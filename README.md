@@ -10,6 +10,11 @@ Ansible foundation for a local Ubuntu server that will host application deployme
 ├── collections/
 │   └── requirements.yml
 ├── inventories/
+│   ├── local/
+│   │   ├── hosts.yml
+│   │   └── group_vars/
+│   │       ├── all.yml
+│   │       └── server.yml
 │   └── lab/
 │       ├── hosts.yml
 │       ├── group_vars/
@@ -31,6 +36,8 @@ Ansible foundation for a local Ubuntu server that will host application deployme
 │   ├── docker/
 │   ├── hardening/
 │   └── nginx/
+├── scripts/
+│   └── apply-local.sh
 └── .gitignore
 ```
 
@@ -111,6 +118,22 @@ Dry run:
 ```bash
 ansible-playbook playbooks/site.yml --check --diff
 ```
+
+## Pull Model On The Target Server
+
+For a self-hosted local server that pulls this public repository from GitHub and applies Ansible to itself:
+
+```bash
+sudo apt update
+sudo apt install -y git python3-venv python3-pip
+sudo git clone https://github.com/abykovwww-byte/ubuntu_ansible_palybooks.git /opt/ubuntu_ansible_palybooks
+sudo chown -R "$USER:$USER" /opt/ubuntu_ansible_palybooks
+cd /opt/ubuntu_ansible_palybooks
+chmod +x scripts/apply-local.sh
+./scripts/apply-local.sh playbooks/bootstrap.yml
+```
+
+Local-only overrides can be placed in `/etc/ansible/local-overrides.yml`. Do not commit that file. Use it for real SSH public keys, local domains, firewall flags, and other host-specific values that should not live in the public repository.
 
 ## Tags
 

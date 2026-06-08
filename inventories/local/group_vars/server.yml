@@ -1,0 +1,42 @@
+---
+hardening_manage_ssh: false
+hardening_sshd_port: 22
+hardening_permit_root_login: "no"
+hardening_password_authentication: "no"
+hardening_pubkey_authentication: "yes"
+hardening_x11_forwarding: "no"
+hardening_allow_users:
+  - abykov
+  - "{{ deploy_user_name }}"
+
+hardening_manage_ufw: false
+hardening_ufw_default_incoming_policy: deny
+hardening_ufw_default_outgoing_policy: allow
+hardening_ufw_allowed_ports:
+  - port: "{{ hardening_sshd_port }}"
+    proto: tcp
+    comment: ssh
+  - port: 80
+    proto: tcp
+    comment: http
+  - port: 443
+    proto: tcp
+    comment: https
+
+docker_users:
+  - abykov
+  - "{{ deploy_user_name }}"
+
+docker_data_root: ""
+docker_daemon_config: {}
+
+nginx_remove_default_site: true
+nginx_client_max_body_size: 64m
+nginx_proxy_read_timeout: 60s
+nginx_apps: []
+
+coolify_enabled: false
+coolify_install_dir: /opt/coolify
+coolify_domain: ""
+coolify_email: ""
+coolify_version: "latest"
