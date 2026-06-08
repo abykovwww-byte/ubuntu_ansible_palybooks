@@ -1,0 +1,323 @@
+# Server Setup Notes
+
+Date: 2026-06-08
+
+Target server:
+
+```text
+Host: 192.168.1.88
+SSH user: abykov
+SSH port: 22
+Hostname observed: abykovserv
+```
+
+## Chosen Operating Model
+
+The server uses a pull-based self-hosted Ansible model:
+
+```text
+Ubuntu server -> GitHub public repository over HTTPS
+Ubuntu server -> applies Ansible playbooks to localhost
+```
+
+GitHub does not connect to the server. The server pulls the public repository and runs Ansible locally.
+
+## Repository On Server
+
+The repository is cloned here:
+
+```text
+/opt/ubuntu_ansible_palybooks
+```
+
+Remote repository:
+
+```text
+https://github.com/abykovwww-byte/ubuntu_ansible_palybooks
+```
+
+The checkout was verified on branch:
+
+```text
+main
+```
+
+## Installed Components
+
+The following baseline was installed or verified:
+
+```text
+git
+python3-venv
+python3-pip
+Ansible in /opt/ubuntu_ansible_palybooks/.venv
+Docker Engine
+Docker Compose plugin
+Nginx
+```
+
+Observed versions during setup:
+
+```text
+Ansible core: 2.21.0
+Docker: 29.5.3
+Docker Compose: v5.1.4
+```
+
+Services verified:
+
+```text
+docker: active
+nginx: active
+```
+
+Nginx config test was successful:
+
+```bash
+sudo nginx -t
+```
+
+## Applied Playbooks
+
+These playbooks were run successfully on the server through the local inventory:
+
+```bash
+./scripts/apply-local.sh playbooks/bootstrap.yml
+./scripts/apply-local.sh playbooks/docker.yml
+./scripts/apply-local.sh playbooks/nginx.yml
+```
+
+The full site playbook was also tested through systemd and completed with no failures:
+
+```text
+failed=0
+```
+
+## Local Inventory
+
+The pull model uses:
+
+```text
+inventories/local/hosts.yml
+inventories/local/group_vars/all.yml
+inventories/local/group_vars/server.yml
+```
+
+The inventory configures Ansible to run against:
+
+```text
+localhost
+ansible_connection: local
+```
+
+## Local-Only Overrides
+
+Host-specific values that must not be committed to the public repository are stored here:
+
+```text
+/etc/ansible/local-overrides.yml
+```
+
+This file is owned by the server and is not part of Git.
+
+Current safe defaults created during setup:
+
+```yaml
+server_timezone: "Europe/Moscow"
+ssh_public_keys: []
+hardening_manage_ssh: false
+hardening_manage_ufw: false
+coolify_enabled: false
+```
+
+Use this file later for real local-only values such as:
+
+```text
+real SSH public keys
+local domains
+Nginx app upstreams
+firewall flags
+Coolify enablement
+private registry settings
+```
+
+Do not put secrets or real private values into the public repository.
+
+## Systemd Manual Apply Service
+
+A manual oneshot service was created:
+
+```text
+/etc/systemd/system/ansible-local-apply.service
+```
+
+Run it manually when you want the server to pull the latest GitHub changes and apply `playbooks/site.yml`:
+
+```bash
+sudo systemctl start ansible-local-apply.service
+```
+
+Check the result:
+
+```bash
+sudo systemctl status ansible-local-apply.service --no-pager -l
+sudo journalctl -u ansible-local-apply.service -n 100 --no-pager
+```
+
+The service currently runs:
+
+```bash
+/opt/ubuntu_ansible_palybooks/scripts/apply-local.sh playbooks/site.yml
+```
+
+The Git safe directory setting was added at system level so root-run systemd can pull the repository:
+
+```bash
+sudo git config --system --add safe.directory /opt/ubuntu_ansible_palybooks
+```
+
+## Day-To-Day Workflow
+
+1. Change Ansible code in GitHub or locally.
+2. Push changes to `main`.
+3. SSH to the server.
+4. Run:
+
+```bash
+sudo systemctl start ansible-local-apply.service
+```
+
+5. Check logs:
+
+```bash
+sudo journalctl -u ansible-local-apply.service -n 100 --no-pager
+```
+
+## Safer Manual Playbook Runs
+
+For focused runs:
+
+```bash
+cd /opt/ubuntu_ansible_palybooks
+./scripts/apply-local.sh playbooks/bootstrap.yml
+./scripts/apply-local.sh playbooks/docker.yml
+./scripts/apply-local.sh playbooks/nginx.yml
+```
+
+For a full run:
+
+```bash
+cd /opt/ubuntu_ansible_palybooks
+./scripts/apply-local.sh playbooks/site.yml
+```
+
+## Hardening Status
+
+SSH hardening and UFW firewall were intentionally left disabled:
+
+```yaml
+hardening_manage_ssh: false
+hardening_manage_ufw: false
+```
+
+Reason: this avoids accidentally locking out SSH access during the initial setup.
+
+Recommended next step before enabling hardening:
+
+1. Confirm SSH key login works.
+2. Confirm another active SSH session is open.
+3. Put the real allowed users and SSH port in local overrides.
+4. Run only:
+
+```bash
+cd /opt/ubuntu_ansible_palybooks
+./scripts/apply-local.sh playbooks/hardening.yml
+```
+
+## Docker Notes
+
+The following users were configured for Docker group membership through the local inventory:
+
+```text
+abykov
+deploy
+```
+
+For the current SSH session to pick up Docker group membership, log out and log back in.
+
+Check Docker:
+
+```bash
+docker --version
+docker compose version
+systemctl is-active docker
+```
+
+## Nginx Notes
+
+Nginx was installed, started, and the default site was disabled by the role.
+
+No reverse proxy apps are currently configured in `inventories/local/group_vars/server.yml`:
+
+```yaml
+nginx_apps: []
+```
+
+Add app definitions later either in the repository defaults or in:
+
+```text
+/etc/ansible/local-overrides.yml
+```
+
+Example:
+
+```yaml
+nginx_apps:
+  - name: "my-app"
+    enabled: true
+    server_names:
+      - "my-app.local"
+    upstream_host: "127.0.0.1"
+    upstream_port: 3000
+    websocket: true
+```
+
+Then apply:
+
+```bash
+sudo systemctl start ansible-local-apply.service
+```
+
+## Coolify Status
+
+Coolify is currently disabled:
+
+```yaml
+coolify_enabled: false
+```
+
+Enable it only after deciding the desired install method, domain, and admin email. Put real host-specific values in:
+
+```text
+/etc/ansible/local-overrides.yml
+```
+
+## Known Warning
+
+During setup, `apt update` showed a warning for this third-party repository:
+
+```text
+https://apt.lizardbyte.dev noble InRelease
+Could not resolve apt.lizardbyte.dev
+```
+
+This did not block the setup, but future `apt update` runs may keep showing the warning until that repository is fixed or disabled.
+
+## Current Recommended Next Steps
+
+1. Log out and log back in to refresh Docker group membership for `abykov`.
+2. Decide whether app configs should live in Git or in `/etc/ansible/local-overrides.yml`.
+3. Add the first Nginx app reverse proxy entry.
+4. Keep hardening disabled until SSH access is fully confirmed.
+5. Consider cleaning or disabling the broken `apt.lizardbyte.dev` apt source.
+6. Decide later whether to add a systemd timer for automatic periodic pull/apply. For now, manual apply is safer.
