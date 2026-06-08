@@ -1,0 +1,26 @@
+server {
+    listen 80;
+    server_name {{ item.server_names | join(' ') }};
+
+    client_max_body_size {{ item.client_max_body_size | default(nginx_client_max_body_size) }};
+
+    location / {
+        proxy_pass http://{{ item.upstream_host }}:{{ item.upstream_port }};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout {{ item.proxy_read_timeout | default(nginx_proxy_read_timeout) }};
+{% if item.websocket | default(false) | bool %}
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+{% endif %}
+    }
+{% for location in item.extra_locations | default([]) %}
+
+    location {{ location.path }} {
+        proxy_pass http://{{ location.upstream_host | default(item.upstream_host) }}:{{ location.upstream_port | default(item.upstream_port) }};
+    }
+{% endfor %}
+}

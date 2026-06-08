@@ -1,0 +1,38 @@
+---
+- name: Validate Coolify variables
+  ansible.builtin.assert:
+    that:
+      - coolify_install_dir | length > 0
+      - coolify_domain | length > 0
+      - coolify_email | length > 0
+    fail_msg: "Coolify is enabled, but coolify_install_dir, coolify_domain, or coolify_email is not set."
+  when: coolify_enabled | bool
+  tags: [coolify, preflight]
+
+- name: Ensure Coolify install directory exists
+  ansible.builtin.file:
+    path: "{{ coolify_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: coolify_enabled | bool
+  tags: [coolify, directories]
+
+- name: Render Coolify environment placeholder
+  ansible.builtin.template:
+    src: coolify.env.j2
+    dest: "{{ coolify_install_dir }}/coolify.env"
+    owner: root
+    group: root
+    mode: "0600"
+  when: coolify_enabled | bool
+  tags: [coolify, config]
+
+- name: Show Coolify installation notice
+  ansible.builtin.debug:
+    msg:
+      - "Coolify role prepared {{ coolify_install_dir }} and env file."
+      - "Installer execution is intentionally not hardcoded. Pin the approved install method/version before enabling real installation."
+  when: coolify_enabled | bool
+  tags: [coolify]

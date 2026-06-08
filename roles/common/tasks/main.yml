@@ -1,0 +1,67 @@
+---
+- name: Validate common variables
+  ansible.builtin.assert:
+    that:
+      - server_timezone | length > 0
+      - server_locale | length > 0
+      - service_directories is iterable
+    fail_msg: "Required common variables are missing or invalid."
+  tags: [common, preflight]
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [common, packages]
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_base_packages }}"
+    state: present
+  tags: [common, packages]
+
+- name: Configure timezone
+  community.general.timezone:
+    name: "{{ server_timezone }}"
+  tags: [common, timezone]
+
+- name: Ensure deploy group exists
+  ansible.builtin.group:
+    name: "{{ deploy_group_name }}"
+    state: present
+  when: deploy_user_enabled | bool
+  tags: [common, users]
+
+- name: Ensure deploy user exists
+  ansible.builtin.user:
+    name: "{{ deploy_user_name }}"
+    group: "{{ deploy_group_name }}"
+    groups: "{{ deploy_user_groups }}"
+    append: true
+    shell: "{{ deploy_user_shell }}"
+    home: "{{ deploy_user_home }}"
+    create_home: true
+    state: present
+  when: deploy_user_enabled | bool
+  tags: [common, users]
+
+- name: Install authorized keys for deploy user
+  ansible.posix.authorized_key:
+    user: "{{ deploy_user_name }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ ssh_public_keys }}"
+  when:
+    - deploy_user_enabled | bool
+    - ssh_public_keys | length > 0
+  tags: [common, ssh]
+
+- name: Ensure service directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop: "{{ service_directories }}"
+  tags: [common, directories]

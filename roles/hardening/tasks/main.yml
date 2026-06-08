@@ -1,0 +1,67 @@
+---
+- name: Validate hardening variables
+  ansible.builtin.assert:
+    that:
+      - hardening_sshd_port | int > 0
+      - hardening_sshd_port | int < 65536
+      - hardening_permit_root_login in ['yes', 'no', 'prohibit-password', 'forced-commands-only']
+      - hardening_password_authentication in ['yes', 'no']
+    fail_msg: "Hardening variables contain invalid SSH settings."
+  tags: [hardening, preflight]
+
+- name: Install hardening packages
+  ansible.builtin.apt:
+    name:
+      - openssh-server
+      - ufw
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [hardening, packages]
+
+- name: Configure sshd safely
+  ansible.builtin.template:
+    src: sshd_config_hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/90-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: hardening_manage_ssh | bool
+  notify: Restart ssh
+  tags: [hardening, ssh]
+
+- name: Validate sshd configuration
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+  when: hardening_manage_ssh | bool
+  tags: [hardening, ssh, validate]
+
+- name: Configure UFW default incoming policy
+  community.general.ufw:
+    direction: incoming
+    policy: "{{ hardening_ufw_default_incoming_policy }}"
+  when: hardening_manage_ufw | bool
+  tags: [hardening, firewall]
+
+- name: Configure UFW default outgoing policy
+  community.general.ufw:
+    direction: outgoing
+    policy: "{{ hardening_ufw_default_outgoing_policy }}"
+  when: hardening_manage_ufw | bool
+  tags: [hardening, firewall]
+
+- name: Allow configured UFW ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto | default('tcp') }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ hardening_ufw_allowed_ports }}"
+  when: hardening_manage_ufw | bool
+  tags: [hardening, firewall]
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  when: hardening_manage_ufw | bool
+  tags: [hardening, firewall]

@@ -1,0 +1,16 @@
+---
+- name: Configure local deployment platform
+  hosts: server
+  become: true
+  roles:
+    - role: common
+      tags: [common]
+    - role: hardening
+      tags: [hardening]
+    - role: docker
+      tags: [docker]
+    - role: nginx
+      tags: [nginx]
+    - role: coolify
+      tags: [coolify]
+      when: coolify_enabled | bool

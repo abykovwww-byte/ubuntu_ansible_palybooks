@@ -1,0 +1,7 @@
+---
+- name: Bootstrap Ubuntu server
+  hosts: server
+  become: true
+  roles:
+    - role: common
+      tags: [common, bootstrap]

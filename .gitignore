@@ -1,0 +1,24 @@
+.DS_Store
+*.retry
+*.log
+
+# Python / Ansible local state
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+
+# Ansible secrets
+*.vault.yml
+vault.yml
+inventories/**/group_vars/**/vault.yml
+inventories/**/host_vars/**/vault.yml
+
+# Local inventory overrides
+inventories/**/hosts.local.yml
+*.local.yml
+
+# Editor / OS
+.idea/
+.vscode/
+Thumbs.db

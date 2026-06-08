@@ -1,0 +1,7 @@
+---
+- name: Apply basic server hardening
+  hosts: server
+  become: true
+  roles:
+    - role: hardening
+      tags: [hardening]

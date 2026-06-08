@@ -1,0 +1,5 @@
+{% set config = docker_daemon_config.copy() %}
+{% if docker_data_root | length > 0 %}
+{% set _ = config.update({'data-root': docker_data_root}) %}
+{% endif %}
+{{ config | to_nice_json }}

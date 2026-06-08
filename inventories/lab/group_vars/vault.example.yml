@@ -1,0 +1,8 @@
+---
+# Copy this file to vault.yml and encrypt it:
+# ansible-vault encrypt inventories/lab/group_vars/vault.yml
+
+vault_become_password: "TODO_OPTIONAL_SUDO_PASSWORD"
+vault_coolify_admin_password: "TODO_COOLIFY_ADMIN_PASSWORD"
+vault_registry_username: "TODO_REGISTRY_USERNAME"
+vault_registry_password: "TODO_REGISTRY_PASSWORD"

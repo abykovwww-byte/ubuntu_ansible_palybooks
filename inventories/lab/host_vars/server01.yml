@@ -1,0 +1,8 @@
+---
+# Host-specific values only. Keep shared settings in group_vars.
+ansible_host: "TODO_SERVER_IP_OR_DNS"
+ansible_user: "TODO_SSH_USER"
+ansible_port: 22
+ansible_ssh_private_key_file: "~/.ssh/TODO_PRIVATE_KEY"
+
+host_description: "Local Ubuntu lab server"

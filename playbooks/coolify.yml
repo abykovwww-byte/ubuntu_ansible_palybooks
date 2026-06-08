@@ -1,0 +1,8 @@
+---
+- name: Install optional Coolify layer
+  hosts: server
+  become: true
+  roles:
+    - role: coolify
+      tags: [coolify]
+      when: coolify_enabled | bool

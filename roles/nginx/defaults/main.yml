@@ -1,0 +1,5 @@
+---
+nginx_remove_default_site: true
+nginx_client_max_body_size: 64m
+nginx_proxy_read_timeout: 60s
+nginx_apps: []

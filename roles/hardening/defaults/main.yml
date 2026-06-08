@@ -1,0 +1,13 @@
+---
+hardening_manage_ssh: true
+hardening_sshd_port: 22
+hardening_permit_root_login: "no"
+hardening_password_authentication: "no"
+hardening_pubkey_authentication: "yes"
+hardening_x11_forwarding: "no"
+hardening_allow_users: []
+
+hardening_manage_ufw: false
+hardening_ufw_default_incoming_policy: deny
+hardening_ufw_default_outgoing_policy: allow
+hardening_ufw_allowed_ports: []

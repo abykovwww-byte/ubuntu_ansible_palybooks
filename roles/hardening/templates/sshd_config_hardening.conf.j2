@@ -1,0 +1,8 @@
+Port {{ hardening_sshd_port }}
+PermitRootLogin {{ hardening_permit_root_login }}
+PasswordAuthentication {{ hardening_password_authentication }}
+PubkeyAuthentication {{ hardening_pubkey_authentication }}
+X11Forwarding {{ hardening_x11_forwarding }}
+{% if hardening_allow_users | length > 0 %}
+AllowUsers {{ hardening_allow_users | join(' ') }}
+{% endif %}

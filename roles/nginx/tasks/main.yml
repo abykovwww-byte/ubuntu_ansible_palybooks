@@ -1,0 +1,78 @@
+---
+- name: Validate Nginx variables
+  ansible.builtin.assert:
+    that:
+      - nginx_apps is iterable
+    fail_msg: "nginx_apps must be a list of application definitions."
+  tags: [nginx, preflight]
+
+- name: Install Nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [nginx, packages]
+
+- name: Ensure Nginx site directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/nginx/sites-available
+    - /etc/nginx/sites-enabled
+  tags: [nginx, config]
+
+- name: Disable default Nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  when: nginx_remove_default_site | bool
+  notify: Reload nginx
+  tags: [nginx, config]
+
+- name: Render reverse proxy sites
+  ansible.builtin.template:
+    src: reverse_proxy.conf.j2
+    dest: "/etc/nginx/sites-available/{{ item.name }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ nginx_apps }}"
+  when: item.enabled | default(true) | bool
+  notify: Reload nginx
+  tags: [nginx, sites]
+
+- name: Enable reverse proxy sites
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ item.name }}.conf"
+    dest: "/etc/nginx/sites-enabled/{{ item.name }}.conf"
+    state: link
+  loop: "{{ nginx_apps }}"
+  when: item.enabled | default(true) | bool
+  notify: Reload nginx
+  tags: [nginx, sites]
+
+- name: Remove disabled reverse proxy site links
+  ansible.builtin.file:
+    path: "/etc/nginx/sites-enabled/{{ item.name }}.conf"
+    state: absent
+  loop: "{{ nginx_apps }}"
+  when: not (item.enabled | default(true) | bool)
+  notify: Reload nginx
+  tags: [nginx, sites]
+
+- name: Validate Nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  tags: [nginx, validate]
+
+- name: Ensure Nginx service is enabled and started
+  ansible.builtin.service:
+    name: nginx
+    enabled: true
+    state: started
+  tags: [nginx, service]

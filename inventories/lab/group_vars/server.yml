@@ -1,0 +1,49 @@
+---
+hardening_manage_ssh: true
+hardening_sshd_port: "{{ ansible_port | default(22) }}"
+hardening_permit_root_login: "no"
+hardening_password_authentication: "no"
+hardening_pubkey_authentication: "yes"
+hardening_x11_forwarding: "no"
+hardening_allow_users:
+  - "{{ ansible_user }}"
+  - "{{ deploy_user_name }}"
+
+hardening_manage_ufw: false
+hardening_ufw_default_incoming_policy: deny
+hardening_ufw_default_outgoing_policy: allow
+hardening_ufw_allowed_ports:
+  - port: "{{ hardening_sshd_port }}"
+    proto: tcp
+    comment: ssh
+  - port: 80
+    proto: tcp
+    comment: http
+  - port: 443
+    proto: tcp
+    comment: https
+
+docker_users:
+  - "{{ deploy_user_name }}"
+
+docker_data_root: ""
+docker_daemon_config: {}
+
+nginx_remove_default_site: true
+nginx_client_max_body_size: 64m
+nginx_proxy_read_timeout: 60s
+nginx_apps:
+  - name: "example-app"
+    enabled: false
+    server_names:
+      - "TODO_APP_DOMAIN"
+    upstream_host: "127.0.0.1"
+    upstream_port: 3000
+    websocket: true
+    extra_locations: []
+
+coolify_enabled: false
+coolify_install_dir: /opt/coolify
+coolify_domain: "TODO_COOLIFY_DOMAIN"
+coolify_email: "TODO_ADMIN_EMAIL"
+coolify_version: "latest"

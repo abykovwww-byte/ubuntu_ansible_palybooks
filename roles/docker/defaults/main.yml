@@ -1,0 +1,6 @@
+---
+docker_users: []
+docker_data_root: ""
+docker_daemon_config: {}
+docker_apt_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else ansible_architecture }}"
+docker_apt_release: "{{ ansible_distribution_release }}"

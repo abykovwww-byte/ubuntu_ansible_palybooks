@@ -1,0 +1,7 @@
+---
+coolify_enabled: false
+coolify_install_dir: /opt/coolify
+coolify_domain: ""
+coolify_email: ""
+coolify_version: latest
+coolify_env: {}
