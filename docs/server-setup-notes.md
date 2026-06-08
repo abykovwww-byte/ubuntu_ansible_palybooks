@@ -302,7 +302,7 @@ Enable it only after deciding the desired install method, domain, and admin emai
 /etc/ansible/local-overrides.yml
 ```
 
-## Known Warning
+## Apt Source Cleanup
 
 During setup, `apt update` showed a warning for this third-party repository:
 
@@ -311,7 +311,19 @@ https://apt.lizardbyte.dev noble InRelease
 Could not resolve apt.lizardbyte.dev
 ```
 
-This did not block the setup, but future `apt update` runs may keep showing the warning until that repository is fixed or disabled.
+The source was found here:
+
+```text
+/etc/apt/sources.list.d/lizardbyte.list
+```
+
+It was disabled by renaming it to:
+
+```text
+/etc/apt/sources.list.d/lizardbyte.list.disabled
+```
+
+After that, `sudo apt-get update` completed without the LizardByte DNS warning.
 
 ## Current Recommended Next Steps
 
@@ -319,5 +331,4 @@ This did not block the setup, but future `apt update` runs may keep showing the 
 2. Decide whether app configs should live in Git or in `/etc/ansible/local-overrides.yml`.
 3. Add the first Nginx app reverse proxy entry.
 4. Keep hardening disabled until SSH access is fully confirmed.
-5. Consider cleaning or disabling the broken `apt.lizardbyte.dev` apt source.
-6. Decide later whether to add a systemd timer for automatic periodic pull/apply. For now, manual apply is safer.
+5. Decide later whether to add a systemd timer for automatic periodic pull/apply. For now, manual apply is safer.
