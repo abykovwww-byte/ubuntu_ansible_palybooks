@@ -51,6 +51,9 @@ hermes_log_dir: "{{ app_log_base_dir }}/hermes"
 hermes_bind_host: "127.0.0.1"
 hermes_gateway_host_port: 8642
 hermes_dashboard_host_port: 9119
+hermes_dashboard_domain: hermes.abykov.site
+hermes_api_domain: api_hermes.abykov.site
+hermes_api_alias_domain: api-hermes.abykov.site
 hermes_dashboard_enabled: true
 hermes_api_server_enabled: true
 hermes_api_server_key: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-api-server-key length=48 chars=ascii_letters,digits') }}"
@@ -93,6 +96,23 @@ nginx_apps:
     upstream_host: "127.0.0.1"
     upstream_port: "{{ task_reminder_host_port }}"
     websocket: false
+  - name: hermes-dashboard
+    enabled: "{{ hermes_enabled }}"
+    server_names:
+      - "{{ hermes_dashboard_domain }}"
+    upstream_host: "127.0.0.1"
+    upstream_port: "{{ hermes_dashboard_host_port }}"
+    websocket: true
+    proxy_read_timeout: 300s
+  - name: hermes-api
+    enabled: "{{ hermes_enabled }}"
+    server_names:
+      - "{{ hermes_api_domain }}"
+      - "{{ hermes_api_alias_domain }}"
+    upstream_host: "127.0.0.1"
+    upstream_port: "{{ hermes_gateway_host_port }}"
+    websocket: true
+    proxy_read_timeout: 300s
 
 coolify_enabled: false
 coolify_install_dir: /opt/coolify

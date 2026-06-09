@@ -234,7 +234,15 @@ Gateway API: 127.0.0.1:8642
 Dashboard: 127.0.0.1:9119
 ```
 
-The deployment intentionally binds Hermes to localhost only. Do not expose the gateway API or dashboard publicly until access control, domain, and TLS are decided.
+Hermes is also published through Nginx:
+
+```text
+Dashboard: http://hermes.abykov.site
+Gateway API: http://api_hermes.abykov.site
+Gateway API alias: http://api-hermes.abykov.site
+```
+
+`api_hermes.abykov.site` is included because it was requested, but underscores are not valid in strict DNS hostnames. Prefer `api-hermes.abykov.site` if the DNS provider or browser rejects the underscore name.
 
 Generated local secret:
 

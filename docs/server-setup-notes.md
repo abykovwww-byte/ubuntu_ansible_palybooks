@@ -354,7 +354,15 @@ Gateway API: 127.0.0.1:8642
 Dashboard: 127.0.0.1:9119
 ```
 
-The service is not published through Nginx yet. It is bound to localhost for safety.
+The service is published through Nginx:
+
+```text
+Dashboard: hermes.abykov.site -> 127.0.0.1:9119
+Gateway API: api_hermes.abykov.site -> 127.0.0.1:8642
+Gateway API alias: api-hermes.abykov.site -> 127.0.0.1:8642
+```
+
+Use `api-hermes.abykov.site` if DNS tooling rejects the underscore in `api_hermes.abykov.site`.
 
 Useful checks after apply:
 
