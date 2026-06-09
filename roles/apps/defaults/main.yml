@@ -1,0 +1,6 @@
+---
+docker_apps: []
+docker_apps_default_owner: root
+docker_apps_default_group: "{{ deploy_group_name | default('deploy') }}"
+docker_apps_default_directory_mode: "2775"
+docker_apps_default_file_mode: "0644"

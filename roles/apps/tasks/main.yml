@@ -1,0 +1,100 @@
+---
+- name: Validate Docker app variables
+  ansible.builtin.assert:
+    that:
+      - docker_apps is iterable
+    fail_msg: "docker_apps must be a list of Docker Compose application definitions."
+  tags: [apps, preflight]
+
+- name: Ensure Docker app directories exist
+  ansible.builtin.file:
+    path: "{{ item.1 }}"
+    state: directory
+    owner: "{{ item.0.owner | default(docker_apps_default_owner) }}"
+    group: "{{ item.0.group | default(docker_apps_default_group) }}"
+    mode: "{{ item.0.directory_mode | default(docker_apps_default_directory_mode) }}"
+  loop: "{{ docker_apps | subelements('managed_directories', skip_missing=True) }}"
+  when: item.0.enabled | default(true) | bool
+  tags: [apps, directories]
+
+- name: Copy Docker app source
+  ansible.builtin.copy:
+    src: "{{ app.source_dir }}/"
+    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/"
+    owner: "{{ app.owner | default(docker_apps_default_owner) }}"
+    group: "{{ app.group | default(docker_apps_default_group) }}"
+    mode: "{{ app.file_mode | default(docker_apps_default_file_mode) }}"
+    directory_mode: "{{ app.directory_mode | default(docker_apps_default_directory_mode) }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.source_dir is defined
+  notify: Restart Docker app
+  tags: [apps, source]
+
+- name: Render Docker app compose files
+  ansible.builtin.template:
+    src: "{{ app.compose_template }}"
+    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/compose.yml"
+    owner: "{{ app.owner | default(docker_apps_default_owner) }}"
+    group: "{{ app.group | default(docker_apps_default_group) }}"
+    mode: "0644"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.compose_template is defined
+  notify: Restart Docker app
+  tags: [apps, compose]
+
+- name: Render Docker app environment files
+  ansible.builtin.template:
+    src: "{{ app.env_template }}"
+    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/.env"
+    owner: "{{ app.owner | default(docker_apps_default_owner) }}"
+    group: "{{ app.group | default(docker_apps_default_group) }}"
+    mode: "0640"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.env_template is defined
+  notify: Restart Docker app
+  tags: [apps, env]
+
+- name: Render Docker app example environment files
+  ansible.builtin.template:
+    src: "{{ app.env_example_template }}"
+    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/.env.example"
+    owner: "{{ app.owner | default(docker_apps_default_owner) }}"
+    group: "{{ app.group | default(docker_apps_default_group) }}"
+    mode: "0644"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.env_example_template is defined
+  tags: [apps, env]
+
+- name: Start Docker apps
+  ansible.builtin.command:
+    cmd: docker compose up -d --build
+    chdir: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.compose_up | default(true) | bool
+  changed_when: false
+  tags: [apps, compose]

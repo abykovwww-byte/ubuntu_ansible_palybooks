@@ -46,6 +46,7 @@ Ansible foundation for a local Ubuntu server that will host application deployme
 - `common`: base packages, timezone, deploy group/user, SSH public keys, service directories.
 - `hardening`: cautious SSH configuration and optional UFW firewall.
 - `docker`: Docker Engine, Compose plugin, Docker group membership, optional daemon config.
+- `apps`: Docker Compose app deployments under `/srv/apps`.
 - `nginx`: Nginx reverse proxy sites from `nginx_apps`.
 - `coolify`: optional Coolify preparation when `coolify_enabled: true`.
 
@@ -108,6 +109,7 @@ Run a focused playbook:
 ```bash
 ansible-playbook playbooks/bootstrap.yml
 ansible-playbook playbooks/docker.yml
+ansible-playbook playbooks/apps.yml
 ansible-playbook playbooks/nginx.yml
 ansible-playbook playbooks/hardening.yml
 ansible-playbook playbooks/coolify.yml
@@ -141,6 +143,7 @@ Local-only overrides can be placed in `/etc/ansible/local-overrides.yml`. Do not
 - `common`, `packages`, `timezone`, `users`, `ssh`, `directories`.
 - `hardening`, `firewall`.
 - `docker`, `repository`, `config`, `service`.
+- `apps`, `source`, `compose`, `env`.
 - `nginx`, `sites`, `validate`.
 - `coolify`.
 
@@ -168,6 +171,42 @@ nginx_apps:
 ```
 
 The role renders `/etc/nginx/sites-available/<name>.conf` and links it into `sites-enabled`.
+
+## Task Reminder App
+
+The first bundled app is `task-reminder`, published through Nginx at:
+
+```text
+task.abykov.site
+```
+
+The app is deployed by the `apps` role as a Docker Compose project:
+
+```text
+/srv/apps/task-reminder
+/srv/app-data/task-reminder
+/var/log/apps/task-reminder
+```
+
+It provides:
+
+- public task list at `/`;
+- admin UI at `/admin`;
+- editable tasks and time triggers;
+- persistent in-page reminders that stay visible until clicked;
+- optional browser notifications when notification permission is granted.
+
+The admin password and session secret are generated on the server by Ansible and are not stored in Git:
+
+```bash
+sudo cat /etc/ansible/task-reminder-admin-password
+```
+
+Apply the app through the normal pull model:
+
+```bash
+sudo systemctl start ansible-local-apply.service
+```
 
 ## Coolify
 
@@ -199,7 +238,7 @@ The scaffold avoids `shell`. The Nginx role uses `ansible.builtin.command: nginx
 - Add real `ssh_public_keys`.
 - Review `deploy_user_name`, `deploy_group_name`, and `deploy_user_groups`.
 - Review service directories under `/srv` and `/var/log/apps`.
-- Fill `nginx_apps` with real domains and upstream ports.
+- Review the bundled `task-reminder` entry in `nginx_apps` and add more apps as needed.
 - Set `docker_users` and optional Docker daemon settings.
 - Decide whether `hardening_manage_ufw` should be enabled.
 - Decide whether `coolify_enabled` should be enabled and fill Coolify variables.

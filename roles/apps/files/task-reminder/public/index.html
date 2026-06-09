@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Задачи</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Задачи">
+          <span class="brand-mark">T</span>
+          <span>Задачи</span>
+        </a>
+        <nav class="nav">
+          <a href="/" data-nav="home">Список</a>
+          <a href="/admin" data-nav="admin">Админка</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <h1>Мои задачи</h1>
+            <p>Короткий список дел с напоминаниями, которые остаются на экране до клика.</p>
+          </div>
+          <button class="notify-button" id="notifyPermission" type="button">Включить уведомления</button>
+        </section>
+
+        <section class="workspace" id="publicView">
+          <div class="section-head">
+            <h2>Активные задачи</h2>
+            <span id="taskCount">0</span>
+          </div>
+          <div class="task-list" id="taskList"></div>
+        </section>
+
+        <section class="workspace hidden" id="adminView">
+          <div class="section-head">
+            <h2>Админка</h2>
+            <button class="secondary hidden" id="logoutButton" type="button">Выйти</button>
+          </div>
+
+          <form class="login-form" id="loginForm">
+            <label>
+              Пароль администратора
+              <input name="password" type="password" autocomplete="current-password" required />
+            </label>
+            <button type="submit">Войти</button>
+          </form>
+
+          <div class="admin-grid hidden" id="adminPanel">
+            <form class="task-form" id="taskForm">
+              <input type="hidden" name="id" />
+              <label>
+                Задача
+                <input name="title" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Детали
+                <textarea name="notes" rows="4"></textarea>
+              </label>
+              <label>
+                Время уведомления
+                <input name="triggerAt" type="datetime-local" />
+              </label>
+              <div class="form-row">
+                <label class="check">
+                  <input name="enabled" type="checkbox" checked />
+                  Показывать
+                </label>
+                <label class="check">
+                  <input name="completed" type="checkbox" />
+                  Выполнено
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit">Сохранить</button>
+                <button class="secondary" id="resetForm" type="button">Новая</button>
+              </div>
+            </form>
+
+            <div class="admin-list" id="adminTaskList"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast-stack" id="toastStack" aria-live="assertive"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+---
+services:
+  task-reminder:
+    build:
+      context: .
+    container_name: task-reminder
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "{{ task_reminder_bind_host }}:{{ task_reminder_host_port }}:{{ task_reminder_container_port }}"
+    volumes:
+      - "{{ task_reminder_data_dir }}:/data"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - scripts/healthcheck.js
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

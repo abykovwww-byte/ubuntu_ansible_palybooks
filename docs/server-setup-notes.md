@@ -257,10 +257,15 @@ systemctl is-active docker
 
 Nginx was installed, started, and the default site was disabled by the role.
 
-No reverse proxy apps are currently configured in `inventories/local/group_vars/server.yml`:
+The first reverse proxy app is configured in `inventories/local/group_vars/server.yml`:
 
 ```yaml
-nginx_apps: []
+nginx_apps:
+  - name: "task-reminder"
+    server_names:
+      - "task.abykov.site"
+    upstream_host: "127.0.0.1"
+    upstream_port: 3100
 ```
 
 Add app definitions later either in the repository defaults or in:
@@ -287,6 +292,37 @@ Then apply:
 ```bash
 sudo systemctl start ansible-local-apply.service
 ```
+
+## Task Reminder App
+
+The first platform app is a Docker Compose task reminder site:
+
+```text
+Domain: task.abykov.site
+Project: /srv/apps/task-reminder
+Data: /srv/app-data/task-reminder
+Internal port: 127.0.0.1:3100 -> container 3000
+```
+
+Public page:
+
+```text
+https://task.abykov.site/
+```
+
+Admin page:
+
+```text
+https://task.abykov.site/admin
+```
+
+The admin password is generated locally on the server:
+
+```bash
+sudo cat /etc/ansible/task-reminder-admin-password
+```
+
+The site shows active tasks on entry. Time triggers are checked in the browser: when a task becomes due, an in-page reminder appears and remains visible until clicked. If browser notification permission is granted, the app also sends a native browser notification.
 
 ## Coolify Status
 

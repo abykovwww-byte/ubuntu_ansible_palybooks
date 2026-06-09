@@ -1,0 +1,15 @@
+---
+- name: Restart Docker app
+  ansible.builtin.command:
+    cmd: docker compose up -d --build
+    chdir: "{{ app_project_dir }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  vars:
+    app_project_dir: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.compose_up | default(true) | bool
+  changed_when: true

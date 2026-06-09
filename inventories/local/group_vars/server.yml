@@ -30,10 +30,41 @@ docker_users:
 docker_data_root: ""
 docker_daemon_config: {}
 
+task_reminder_domain: task.abykov.site
+task_reminder_project_dir: "{{ app_deploy_base_dir }}/task-reminder"
+task_reminder_data_dir: "{{ app_data_base_dir }}/task-reminder"
+task_reminder_log_dir: "{{ app_log_base_dir }}/task-reminder"
+task_reminder_bind_host: "127.0.0.1"
+task_reminder_host_port: 3100
+task_reminder_container_port: 3000
+task_reminder_admin_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/task-reminder-admin-password length=24 chars=ascii_letters,digits') }}"
+task_reminder_session_secret: "{{ lookup('ansible.builtin.password', '/etc/ansible/task-reminder-session-secret length=48 chars=ascii_letters,digits') }}"
+
+docker_apps:
+  - name: task-reminder
+    enabled: true
+    source_dir: task-reminder
+    project_dir: "{{ task_reminder_project_dir }}"
+    compose_template: task-reminder.compose.yml.j2
+    env_template: task-reminder.env.j2
+    env_example_template: task-reminder.env.example.j2
+    compose_up: true
+    managed_directories:
+      - "{{ task_reminder_project_dir }}"
+      - "{{ task_reminder_data_dir }}"
+      - "{{ task_reminder_log_dir }}"
+
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
 nginx_proxy_read_timeout: 60s
-nginx_apps: []
+nginx_apps:
+  - name: task-reminder
+    enabled: true
+    server_names:
+      - "{{ task_reminder_domain }}"
+    upstream_host: "127.0.0.1"
+    upstream_port: "{{ task_reminder_host_port }}"
+    websocket: false
 
 coolify_enabled: false
 coolify_install_dir: /opt/coolify

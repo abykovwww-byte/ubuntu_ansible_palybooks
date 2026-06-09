@@ -9,6 +9,8 @@
       tags: [hardening]
     - role: docker
       tags: [docker]
+    - role: apps
+      tags: [apps]
     - role: nginx
       tags: [nginx]
     - role: coolify
