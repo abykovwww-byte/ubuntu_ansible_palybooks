@@ -13,6 +13,7 @@ const elements = {
   notifyPermission: document.querySelector("#notifyPermission"),
   loginForm: document.querySelector("#loginForm"),
   logoutButton: document.querySelector("#logoutButton"),
+  syncGithubButton: document.querySelector("#syncGithubButton"),
   adminPanel: document.querySelector("#adminPanel"),
   taskForm: document.querySelector("#taskForm"),
   resetForm: document.querySelector("#resetForm"),
@@ -52,6 +53,7 @@ function taskTemplate(task, admin = false) {
   card.innerHTML = `
     <div>
       <h3 class="task-title"></h3>
+      <div class="task-meta"></div>
       <p class="task-notes"></p>
     </div>
     <span class="task-time"></span>
@@ -59,6 +61,7 @@ function taskTemplate(task, admin = false) {
   card.querySelector(".task-title").textContent = task.title;
   card.querySelector(".task-notes").textContent = task.notes || "Нет деталей";
   card.querySelector(".task-time").textContent = formatTime(task.triggerAt);
+  renderTaskMeta(card.querySelector(".task-meta"), task);
 
   if (admin) {
     const footer = document.createElement("footer");
@@ -79,6 +82,26 @@ function taskTemplate(task, admin = false) {
   }
 
   return card;
+}
+
+function renderTaskMeta(container, task) {
+  const items = [];
+  if (task.assignedBy) items.push(["От", task.assignedBy]);
+  if (task.priority) items.push(["Приоритет", task.priority]);
+  if (task.source?.type === "github") items.push(["Источник", "GitHub"]);
+  for (const tag of task.tags || []) items.push(["Тег", tag]);
+
+  if (items.length === 0) {
+    container.remove();
+    return;
+  }
+
+  for (const [label, value] of items) {
+    const item = document.createElement("span");
+    item.className = "task-chip";
+    item.textContent = `${label}: ${value}`;
+    container.append(item);
+  }
 }
 
 function renderPublicTasks() {
@@ -139,6 +162,7 @@ async function checkAdminSession() {
   }
   elements.loginForm.classList.toggle("hidden", state.admin);
   elements.logoutButton.classList.toggle("hidden", !state.admin);
+  elements.syncGithubButton.classList.toggle("hidden", !state.admin);
   elements.adminPanel.classList.toggle("hidden", !state.admin);
   if (state.admin) await loadAdminTasks();
 }
@@ -155,6 +179,9 @@ function editTask(task) {
   elements.taskForm.elements.title.value = task.title;
   elements.taskForm.elements.notes.value = task.notes || "";
   elements.taskForm.elements.triggerAt.value = task.triggerAt || "";
+  elements.taskForm.elements.assignedBy.value = task.assignedBy || "";
+  elements.taskForm.elements.priority.value = task.priority || "";
+  elements.taskForm.elements.tags.value = (task.tags || []).join(", ");
   elements.taskForm.elements.enabled.checked = Boolean(task.enabled);
   elements.taskForm.elements.completed.checked = Boolean(task.completed);
   elements.taskForm.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -172,6 +199,9 @@ function collectFormTask() {
     title: form.title.value,
     notes: form.notes.value,
     triggerAt: form.triggerAt.value,
+    assignedBy: form.assignedBy.value,
+    priority: form.priority.value,
+    tags: form.tags.value,
     enabled: form.enabled.checked,
     completed: form.completed.checked,
   };
@@ -239,6 +269,20 @@ elements.logoutButton.addEventListener("click", async () => {
   state.admin = false;
   resetEditor();
   await checkAdminSession();
+});
+
+elements.syncGithubButton.addEventListener("click", async () => {
+  elements.syncGithubButton.disabled = true;
+  try {
+    const result = await api("/api/admin/sync/github", { method: "POST" });
+    elements.syncGithubButton.textContent = `GitHub: +${result.imported}, пропущено ${result.skipped}`;
+    await Promise.all([loadTasks(), loadAdminTasks()]);
+  } finally {
+    window.setTimeout(() => {
+      elements.syncGithubButton.disabled = false;
+      elements.syncGithubButton.textContent = "Синхронизировать GitHub";
+    }, 2200);
+  }
 });
 
 elements.taskForm.addEventListener("submit", async (event) => {

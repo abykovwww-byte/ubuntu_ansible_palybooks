@@ -48,6 +48,11 @@ button:hover {
   background: var(--accent-dark);
 }
 
+button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
 .secondary {
   border: 1px solid var(--line);
   background: var(--surface);
@@ -204,6 +209,23 @@ button:hover {
   color: var(--muted);
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.task-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .task-time {

@@ -324,6 +324,18 @@ sudo cat /etc/ansible/task-reminder-admin-password
 
 The site shows active tasks on entry. Time triggers are checked in the browser: when a task becomes due, an in-page reminder appears and remains visible until clicked. If browser notification permission is granted, the app also sends a native browser notification.
 
+GitHub import is configured from:
+
+```text
+https://raw.githubusercontent.com/abykovwww-byte/task.abykov.site/main/tasks.json
+```
+
+The app imports only new GitHub task ids. Existing imported ids are skipped so local app state is not overwritten. The authoring format is documented in:
+
+```text
+docs/task-github-format.md
+```
+
 ## Coolify Status
 
 Coolify is currently disabled:

@@ -39,7 +39,10 @@
         <section class="workspace hidden" id="adminView">
           <div class="section-head">
             <h2>Админка</h2>
-            <button class="secondary hidden" id="logoutButton" type="button">Выйти</button>
+            <div class="actions">
+              <button class="secondary hidden" id="syncGithubButton" type="button">Синхронизировать GitHub</button>
+              <button class="secondary hidden" id="logoutButton" type="button">Выйти</button>
+            </div>
           </div>
 
           <form class="login-form" id="loginForm">
@@ -64,6 +67,18 @@
               <label>
                 Время уведомления
                 <input name="triggerAt" type="datetime-local" />
+              </label>
+              <label>
+                Кто выдал задачу
+                <input name="assignedBy" type="text" maxlength="80" />
+              </label>
+              <label>
+                Приоритет
+                <input name="priority" type="text" maxlength="40" placeholder="normal, high, urgent" />
+              </label>
+              <label>
+                Теги
+                <input name="tags" type="text" maxlength="160" placeholder="работа, дом, звонок" />
               </label>
               <div class="form-row">
                 <label class="check">

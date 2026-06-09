@@ -193,6 +193,7 @@ It provides:
 - public task list at `/`;
 - admin UI at `/admin`;
 - editable tasks and time triggers;
+- automatic import of new tasks from `abykovwww-byte/task.abykov.site`;
 - persistent in-page reminders that stay visible until clicked;
 - optional browser notifications when notification permission is granted.
 
@@ -207,6 +208,14 @@ Apply the app through the normal pull model:
 ```bash
 sudo systemctl start ansible-local-apply.service
 ```
+
+GitHub task import reads:
+
+```text
+https://raw.githubusercontent.com/abykovwww-byte/task.abykov.site/main/tasks.json
+```
+
+The app imports only new GitHub task ids and ignores later edits to already imported ids. See `docs/task-github-format.md` for the exact JSON format.
 
 ## Coolify
 
