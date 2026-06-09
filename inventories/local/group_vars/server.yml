@@ -55,6 +55,7 @@ hermes_dashboard_domain: hermes.abykov.site
 hermes_api_domain: api_hermes.abykov.site
 hermes_api_alias_domain: api-hermes.abykov.site
 hermes_dashboard_enabled: true
+hermes_dashboard_insecure: true
 hermes_api_server_enabled: true
 hermes_api_server_key: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-api-server-key length=48 chars=ascii_letters,digits') }}"
 hermes_api_server_cors_origins: "*"

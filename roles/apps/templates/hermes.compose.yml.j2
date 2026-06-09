@@ -4,7 +4,7 @@ services:
     image: "{{ hermes_image }}"
     container_name: hermes
     restart: unless-stopped
-    command: gateway run
+    command: "gateway run{% if hermes_dashboard_insecure | bool %} --insecure{% endif %}"
     environment:
       HERMES_DASHBOARD: "{{ hermes_dashboard_enabled | bool | ternary('1', '0') }}"
       API_SERVER_ENABLED: "{{ hermes_api_server_enabled | bool | ternary('true', 'false') }}"

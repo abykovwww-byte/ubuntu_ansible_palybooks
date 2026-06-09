@@ -364,6 +364,8 @@ Gateway API alias: api-hermes.abykov.site -> 127.0.0.1:8642
 
 Use `api-hermes.abykov.site` if DNS tooling rejects the underscore in `api_hermes.abykov.site`.
 
+The dashboard currently runs with Hermes `--insecure` because no dashboard auth provider is configured yet. Add dashboard auth before broad public exposure.
+
 Useful checks after apply:
 
 ```bash
