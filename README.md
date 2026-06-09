@@ -217,6 +217,12 @@ https://raw.githubusercontent.com/abykovwww-byte/task.abykov.site/main/tasks.jso
 
 The app imports only new GitHub task ids and ignores later edits to already imported ids. See `docs/task-github-format.md` for the exact JSON format.
 
+If `abykovwww-byte/task.abykov.site` is private, set a read-only token in `/etc/ansible/local-overrides.yml`:
+
+```yaml
+task_reminder_github_token: "github_pat_or_fine_grained_token_here"
+```
+
 ## Coolify
 
 Coolify is disabled by default:

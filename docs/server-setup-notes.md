@@ -336,6 +336,12 @@ The app imports only new GitHub task ids. Existing imported ids are skipped so l
 docs/task-github-format.md
 ```
 
+If the task source repository is private, add a read-only GitHub token to `/etc/ansible/local-overrides.yml`:
+
+```yaml
+task_reminder_github_token: "github_pat_or_fine_grained_token_here"
+```
+
 ## Coolify Status
 
 Coolify is currently disabled:

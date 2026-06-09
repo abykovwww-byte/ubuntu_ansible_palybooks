@@ -12,6 +12,7 @@ const adminPassword = process.env.ADMIN_PASSWORD || randomBytes(24).toString("ba
 const sessionSecret = process.env.SESSION_SECRET || randomBytes(32).toString("hex");
 const githubTasksUrl = process.env.GITHUB_TASKS_URL || "";
 const githubSyncIntervalMs = Number(process.env.GITHUB_SYNC_INTERVAL_SECONDS || 300) * 1000;
+const githubToken = process.env.GITHUB_TOKEN || "";
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -218,6 +219,7 @@ async function syncGitHubTasks() {
   const response = await fetch(githubTasksUrl, {
     headers: {
       accept: "application/json",
+      ...(githubToken ? { authorization: `Bearer ${githubToken}` } : {}),
       "user-agent": "task-reminder/1.0",
     },
   });

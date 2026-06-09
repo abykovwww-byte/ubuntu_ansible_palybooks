@@ -41,6 +41,7 @@ task_reminder_admin_password: "{{ lookup('ansible.builtin.password', '/etc/ansib
 task_reminder_session_secret: "{{ lookup('ansible.builtin.password', '/etc/ansible/task-reminder-session-secret length=48 chars=ascii_letters,digits') }}"
 task_reminder_github_tasks_url: https://raw.githubusercontent.com/abykovwww-byte/task.abykov.site/main/tasks.json
 task_reminder_github_sync_interval_seconds: 300
+task_reminder_github_token: ""
 
 docker_apps:
   - name: task-reminder

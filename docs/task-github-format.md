@@ -6,6 +6,14 @@ The task reminder app imports new tasks from:
 https://raw.githubusercontent.com/abykovwww-byte/task.abykov.site/main/tasks.json
 ```
 
+If the repository is private, either make it public or put a read-only GitHub token in `/etc/ansible/local-overrides.yml` on the server:
+
+```yaml
+task_reminder_github_token: "github_pat_or_fine_grained_token_here"
+```
+
+For a fine-grained token, grant read-only Contents access to `abykovwww-byte/task.abykov.site`.
+
 Create this file in the repository:
 
 ```text
