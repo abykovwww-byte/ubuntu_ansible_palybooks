@@ -43,6 +43,22 @@ task_reminder_github_tasks_url: https://raw.githubusercontent.com/abykovwww-byte
 task_reminder_github_sync_interval_seconds: 300
 task_reminder_github_token: ""
 
+hermes_enabled: true
+hermes_image: nousresearch/hermes-agent:latest
+hermes_project_dir: "{{ app_deploy_base_dir }}/hermes"
+hermes_data_dir: "{{ app_data_base_dir }}/hermes"
+hermes_log_dir: "{{ app_log_base_dir }}/hermes"
+hermes_bind_host: "127.0.0.1"
+hermes_gateway_host_port: 8642
+hermes_dashboard_host_port: 9119
+hermes_dashboard_enabled: true
+hermes_api_server_enabled: true
+hermes_api_server_key: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-api-server-key length=48 chars=ascii_letters,digits') }}"
+hermes_api_server_cors_origins: "*"
+hermes_skip_config_migration: false
+hermes_memory_limit: 4G
+hermes_cpu_limit: "2.0"
+
 docker_apps:
   - name: task-reminder
     enabled: true
@@ -56,6 +72,15 @@ docker_apps:
       - "{{ task_reminder_project_dir }}"
       - "{{ task_reminder_data_dir }}"
       - "{{ task_reminder_log_dir }}"
+  - name: hermes
+    enabled: "{{ hermes_enabled }}"
+    project_dir: "{{ hermes_project_dir }}"
+    compose_template: hermes.compose.yml.j2
+    compose_up: true
+    managed_directories:
+      - "{{ hermes_project_dir }}"
+      - "{{ hermes_data_dir }}"
+      - "{{ hermes_log_dir }}"
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m

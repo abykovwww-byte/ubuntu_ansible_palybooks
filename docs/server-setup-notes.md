@@ -342,6 +342,28 @@ If the task source repository is private, add a read-only GitHub token to `/etc/
 task_reminder_github_token: "github_pat_or_fine_grained_token_here"
 ```
 
+## Hermes Agent
+
+Hermes Agent is configured as a Docker Compose app:
+
+```text
+Container: hermes
+Project: /srv/apps/hermes
+Data: /srv/app-data/hermes
+Gateway API: 127.0.0.1:8642
+Dashboard: 127.0.0.1:9119
+```
+
+The service is not published through Nginx yet. It is bound to localhost for safety.
+
+Useful checks after apply:
+
+```bash
+docker ps --filter name=hermes
+curl -fsS http://127.0.0.1:8642/health
+sudo cat /etc/ansible/hermes-api-server-key
+```
+
 ## Coolify Status
 
 Coolify is currently disabled:

@@ -1,0 +1,24 @@
+---
+services:
+  hermes:
+    image: "{{ hermes_image }}"
+    container_name: hermes
+    restart: unless-stopped
+    command: gateway run
+    environment:
+      HERMES_DASHBOARD: "{{ hermes_dashboard_enabled | bool | ternary('1', '0') }}"
+      API_SERVER_ENABLED: "{{ hermes_api_server_enabled | bool | ternary('true', 'false') }}"
+      API_SERVER_HOST: "0.0.0.0"
+      API_SERVER_KEY: "{{ hermes_api_server_key }}"
+      API_SERVER_CORS_ORIGINS: "{{ hermes_api_server_cors_origins }}"
+      HERMES_SKIP_CONFIG_MIGRATION: "{{ hermes_skip_config_migration | bool | ternary('1', '0') }}"
+    ports:
+      - "{{ hermes_bind_host }}:{{ hermes_gateway_host_port }}:8642"
+      - "{{ hermes_bind_host }}:{{ hermes_dashboard_host_port }}:9119"
+    volumes:
+      - "{{ hermes_data_dir }}:/opt/data"
+    deploy:
+      resources:
+        limits:
+          memory: "{{ hermes_memory_limit }}"
+          cpus: "{{ hermes_cpu_limit }}"

@@ -223,6 +223,27 @@ If `abykovwww-byte/task.abykov.site` is private, set a read-only token in `/etc/
 task_reminder_github_token: "github_pat_or_fine_grained_token_here"
 ```
 
+## Hermes Agent
+
+Hermes Agent is deployed as a Docker Compose app when `hermes_enabled: true`.
+
+```text
+Project: /srv/apps/hermes
+Data: /srv/app-data/hermes
+Gateway API: 127.0.0.1:8642
+Dashboard: 127.0.0.1:9119
+```
+
+The deployment intentionally binds Hermes to localhost only. Do not expose the gateway API or dashboard publicly until access control, domain, and TLS are decided.
+
+Generated local secret:
+
+```bash
+sudo cat /etc/ansible/hermes-api-server-key
+```
+
+Hermes stores its config, provider keys, sessions, skills, and memory in `/srv/app-data/hermes`, mounted into the container as `/opt/data`.
+
 ## Coolify
 
 Coolify is disabled by default:
