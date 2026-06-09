@@ -244,12 +244,13 @@ Gateway API alias: http://api-hermes.abykov.site
 
 `api_hermes.abykov.site` is included because it was requested, but underscores are not valid in strict DNS hostnames. Prefer `api-hermes.abykov.site` if the DNS provider or browser rejects the underscore name.
 
-The dashboard currently runs with Hermes `--insecure` because no dashboard auth provider is configured yet. Keep it behind trusted network/DNS controls or add a real dashboard auth provider before exposing it broadly.
+The dashboard currently runs with Hermes `--insecure` because no dashboard auth provider is configured yet. Nginx Basic Auth is enabled on both Hermes vhosts as an outer access gate.
 
 Generated local secret:
 
 ```bash
 sudo cat /etc/ansible/hermes-api-server-key
+sudo cat /etc/ansible/hermes-dashboard-password
 ```
 
 Hermes stores its config, provider keys, sessions, skills, and memory in `/srv/app-data/hermes`, mounted into the container as `/opt/data`.

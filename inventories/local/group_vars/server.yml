@@ -58,6 +58,10 @@ hermes_dashboard_enabled: true
 hermes_dashboard_insecure: true
 hermes_api_server_enabled: true
 hermes_api_server_key: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-api-server-key length=48 chars=ascii_letters,digits') }}"
+hermes_basic_auth_user: hermes
+hermes_basic_auth_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-dashboard-password length=24 chars=ascii_letters,digits') }}"
+hermes_basic_auth_salt: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-dashboard-salt length=16 chars=ascii_letters,digits') }}"
+hermes_basic_auth_password_hash: "{{ lookup('ansible.builtin.pipe', 'openssl passwd -apr1 -salt ' ~ hermes_basic_auth_salt ~ ' ' ~ hermes_basic_auth_password) }}"
 hermes_api_server_cors_origins: "*"
 hermes_skip_config_migration: false
 hermes_memory_limit: 4G
@@ -105,6 +109,11 @@ nginx_apps:
     upstream_port: "{{ hermes_dashboard_host_port }}"
     websocket: true
     proxy_read_timeout: 300s
+    basic_auth:
+      enabled: true
+      realm: Hermes
+      user: "{{ hermes_basic_auth_user }}"
+      password_hash: "{{ hermes_basic_auth_password_hash }}"
   - name: hermes-api
     enabled: "{{ hermes_enabled }}"
     server_names:
@@ -114,6 +123,11 @@ nginx_apps:
     upstream_port: "{{ hermes_gateway_host_port }}"
     websocket: true
     proxy_read_timeout: 300s
+    basic_auth:
+      enabled: true
+      realm: Hermes API
+      user: "{{ hermes_basic_auth_user }}"
+      password_hash: "{{ hermes_basic_auth_password_hash }}"
 
 coolify_enabled: false
 coolify_install_dir: /opt/coolify

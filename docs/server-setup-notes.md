@@ -364,7 +364,7 @@ Gateway API alias: api-hermes.abykov.site -> 127.0.0.1:8642
 
 Use `api-hermes.abykov.site` if DNS tooling rejects the underscore in `api_hermes.abykov.site`.
 
-The dashboard currently runs with Hermes `--insecure` because no dashboard auth provider is configured yet. Add dashboard auth before broad public exposure.
+The dashboard currently runs with Hermes `--insecure` because no dashboard auth provider is configured yet. Nginx Basic Auth is enabled on both Hermes vhosts as an outer access gate.
 
 Useful checks after apply:
 
@@ -372,6 +372,7 @@ Useful checks after apply:
 docker ps --filter name=hermes
 curl -fsS http://127.0.0.1:8642/health
 sudo cat /etc/ansible/hermes-api-server-key
+sudo cat /etc/ansible/hermes-dashboard-password
 ```
 
 ## Coolify Status

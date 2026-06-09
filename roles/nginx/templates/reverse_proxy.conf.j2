@@ -3,6 +3,10 @@ server {
     server_name {{ item.server_names | join(' ') }};
 
     client_max_body_size {{ item.client_max_body_size | default(nginx_client_max_body_size) }};
+{% if item.basic_auth.enabled | default(false) | bool %}
+    auth_basic "{{ item.basic_auth.realm | default(item.name) }}";
+    auth_basic_user_file /etc/nginx/.htpasswd-{{ item.name }};
+{% endif %}
 
     location / {
         proxy_pass http://{{ item.upstream_host }}:{{ item.upstream_port }};

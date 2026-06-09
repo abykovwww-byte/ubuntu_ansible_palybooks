@@ -34,6 +34,20 @@
   notify: Reload nginx
   tags: [nginx, config]
 
+- name: Render Nginx basic auth files
+  ansible.builtin.template:
+    src: auth_basic.htpasswd.j2
+    dest: "/etc/nginx/.htpasswd-{{ item.name }}"
+    owner: root
+    group: www-data
+    mode: "0640"
+  loop: "{{ nginx_apps }}"
+  when:
+    - item.enabled | default(true) | bool
+    - item.basic_auth.enabled | default(false) | bool
+  notify: Reload nginx
+  tags: [nginx, sites]
+
 - name: Render reverse proxy sites
   ansible.builtin.template:
     src: reverse_proxy.conf.j2
@@ -62,6 +76,15 @@
     state: absent
   loop: "{{ nginx_apps }}"
   when: not (item.enabled | default(true) | bool)
+  notify: Reload nginx
+  tags: [nginx, sites]
+
+- name: Remove disabled Nginx basic auth files
+  ansible.builtin.file:
+    path: "/etc/nginx/.htpasswd-{{ item.name }}"
+    state: absent
+  loop: "{{ nginx_apps }}"
+  when: not (item.enabled | default(true) | bool) or not (item.basic_auth.enabled | default(false) | bool)
   notify: Reload nginx
   tags: [nginx, sites]
 
