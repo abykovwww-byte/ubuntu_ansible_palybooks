@@ -90,8 +90,13 @@ tovar_ai_browser_extraction_enabled: true
 tovar_ai_browser_timeout_ms: 20000
 tovar_ai_browser_max_excerpt_chars: 12000
 tovar_ai_browser_concurrency: 2
-tovar_ai_extraction_provider_order: "local,external"
+tovar_ai_extraction_provider_order: "local,browser_use,external"
 tovar_ai_extraction_fallback_min_text_chars: 800
+tovar_ai_browser_use_api_key: ""
+tovar_ai_browser_use_base_url: "https://api.browser-use.com/api/v3"
+tovar_ai_browser_use_model: "claude-sonnet-4.6"
+tovar_ai_browser_use_timeout_seconds: 180
+tovar_ai_browser_use_poll_interval_seconds: 2
 tovar_ai_external_browser_api_url: ""
 tovar_ai_external_browser_api_key: ""
 tovar_ai_external_browser_timeout_seconds: 90
