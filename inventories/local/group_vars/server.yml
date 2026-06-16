@@ -67,6 +67,25 @@ hermes_skip_config_migration: false
 hermes_memory_limit: 4G
 hermes_cpu_limit: "2.0"
 
+tovar_ai_enabled: true
+tovar_ai_domain: tovar.abykov.site
+tovar_ai_repo_url: https://github.com/abykovwww-byte/tovar.ai.git
+tovar_ai_repo_version: master
+tovar_ai_project_dir: "{{ app_deploy_base_dir }}/tovar-ai"
+tovar_ai_data_dir: "{{ app_data_base_dir }}/tovar-ai"
+tovar_ai_log_dir: "{{ app_log_base_dir }}/tovar-ai"
+tovar_ai_bind_host: "127.0.0.1"
+tovar_ai_host_port: 3101
+tovar_ai_container_port: 3000
+tovar_ai_llm_provider: "openrouter"
+tovar_ai_llm_base_url: "https://openrouter.ai/api/v1"
+tovar_ai_llm_model: "deepseek/deepseek-chat"
+tovar_ai_llm_api_key: ""
+tovar_ai_llm_timeout_seconds: 60
+tovar_ai_llm_max_output_tokens: 1200
+tovar_ai_openrouter_site_url: "https://tovar.abykov.site"
+tovar_ai_openrouter_app_name: "tovar.ai"
+
 docker_apps:
   - name: task-reminder
     enabled: true
@@ -89,6 +108,19 @@ docker_apps:
       - "{{ hermes_project_dir }}"
       - "{{ hermes_data_dir }}"
       - "{{ hermes_log_dir }}"
+  - name: tovar-ai
+    enabled: "{{ tovar_ai_enabled }}"
+    repo_url: "{{ tovar_ai_repo_url }}"
+    repo_version: "{{ tovar_ai_repo_version }}"
+    project_dir: "{{ tovar_ai_project_dir }}"
+    compose_template: tovar-ai.compose.yml.j2
+    env_template: tovar-ai.env.j2
+    env_example_template: tovar-ai.env.example.j2
+    compose_up: true
+    managed_directories:
+      - "{{ tovar_ai_project_dir }}"
+      - "{{ tovar_ai_data_dir }}"
+      - "{{ tovar_ai_log_dir }}"
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
@@ -128,6 +160,13 @@ nginx_apps:
       realm: Hermes API
       user: "{{ hermes_basic_auth_user }}"
       password_hash: "{{ hermes_basic_auth_password_hash }}"
+  - name: tovar-ai
+    enabled: "{{ tovar_ai_enabled }}"
+    server_names:
+      - "{{ tovar_ai_domain }}"
+    upstream_host: "{{ tovar_ai_bind_host }}"
+    upstream_port: "{{ tovar_ai_host_port }}"
+    websocket: false
 
 coolify_enabled: false
 coolify_install_dir: /opt/coolify

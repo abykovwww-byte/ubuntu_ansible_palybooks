@@ -17,6 +17,23 @@
   when: item.0.enabled | default(true) | bool
   tags: [apps, directories]
 
+- name: Clone Docker app repositories
+  ansible.builtin.git:
+    repo: "{{ app.repo_url }}"
+    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+    version: "{{ app.repo_version | default('main') }}"
+    force: "{{ app.repo_force | default(false) }}"
+    update: true
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+  notify: Restart Docker app
+  tags: [apps, source, git]
+
 - name: Copy Docker app source
   ansible.builtin.copy:
     src: "{{ app.source_dir }}/"

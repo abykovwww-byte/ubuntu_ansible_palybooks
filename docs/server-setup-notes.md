@@ -375,6 +375,57 @@ sudo cat /etc/ansible/hermes-api-server-key
 sudo cat /etc/ansible/hermes-dashboard-password
 ```
 
+## tovar.ai
+
+tovar.ai is configured as a Docker Compose app managed by the `apps` role.
+
+Public endpoint:
+
+```text
+http://tovar.abykov.site
+```
+
+Runtime layout:
+
+```text
+Project: /srv/apps/tovar-ai
+Data: /srv/app-data/tovar-ai
+Logs: /var/log/apps/tovar-ai
+Internal port: 127.0.0.1:3101 -> container 3000
+```
+
+The app source is pulled from:
+
+```text
+https://github.com/abykovwww-byte/tovar.ai.git
+```
+
+The OpenRouter key must stay only on the server, usually in:
+
+```text
+/etc/ansible/local-overrides.yml
+```
+
+Expected local override variables:
+
+```yaml
+tovar_ai_llm_provider: "openrouter"
+tovar_ai_llm_base_url: "https://openrouter.ai/api/v1"
+tovar_ai_llm_model: "deepseek/deepseek-chat"
+tovar_ai_llm_api_key: "PASTE_OPENROUTER_API_KEY_HERE"
+tovar_ai_llm_timeout_seconds: 60
+tovar_ai_llm_max_output_tokens: 1200
+tovar_ai_openrouter_site_url: "https://tovar.abykov.site"
+tovar_ai_openrouter_app_name: "tovar.ai"
+```
+
+Useful checks after apply:
+
+```bash
+docker ps --filter name=tovar-ai
+curl -fsS http://127.0.0.1:3101/health
+```
+
 ## Coolify Status
 
 Coolify is currently disabled:
