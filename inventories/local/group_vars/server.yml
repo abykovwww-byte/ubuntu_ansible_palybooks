@@ -113,14 +113,14 @@ docker_apps:
     enabled: "{{ tovar_ai_enabled }}"
     repo_url: "{{ tovar_ai_repo_url }}"
     repo_version: "{{ tovar_ai_repo_version }}"
-    repo_token: "{{ tovar_ai_github_token }}"
+    repo_token_var: tovar_ai_github_token
+    repo_recreate_if_not_git: true
     project_dir: "{{ tovar_ai_project_dir }}"
     compose_template: tovar-ai.compose.yml.j2
     env_template: tovar-ai.env.j2
     env_example_template: tovar-ai.env.example.j2
     compose_up: true
     managed_directories:
-      - "{{ tovar_ai_project_dir }}"
       - "{{ tovar_ai_data_dir }}"
       - "{{ tovar_ai_log_dir }}"
 

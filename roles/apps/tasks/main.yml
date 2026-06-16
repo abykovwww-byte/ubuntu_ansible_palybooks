@@ -28,9 +28,28 @@
   when:
     - app.enabled | default(true) | bool
     - app.repo_url is defined
-    - app.repo_token is defined
-    - app.repo_token | length > 0
-  no_log: true
+    - app_repo_token | length > 0
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
+  tags: [apps, source, git]
+
+- name: Remove non-git Docker app repository directories
+  ansible.builtin.file:
+    path: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+    state: absent
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+    index_var: app_index
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_recreate_if_not_git | default(false) | bool
+    - app_repo_token | length > 0
+    - not docker_app_repo_state.results[app_index].stat.exists
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   tags: [apps, source, git]
 
 - name: Clone token-auth Docker app repositories
@@ -38,7 +57,7 @@
     argv:
       - git
       - -c
-      - "http.extraHeader=Authorization: Bearer {{ app.repo_token }}"
+      - "http.extraHeader=Authorization: Bearer {{ app_repo_token }}"
       - clone
       - --branch
       - "{{ app.repo_version | default('main') }}"
@@ -52,9 +71,10 @@
   when:
     - app.enabled | default(true) | bool
     - app.repo_url is defined
-    - app.repo_token is defined
-    - app.repo_token | length > 0
+    - app_repo_token | length > 0
     - not docker_app_repo_state.results[app_index].stat.exists
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   no_log: true
   notify: Restart Docker app
   tags: [apps, source, git]
@@ -66,7 +86,7 @@
       - -C
       - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
       - -c
-      - "http.extraHeader=Authorization: Bearer {{ app.repo_token }}"
+      - "http.extraHeader=Authorization: Bearer {{ app_repo_token }}"
       - fetch
       - origin
       - "{{ app.repo_version | default('main') }}"
@@ -77,8 +97,9 @@
   when:
     - app.enabled | default(true) | bool
     - app.repo_url is defined
-    - app.repo_token is defined
-    - app.repo_token | length > 0
+    - app_repo_token | length > 0
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   changed_when: false
   no_log: true
   tags: [apps, source, git]
@@ -99,8 +120,9 @@
   when:
     - app.enabled | default(true) | bool
     - app.repo_url is defined
-    - app.repo_token is defined
-    - app.repo_token | length > 0
+    - app_repo_token | length > 0
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   notify: Restart Docker app
   tags: [apps, source, git]
 
@@ -118,7 +140,9 @@
   when:
     - app.enabled | default(true) | bool
     - app.repo_url is defined
-    - app.repo_token is not defined or app.repo_token | length == 0
+    - app_repo_token | length == 0
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   notify: Restart Docker app
   tags: [apps, source, git]
 
