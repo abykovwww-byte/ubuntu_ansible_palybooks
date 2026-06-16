@@ -426,6 +426,11 @@ tovar_ai_browser_extraction_enabled: true
 tovar_ai_browser_timeout_ms: 20000
 tovar_ai_browser_max_excerpt_chars: 12000
 tovar_ai_browser_concurrency: 2
+tovar_ai_extraction_provider_order: "local,external"
+tovar_ai_extraction_fallback_min_text_chars: 800
+tovar_ai_external_browser_api_url: ""
+tovar_ai_external_browser_api_key: ""
+tovar_ai_external_browser_timeout_seconds: 90
 ```
 
 Useful checks after apply:
