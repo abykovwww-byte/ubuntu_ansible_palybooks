@@ -57,7 +57,7 @@
     argv:
       - git
       - -c
-      - "http.extraHeader=Authorization: Bearer {{ app_repo_token }}"
+      - "http.extraHeader=Authorization: Basic {{ ('x-access-token:' ~ app_repo_token) | b64encode }}"
       - clone
       - --branch
       - "{{ app.repo_version | default('main') }}"
@@ -86,7 +86,7 @@
       - -C
       - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
       - -c
-      - "http.extraHeader=Authorization: Bearer {{ app_repo_token }}"
+      - "http.extraHeader=Authorization: Basic {{ ('x-access-token:' ~ app_repo_token) | b64encode }}"
       - fetch
       - origin
       - "{{ app.repo_version | default('main') }}"
