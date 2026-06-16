@@ -400,6 +400,10 @@ The app source is pulled from:
 https://github.com/abykovwww-byte/tovar.ai.git
 ```
 
+If the repository is private, the app reuses `task_reminder_github_token` by
+default through `tovar_ai_github_token`. The token is passed to Git through a
+temporary HTTP header and is not written to the cloned repository remote URL.
+
 The OpenRouter key must stay only on the server, usually in:
 
 ```text

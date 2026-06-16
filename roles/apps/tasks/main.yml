@@ -17,7 +17,94 @@
   when: item.0.enabled | default(true) | bool
   tags: [apps, directories]
 
-- name: Clone Docker app repositories
+- name: Check token-auth Docker app repository state
+  ansible.builtin.stat:
+    path: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/.git"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  register: docker_app_repo_state
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_token is defined
+    - app.repo_token | length > 0
+  no_log: true
+  tags: [apps, source, git]
+
+- name: Clone token-auth Docker app repositories
+  ansible.builtin.command:
+    argv:
+      - git
+      - -c
+      - "http.extraHeader=Authorization: Bearer {{ app.repo_token }}"
+      - clone
+      - --branch
+      - "{{ app.repo_version | default('main') }}"
+      - "{{ app.repo_url }}"
+      - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+    index_var: app_index
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_token is defined
+    - app.repo_token | length > 0
+    - not docker_app_repo_state.results[app_index].stat.exists
+  no_log: true
+  notify: Restart Docker app
+  tags: [apps, source, git]
+
+- name: Fetch token-auth Docker app repositories
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+      - -c
+      - "http.extraHeader=Authorization: Bearer {{ app.repo_token }}"
+      - fetch
+      - origin
+      - "{{ app.repo_version | default('main') }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_token is defined
+    - app.repo_token | length > 0
+  changed_when: false
+  no_log: true
+  tags: [apps, source, git]
+
+- name: Reset token-auth Docker app repositories
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+      - reset
+      - --hard
+      - FETCH_HEAD
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_token is defined
+    - app.repo_token | length > 0
+  notify: Restart Docker app
+  tags: [apps, source, git]
+
+- name: Clone public Docker app repositories
   ansible.builtin.git:
     repo: "{{ app.repo_url }}"
     dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
@@ -31,6 +118,7 @@
   when:
     - app.enabled | default(true) | bool
     - app.repo_url is defined
+    - app.repo_token is not defined or app.repo_token | length == 0
   notify: Restart Docker app
   tags: [apps, source, git]
 
