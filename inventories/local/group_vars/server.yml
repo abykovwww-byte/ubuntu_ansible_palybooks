@@ -182,6 +182,7 @@ nginx_apps:
       - "{{ tovar_ai_domain }}"
     upstream_host: "{{ tovar_ai_bind_host }}"
     upstream_port: "{{ tovar_ai_host_port }}"
+    proxy_read_timeout: 360s
     websocket: false
 
 coolify_enabled: false
