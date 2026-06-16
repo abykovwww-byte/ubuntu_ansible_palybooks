@@ -422,6 +422,10 @@ tovar_ai_llm_timeout_seconds: 60
 tovar_ai_llm_max_output_tokens: 1200
 tovar_ai_openrouter_site_url: "https://tovar.abykov.site"
 tovar_ai_openrouter_app_name: "tovar.ai"
+tovar_ai_browser_extraction_enabled: true
+tovar_ai_browser_timeout_ms: 20000
+tovar_ai_browser_max_excerpt_chars: 12000
+tovar_ai_browser_concurrency: 2
 ```
 
 Useful checks after apply:
