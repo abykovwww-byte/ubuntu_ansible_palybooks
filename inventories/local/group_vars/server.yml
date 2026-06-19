@@ -67,6 +67,18 @@ hermes_skip_config_migration: false
 hermes_memory_limit: 4G
 hermes_cpu_limit: "2.0"
 
+opensearch_ad_enabled: true
+opensearch_ad_version: "3.7.0"
+opensearch_ad_project_dir: "{{ app_deploy_base_dir }}/opensearch-ad"
+opensearch_ad_log_dir: "{{ app_log_base_dir }}/opensearch-ad"
+opensearch_ad_bind_host: "127.0.0.1"
+opensearch_ad_api_host_port: 9200
+opensearch_ad_performance_host_port: 9600
+opensearch_ad_dashboards_host_port: 5601
+opensearch_ad_heap: "1g"
+opensearch_ad_cluster_name: ad-analysis
+opensearch_ad_admin_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/opensearch-ad-admin-password length=32 chars=ascii_letters,digits') }}"
+
 tovar_ai_enabled: true
 tovar_ai_domain: tovar.abykov.site
 tovar_ai_repo_url: https://github.com/abykovwww-byte/tovar.ai.git
@@ -123,6 +135,15 @@ docker_apps:
       - "{{ hermes_project_dir }}"
       - "{{ hermes_data_dir }}"
       - "{{ hermes_log_dir }}"
+  - name: opensearch-ad
+    enabled: "{{ opensearch_ad_enabled }}"
+    project_dir: "{{ opensearch_ad_project_dir }}"
+    compose_template: opensearch-ad.compose.yml.j2
+    env_template: opensearch-ad.env.j2
+    compose_up: true
+    managed_directories:
+      - "{{ opensearch_ad_project_dir }}"
+      - "{{ opensearch_ad_log_dir }}"
   - name: tovar-ai
     enabled: "{{ tovar_ai_enabled }}"
     repo_url: "{{ tovar_ai_repo_url }}"

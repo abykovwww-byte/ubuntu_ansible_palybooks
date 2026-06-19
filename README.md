@@ -255,6 +255,53 @@ sudo cat /etc/ansible/hermes-dashboard-password
 
 Hermes stores its config, provider keys, sessions, skills, and memory in `/srv/app-data/hermes`, mounted into the container as `/opt/data`.
 
+## OpenSearch AD Analysis
+
+OpenSearch for AD group analysis is deployed as a Docker Compose app when `opensearch_ad_enabled: true`.
+
+```text
+Project: /srv/apps/opensearch-ad
+OpenSearch API: https://127.0.0.1:9200 on the server
+OpenSearch Dashboards: http://127.0.0.1:5601 on the server
+Performance Analyzer: 127.0.0.1:9600 on the server
+```
+
+The ports are bound to `127.0.0.1` by default so AD membership data is not exposed to the LAN or internet. From a workstation, open a tunnel first:
+
+```bash
+ssh -L 5601:127.0.0.1:5601 -L 9200:127.0.0.1:9200 abykov@192.168.1.88
+```
+
+Then use:
+
+```text
+Dashboards: http://127.0.0.1:5601
+OpenSearch API: https://127.0.0.1:9200
+```
+
+The `admin` password is generated locally on the server and is not stored in Git:
+
+```bash
+sudo cat /etc/ansible/opensearch-ad-admin-password
+```
+
+If OpenSearch logs report a `vm.max_map_count` bootstrap error, set the host value once on the server:
+
+```bash
+echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-opensearch-ad.conf
+sudo sysctl --system
+```
+
+Load AD data from the Windows export folder through the tunnel:
+
+```powershell
+cd C:\Users\albykov\Documents\Пользователи\opensearch-ad
+$env:OPENSEARCH_URL = "https://127.0.0.1:9200"
+$env:OPENSEARCH_USER = "admin"
+$env:OPENSEARCH_PASSWORD = "PASTE_SERVER_PASSWORD_HERE"
+python .\load_ad_to_opensearch.py --recreate
+```
+
 ## Coolify
 
 Coolify is disabled by default:

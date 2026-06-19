@@ -375,6 +375,58 @@ sudo cat /etc/ansible/hermes-api-server-key
 sudo cat /etc/ansible/hermes-dashboard-password
 ```
 
+## OpenSearch AD Analysis
+
+OpenSearch is configured as a Docker Compose app for AD user/group analysis:
+
+```text
+Container: ad-opensearch
+Dashboards container: ad-opensearch-dashboards
+Project: /srv/apps/opensearch-ad
+OpenSearch API: https://127.0.0.1:9200 on the server
+OpenSearch Dashboards: http://127.0.0.1:5601 on the server
+Performance Analyzer: 127.0.0.1:9600 on the server
+```
+
+Ports are intentionally bound to localhost. Use SSH forwarding from the workstation:
+
+```bash
+ssh -L 5601:127.0.0.1:5601 -L 9200:127.0.0.1:9200 abykov@192.168.1.88
+```
+
+The server stores the generated admin password locally:
+
+```bash
+sudo cat /etc/ansible/opensearch-ad-admin-password
+```
+
+The compose deployment uses OpenSearch and OpenSearch Dashboards image tag `3.7.0`, sets `discovery.type=single-node`, and keeps data in the Docker volume `opensearch-ad-data`.
+
+If OpenSearch logs report a `vm.max_map_count` bootstrap error, set the host value once:
+
+```bash
+echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-opensearch-ad.conf
+sudo sysctl --system
+```
+
+Useful checks after apply:
+
+```bash
+docker ps --filter name=ad-opensearch
+curl -k -u admin:$(sudo cat /etc/ansible/opensearch-ad-admin-password) https://127.0.0.1:9200
+curl -fsS http://127.0.0.1:5601/api/status
+```
+
+AD CSV snapshots can be loaded from the Windows export folder through the SSH tunnel:
+
+```powershell
+cd C:\Users\albykov\Documents\Пользователи\opensearch-ad
+$env:OPENSEARCH_URL = "https://127.0.0.1:9200"
+$env:OPENSEARCH_USER = "admin"
+$env:OPENSEARCH_PASSWORD = "PASTE_SERVER_PASSWORD_HERE"
+python .\load_ad_to_opensearch.py --recreate
+```
+
 ## tovar.ai
 
 tovar.ai is configured as a Docker Compose app managed by the `apps` role.
