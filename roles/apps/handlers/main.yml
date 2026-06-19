@@ -12,4 +12,8 @@
   when:
     - app.enabled | default(true) | bool
     - app.compose_up | default(true) | bool
+  register: docker_app_restart
+  retries: "{{ app.compose_retries | default(docker_apps_compose_retries) }}"
+  delay: "{{ app.compose_retry_delay | default(docker_apps_compose_retry_delay) }}"
+  until: docker_app_restart.rc == 0
   changed_when: true
