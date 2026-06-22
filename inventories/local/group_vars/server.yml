@@ -210,6 +210,7 @@ nginx_apps:
     upstream_port: "{{ opensearch_ad_dashboards_host_port }}"
     websocket: true
     proxy_read_timeout: 300s
+    drop_authorization: true
     basic_auth:
       enabled: true
       realm: OpenSearch
