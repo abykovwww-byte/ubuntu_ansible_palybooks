@@ -75,9 +75,14 @@ opensearch_ad_bind_host: "127.0.0.1"
 opensearch_ad_api_host_port: 9200
 opensearch_ad_performance_host_port: 9600
 opensearch_ad_dashboards_host_port: 5601
+opensearch_ad_dashboards_domain: osearch.abykov.site
 opensearch_ad_heap: "1g"
 opensearch_ad_cluster_name: ad-analysis
 opensearch_ad_admin_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/opensearch-ad-admin-password length=32 chars=ascii_letters,digits') }}"
+opensearch_ad_basic_auth_user: osearch
+opensearch_ad_basic_auth_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/opensearch-ad-dashboard-password length=24 chars=ascii_letters,digits') }}"
+opensearch_ad_basic_auth_salt: "{{ lookup('ansible.builtin.password', '/etc/ansible/opensearch-ad-dashboard-salt length=16 chars=ascii_letters,digits') }}"
+opensearch_ad_basic_auth_password_hash: "{{ lookup('ansible.builtin.pipe', 'openssl passwd -apr1 -salt ' ~ opensearch_ad_basic_auth_salt ~ ' ' ~ opensearch_ad_basic_auth_password) }}"
 
 tovar_ai_enabled: true
 tovar_ai_domain: tovar.abykov.site
@@ -197,6 +202,19 @@ nginx_apps:
       realm: Hermes API
       user: "{{ hermes_basic_auth_user }}"
       password_hash: "{{ hermes_basic_auth_password_hash }}"
+  - name: opensearch-ad-dashboards
+    enabled: "{{ opensearch_ad_enabled }}"
+    server_names:
+      - "{{ opensearch_ad_dashboards_domain }}"
+    upstream_host: "{{ opensearch_ad_bind_host }}"
+    upstream_port: "{{ opensearch_ad_dashboards_host_port }}"
+    websocket: true
+    proxy_read_timeout: 300s
+    basic_auth:
+      enabled: true
+      realm: OpenSearch
+      user: "{{ opensearch_ad_basic_auth_user }}"
+      password_hash: "{{ opensearch_ad_basic_auth_password_hash }}"
   - name: tovar-ai
     enabled: "{{ tovar_ai_enabled }}"
     server_names:

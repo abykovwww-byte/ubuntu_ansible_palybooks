@@ -266,23 +266,29 @@ OpenSearch Dashboards: http://127.0.0.1:5601 on the server
 Performance Analyzer: 127.0.0.1:9600 on the server
 ```
 
-The ports are bound to `127.0.0.1` by default so AD membership data is not exposed to the LAN or internet. From a workstation, open a tunnel first:
-
-```bash
-ssh -L 5601:127.0.0.1:5601 -L 9200:127.0.0.1:9200 abykov@192.168.1.88
-```
-
-Then use:
+The raw OpenSearch API and Performance Analyzer ports are bound to `127.0.0.1` by default so AD membership data is not exposed to the LAN or internet. OpenSearch Dashboards is published through Nginx with Basic Auth:
 
 ```text
-Dashboards: http://127.0.0.1:5601
-OpenSearch API: https://127.0.0.1:9200
+Dashboard: http://osearch.abykov.site
 ```
 
-The `admin` password is generated locally on the server and is not stored in Git:
+Create a DNS A record for `osearch.abykov.site` pointing to the server. The Basic Auth password and OpenSearch `admin` password are generated locally on the server and are not stored in Git:
 
 ```bash
+sudo cat /etc/ansible/opensearch-ad-dashboard-password
 sudo cat /etc/ansible/opensearch-ad-admin-password
+```
+
+For raw API access from a workstation, open a tunnel explicitly:
+
+```bash
+ssh -L 9200:127.0.0.1:9200 abykov@192.168.1.88
+```
+
+Then use the tunneled API:
+
+```text
+OpenSearch API: https://127.0.0.1:9200
 ```
 
 If OpenSearch logs report a `vm.max_map_count` bootstrap error, set the host value once on the server:

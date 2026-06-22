@@ -388,16 +388,25 @@ OpenSearch Dashboards: http://127.0.0.1:5601 on the server
 Performance Analyzer: 127.0.0.1:9600 on the server
 ```
 
-Ports are intentionally bound to localhost. Use SSH forwarding from the workstation:
+The raw OpenSearch API and Performance Analyzer ports stay bound to localhost. OpenSearch Dashboards is published through Nginx:
 
-```bash
-ssh -L 5601:127.0.0.1:5601 -L 9200:127.0.0.1:9200 abykov@192.168.1.88
+```text
+Dashboard: osearch.abykov.site -> 127.0.0.1:5601
 ```
 
-The server stores the generated admin password locally:
+Create a DNS A record for `osearch.abykov.site` pointing to the server. Nginx Basic Auth is enabled as an outer access gate.
+
+Generated local secrets:
 
 ```bash
+sudo cat /etc/ansible/opensearch-ad-dashboard-password
 sudo cat /etc/ansible/opensearch-ad-admin-password
+```
+
+Use SSH forwarding only for raw API access from the workstation:
+
+```bash
+ssh -L 9200:127.0.0.1:9200 abykov@192.168.1.88
 ```
 
 The compose deployment uses OpenSearch and OpenSearch Dashboards image tag `3.7.0`, sets `discovery.type=single-node`, and keeps data in the Docker volume `opensearch-ad-data`.
