@@ -164,6 +164,18 @@
   notify: Restart Docker app
   tags: [apps, source]
 
+- name: Create Docker app runtime files when missing
+  ansible.builtin.copy:
+    content: "{{ item.1.content }}"
+    dest: "{{ item.1.path }}"
+    owner: "{{ item.1.owner | default(item.0.owner | default(docker_apps_default_owner)) }}"
+    group: "{{ item.1.group | default(item.0.group | default(docker_apps_default_group)) }}"
+    mode: "{{ item.1.mode | default('0640') }}"
+    force: false
+  loop: "{{ docker_apps | subelements('runtime_files', skip_missing=True) }}"
+  when: item.0.enabled | default(true) | bool
+  tags: [apps, runtime]
+
 - name: Render Docker app compose files
   ansible.builtin.template:
     src: "{{ app.compose_template }}"

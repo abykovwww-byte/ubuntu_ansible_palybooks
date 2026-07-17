@@ -508,7 +508,7 @@ curl -fsS http://127.0.0.1:3101/health
 
 ## RP Stack
 
-RP Stack is configured as a Docker Compose app managed by the `apps` role. Iteration 1 deploys SillyTavern only.
+RP Stack is configured as a Docker Compose app managed by the `apps` role. Iteration 1 deploys SillyTavern; iteration 2 adds semi-automatic world state files and helper scripts.
 
 LAN endpoint:
 
@@ -541,6 +541,17 @@ API type: Chat Completion
 Chat Completion Source: Custom (OpenAI-compatible)
 Base URL: https://integrate.api.nvidia.com/v1
 Model: z-ai/glm-5.2
+```
+
+State workflow:
+
+```bash
+cd /srv/apps/rp-stack
+python3 scripts/validate-state.py
+python3 scripts/validate-state.py --patch state/proposed/turn-001.json
+python3 scripts/apply-state-patch.py --patch state/proposed/turn-001.json
+python3 scripts/apply-state-patch.py --patch state/proposed/turn-001.json --confirm
+python3 scripts/render-state-block.py
 ```
 
 ## Coolify Status

@@ -126,6 +126,9 @@ rp_stack_data_dir: "{{ rp_stack_storage_dir }}/data"
 rp_stack_plugins_dir: "{{ rp_stack_storage_dir }}/plugins"
 rp_stack_extensions_dir: "{{ rp_stack_storage_dir }}/extensions"
 rp_stack_backup_dir: "{{ app_backup_base_dir }}/rp-stack"
+rp_stack_state_dir: "{{ rp_stack_project_dir }}/state"
+rp_stack_state_history_dir: "{{ rp_stack_state_dir }}/history"
+rp_stack_state_proposed_dir: "{{ rp_stack_state_dir }}/proposed"
 rp_stack_bind_host: "192.168.1.88"
 rp_stack_sillytavern_host_port: 8000
 rp_stack_sillytavern_version: "1.18.0"
@@ -205,6 +208,50 @@ docker_apps:
       - "{{ rp_stack_plugins_dir }}"
       - "{{ rp_stack_extensions_dir }}"
       - "{{ rp_stack_backup_dir }}"
+      - "{{ rp_stack_state_dir }}"
+      - "{{ rp_stack_state_history_dir }}"
+      - "{{ rp_stack_state_proposed_dir }}"
+    runtime_files:
+      - path: "{{ rp_stack_state_dir }}/current.json"
+        mode: "0640"
+        content: |
+          {
+            "meta": {
+              "campaign_id": "default",
+              "schema_version": "1.0.0",
+              "state_version": 1,
+              "turn": 0,
+              "last_updated": "1970-01-01T00:00:00Z"
+            },
+            "player": {
+              "location": "unknown",
+              "status": "active",
+              "reputation": {},
+              "resources": {},
+              "known_abilities": [],
+              "constraints": [],
+              "known_world_facts": []
+            },
+            "characters": {},
+            "factions": {},
+            "locations": {},
+            "resources": {},
+            "relationships": {},
+            "active_threads": [],
+            "completed_threads": [],
+            "world_constraints": [],
+            "timeline": [],
+            "last_turn": {
+              "turn": 0,
+              "player_message": "",
+              "narrator_response": "",
+              "state_patch_id": ""
+            },
+            "uncertain_facts": []
+          }
+      - path: "{{ rp_stack_state_dir }}/audit.log"
+        mode: "0640"
+        content: ""
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
