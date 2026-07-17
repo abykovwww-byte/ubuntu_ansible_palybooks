@@ -252,6 +252,9 @@ docker_apps:
       - path: "{{ rp_stack_state_dir }}/audit.log"
         mode: "0640"
         content: ""
+      - path: "{{ rp_stack_state_dir }}/checks.log"
+        mode: "0640"
+        content: ""
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
