@@ -125,6 +125,7 @@ rp_stack_config_dir: "{{ rp_stack_storage_dir }}/config"
 rp_stack_data_dir: "{{ rp_stack_storage_dir }}/data"
 rp_stack_plugins_dir: "{{ rp_stack_storage_dir }}/plugins"
 rp_stack_extensions_dir: "{{ rp_stack_storage_dir }}/extensions"
+rp_stack_gateway_data_dir: "{{ rp_stack_storage_dir }}/gateway"
 rp_stack_backup_dir: "{{ app_backup_base_dir }}/rp-stack"
 rp_stack_state_dir: "{{ rp_stack_project_dir }}/state"
 rp_stack_state_history_dir: "{{ rp_stack_state_dir }}/history"
@@ -136,6 +137,11 @@ rp_stack_puid: 1000
 rp_stack_pgid: 1000
 rp_stack_nvidia_api_base: "https://integrate.api.nvidia.com/v1"
 rp_stack_nvidia_model: "z-ai/glm-5.2"
+rp_stack_gateway_port: 8088
+rp_stack_gateway_database_url: "sqlite:////data/rp_gateway.db"
+rp_stack_gateway_log_level: INFO
+rp_stack_gateway_log_prompts: "false"
+rp_stack_gateway_max_repair_attempts: 1
 rp_stack_sillytavern_whitelist:
   - "::1"
   - "127.0.0.1"
@@ -207,6 +213,7 @@ docker_apps:
       - "{{ rp_stack_data_dir }}"
       - "{{ rp_stack_plugins_dir }}"
       - "{{ rp_stack_extensions_dir }}"
+      - "{{ rp_stack_gateway_data_dir }}"
       - "{{ rp_stack_backup_dir }}"
       - "{{ rp_stack_state_dir }}"
       - "{{ rp_stack_state_history_dir }}"

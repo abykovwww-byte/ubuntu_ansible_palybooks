@@ -1,5 +1,28 @@
 ---
 services:
+  rp-gateway:
+    build:
+      context: ./rp-gateway
+    container_name: rp-stack-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - "{{ rp_stack_gateway_data_dir }}:/data:rw"
+      - "{{ rp_stack_state_dir }}:/state:rw"
+    expose:
+      - "{{ rp_stack_gateway_port }}"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ rp_stack_gateway_port }}/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - rp-stack
+
   sillytavern:
     image: "ghcr.io/sillytavern/sillytavern:{{ rp_stack_sillytavern_version }}"
     container_name: rp-stack-sillytavern
@@ -10,6 +33,9 @@ services:
       - PUID={{ rp_stack_puid }}
       - PGID={{ rp_stack_pgid }}
       - SILLYTAVERN_DATAROOT=/home/node/app/data
+    depends_on:
+      rp-gateway:
+        condition: service_healthy
     ports:
       - "{{ rp_stack_bind_host }}:{{ rp_stack_sillytavern_host_port }}:8000"
     volumes:
