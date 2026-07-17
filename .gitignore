@@ -1,6 +1,8 @@
 .DS_Store
 *.retry
 *.log
+.env
+**/.env
 
 # Python / Ansible local state
 __pycache__/

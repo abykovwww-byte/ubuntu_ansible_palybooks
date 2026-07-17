@@ -167,7 +167,7 @@
 - name: Render Docker app compose files
   ansible.builtin.template:
     src: "{{ app.compose_template }}"
-    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/compose.yml"
+    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/{{ app.compose_filename | default('compose.yml') }}"
     owner: "{{ app.owner | default(docker_apps_default_owner) }}"
     group: "{{ app.group | default(docker_apps_default_group) }}"
     mode: "0644"
@@ -187,7 +187,7 @@
     dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/.env"
     owner: "{{ app.owner | default(docker_apps_default_owner) }}"
     group: "{{ app.group | default(docker_apps_default_group) }}"
-    mode: "0640"
+    mode: "{{ app.env_mode | default('0640') }}"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app

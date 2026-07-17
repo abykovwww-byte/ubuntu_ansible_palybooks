@@ -118,6 +118,28 @@ tovar_ai_external_browser_api_url: ""
 tovar_ai_external_browser_api_key: ""
 tovar_ai_external_browser_timeout_seconds: 90
 
+rp_stack_enabled: true
+rp_stack_project_dir: "{{ app_deploy_base_dir }}/rp-stack"
+rp_stack_storage_dir: "{{ app_data_base_dir }}/rp-stack"
+rp_stack_config_dir: "{{ rp_stack_storage_dir }}/config"
+rp_stack_data_dir: "{{ rp_stack_storage_dir }}/data"
+rp_stack_plugins_dir: "{{ rp_stack_storage_dir }}/plugins"
+rp_stack_extensions_dir: "{{ rp_stack_storage_dir }}/extensions"
+rp_stack_backup_dir: "{{ app_backup_base_dir }}/rp-stack"
+rp_stack_bind_host: "192.168.1.88"
+rp_stack_sillytavern_host_port: 8000
+rp_stack_sillytavern_version: "1.18.0"
+rp_stack_puid: 1000
+rp_stack_pgid: 1000
+rp_stack_nvidia_api_base: "https://integrate.api.nvidia.com/v1"
+rp_stack_nvidia_model: "z-ai/glm-5.2"
+rp_stack_sillytavern_whitelist:
+  - "::1"
+  - "127.0.0.1"
+  - "192.168.0.0/16"
+rp_stack_sillytavern_basic_auth_user: rp
+rp_stack_sillytavern_basic_auth_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/rp-stack-sillytavern-basic-auth-password length=24 chars=ascii_letters,digits') }}"
+
 docker_apps:
   - name: task-reminder
     enabled: true
@@ -163,6 +185,26 @@ docker_apps:
     managed_directories:
       - "{{ tovar_ai_data_dir }}"
       - "{{ tovar_ai_log_dir }}"
+  - name: rp-stack
+    enabled: "{{ rp_stack_enabled }}"
+    source_dir: rp-stack
+    project_dir: "{{ rp_stack_project_dir }}"
+    owner: abykov
+    group: abykov
+    directory_mode: "0750"
+    compose_template: rp-stack.compose.yml.j2
+    compose_filename: docker-compose.yml
+    env_template: rp-stack.env.j2
+    env_example_template: rp-stack.env.example.j2
+    env_mode: "0600"
+    compose_up: true
+    managed_directories:
+      - "{{ rp_stack_project_dir }}"
+      - "{{ rp_stack_config_dir }}"
+      - "{{ rp_stack_data_dir }}"
+      - "{{ rp_stack_plugins_dir }}"
+      - "{{ rp_stack_extensions_dir }}"
+      - "{{ rp_stack_backup_dir }}"
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m

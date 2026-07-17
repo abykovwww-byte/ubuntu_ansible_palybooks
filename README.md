@@ -308,6 +308,43 @@ $env:OPENSEARCH_PASSWORD = "PASTE_SERVER_PASSWORD_HERE"
 python .\load_ad_to_opensearch.py --recreate
 ```
 
+## RP Stack
+
+RP Stack is configured as a Docker Compose app managed by the `apps` role. Iteration 1 deploys SillyTavern only.
+
+LAN endpoint:
+
+```text
+http://192.168.1.88:8000
+```
+
+Runtime layout:
+
+```text
+Project: /srv/apps/rp-stack
+Persistent data: /srv/app-data/rp-stack
+Backups: /srv/backups/rp-stack
+Port bind: 192.168.1.88:8000 -> container 8000
+Image: ghcr.io/sillytavern/sillytavern:1.18.0
+```
+
+The service is intentionally not published through the public Nginx reverse proxy. SillyTavern whitelist and Basic Auth are enabled for LAN use.
+
+Generated local secret:
+
+```bash
+sudo cat /etc/ansible/rp-stack-sillytavern-basic-auth-password
+```
+
+NVIDIA API key is not managed by this repository. Enter it manually in the SillyTavern UI:
+
+```text
+API type: Chat Completion
+Chat Completion Source: Custom (OpenAI-compatible)
+Base URL: https://integrate.api.nvidia.com/v1
+Model: z-ai/glm-5.2
+```
+
 ## Coolify
 
 Coolify is disabled by default:
