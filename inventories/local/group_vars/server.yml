@@ -215,6 +215,7 @@ docker_apps:
       - "{{ rp_stack_extensions_dir }}"
       - "{{ rp_stack_gateway_data_dir }}"
       - "{{ rp_stack_backup_dir }}"
+      - "{{ rp_stack_data_dir }}/default-user/QuickReplies"
       - "{{ rp_stack_state_dir }}"
       - "{{ rp_stack_state_history_dir }}"
       - "{{ rp_stack_state_proposed_dir }}"
@@ -262,6 +263,111 @@ docker_apps:
       - path: "{{ rp_stack_state_dir }}/checks.log"
         mode: "0640"
         content: ""
+      - path: "{{ rp_stack_data_dir }}/default-user/QuickReplies/RP World.json"
+        mode: "0640"
+        content: |
+          {
+            "version": 2,
+            "name": "RP World",
+            "disableSend": false,
+            "placeBeforeInput": false,
+            "injectInput": false,
+            "color": "rgba(0, 0, 0, 0)",
+            "onlyBorderColor": false,
+            "qrList": [
+              {
+                "id": 1,
+                "showLabel": true,
+                "label": "Мир",
+                "title": "Draft a world-state patch from natural language",
+                "message": "/input rows=6 wide=on large=on okButton=\"Preview\" Что изменить или запомнить в мире? | /setvar key=rp_world_instruction | /send /world {{ '{{' }}getvar::rp_world_instruction{{ '}}' }} | /trigger",
+                "contextList": [],
+                "preventAutoExecute": true,
+                "isHidden": false,
+                "executeOnStartup": false,
+                "executeOnUser": false,
+                "executeOnAi": false,
+                "executeOnChatChange": false,
+                "executeOnGroupMemberDraft": false,
+                "executeOnNewChat": false,
+                "executeBeforeGeneration": false,
+                "automationId": ""
+              },
+              {
+                "id": 2,
+                "showLabel": true,
+                "label": "Применить мир",
+                "title": "Apply the latest pending world proposal",
+                "message": "/send /world apply latest | /trigger",
+                "contextList": [],
+                "preventAutoExecute": true,
+                "isHidden": false,
+                "executeOnStartup": false,
+                "executeOnUser": false,
+                "executeOnAi": false,
+                "executeOnChatChange": false,
+                "executeOnGroupMemberDraft": false,
+                "executeOnNewChat": false,
+                "executeBeforeGeneration": false,
+                "automationId": ""
+              },
+              {
+                "id": 3,
+                "showLabel": true,
+                "label": "Отменить preview",
+                "title": "Discard the latest pending world proposal",
+                "message": "/send /world discard latest | /trigger",
+                "contextList": [],
+                "preventAutoExecute": true,
+                "isHidden": false,
+                "executeOnStartup": false,
+                "executeOnUser": false,
+                "executeOnAi": false,
+                "executeOnChatChange": false,
+                "executeOnGroupMemberDraft": false,
+                "executeOnNewChat": false,
+                "executeBeforeGeneration": false,
+                "automationId": ""
+              },
+              {
+                "id": 4,
+                "showLabel": true,
+                "label": "Показать мир",
+                "title": "Show compact world-state status",
+                "message": "/send /world show | /trigger",
+                "contextList": [],
+                "preventAutoExecute": true,
+                "isHidden": false,
+                "executeOnStartup": false,
+                "executeOnUser": false,
+                "executeOnAi": false,
+                "executeOnChatChange": false,
+                "executeOnGroupMemberDraft": false,
+                "executeOnNewChat": false,
+                "executeBeforeGeneration": false,
+                "automationId": ""
+              },
+              {
+                "id": 5,
+                "showLabel": true,
+                "label": "Откат мира",
+                "title": "Roll back one world-state version",
+                "message": "/send /world rollback | /trigger",
+                "contextList": [],
+                "preventAutoExecute": true,
+                "isHidden": false,
+                "executeOnStartup": false,
+                "executeOnUser": false,
+                "executeOnAi": false,
+                "executeOnChatChange": false,
+                "executeOnGroupMemberDraft": false,
+                "executeOnNewChat": false,
+                "executeBeforeGeneration": false,
+                "automationId": ""
+              }
+            ],
+            "idIndex": 5
+          }
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
