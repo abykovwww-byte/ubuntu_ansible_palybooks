@@ -315,7 +315,8 @@ RP Stack is configured as a Docker Compose app managed by the `apps` role. Itera
 LAN endpoint:
 
 ```text
-http://192.168.1.88:8000
+SillyTavern: http://192.168.1.88:8000
+Light GUI:   http://192.168.1.88:8010
 ```
 
 Runtime layout:
@@ -343,6 +344,13 @@ API type: Chat Completion
 Chat Completion Source: Custom (OpenAI-compatible)
 Base URL: https://integrate.api.nvidia.com/v1
 Model: z-ai/glm-5.2
+```
+
+For Light GUI, keep the provider key server-side by setting this only in
+`/etc/ansible/local-overrides.yml` on `192.168.1.88`:
+
+```yaml
+rp_stack_nvidia_api_key: "..."
 ```
 
 State workflow:

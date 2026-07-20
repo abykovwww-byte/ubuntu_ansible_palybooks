@@ -137,7 +137,9 @@ rp_stack_puid: 1000
 rp_stack_pgid: 1000
 rp_stack_nvidia_api_base: "https://integrate.api.nvidia.com/v1"
 rp_stack_nvidia_model: "z-ai/glm-5.2"
+rp_stack_nvidia_api_key: ""
 rp_stack_gateway_port: 8088
+rp_stack_light_gui_host_port: 8010
 rp_stack_gateway_database_url: "sqlite:////data/rp_gateway.db"
 rp_stack_gateway_log_level: INFO
 rp_stack_gateway_log_prompts: "false"
@@ -219,6 +221,7 @@ docker_apps:
       - "{{ rp_stack_data_dir }}/default-user/QuickReplies"
       - "{{ rp_stack_data_dir }}/default-user/worlds"
       - "{{ rp_stack_state_dir }}"
+      - "{{ rp_stack_state_dir }}/parties"
       - "{{ rp_stack_state_history_dir }}"
       - "{{ rp_stack_state_proposed_dir }}"
     runtime_files:

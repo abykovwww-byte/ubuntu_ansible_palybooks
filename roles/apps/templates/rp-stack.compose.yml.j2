@@ -10,6 +10,7 @@ services:
     volumes:
       - "{{ rp_stack_gateway_data_dir }}:/data:rw"
       - "{{ rp_stack_state_dir }}:/state:rw"
+      - "./worldpacks:/worldpacks:ro"
     expose:
       - "{{ rp_stack_gateway_port }}"
     security_opt:
@@ -19,6 +20,27 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 30s
+      retries: 3
+    networks:
+      - rp-stack
+
+  rp-light-gui:
+    build:
+      context: ./rp-light-gui
+    container_name: rp-stack-light-gui
+    restart: unless-stopped
+    depends_on:
+      rp-gateway:
+        condition: service_healthy
+    ports:
+      - "{{ rp_stack_bind_host }}:{{ rp_stack_light_gui_host_port }}:80"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
       retries: 3
     networks:
       - rp-stack
