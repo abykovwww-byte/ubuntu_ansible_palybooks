@@ -216,6 +216,7 @@ docker_apps:
       - "{{ rp_stack_gateway_data_dir }}"
       - "{{ rp_stack_backup_dir }}"
       - "{{ rp_stack_data_dir }}/default-user/QuickReplies"
+      - "{{ rp_stack_data_dir }}/default-user/worlds"
       - "{{ rp_stack_state_dir }}"
       - "{{ rp_stack_state_history_dir }}"
       - "{{ rp_stack_state_proposed_dir }}"
@@ -368,6 +369,11 @@ docker_apps:
             ],
             "idIndex": 5
           }
+    runtime_source_files:
+      - src: "rp-stack/worldpacks/smoke-gate-borderland/sillytavern/Predel_Dymnyh_Vrat.json"
+        path: "{{ rp_stack_data_dir }}/default-user/worlds/Predel_Dymnyh_Vrat.json"
+        mode: "0640"
+        force: false
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m

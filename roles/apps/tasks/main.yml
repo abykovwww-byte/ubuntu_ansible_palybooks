@@ -176,6 +176,18 @@
   when: item.0.enabled | default(true) | bool
   tags: [apps, runtime]
 
+- name: Copy Docker app runtime source files when missing
+  ansible.builtin.copy:
+    src: "{{ item.1.src }}"
+    dest: "{{ item.1.path }}"
+    owner: "{{ item.1.owner | default(item.0.owner | default(docker_apps_default_owner)) }}"
+    group: "{{ item.1.group | default(item.0.group | default(docker_apps_default_group)) }}"
+    mode: "{{ item.1.mode | default('0640') }}"
+    force: "{{ item.1.force | default(false) }}"
+  loop: "{{ docker_apps | subelements('runtime_source_files', skip_missing=True) }}"
+  when: item.0.enabled | default(true) | bool
+  tags: [apps, runtime]
+
 - name: Render Docker app compose files
   ansible.builtin.template:
     src: "{{ app.compose_template }}"
