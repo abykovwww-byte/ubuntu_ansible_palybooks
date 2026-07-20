@@ -146,6 +146,7 @@ rp_stack_sillytavern_whitelist:
   - "::1"
   - "127.0.0.1"
   - "192.168.0.0/16"
+rp_stack_sillytavern_basic_auth_enabled: false
 rp_stack_sillytavern_basic_auth_user: rp
 rp_stack_sillytavern_basic_auth_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/rp-stack-sillytavern-basic-auth-password length=24 chars=ascii_letters,digits') }}"
 
