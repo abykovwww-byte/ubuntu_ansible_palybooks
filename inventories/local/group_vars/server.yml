@@ -381,6 +381,10 @@ docker_apps:
         path: "{{ rp_stack_data_dir }}/default-user/worlds/Predel_Dymnyh_Vrat.json"
         mode: "0640"
         force: false
+      - src: "rp-stack/worldpacks/ellinoid/sillytavern/ellinoid.json"
+        path: "{{ rp_stack_data_dir }}/default-user/worlds/ellinoid.json"
+        mode: "0640"
+        force: false
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
