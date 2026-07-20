@@ -147,6 +147,7 @@ rp_stack_gateway_database_url: "sqlite:////data/rp_gateway.db"
 rp_stack_gateway_log_level: INFO
 rp_stack_gateway_log_prompts: "false"
 rp_stack_gateway_max_repair_attempts: 1
+rp_stack_gateway_request_timeout_seconds: 240
 rp_stack_sillytavern_whitelist:
   - "::1"
   - "127.0.0.1"
