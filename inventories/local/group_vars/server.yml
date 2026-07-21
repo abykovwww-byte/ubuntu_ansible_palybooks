@@ -395,6 +395,10 @@ docker_apps:
         path: "{{ rp_stack_data_dir }}/default-user/worlds/mechanist-new-world.json"
         mode: "0640"
         force: false
+      - src: "rp-stack/worldpacks/incident-50/sillytavern/incident-50.json"
+        path: "{{ rp_stack_data_dir }}/default-user/worlds/incident-50.json"
+        mode: "0640"
+        force: false
 
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
