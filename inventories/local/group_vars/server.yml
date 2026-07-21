@@ -30,6 +30,14 @@ docker_users:
 docker_data_root: ""
 docker_daemon_config: {}
 
+tailscale_enabled: true
+tailscale_hostname: abykovserv
+tailscale_operator: abykov
+tailscale_accept_dns: false
+tailscale_ssh_enabled: false
+tailscale_advertise_routes:
+  - "192.168.1.88/32"
+
 task_reminder_domain: task.abykov.site
 task_reminder_project_dir: "{{ app_deploy_base_dir }}/task-reminder"
 task_reminder_data_dir: "{{ app_data_base_dir }}/task-reminder"

@@ -1,0 +1,13 @@
+---
+tailscale_enabled: false
+tailscale_auth_key: ""
+tailscale_hostname: "{{ inventory_hostname }}"
+tailscale_operator: ""
+tailscale_accept_dns: false
+tailscale_ssh_enabled: false
+tailscale_advertise_routes: []
+tailscale_advertise_exit_node: false
+tailscale_extra_args: []
+tailscale_apt_distribution: "{{ ansible_distribution_release | default('jammy') }}"
+tailscale_apt_key_url: "https://pkgs.tailscale.com/stable/ubuntu/{{ tailscale_apt_distribution }}.noarmor.gpg"
+tailscale_apt_repo_url: https://pkgs.tailscale.com/stable/ubuntu

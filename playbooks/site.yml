@@ -7,6 +7,9 @@
       tags: [common]
     - role: hardening
       tags: [hardening]
+    - role: tailscale
+      tags: [tailscale]
+      when: tailscale_enabled | default(false) | bool
     - role: docker
       tags: [docker]
     - role: apps
