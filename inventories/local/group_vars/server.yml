@@ -153,6 +153,12 @@ rp_stack_gateway_log_prompts: "false"
 rp_stack_gateway_max_repair_attempts: 1
 rp_stack_gateway_request_timeout_seconds: 900
 rp_stack_gateway_model_attempt_timeout_seconds: 120
+rp_stack_party_raw_turn_limit: 96
+rp_stack_narrative_history_message_limit: 0
+rp_stack_memory_auto_min_unsummarized_turns: 48
+rp_stack_memory_max_batch_turns: 96
+rp_stack_journal_auto_min_unsummarized_turns: 24
+rp_stack_journal_max_batch_turns: 48
 rp_stack_sillytavern_whitelist:
   - "::1"
   - "127.0.0.1"
