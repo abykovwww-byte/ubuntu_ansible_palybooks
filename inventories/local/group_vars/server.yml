@@ -180,10 +180,11 @@ rp_stack_gateway_max_repair_attempts: 1
 rp_stack_gateway_request_timeout_seconds: 900
 rp_stack_gateway_model_attempt_timeout_seconds: 45
 rp_stack_post_turn_helpers_inline: false
-rp_stack_party_raw_turn_limit: 32
-rp_stack_narrative_history_message_limit: 65
-rp_stack_memory_auto_min_unsummarized_turns: 16
-rp_stack_memory_max_batch_turns: 48
+rp_stack_party_context_max_tokens: 131072
+rp_stack_party_context_completion_reserve_tokens: 16384
+rp_stack_party_context_system_reserve_tokens: 32768
+rp_stack_party_context_min_history_tokens: 8192
+rp_stack_memory_summary_batch_tokens: 65536
 rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 rp_stack_sillytavern_whitelist:
