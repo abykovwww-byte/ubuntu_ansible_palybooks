@@ -6,3 +6,6 @@ docker_apps_default_directory_mode: "2775"
 docker_apps_default_file_mode: "0644"
 docker_apps_compose_retries: 3
 docker_apps_compose_retry_delay: 20
+docker_apps_force_compose_up: false
+rp_stack_local_llm_force_model_download: false
+rp_stack_local_llm_force_runtime_check: false

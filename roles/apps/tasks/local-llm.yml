@@ -15,11 +15,53 @@
       - vulkan-tools
     state: present
     update_cache: true
+    cache_valid_time: 86400
+
+- name: Check the active local LLM model file
+  ansible.builtin.stat:
+    path: "{{ rp_stack_local_llm_model_dir }}/{{ rp_stack_local_llm_model_filename }}"
+  register: rp_local_llm_model_file
+
+- name: Check the local LLM model provenance manifest
+  ansible.builtin.stat:
+    path: "{{ rp_stack_local_llm_model_dir }}/manifest.json"
+  register: rp_local_llm_manifest_file
+
+- name: Read the local LLM model provenance manifest
+  ansible.builtin.slurp:
+    src: "{{ rp_stack_local_llm_model_dir }}/manifest.json"
+  register: rp_local_llm_manifest_raw
+  when: rp_local_llm_manifest_file.stat.exists
+
+- name: Parse the local LLM model provenance manifest
+  ansible.builtin.set_fact:
+    rp_local_llm_manifest: "{{ (rp_local_llm_manifest_raw.content | b64decode | from_json) if rp_local_llm_manifest_file.stat.exists else {} }}"
+
+- name: Decide whether the local LLM model must be downloaded
+  ansible.builtin.set_fact:
+    rp_local_llm_model_download_required: >-
+      {{
+        (not rp_local_llm_model_file.stat.exists)
+        or ((rp_local_llm_manifest.filename | default('')) != rp_stack_local_llm_model_filename)
+        or ((rp_local_llm_manifest.source_revision | default('')) != rp_stack_local_llm_model_revision)
+        or ((rp_local_llm_manifest.sha256 | default('')) != rp_stack_local_llm_model_sha256)
+        or (rp_stack_local_llm_force_model_download | default(false) | bool)
+      }}
+
+- name: Decide whether the local LLM runtime must be verified
+  ansible.builtin.set_fact:
+    rp_local_llm_runtime_check_required: >-
+      {{
+        (rp_local_llm_model_download_required | bool)
+        or ((rp_local_llm_manifest.runner_image | default('')) != rp_stack_local_llm_image)
+        or (rp_stack_local_llm_force_runtime_check | default(false) | bool)
+      }}
 
 - name: Check the AMD DRM render node
   ansible.builtin.stat:
     path: /dev/dri/renderD128
   register: rp_local_llm_dri
+  when: rp_local_llm_runtime_check_required | bool
 
 - name: Assert the AMD DRM render node is available
   ansible.builtin.assert:
@@ -27,11 +69,13 @@
       - rp_local_llm_dri.stat.exists
       - rp_local_llm_dri.stat.ischr
     fail_msg: "Local LLM requires /dev/dri/renderD128 for Vulkan acceleration."
+  when: rp_local_llm_runtime_check_required | bool
 
 - name: Verify Vulkan sees an AMD physical device
   ansible.builtin.command: vulkaninfo --summary
   register: rp_local_llm_vulkaninfo
   changed_when: false
+  when: rp_local_llm_runtime_check_required | bool
 
 - name: Assert Vulkan reports a physical device
   ansible.builtin.assert:
@@ -39,6 +83,7 @@
       - "'AMD Radeon' in rp_local_llm_vulkaninfo.stdout"
       - "'PHYSICAL_DEVICE_TYPE_' in rp_local_llm_vulkaninfo.stdout"
     fail_msg: "Vulkan runtime is installed but does not report a physical GPU."
+  when: rp_local_llm_runtime_check_required | bool
 
 - name: Verify the pinned llama.cpp image sees a Vulkan device
   ansible.builtin.command:
@@ -52,12 +97,14 @@
       - --list-devices
   register: rp_local_llm_devices
   changed_when: false
+  when: rp_local_llm_runtime_check_required | bool
 
 - name: Assert llama.cpp finds a non-CPU Vulkan device
   ansible.builtin.assert:
     that:
       - "'Vulkan' in rp_local_llm_devices.stdout or 'vulkan' in rp_local_llm_devices.stdout"
     fail_msg: "Pinned llama.cpp Vulkan runner did not detect a Vulkan device."
+  when: rp_local_llm_runtime_check_required | bool
 
 - name: Download the pinned official Gemma GGUF to a temporary file
   ansible.builtin.get_url:
@@ -69,6 +116,7 @@
     group: abykov
     force: true
   register: rp_local_llm_model_download
+  when: rp_local_llm_model_download_required | bool
 
 - name: Atomically activate the verified Gemma GGUF
   ansible.builtin.command:
@@ -77,7 +125,7 @@
       - -f
       - "{{ rp_stack_local_llm_model_dir }}/{{ rp_stack_local_llm_model_filename }}.partial"
       - "{{ rp_stack_local_llm_model_dir }}/{{ rp_stack_local_llm_model_filename }}"
-  when: rp_local_llm_model_download.changed
+  when: rp_local_llm_model_download.changed | default(false)
 
 - name: Write local model provenance manifest
   ansible.builtin.copy:

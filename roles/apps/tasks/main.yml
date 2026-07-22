@@ -55,6 +55,7 @@
     - not docker_app_repo_state.results[app_index].stat.exists
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
+  register: docker_app_removed_non_git
   tags: [apps, source, git]
 
 - name: Clone token-auth Docker app repositories
@@ -81,7 +82,7 @@
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   no_log: true
-  notify: Restart Docker app
+  register: docker_app_token_clone
   tags: [apps, source, git]
 
 - name: Fetch token-auth Docker app repositories
@@ -128,7 +129,7 @@
     - app_repo_token | length > 0
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
-  notify: Restart Docker app
+  register: docker_app_token_reset
   tags: [apps, source, git]
 
 - name: Clone public Docker app repositories
@@ -148,7 +149,7 @@
     - app_repo_token | length == 0
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
-  notify: Restart Docker app
+  register: docker_app_public_repo
   tags: [apps, source, git]
 
 - name: Copy Docker app source
@@ -166,7 +167,7 @@
   when:
     - app.enabled | default(true) | bool
     - app.source_dir is defined
-  notify: Restart Docker app
+  register: docker_app_source_copy
   tags: [apps, source]
 
 - name: Create Docker app runtime files when missing
@@ -179,6 +180,7 @@
     force: false
   loop: "{{ docker_apps | subelements('runtime_files', skip_missing=True) }}"
   when: item.0.enabled | default(true) | bool
+  register: docker_app_runtime_files
   tags: [apps, runtime]
 
 - name: Copy Docker app runtime source files when missing
@@ -191,6 +193,7 @@
     force: "{{ item.1.force | default(false) }}"
   loop: "{{ docker_apps | subelements('runtime_source_files', skip_missing=True) }}"
   when: item.0.enabled | default(true) | bool
+  register: docker_app_runtime_source_files
   tags: [apps, runtime]
 
 - name: Render Docker app compose files
@@ -207,7 +210,7 @@
   when:
     - app.enabled | default(true) | bool
     - app.compose_template is defined
-  notify: Restart Docker app
+  register: docker_app_compose_templates
   tags: [apps, compose]
 
 - name: Render Docker app environment files
@@ -224,7 +227,7 @@
   when:
     - app.enabled | default(true) | bool
     - app.env_template is defined
-  notify: Restart Docker app
+  register: docker_app_env_templates
   tags: [apps, env]
 
 - name: Render Docker app example environment files
@@ -241,9 +244,53 @@
   when:
     - app.enabled | default(true) | bool
     - app.env_example_template is defined
+  register: docker_app_env_example_templates
   tags: [apps, env]
 
-- name: Start Docker apps
+- name: Collect changed Docker apps from app-level tasks
+  ansible.builtin.set_fact:
+    docker_app_changed_names: "{{ (docker_app_changed_names | default([])) + [item.app.name] }}"
+  loop: >-
+    {{
+      [
+        docker_app_removed_non_git.results | default([]),
+        docker_app_token_clone.results | default([]),
+        docker_app_token_reset.results | default([]),
+        docker_app_public_repo.results | default([]),
+        docker_app_source_copy.results | default([]),
+        docker_app_compose_templates.results | default([]),
+        docker_app_env_templates.results | default([])
+      ] | flatten
+    }}
+  when:
+    - item.changed | default(false) | bool
+    - item.app is defined
+    - item.app.name is defined
+  tags: [apps, compose]
+
+- name: Collect changed Docker apps from runtime file tasks
+  ansible.builtin.set_fact:
+    docker_app_changed_names: "{{ (docker_app_changed_names | default([])) + [item.item.0.name] }}"
+  loop: >-
+    {{
+      [
+        docker_app_runtime_files.results | default([]),
+        docker_app_runtime_source_files.results | default([])
+      ] | flatten
+    }}
+  when:
+    - item.changed | default(false) | bool
+    - item.item is defined
+    - item.item.0 is defined
+    - item.item.0.name is defined
+  tags: [apps, compose]
+
+- name: Normalize changed Docker app list
+  ansible.builtin.set_fact:
+    docker_app_changed_names: "{{ docker_app_changed_names | default([]) | unique | list }}"
+  tags: [apps, compose]
+
+- name: Start changed Docker apps
   ansible.builtin.command:
     cmd: docker compose up -d --build
     chdir: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
@@ -254,9 +301,13 @@
   when:
     - app.enabled | default(true) | bool
     - app.compose_up | default(true) | bool
+    - >-
+      app.name in (docker_app_changed_names | default([]))
+      or (docker_apps_force_compose_up | default(false) | bool)
+      or (app.compose_force | default(false) | bool)
   register: docker_app_start
   retries: "{{ app.compose_retries | default(docker_apps_compose_retries) }}"
   delay: "{{ app.compose_retry_delay | default(docker_apps_compose_retry_delay) }}"
   until: docker_app_start.rc == 0
-  changed_when: false
+  changed_when: true
   tags: [apps, compose]
