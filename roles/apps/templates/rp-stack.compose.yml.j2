@@ -1,5 +1,49 @@
 ---
 services:
+{% if rp_stack_local_llm_enabled | default(false) | bool %}
+  rp-local-llm:
+    image: "{{ rp_stack_local_llm_image }}"
+    container_name: rp-stack-local-llm
+    restart: unless-stopped
+    command:
+      - -m
+      - "/models/{{ rp_stack_local_llm_model_filename }}"
+      - --alias
+      - "{{ rp_stack_local_llm_model_alias }}"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -c
+      - "{{ rp_stack_local_llm_context_tokens }}"
+      - -ngl
+      - "{{ rp_stack_local_llm_gpu_layers }}"
+      - --flash-attn
+      - on
+      - -ctk
+      - q8_0
+      - -ctv
+      - q8_0
+      - -np
+      - "1"
+    volumes:
+      - "{{ rp_stack_local_llm_model_dir }}:/models:ro"
+    devices:
+      - "/dev/dri/renderD128:/dev/dri/renderD128"
+    expose:
+      - "8080"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10m
+      retries: 6
+    networks:
+      - rp-llm
+
+{% endif %}
   rp-gateway:
     build:
       context: ./rp-gateway
@@ -23,6 +67,9 @@ services:
       retries: 3
     networks:
       - rp-stack
+{% if rp_stack_local_llm_enabled | default(false) | bool %}
+      - rp-llm
+{% endif %}
 
   rp-light-gui:
     build:
@@ -83,3 +130,8 @@ services:
 networks:
   rp-stack:
     name: rp-stack
+{% if rp_stack_local_llm_enabled | default(false) | bool %}
+  rp-llm:
+    name: rp-llm
+    internal: true
+{% endif %}

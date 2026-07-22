@@ -6,6 +6,11 @@
     fail_msg: "docker_apps must be a list of Docker Compose application definitions."
   tags: [apps, preflight]
 
+- name: Prepare local Vulkan LLM runtime
+  ansible.builtin.import_tasks: local-llm.yml
+  when: rp_stack_local_llm_enabled | default(false) | bool
+  tags: [apps, local-llm]
+
 - name: Ensure Docker app directories exist
   ansible.builtin.file:
     path: "{{ item.1 }}"

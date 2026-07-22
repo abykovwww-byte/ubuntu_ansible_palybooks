@@ -1,0 +1,96 @@
+---
+- name: Create persistent local model directory
+  ansible.builtin.file:
+    path: "{{ rp_stack_local_llm_model_dir }}"
+    state: directory
+    owner: abykov
+    group: abykov
+    mode: "0750"
+
+- name: Install Vulkan runtime packages for the local LLM
+  ansible.builtin.apt:
+    name:
+      - libvulkan1
+      - mesa-vulkan-drivers
+      - vulkan-tools
+    state: present
+    update_cache: true
+
+- name: Check the AMD DRM render node
+  ansible.builtin.stat:
+    path: /dev/dri/renderD128
+  register: rp_local_llm_dri
+
+- name: Assert the AMD DRM render node is available
+  ansible.builtin.assert:
+    that:
+      - rp_local_llm_dri.stat.exists
+      - rp_local_llm_dri.stat.ischr
+    fail_msg: "Local LLM requires /dev/dri/renderD128 for Vulkan acceleration."
+
+- name: Verify Vulkan sees an AMD physical device
+  ansible.builtin.command: vulkaninfo --summary
+  register: rp_local_llm_vulkaninfo
+  changed_when: false
+
+- name: Assert Vulkan reports a physical device
+  ansible.builtin.assert:
+    that:
+      - "'GPU id' in rp_local_llm_vulkaninfo.stdout"
+    fail_msg: "Vulkan runtime is installed but does not report a physical GPU."
+
+- name: Verify the pinned llama.cpp image sees a Vulkan device
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --device
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - "{{ rp_stack_local_llm_image }}"
+      - --list-devices
+  register: rp_local_llm_devices
+  changed_when: false
+
+- name: Assert llama.cpp finds a non-CPU Vulkan device
+  ansible.builtin.assert:
+    that:
+      - "'Vulkan' in rp_local_llm_devices.stdout or 'vulkan' in rp_local_llm_devices.stdout"
+    fail_msg: "Pinned llama.cpp Vulkan runner did not detect a Vulkan device."
+
+- name: Download the pinned official Gemma GGUF to a temporary file
+  ansible.builtin.get_url:
+    url: "{{ rp_stack_local_llm_model_url }}"
+    dest: "{{ rp_stack_local_llm_model_dir }}/{{ rp_stack_local_llm_model_filename }}.partial"
+    checksum: "sha256:{{ rp_stack_local_llm_model_sha256 }}"
+    mode: "0640"
+    owner: abykov
+    group: abykov
+    force: true
+  register: rp_local_llm_model_download
+
+- name: Atomically activate the verified Gemma GGUF
+  ansible.builtin.command:
+    argv:
+      - mv
+      - -f
+      - "{{ rp_stack_local_llm_model_dir }}/{{ rp_stack_local_llm_model_filename }}.partial"
+      - "{{ rp_stack_local_llm_model_dir }}/{{ rp_stack_local_llm_model_filename }}"
+  when: rp_local_llm_model_download.changed
+
+- name: Write local model provenance manifest
+  ansible.builtin.copy:
+    dest: "{{ rp_stack_local_llm_model_dir }}/manifest.json"
+    owner: abykov
+    group: abykov
+    mode: "0640"
+    content: |
+      {
+        "alias": "{{ rp_stack_local_llm_model_alias }}",
+        "source_repository": "google/gemma-4-26B-A4B-it-qat-q4_0-gguf",
+        "source_revision": "{{ rp_stack_local_llm_model_revision }}",
+        "filename": "{{ rp_stack_local_llm_model_filename }}",
+        "sha256": "{{ rp_stack_local_llm_model_sha256 }}",
+        "runner_image": "{{ rp_stack_local_llm_image }}",
+        "backend": "Vulkan"
+      }

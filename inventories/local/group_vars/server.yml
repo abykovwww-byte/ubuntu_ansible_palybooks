@@ -136,6 +136,19 @@ rp_stack_plugins_dir: "{{ rp_stack_storage_dir }}/plugins"
 rp_stack_extensions_dir: "{{ rp_stack_storage_dir }}/extensions"
 rp_stack_gateway_data_dir: "{{ rp_stack_storage_dir }}/gateway"
 rp_stack_backup_dir: "{{ app_backup_base_dir }}/rp-stack"
+rp_stack_local_llm_enabled: true
+rp_stack_local_llm_models_dir: "{{ rp_stack_storage_dir }}/models"
+rp_stack_local_llm_model_dir: "{{ rp_stack_local_llm_models_dir }}/gemma-4-26b-a4b"
+rp_stack_local_llm_image: "ghcr.io/ggml-org/llama.cpp:server-vulkan-b10088@sha256:3641a8e47d0ae168148ccef282eaab6aae8bd4ec903001b9518ffd11de912179"
+rp_stack_local_llm_model_alias: "gemma-4-26b-a4b-it-rp-q4"
+rp_stack_local_llm_model_filename: "gemma-4-26B_q4_0-it.gguf"
+rp_stack_local_llm_model_revision: "d1c082be9cf3c8a514acf63b8761f4b41935842e"
+rp_stack_local_llm_model_url: "https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf/resolve/{{ rp_stack_local_llm_model_revision }}/{{ rp_stack_local_llm_model_filename }}?download=true"
+rp_stack_local_llm_model_sha256: "3eca3b8f6d7baf218a7dd6bba5fb59a56ee25fe2d567b6f5f589b4f697eca51d"
+rp_stack_local_llm_base_url: "http://rp-local-llm:8080/v1"
+rp_stack_local_llm_context_tokens: 32768
+rp_stack_local_llm_gpu_layers: 99
+rp_stack_local_llm_timeout_seconds: 240
 rp_stack_state_dir: "{{ rp_stack_project_dir }}/state"
 rp_stack_state_history_dir: "{{ rp_stack_state_dir }}/history"
 rp_stack_state_proposed_dir: "{{ rp_stack_state_dir }}/proposed"
@@ -261,6 +274,8 @@ docker_apps:
       - "{{ rp_stack_plugins_dir }}"
       - "{{ rp_stack_extensions_dir }}"
       - "{{ rp_stack_gateway_data_dir }}"
+      - "{{ rp_stack_local_llm_models_dir }}"
+      - "{{ rp_stack_local_llm_model_dir }}"
       - "{{ rp_stack_backup_dir }}"
       - "{{ rp_stack_data_dir }}/default-user/QuickReplies"
       - "{{ rp_stack_data_dir }}/default-user/worlds"
