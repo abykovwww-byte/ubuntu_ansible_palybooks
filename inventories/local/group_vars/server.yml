@@ -148,17 +148,13 @@ rp_stack_sillytavern_version: "1.18.0"
 rp_stack_puid: 1000
 rp_stack_pgid: 1000
 rp_stack_nvidia_api_base: "https://integrate.api.nvidia.com/v1"
-rp_stack_nvidia_model: "mistralai/mistral-small-4-119b-2603"
+rp_stack_nvidia_model: "z-ai/glm-5.2"
 rp_stack_nvidia_api_key: ""
 rp_stack_nvidia_fallback_models:
-  - "openai/gpt-oss-20b"
-rp_stack_nvidia_disabled_models:
-  - "z-ai/glm-5.2"
-  - "qwen/qwen3.5-397b-a17b"
   - "deepseek-ai/deepseek-v4-pro"
   - "deepseek-ai/deepseek-v4-flash"
-  - "mistralai/ministral-14b-instruct-2512"
-  - "meta/llama-3.3-70b-instruct"
+  - "qwen/qwen3.5-397b-a17b"
+rp_stack_nvidia_disabled_models: []
 rp_stack_nvidia_model_catalog_live: true
 rp_stack_nvidia_model_catalog_url: "https://build.nvidia.com/models?q=llm"
 rp_stack_nvidia_model_catalog_ttl_seconds: 86400
