@@ -158,6 +158,19 @@ rp_stack_nvidia_disabled_models: []
 rp_stack_nvidia_model_catalog_live: true
 rp_stack_nvidia_model_catalog_url: "https://build.nvidia.com/models?q=llm"
 rp_stack_nvidia_model_catalog_ttl_seconds: 86400
+rp_stack_gemini_api_base: "https://generativelanguage.googleapis.com/v1beta/openai"
+rp_stack_gemini_api_key: ""
+rp_stack_gemini_models:
+  - "gemini-3.6-flash"
+  - "gemini-3.5-flash"
+rp_stack_gemini_model_catalog_live: true
+rp_stack_openrouter_api_base: "https://openrouter.ai/api/v1"
+rp_stack_openrouter_api_key: ""
+rp_stack_openrouter_models:
+  - "openrouter/auto"
+  - "openrouter/free"
+rp_stack_openrouter_model_catalog_live: true
+rp_stack_provider_model_catalog_ttl_seconds: 86400
 rp_stack_gateway_port: 8088
 rp_stack_light_gui_host_port: 8010
 rp_stack_gateway_database_url: "sqlite:////data/rp_gateway.db"
