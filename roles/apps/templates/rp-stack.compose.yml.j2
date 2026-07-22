@@ -33,7 +33,9 @@ services:
       rp-gateway:
         condition: service_healthy
     ports:
-      - "{{ rp_stack_bind_host }}:{{ rp_stack_light_gui_host_port }}:80"
+{% for bind_host in rp_stack_bind_hosts | default([rp_stack_bind_host]) %}
+      - "{{ bind_host }}:{{ rp_stack_light_gui_host_port }}:80"
+{% endfor %}
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -59,7 +61,9 @@ services:
       rp-gateway:
         condition: service_healthy
     ports:
-      - "{{ rp_stack_bind_host }}:{{ rp_stack_sillytavern_host_port }}:8000"
+{% for bind_host in rp_stack_bind_hosts | default([rp_stack_bind_host]) %}
+      - "{{ bind_host }}:{{ rp_stack_sillytavern_host_port }}:8000"
+{% endfor %}
     volumes:
       - "{{ rp_stack_config_dir }}:/home/node/app/config:rw"
       - "{{ rp_stack_data_dir }}:/home/node/app/data:rw"

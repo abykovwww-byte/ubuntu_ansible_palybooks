@@ -32,6 +32,7 @@ docker_daemon_config: {}
 
 tailscale_enabled: true
 tailscale_hostname: abykovserv
+tailscale_node_ip: "100.117.52.16"
 tailscale_operator: abykov
 tailscale_accept_dns: false
 tailscale_ssh_enabled: false
@@ -139,6 +140,9 @@ rp_stack_state_dir: "{{ rp_stack_project_dir }}/state"
 rp_stack_state_history_dir: "{{ rp_stack_state_dir }}/history"
 rp_stack_state_proposed_dir: "{{ rp_stack_state_dir }}/proposed"
 rp_stack_bind_host: "192.168.1.88"
+rp_stack_bind_hosts:
+  - "{{ rp_stack_bind_host }}"
+  - "{{ tailscale_node_ip }}"
 rp_stack_sillytavern_host_port: 8000
 rp_stack_sillytavern_version: "1.18.0"
 rp_stack_puid: 1000
@@ -172,6 +176,7 @@ rp_stack_sillytavern_whitelist:
   - "::1"
   - "127.0.0.1"
   - "192.168.0.0/16"
+  - "100.64.0.0/10"
 rp_stack_sillytavern_basic_auth_enabled: false
 rp_stack_sillytavern_basic_auth_user: rp
 rp_stack_sillytavern_basic_auth_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/rp-stack-sillytavern-basic-auth-password length=24 chars=ascii_letters,digits') }}"
