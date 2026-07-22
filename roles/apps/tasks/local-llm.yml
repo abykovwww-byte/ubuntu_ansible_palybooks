@@ -36,7 +36,8 @@
 - name: Assert Vulkan reports a physical device
   ansible.builtin.assert:
     that:
-      - "'GPU id' in rp_local_llm_vulkaninfo.stdout"
+      - "'AMD Radeon' in rp_local_llm_vulkaninfo.stdout"
+      - "'PHYSICAL_DEVICE_TYPE_' in rp_local_llm_vulkaninfo.stdout"
     fail_msg: "Vulkan runtime is installed but does not report a physical GPU."
 
 - name: Verify the pinned llama.cpp image sees a Vulkan device
