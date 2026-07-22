@@ -20,6 +20,10 @@ services:
       - "{{ rp_stack_local_llm_gpu_layers }}"
       - --flash-attn
       - on
+      - --reasoning
+      - off
+      - -n
+      - "1200"
       - -ctk
       - q8_0
       - -ctv
