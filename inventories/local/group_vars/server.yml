@@ -197,7 +197,11 @@ rp_stack_party_context_max_tokens: 131072
 rp_stack_party_context_completion_reserve_tokens: 16384
 rp_stack_party_context_system_reserve_tokens: 32768
 rp_stack_party_context_min_history_tokens: 8192
-rp_stack_memory_summary_batch_tokens: 65536
+rp_stack_memory_llm_provider: "local"
+rp_stack_memory_llm_model: "{{ rp_stack_local_llm_model_alias }}"
+rp_stack_memory_summary_batch_tokens: 10000
+rp_stack_party_memory_max_tokens: 8000
+rp_stack_party_memory_max_chars: 20000
 rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 rp_stack_sillytavern_whitelist:
