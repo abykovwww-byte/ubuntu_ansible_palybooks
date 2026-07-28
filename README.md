@@ -310,13 +310,13 @@ python .\load_ad_to_opensearch.py --recreate
 
 ## RP Stack
 
-RP Stack is configured as a Docker Compose app managed by the `apps` role. Iteration 1 deploys SillyTavern; iteration 2 adds semi-automatic world state files and helper scripts.
+RP Stack is a Docker Compose app managed by the `apps` role. Light GUI is the
+only browser client and talks to the party-scoped Gateway API.
 
 LAN endpoint:
 
 ```text
-SillyTavern: http://192.168.1.88:8000
-Light GUI:   http://192.168.1.88:8010
+Light GUI: http://192.168.1.88:8010
 ```
 
 Runtime layout:
@@ -325,28 +325,10 @@ Runtime layout:
 Project: /srv/apps/rp-stack
 Persistent data: /srv/app-data/rp-stack
 Backups: /srv/backups/rp-stack
-Port bind: 192.168.1.88:8000 -> container 8000
-Image: ghcr.io/sillytavern/sillytavern:1.18.0
+Port bind: 192.168.1.88:8010 -> Light GUI container 80
 ```
 
-The service is intentionally not published through the public Nginx reverse proxy. SillyTavern whitelist and Basic Auth are enabled for LAN use.
-
-Generated local secret:
-
-```bash
-sudo cat /etc/ansible/rp-stack-sillytavern-basic-auth-password
-```
-
-NVIDIA API key is not managed by this repository. Enter it manually in the SillyTavern UI:
-
-```text
-API type: Chat Completion
-Chat Completion Source: Custom (OpenAI-compatible)
-Base URL: https://integrate.api.nvidia.com/v1
-Model: z-ai/glm-5.2
-```
-
-For Light GUI, keep the provider key server-side by setting this only in
+Keep provider keys server-side by setting them only in
 `/etc/ansible/local-overrides.yml` on `192.168.1.88`:
 
 ```yaml

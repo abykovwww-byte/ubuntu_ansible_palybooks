@@ -156,8 +156,6 @@ rp_stack_bind_host: "192.168.1.88"
 rp_stack_bind_hosts:
   - "{{ rp_stack_bind_host }}"
   - "{{ tailscale_node_ip }}"
-rp_stack_sillytavern_host_port: 8000
-rp_stack_sillytavern_version: "1.18.0"
 rp_stack_puid: 1000
 rp_stack_pgid: 1000
 rp_stack_nvidia_api_base: "https://integrate.api.nvidia.com/v1"
@@ -208,15 +206,6 @@ rp_stack_party_memory_retrieval_limit: 3
 rp_stack_party_memory_retrieval_max_chars: 9000
 rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
-rp_stack_sillytavern_whitelist:
-  - "::1"
-  - "127.0.0.1"
-  - "192.168.0.0/16"
-  - "100.64.0.0/10"
-rp_stack_sillytavern_basic_auth_enabled: false
-rp_stack_sillytavern_basic_auth_user: rp
-rp_stack_sillytavern_basic_auth_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/rp-stack-sillytavern-basic-auth-password length=24 chars=ascii_letters,digits') }}"
-
 docker_apps:
   - name: task-reminder
     enabled: true
@@ -275,6 +264,7 @@ docker_apps:
     env_example_template: rp-stack.env.example.j2
     env_mode: "0600"
     compose_up: true
+    compose_remove_orphans: true
     managed_directories:
       - "{{ rp_stack_project_dir }}"
       - "{{ rp_stack_config_dir }}"
@@ -440,28 +430,6 @@ docker_apps:
             ],
             "idIndex": 5
           }
-    runtime_source_files:
-      - src: "rp-stack/worldpacks/smoke-gate-borderland/sillytavern/Predel_Dymnyh_Vrat.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/Predel_Dymnyh_Vrat.json"
-        mode: "0640"
-        force: false
-      - src: "rp-stack/worldpacks/ellinoid/sillytavern/ellinoid.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/ellinoid.json"
-        mode: "0640"
-        force: false
-      - src: "rp-stack/worldpacks/mechanist-new-world/sillytavern/mechanist-new-world.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/mechanist-new-world.json"
-        mode: "0640"
-        force: false
-      - src: "rp-stack/worldpacks/incident-50/sillytavern/incident-50.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/incident-50.json"
-        mode: "0640"
-        force: false
-      - src: "rp-stack/worldpacks/awareness/sillytavern/awareness.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/awareness.json"
-        mode: "0640"
-        force: false
-
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
 nginx_proxy_read_timeout: 60s

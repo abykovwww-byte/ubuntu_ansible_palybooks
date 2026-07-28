@@ -1,0 +1,6 @@
+interface:
+  display_name: "Gateway World Pack Builder"
+  short_description: "Build RP, novel, and training worlds for Light GUI"
+  default_prompt: "Use $rp-world-pack-builder to create a validated, scenario-aware world pack for the rp-gateway and Light GUI stack. Keep RP, novel, and training instructions distinct. If live deployment is needed, follow $abykovserv-iac-deploy for abykovserv."
+policy:
+  allow_implicit_invocation: true

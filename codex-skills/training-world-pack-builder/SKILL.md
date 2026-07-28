@@ -1,0 +1,150 @@
+---
+name: training-world-pack-builder
+description: Build or update deterministic scored learning world packs for the rp-gateway and Light GUI stack. Use when Codex needs to create a simulation, scenario-based exercise, awareness course, assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, or output-validator contract. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
+---
+
+# Training World Pack Builder
+
+Create reviewable, playable training world packs for the local RP Stack. This
+skill owns authored learning design and pack artifacts; it does not change
+Gateway mechanics or deploy directly.
+
+## Hard Boundaries
+
+- Create `scenario_types: { recommended: "training", supported: ["training"] }`. The party creator still selects `training`; a world pack must never silently select or change it.
+- Treat Gateway canonical party state as authority. Light GUI creates isolated state from `state-seed.json`; never overwrite `state/current.json` for normal play.
+- Use deterministic authored progression only: no dice, random outcomes, `/check`, or hidden model adjudication of correctness.
+- Resolve only player actions explicitly stated in the current turn. Advance exactly one scheduled scenario turn after each response.
+- Keep rubrics, score fields, validators, completion rules, and the current schedule in canonical state or explicit pack rules, not only in prose memory.
+- Withhold hints, correctness, hidden scoring, remediation, and best-practice teaching until the authored debrief point. Do not make the simulation unwinnable or imply that every event is hostile.
+- Do not embed a gameplay model, credentials, real secrets, personal data, exploit payloads, or operationally harmful instructions in a pack.
+- Keep the pack defensive, fictionalized, and safety-bounded for security, medical, legal, or other high-stakes topics. Escalate any need for real policy or regulated content to the user.
+- Use `abykovserv-iac-deploy` for GitHub + Ansible deployment; never make durable `/srv` or `/opt` edits by hand.
+
+## Intake
+
+Ask only for missing information, at most three questions at once:
+
+1. Learner role, subject domain, and measurable learning objective.
+2. Scenario duration and schedule: number of turns, decision surfaces, and exact debrief point.
+3. Assessment rubric: observable actions, score/state fields, pass conditions, and feedback style at debrief.
+
+Also establish audience level, permitted fictionalization, language, accessibility
+or content constraints, and whether the user requests draft-only. If proceeding
+with assumptions, record each in `manifest.json`; do not invent a mandatory
+policy, score threshold, or safe procedure.
+
+## Discover
+
+Before editing, inspect the actual nested IaC repo and read:
+
+- the existing training pack `worldpacks/awareness/` as the working example;
+- `docs/decisions/007-light-gui-party-memory.md`, `009-long-context-memory-policy.md`, and `010-party-scenario-types.md`;
+- `references/training-contract.md` when authoring or reviewing the deterministic schedule, scoring, memory, and debrief contracts;
+- the state schema, existing manifests, and `inventories/local/group_vars/server.yml`.
+
+Verify paths with `rg --files`. Default source location:
+
+```text
+ubuntu_ansible_palybooks/roles/apps/files/rp-stack/worldpacks/<slug>/
+```
+
+Use lowercase ASCII slugs with letters, digits, and hyphens. Preserve unrelated
+uncommitted work.
+
+## Build
+
+Create the normal world-pack contract:
+
+```text
+manifest.json
+state-seed.json
+campaign-bible.md
+prompts/gm-system.md
+prompts/authors-note.md
+prompts/opening-scene.md
+world-info/index.md
+characters/index.md
+rules/checks.md
+quick-replies/notes.md
+setup-flow.md
+```
+
+Set `manifest.player_role`; make `scenario_types.recommended` and the only
+supported type `training`. Keep `rules/checks.md` as the deterministic
+resolution-and-scoring contract; it must not describe Gateway checks.
+
+Put the following in `state-seed.json` under schema-valid fields:
+
+- current schedule/window, turn count, completion state, and remaining turns;
+- named score counters for observable learner actions;
+- constraints, validated facts, and data the narrator needs to produce the next exact surface;
+- no secret answer key exposed as player-facing state.
+
+Use `campaign-bible.md` for the authored turn map. Each turn specifies its
+window/header, neutral context, required artefacts or dialogue format, eligible
+player actions, deterministic consequences, fields to update, and next-turn
+transition. Describe the debrief separately: it alone may reveal scoring,
+correctness, explanations, remediation, and completion result.
+
+Write active runtime prompts:
+
+- `gm-system.md`: one authored turn at a time; exact templates; state authority; no hints or assessment before debrief; no random mechanics; preserve player agency.
+- `authors-note.md`: voice, realism, pacing, and output presentation; it may not override the Gateway training contract.
+- `opening-scene.md`: first scheduled window and a concrete decision surface, without an answer cue.
+
+Use a complete, plausible mix of normal, ambiguous, inconvenient, and
+assessment-relevant events. Never label threats or safe answers in the scene.
+For structured artifacts such as email, chat, report, patient record, or ticket,
+specify all visible fields and validate them against the authored template.
+
+The lorebook is a compatibility artifact. Create focused entries; it is not
+the source of score, schedule, or correctness.
+
+## Prompt Memory and Precedence
+
+The Gateway prompt has separate layers:
+
+1. Scenario contract and immutable world prompts.
+2. Party-scoped immutable episodic `memory_chapters` for older scenes.
+3. Budgeted recent raw turns; retain all raw turns durably.
+4. Relevant characters, dynamic canonical state, `AUTHORITATIVE_OUTCOME`, then the current player action.
+
+State and outcome override memory. Do not store the rubric only in episodic
+memory, repeat a raw range already covered by a chapter, or use human-facing
+journal recaps as narrator memory. Design detailed chapter continuity but keep
+the current schedule, score, and debrief gate compact and authoritative.
+
+## Validate
+
+- Parse every JSON file.
+- Confirm only `training` appears in `scenario_types` and that it is recommended.
+- Validate from the RP-stack source root:
+
+```powershell
+python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --schema state\schema.json
+```
+
+- Test deterministic paths: initial turn header; one explicit action updates only expected state; `/check` is rejected; no score/hint leaks before debrief; debrief output includes planned explanation; party and memory isolation hold.
+- Test output templates and relevant validator rules. If generic Gateway validation cannot enforce a requested course contract, declare the gap and add code/tests only with user approval.
+- Scan narrowly for API-key-looking strings and unsafe real data.
+
+## IaC and Delivery
+
+For a playable pack, follow:
+
+```text
+local validation -> commit -> push origin/main -> server pull-based Ansible apply -> runtime verification
+```
+
+After deployment, verify the manifest is listed by `/api/worldpacks`, the
+party can be created explicitly as `training`, its isolated state starts at
+turn one, and world context resolves from the files referenced by the manifest.
+If SSH/sudo/network blocks the apply, report the committed/pushed state and
+the exact remaining server-side action; do not claim it is live.
+
+## Final Handoff
+
+State whether the pack is draft-only, committed/pushed, or deployed and
+visible. List the pack, score/schedule, debrief, validation evidence, and any
+Gateway enforcement gap.

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Abykovserv IaC Deploy"
+  short_description: "Deploy abykovserv via GitHub and Ansible"
+  default_prompt: "Use $abykovserv-iac-deploy to deploy and verify a change on abykovserv through GitHub and Ansible."
+policy:
+  allow_implicit_invocation: true

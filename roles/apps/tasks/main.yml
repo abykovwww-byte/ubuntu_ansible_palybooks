@@ -292,7 +292,9 @@
 
 - name: Start changed Docker apps
   ansible.builtin.command:
-    cmd: docker compose up -d --build
+    cmd: >-
+      docker compose up -d --build
+      {{ '--remove-orphans' if app.compose_remove_orphans | default(false) | bool else '' }}
     chdir: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
   loop: "{{ docker_apps }}"
   loop_control:

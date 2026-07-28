@@ -98,39 +98,6 @@ services:
     networks:
       - rp-stack
 
-  sillytavern:
-    image: "ghcr.io/sillytavern/sillytavern:{{ rp_stack_sillytavern_version }}"
-    container_name: rp-stack-sillytavern
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - PUID={{ rp_stack_puid }}
-      - PGID={{ rp_stack_pgid }}
-      - SILLYTAVERN_DATAROOT=/home/node/app/data
-    depends_on:
-      rp-gateway:
-        condition: service_healthy
-    ports:
-{% for bind_host in rp_stack_bind_hosts | default([rp_stack_bind_host]) %}
-      - "{{ bind_host }}:{{ rp_stack_sillytavern_host_port }}:8000"
-{% endfor %}
-    volumes:
-      - "{{ rp_stack_config_dir }}:/home/node/app/config:rw"
-      - "{{ rp_stack_data_dir }}:/home/node/app/data:rw"
-      - "{{ rp_stack_plugins_dir }}:/home/node/app/plugins:rw"
-      - "{{ rp_stack_extensions_dir }}:/home/node/app/public/scripts/extensions/third-party:rw"
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "node", "src/healthcheck.js"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3
-    networks:
-      - rp-stack
-
 networks:
   rp-stack:
     name: rp-stack
