@@ -313,3 +313,8 @@
   until: docker_app_start.rc == 0
   changed_when: true
   tags: [apps, compose]
+
+- name: Configure Beszel monitoring agent
+  ansible.builtin.import_tasks: beszel.yml
+  when: beszel_enabled | default(false) | bool
+  tags: [apps, beszel]

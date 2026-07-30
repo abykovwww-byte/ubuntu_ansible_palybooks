@@ -39,6 +39,23 @@ tailscale_ssh_enabled: false
 tailscale_advertise_routes:
   - "192.168.1.88/32"
 
+beszel_enabled: true
+beszel_version: "0.18.7"
+beszel_socket_proxy_image: lscr.io/linuxserver/socket-proxy:latest
+beszel_project_dir: "{{ app_deploy_base_dir }}/beszel"
+beszel_data_dir: "{{ app_data_base_dir }}/beszel/hub"
+beszel_agent_data_dir: "{{ app_data_base_dir }}/beszel/agent"
+beszel_socket_dir: "{{ app_data_base_dir }}/beszel/socket"
+beszel_bind_hosts:
+  - "192.168.1.88"
+  - "{{ tailscale_node_ip }}"
+beszel_host_port: 8090
+beszel_app_url: "http://192.168.1.88:{{ beszel_host_port }}"
+# Set both values in /etc/ansible/local-overrides.yml after creating the first
+# Beszel user and adding this host in the web UI. Never commit them here.
+beszel_agent_key: ""
+beszel_agent_token: ""
+
 task_reminder_domain: task.abykov.site
 task_reminder_project_dir: "{{ app_deploy_base_dir }}/task-reminder"
 task_reminder_data_dir: "{{ app_data_base_dir }}/task-reminder"
@@ -208,6 +225,19 @@ rp_stack_party_memory_retrieval_max_chars: 9000
 rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 docker_apps:
+  - name: beszel
+    enabled: "{{ beszel_enabled }}"
+    project_dir: "{{ beszel_project_dir }}"
+    compose_template: beszel.compose.yml.j2
+    env_template: beszel.env.j2
+    env_example_template: beszel.env.example.j2
+    env_mode: "0600"
+    compose_up: true
+    managed_directories:
+      - "{{ beszel_project_dir }}"
+      - "{{ beszel_data_dir }}"
+      - "{{ beszel_agent_data_dir }}"
+      - "{{ beszel_socket_dir }}"
   - name: task-reminder
     enabled: true
     source_dir: task-reminder

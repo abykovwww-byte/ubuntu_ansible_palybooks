@@ -1,0 +1,24 @@
+---
+- name: Validate Beszel agent credentials
+  ansible.builtin.assert:
+    that:
+      - >-
+        (beszel_agent_key | default('') | length == 0)
+        ==
+        (beszel_agent_token | default('') | length == 0)
+    fail_msg: >-
+      Set both beszel_agent_key and beszel_agent_token in
+      /etc/ansible/local-overrides.yml, or leave both empty during initial hub setup.
+
+- name: Start configured Beszel agent
+  ansible.builtin.command:
+    cmd: docker compose --profile agent up -d beszel-agent
+    chdir: "{{ beszel_project_dir }}"
+  register: beszel_agent_start
+  when:
+    - beszel_agent_key | default('') | length > 0
+    - beszel_agent_token | default('') | length > 0
+  changed_when: >-
+    'Created' in (beszel_agent_start.stdout ~ beszel_agent_start.stderr)
+    or 'Started' in (beszel_agent_start.stdout ~ beszel_agent_start.stderr)
+    or 'Recreated' in (beszel_agent_start.stdout ~ beszel_agent_start.stderr)

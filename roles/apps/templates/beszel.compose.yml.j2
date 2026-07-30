@@ -1,0 +1,64 @@
+---
+services:
+  beszel:
+    image: "henrygd/beszel:{{ beszel_version }}"
+    container_name: beszel
+    restart: unless-stopped
+    environment:
+      APP_URL: "{{ beszel_app_url }}"
+      CHECK_UPDATES: "false"
+    ports:
+{% for bind_host in beszel_bind_hosts %}
+      - "{{ bind_host }}:{{ beszel_host_port }}:8090"
+{% endfor %}
+    volumes:
+      - "{{ beszel_data_dir }}:/beszel_data"
+      - "{{ beszel_socket_dir }}:/beszel_socket"
+    healthcheck:
+      test: ["CMD", "/beszel", "health", "--url", "http://localhost:8090"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+  beszel-socket-proxy:
+    image: "{{ beszel_socket_proxy_image }}"
+    container_name: beszel-socket-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      POST: "0"
+      TZ: "{{ server_timezone }}"
+    ports:
+      - "127.0.0.1:2375:2375"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /run
+    security_opt:
+      - no-new-privileges:true
+
+  beszel-agent:
+    profiles: ["agent"]
+    image: "henrygd/beszel-agent:{{ beszel_version }}"
+    container_name: beszel-agent
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - beszel
+      - beszel-socket-proxy
+    env_file:
+      - .env
+    volumes:
+      - "{{ beszel_agent_data_dir }}:/var/lib/beszel-agent"
+      - "{{ beszel_socket_dir }}:/beszel_socket"
+    healthcheck:
+      test: ["CMD", "/agent", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
