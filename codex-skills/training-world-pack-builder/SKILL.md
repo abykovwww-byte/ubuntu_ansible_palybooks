@@ -1,6 +1,6 @@
 ---
 name: training-world-pack-builder
-description: Build or update deterministic scored learning world packs for the rp-gateway and Light GUI stack. Use when Codex needs to create a simulation, scenario-based exercise, awareness course, assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, or output-validator contract. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
+description: Build or update deterministic scored learning world packs for the SillyTavern/rp-gateway/Light GUI stack. Use when Codex needs to create a simulation, scenario-based exercise, awareness course, assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, or output-validator contract. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
 ---
 
 # Training World Pack Builder
@@ -64,6 +64,7 @@ prompts/gm-system.md
 prompts/authors-note.md
 prompts/opening-scene.md
 world-info/index.md
+sillytavern/<slug>.json
 characters/index.md
 rules/checks.md
 quick-replies/notes.md
@@ -73,6 +74,24 @@ setup-flow.md
 Set `manifest.player_role`; make `scenario_types.recommended` and the only
 supported type `training`. Keep `rules/checks.md` as the deterministic
 resolution-and-scoring contract; it must not describe Gateway checks.
+
+For corporate showroom training worlds, add `manifest.corporate_portal` with
+one to five authored characters who actually participate in the scenario.
+Classify every card as `static` or `dynamic`. A static card has `position`; a
+dynamic card has `position_template` containing `{employee_position}` so the
+Gateway materializes its job title when the showroom party is created. Include
+only player-visible directory data (`display_name`, city, birthday, phone,
+messenger, email); never expose secrets, hidden scoring, or answer keys. Keep
+the portal presentational: schedules, score, progression, and correctness stay
+in canonical state and the deterministic training contract.
+
+For every training world that can be published in Showroom, add
+`manifest.showroom_result`. Set `metric` to `state_path` and `state_path` to the
+canonical numeric result authored in `state-seed.json`, for example
+`player.resources.total-score`. The world owns this binding; never leave the
+result source or state path for the Showroom scenario editor to choose. Keep the
+human-facing result label and whether a leaderboard is enabled as scenario
+presentation settings.
 
 Put the following in `state-seed.json` under schema-valid fields:
 
@@ -127,11 +146,14 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 
 - Test deterministic paths: initial turn header; one explicit action updates only expected state; `/check` is rejected; no score/hint leaks before debrief; debrief output includes planned explanation; party and memory isolation hold.
 - Test output templates and relevant validator rules. If generic Gateway validation cannot enforce a requested course contract, declare the gap and add code/tests only with user approval.
+- Confirm `corporate_portal.characters` contains at most five unique IDs; every dynamic card uses `{employee_position}` and every portal character is used by the authored scenario.
+- Confirm `showroom_result.metric` is `state_path`, its `state_path` resolves to a numeric canonical-state field, and the field is updated only by the authored deterministic scoring contract.
 - Scan narrowly for API-key-looking strings and unsafe real data.
 
 ## IaC and Delivery
 
-For a playable pack, follow:
+For a playable pack, add the SillyTavern lorebook to `runtime_source_files` in
+`inventories/local/group_vars/server.yml` with `force: false`. Then follow:
 
 ```text
 local validation -> commit -> push origin/main -> server pull-based Ansible apply -> runtime verification
@@ -139,7 +161,7 @@ local validation -> commit -> push origin/main -> server pull-based Ansible appl
 
 After deployment, verify the manifest is listed by `/api/worldpacks`, the
 party can be created explicitly as `training`, its isolated state starts at
-turn one, and world context resolves from the files referenced by the manifest.
+turn one, and the lorebook exists under the managed SillyTavern worlds path.
 If SSH/sudo/network blocks the apply, report the committed/pushed state and
 the exact remaining server-side action; do not claim it is live.
 

@@ -5,11 +5,20 @@ Use this compact checklist while authoring or reviewing a training pack.
 ## Manifest
 
 ```json
-"scenario_types": { "recommended": "training", "supported": ["training"] }
+"scenario_types": { "recommended": "training", "supported": ["training"] },
+"showroom_result": {
+  "metric": "state_path",
+  "state_path": "player.resources.total-score"
+}
 ```
 
 The UI user chooses the party type. The Gateway rejects an unsupported
 world/type combination; a pack must not auto-select it.
+
+`showroom_result` binds the Showroom leaderboard to the authored numeric field
+in canonical state. Define it while creating the world; the scenario editor
+must not choose the metric or state path. Verify that `state_path` exists in
+`state-seed.json` and is maintained by the deterministic scoring contract.
 
 ## Runtime Contract
 
