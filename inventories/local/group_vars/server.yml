@@ -213,8 +213,7 @@ rp_stack_party_context_max_tokens: 131072
 rp_stack_party_context_completion_reserve_tokens: 16384
 rp_stack_party_context_system_reserve_tokens: 32768
 rp_stack_party_context_min_history_tokens: 8192
-rp_stack_memory_llm_provider: "local"
-rp_stack_memory_llm_model: "{{ rp_stack_local_llm_model_alias }}"
+rp_stack_service_model_choice: "local-gemma"
 rp_stack_memory_summary_batch_tokens: 10000
 rp_stack_party_memory_chapter_max_tokens: 6000
 rp_stack_party_memory_chapter_max_chars: 24000
