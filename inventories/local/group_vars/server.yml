@@ -312,6 +312,10 @@ docker_apps:
       - "{{ rp_stack_state_history_dir }}"
       - "{{ rp_stack_state_proposed_dir }}"
     runtime_source_files:
+      - src: "rp-stack/worldpacks/awareness/sillytavern/awareness.json"
+        path: "{{ rp_stack_data_dir }}/default-user/worlds/Awareness.json"
+        mode: "0640"
+        force: false
       - src: "rp-stack/worldpacks/awareness-one-day/sillytavern/awareness-one-day.json"
         path: "{{ rp_stack_data_dir }}/default-user/worlds/Awareness. One day.json"
         mode: "0640"

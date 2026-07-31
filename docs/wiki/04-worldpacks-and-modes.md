@@ -65,7 +65,7 @@ Gateway отклоняет несовместимую комбинацию, но
 
 | Slug | Название | Рекомендуемый режим | Поддержка | Особенности |
 |---|---|---|---|---|
-| `awareness` | Awareness | `training` | `training` | Недельный awareness-курс, corporate portal и showroom result |
+| `awareness` | Awareness | `training` | `training` | Недельный курс, 10 site blueprints, 6 интерактивных ходов (4 рискованных и 2 легитимных), corporate portal и собственный `awareness-score` |
 | `awareness-one-day` | Awareness. One day | `training` | `training` | 10 сообщений, 10 site blueprints, 6 интерактивных ходов (4 рискованных и 2 легитимных) и детерминированный scoring |
 | `ellinoid` | Эллиноид | `novel` | `novel`, `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |

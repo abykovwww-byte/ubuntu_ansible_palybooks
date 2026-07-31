@@ -32,6 +32,8 @@ Live acceptance на `awareness-one-day` подтвердил полный пу�
 
 В authored расписании мира сайты появляются на ходах 2, 4, 6, 7, 8 и 9. Payment review, lookalike SSO, MFA confirmation и document approval проверяют безопасное поведение в рискованном контексте; project file share и meeting room являются легитимными поверхностями с тем же UI. Поэтому наличие кнопки «Открыть сайт» не раскрывает правильность решения.
 
+Недельный `awareness` использует тот же server-authoritative контракт, но своё расписание и прежний `player.resources.awareness-score`. Сайты появляются на ходах 1, 3, 5, 7, 8 и 9: project file share и HR survey легитимны, а lookalike SSO, MFA confirmation, support package и document approval рискованны. Ходы 2, 4, 6 и 10 остаются не-сайтовыми точками решения, поэтому симулятор не вытесняет социальную инженерию из почты, мессенджера и личного контекста.
+
 ## Showroom и результат
 
 WorldPack сам связывает публичный результат с numeric state path через `manifest.showroom_result`. Showroom scenario может включить leaderboard, но не выбирает, откуда взять score. Это сохраняет ownership оценки у authored training world.
