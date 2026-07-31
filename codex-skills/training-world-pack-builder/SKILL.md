@@ -20,6 +20,9 @@ Gateway mechanics or deploy directly.
 - Let the browser send only artifact identity, semantic event type, and declared field IDs. Never transmit or persist field values, lengths, hashes, masks, clipboard data, or inferred credentials.
 - Keep rubrics, score fields, validators, completion rules, and the current schedule in canonical state or explicit pack rules, not only in prose memory.
 - Withhold hints, correctness, hidden scoring, remediation, and best-practice teaching until the authored debrief point. Do not make the simulation unwinnable or imply that every event is hostile.
+- Treat the stored learner name, profession and responsibilities as mandatory scenario input when the user supplies them. Make authored work requests observably change when that profile changes; do not replace it with a generic department, invented backlog or random corporate project.
+- Orient before asking for retrospective context. The first turn must provide enough situation, task ownership and a bounded decision for a new learner to act. A request for a weekly recap, backlog reconstruction or work plan is appropriate only after the scenario has established the work it refers to.
+- Schedule links intentionally. A reusable site catalog is capacity, not a requirement to place a URL in every narrator response. Mark link-bearing turns explicitly and require a no-link value in the structured output on every other turn.
 - Do not embed a gameplay model, credentials, real secrets, personal data, exploit payloads, or operationally harmful instructions in a pack.
 - Keep the pack defensive, fictionalized, and safety-bounded for security, medical, legal, or other high-stakes topics. Escalate any need for real policy or regulated content to the user.
 - Use `abykovserv-iac-deploy` for GitHub + Ansible deployment; never make durable `/srv` or `/opt` edits by hand.
@@ -91,6 +94,10 @@ allowed event types, complete fallback slot content, and score-rule mappings.
 The main narrator response must return narrative and declared visible slots in
 one bundle. Opening a site never triggers a second model call; invalid or failed
 narration must still materialize the scheduled site from authored fallback.
+Keep the schedule sparse enough to remain plausible for the scenario. On every
+non-site turn, require the structured message's link field to say that there is
+no link and forbid URLs elsewhere in the narration; never let the model infer a
+portal link merely because the simulator capability exists.
 
 Set `manifest.player_role`; make `scenario_types.recommended` and the only
 supported type `training`. Keep `rules/checks.md` as the deterministic
@@ -131,7 +138,7 @@ Write active runtime prompts:
 
 - `gm-system.md`: one authored turn at a time; exact templates; state authority; no hints or assessment before debrief; no random mechanics; preserve player agency.
 - `authors-note.md`: voice, realism, pacing, and output presentation; it may not override the Gateway training contract.
-- `opening-scene.md`: first scheduled window and a concrete decision surface, without an answer cue.
+- `opening-scene.md`: first scheduled window and a concrete decision surface, without an answer cue. Give the learner enough role-specific context to act; do not begin by asking them to invent prior work, a week summary or a plan for tasks the scenario has not introduced.
 
 Use a complete, plausible mix of normal, ambiguous, inconvenient, and
 assessment-relevant events. Never label threats or safe answers in the scene.
@@ -166,6 +173,8 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 ```
 
 - Test deterministic paths: initial turn header; one explicit action updates only expected state; `/check` is rejected; no score/hint leaks before debrief; debrief output includes planned explanation; party and memory isolation hold.
+- Test at least two materially different player profiles and prove the opening task and later work requests change accordingly. Exercise the validation-failure fallback too; it must use the same stored profile rather than reverting to generic corporate copy.
+- Assert the exact authored set of link-bearing turns. For every other turn, reject both a non-empty structured link field and any URL in free text; the presence of a site catalog must not make links ubiquitous.
 - Test output templates and relevant validator rules. If generic Gateway validation cannot enforce a requested course contract, declare the gap and add code/tests only with user approval.
 - Confirm `corporate_portal.characters` contains at most five unique IDs; every dynamic card uses `{employee_position}` and every portal character is used by the authored scenario.
 - Confirm `showroom_result.metric` is `state_path`, its `state_path` resolves to a numeric canonical-state field, and the field is updated only by the authored deterministic scoring contract.

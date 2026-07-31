@@ -49,6 +49,12 @@ For every scored event, `rules/site-interactions.json` defines evidence,
 rubric in `rules/checks.md` and canonical state. Legitimate and hostile sites
 must use the same UI affordance.
 
+Treat the scheduled surface list as the complete link allowlist for the
+scenario. Owning ten reusable blueprints does not mean scheduling ten sites or
+putting a URL in every response. On a non-site turn, the structured message
+must carry the scenario's explicit no-link value and the narration must contain
+no URL. Add validation and fallback tests for the exact link-bearing turn set.
+
 `link_opened` is policy-dependent. `credentials_submitted` is emitted when any
 configured credential field is non-empty and submit is pressed; its contents
 are neither checked nor transmitted. `reported` and `site_closed` remain
