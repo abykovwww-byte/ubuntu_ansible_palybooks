@@ -24,11 +24,13 @@ flowchart LR
     Next -->|"final gate"| Debrief["Debrief из state"]
 ```
 
-Для интерактивного surface путь расширяется без второго LLM-вызова: narrator возвращает письмо и разрешённые текстовые slots сайта одним bundle, Gateway создаёт snapshot, а `opened` / `submitted` / `reported` становятся типизированным evidence следующего хода. Сам факт отправки непустой формы считается fail по authored policy; содержимое полей не проверяется и не сохраняется.
+Для интерактивного surface путь расширяется без второго LLM-вызова: narrator возвращает письмо и разрешённые текстовые slots сайта одним bundle, Gateway создаёт snapshot, а `opened` / `submitted` / `reported` становятся типизированным evidence следующего хода. Отправка непустой формы считается `fail` только там, где это задаёт authored policy конкретной surface; содержимое полей не проверяется и не сохраняется.
 
 Live acceptance на `awareness-one-day` подтвердил полный путь: authored ход создал письмо и `corporate-sso` snapshot, Showroom открыл credential-form, Gateway принял `link_opened`, `credentials_submitted` и `site_closed`, а следующий ход атомарно пометил события consumed и добавил UI-evidence в canonical scoring. В тестовом fail-пути увеличились `credential-exposure`, `suspicious-artifacts-opened` и `unsafe-actions`; решение принял RuleEngine, не narrator.
 
 В `awareness-one-day` итоговая модель оценки разделена на безопасность, ролевую уместность и деловую коммуникацию. Основание начисления сохраняется по конкретному ходу, а итоговые категории сверяются с canonical state, чтобы narrator не мог придумать красивое, но ложное объяснение баллов.
+
+В authored расписании мира сайты появляются на ходах 2, 4, 6, 7, 8 и 9. Payment review, lookalike SSO, MFA confirmation и document approval проверяют безопасное поведение в рискованном контексте; project file share и meeting room являются легитимными поверхностями с тем же UI. Поэтому наличие кнопки «Открыть сайт» не раскрывает правильность решения.
 
 ## Showroom и результат
 
