@@ -1,0 +1,4 @@
+interface:
+  display_name: "RP Stack Wiki"
+  short_description: "Maintain RP Stack architecture documentation"
+  default_prompt: "Use $rp-stack-wiki to review the RP Stack architecture and keep its Wiki and Mermaid diagrams aligned with significant changes."

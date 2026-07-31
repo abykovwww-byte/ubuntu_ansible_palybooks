@@ -1,6 +1,6 @@
 ---
 name: abykovserv-iac-deploy
-description: Use when working on abykovserv / 192.168.1.88 deployments through the ubuntu_ansible_palybooks GitHub IaC repository, Ansible local pull model, /etc/ansible/local-overrides.yml, Docker Compose apps, RP Stack, Gateway, or Light GUI. Covers how to deploy, verify, handle secrets, and when SSH needs sandbox escalation.
+description: Use when working on abykovserv / 192.168.1.88 deployments through the ubuntu_ansible_palybooks GitHub IaC repository, Ansible local pull model, /etc/ansible/local-overrides.yml, Docker Compose apps, RP Stack, Gateway, or Light GUI. Covers how to deploy, verify, handle secrets, preserve RP Stack Wiki documentation, and when SSH needs sandbox escalation.
 metadata:
   short-description: Deploy to abykovserv through GitHub and Ansible
 ---
@@ -41,6 +41,10 @@ Ansible locally.
   `/srv/apps` as a permanent fix; make the change in IaC and redeploy.
 - Preserve user work in the git tree. Never reset or revert unrelated changes
   unless the user explicitly asks.
+- For every RP Stack change, read `../rp-stack-wiki/SKILL.md` and perform its
+  documentation impact gate. Significant changes must update the affected Wiki
+  pages and Mermaid diagrams; documentation-neutral changes must be identified
+  as such in the completion report.
 - Summarize remote command output to the user; they do not see tool output.
 
 ## When More Detail Is Needed
@@ -48,16 +52,23 @@ Ansible locally.
 Read `references/deployment-map.md` for exact paths, commands, app layout,
 verification checks, and rollback notes.
 
+For RP Stack architecture and documentation rules, use the companion
+[`rp-stack-wiki` skill](../rp-stack-wiki/SKILL.md). Its human-readable Wiki is
+published from `docs/wiki/README.md`.
+
 ## Normal Deployment Workflow
 
 1. Inspect the local repo status and relevant files.
 2. Make the IaC/app change in the local Git working tree.
-3. Run focused local checks that do not start a local server.
-4. Commit and push to `origin/main` when the change is ready.
-5. SSH to `abykov@192.168.1.88` with sandbox escalation.
-6. Run `sudo systemctl start ansible-local-apply.service`.
-7. Check `sudo journalctl -u ansible-local-apply.service -n 100 --no-pager`.
-8. Verify the deployed service on the server with Docker Compose, container
+3. Run the `rp-stack-wiki` documentation impact gate for RP Stack changes.
+4. Update affected Wiki pages and Mermaid diagrams in the same change when the
+   change is significant.
+5. Run focused local checks that do not start a local server.
+6. Commit and push to `origin/main` when the change is ready.
+7. SSH to `abykov@192.168.1.88` with sandbox escalation.
+8. Run `sudo systemctl start ansible-local-apply.service`.
+9. Check `sudo journalctl -u ansible-local-apply.service -n 100 --no-pager`.
+10. Verify the deployed service on the server with Docker Compose, container
    tests, HTTP smoke checks, and Browser checks for UI work.
 
 ## Key Commands
