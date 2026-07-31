@@ -74,6 +74,7 @@ ubuntu_ansible_palybooks/
 │       ├── rp-gateway/
 │       ├── rp-light-gui/
 │       ├── rp-showcase-gui/
+│       ├── ui-shared/
 │       ├── worldpacks/
 │       ├── state/schema.json
 │       ├── docs/decisions/
@@ -101,6 +102,7 @@ ubuntu_ansible_palybooks/
 | `services/world_instructor.py` | Draft/preview/apply контракт изменения мира |
 | `services/auth_store.py` | Users, sessions, provider keys, global settings |
 | `services/showroom.py` | Scenarios, visitors, runs, portal snapshots, leaderboard |
+| `services/training_artifacts.py` | Blueprint validation, party snapshots, idempotent events и public views |
 | `services/autotest.py` | Ограниченный auto-player client |
 | `services/service_models.py` | Глобальный service-model catalog/runtime |
 
@@ -113,6 +115,7 @@ ubuntu_ansible_palybooks/
 | Изменить prompt/memory | `narrative.py`, `memory.py`, `context_budget.py`, `state_store.py` |
 | Изменить Light GUI | `rp-light-gui/index.html`, `app.js`, `styles.css` |
 | Изменить Showroom | `rp-showcase-gui/` и `showroom.py` |
+| Изменить training artifacts | `training_artifacts.py`, `ui-shared/`, оба UI и WorldPack contract |
 | Новый RP/novel мир | `worldpacks/<slug>/` и `rp-world-pack-builder` |
 | Новый training мир | `worldpacks/<slug>/` и `training-world-pack-builder` |
 | Runtime/env/ports | `server.yml`, Compose/env templates |
@@ -137,6 +140,7 @@ pytest
 ```bash
 node --check app.js
 node structured-content.test.js
+node training-artifacts.test.js
 ```
 
 Windows может не иметь runtime dependencies. Авторитетный Python test run — внутри rebuilt `rp-gateway` container на сервере. Локальный `compileall` или JS syntax check не является live proof.

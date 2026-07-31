@@ -27,6 +27,7 @@ SQLite используется несколькими service stores, но scop
 | Reliability | `turn_requests`, `memory_checkpoints`, `party_branches`, `autotest_runs` |
 | Dataset | `dataset_turn_labels`, `turn_feedback` |
 | Showroom | `showroom_scenarios`, `showroom_visitors`, `showroom_runs` |
+| Training artifacts | `training_artifacts`, `training_artifact_events` |
 | Provider access | `provider_api_keys` |
 
 ## Изоляция пользователей и партий
@@ -39,6 +40,7 @@ flowchart TB
     P --> C["state_campaign_id"]
     C --> T["Turns / checks / memory / legacy journal"]
     C --> B["Branch campaign IDs"]
+    C --> TA["Training artifact snapshots / events"]
 
     AV["Anonymous visitor"] --> SR["ShowroomRun"]
     SR --> IP["Internal Party"]
@@ -47,6 +49,12 @@ flowchart TB
 Обычный API получает owner из Gateway session. `PartyStore` фильтрует parties и characters по `owner_user_id`; `StateStore` — по `state_campaign_id`. Admin role даёт административные операции, но сама игра всё равно адресуется конкретной Party.
 
 Showroom использует отдельный visitor token. Run доступен только cookie-владельцу; raw party ID не возвращается клиенту.
+
+## Безопасность training artifacts
+
+Narrator не может передать произвольный HTML, CSS или JavaScript. Gateway принимает только известный blueprint и объявленные строковые slots, а UI строит DOM через text nodes под строгим CSP. Внешние ресурсы, навигация на реальные домены и произвольные form targets запрещены.
+
+Значения credential-полей остаются в браузере: при submit клиент передаёт только тип события, artifact ID и idempotency key. Artifact snapshots содержат видимый учебный текст и поэтому подчиняются тем же правилам privacy/review, что и raw turns; server-only interaction policy и скрытый scoring в публичный API не выдаются.
 
 ## Аутентификация
 
@@ -116,4 +124,5 @@ Backup содержит state, историю, users, provider keys и dataset l
 - [AuthStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/auth_store.py)
 - [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
 - [ShowroomStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/showroom.py)
+- [TrainingArtifactService](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
 - [Compose networks](../../roles/apps/templates/rp-stack.compose.yml.j2)

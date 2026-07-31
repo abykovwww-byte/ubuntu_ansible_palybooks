@@ -12,6 +12,7 @@ Light GUI — основной интерфейс владельца парти�
 - список и создание партий;
 - явный выбор WorldPack, персонажа, `scenario_type`, provider и narrator model;
 - основной чат с восстановлением pending-запроса после refresh;
+- открытие валидированных training-сайтов и отправка накопленных событий перед следующим сообщением;
 - редактирование персонажей вручную и генерация служебной моделью;
 - выбор party-scoped BYOK-ключа;
 - GM preview/apply/discard, state, checks и rollback;
@@ -42,7 +43,10 @@ sequenceDiagram
     UI->>GW: POST /api/showroom/runs/{run_id}/messages
     GW->>Party: Обычный party turn pipeline
     Party-->>GW: Ответ и state version
-    GW-->>UI: Публичное представление
+    GW-->>UI: Публичное представление + artifact snapshot
+    Visitor->>UI: Открывает / отправляет форму / сообщает о сайте
+    UI->>GW: POST /api/showroom/runs/{run_id}/artifact-events
+    GW->>Party: Сохраняет typed event без LLM и продвижения хода
 ```
 
 `ShowroomScenario` и `WorldPack` — разные сущности. Scenario добавляет публичное название, описание, режим, модель, обложку, порядок и leaderboard policy к ссылке на WorldPack. Несколько сценариев могут использовать один мир.
@@ -54,10 +58,11 @@ sequenceDiagram
 - показывать immutable snapshot корпоративного портала до пяти персонажей;
 - материализовать динамическую должность из описания сотрудника;
 - отображать структурированные письма и чаты безопасными text nodes;
+- открывать валидированные учебные сайты общим с Light GUI DOM-renderer;
 - собирать opt-in leaderboard по numeric state path или числу ходов;
 - хранить обратную связь 👍/👎 с проверкой владельца visitor cookie.
 
-Ссылки и вложения в текущем structured-content renderer намеренно не интерактивны. Мини-сайты для фишинговых сообщений находятся в плане, а не в runtime.
+Обычные ссылки и вложения в structured content остаются неинтерактивными. Исключение — ссылка на валидированный training artifact: Gateway отдаёт только публичный snapshot, UI собирает страницу из фиксированного blueprint без `innerHTML`, внешних ресурсов и исполняемого кода. Введённые значения не отправляются; Gateway получает только факт отправки формы.
 
 ## Административный контур
 

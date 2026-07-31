@@ -24,6 +24,8 @@ flowchart LR
     Next -->|"final gate"| Debrief["Debrief из state"]
 ```
 
+Для интерактивного surface путь расширяется без второго LLM-вызова: narrator возвращает письмо и разрешённые текстовые slots сайта одним bundle, Gateway создаёт snapshot, а `opened` / `submitted` / `reported` становятся типизированным evidence следующего хода. Сам факт отправки непустой формы считается fail по authored policy; содержимое полей не проверяется и не сохраняется.
+
 В `awareness-one-day` итоговая модель оценки разделена на безопасность, ролевую уместность и деловую коммуникацию. Основание начисления сохраняется по конкретному ходу, а итоговые категории сверяются с canonical state, чтобы narrator не мог придумать красивое, но ложное объяснение баллов.
 
 ## Showroom и результат
@@ -77,6 +79,7 @@ Runs сохраняют status, requested/completed turns, fallback count, provi
 - scenario type и WorldPack;
 - narrator provider/model;
 - authoritative outcome;
+- публичные artifact snapshots и потреблённые typed evidence без значений полей;
 - validator result, repair и fallback;
 - origin: human/main или autotest branch.
 
@@ -126,6 +129,8 @@ Train/validation/test делятся по `metadata.group_id` целыми campa
 ```text
 GET/POST  /api/admin/autotests...
 GET/POST  /api/parties/{party_id}/branches...
+GET/POST  /api/parties/{party_id}/artifacts...
+POST      /api/showroom/runs/{run_id}/artifact-events
 PATCH     /api/admin/datasets/parties/{party_id}
 GET/PUT   /api/admin/datasets/parties/{party_id}/turns...
 GET       /api/admin/datasets/export.jsonl
@@ -140,3 +145,4 @@ PUT       /api/showroom/runs/{run_id}/turns/{turn_id}/feedback
 - [Dataset ADR](../../roles/apps/files/rp-stack/docs/decisions/013-party-dataset-capture.md)
 - [Autotest service](../../roles/apps/files/rp-stack/rp-gateway/app/services/autotest.py)
 - [Party and dataset store](../../roles/apps/files/rp-stack/rp-gateway/app/services/party_store.py)
+- [Interactive artifact ADR](../../roles/apps/files/rp-stack/docs/decisions/014-interactive-training-site-artifacts.md)

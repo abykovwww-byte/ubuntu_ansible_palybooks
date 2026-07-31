@@ -77,7 +77,8 @@ services:
 
   rp-light-gui:
     build:
-      context: ./rp-light-gui
+      context: .
+      dockerfile: rp-light-gui/Dockerfile
     container_name: rp-stack-light-gui
     restart: unless-stopped
     depends_on:
@@ -100,7 +101,8 @@ services:
 
   rp-showcase-gui:
     build:
-      context: ./rp-showcase-gui
+      context: .
+      dockerfile: rp-showcase-gui/Dockerfile
     container_name: rp-stack-showcase-gui
     restart: unless-stopped
     depends_on:

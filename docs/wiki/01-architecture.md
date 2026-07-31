@@ -49,11 +49,11 @@ Gateway не публикует host port. Снаружи доступны то�
 
 | Компонент | Отвечает за | Не отвечает за |
 |---|---|---|
-| Light GUI | Чат, создание партии, GM-инструменты, Prompt Inspector, админка | Правила, state, ключи провайдеров, долговременную память |
-| Showroom | Витрина, анонимный запуск, минимальный чат, портал, рейтинг | Прямой доступ к party ID, скрытый scoring, администрирование без Gateway role |
-| Gateway | Auth, party scope, state, history, правила, LLM routing, branches, datasets | Верстку интерфейсов и ручное хранение секретов в браузере |
-| WorldPack | Неизменяемый замысел мира, seed, prompts, authored training schedule | Выбор модели, party owner, runtime state конкретного прохождения |
-| Narrator LLM | Финальная сцена и диалог в пределах контракта | Истину state, бросок, scoring, права, выбор режима |
+| Light GUI | Чат, создание партии, GM-инструменты, Prompt Inspector, админка, безопасный рендеринг training artifacts | Правила, state, ключи провайдеров, долговременную память |
+| Showroom | Витрина, анонимный запуск, минимальный чат, portal, training artifacts, рейтинг | Прямой доступ к party ID, скрытый scoring, администрирование без Gateway role |
+| Gateway | Auth, party scope, state, history, правила, LLM routing, snapshots и события artifacts, branches, datasets | Верстку интерфейсов и ручное хранение секретов в браузере |
+| WorldPack | Неизменяемый замысел мира, seed, prompts, authored training schedule, site blueprints и interaction policy | Выбор модели, party owner, runtime state конкретного прохождения |
+| Narrator LLM | Финальная сцена, диалог и разрешённые текстовые поля artifact | Истину state, HTML/CSS/JS, scoring, права, выбор режима |
 | Service model | Память, world-state drafts, генерация персонажей | Обычное ведение партии и использование party BYOK |
 | Ansible | Доставка source/config/Compose на сервер | Игровое состояние и данные пользователей |
 
@@ -69,6 +69,10 @@ flowchart LR
     Turns --> Journal["Legacy journal records"]
     Turns --> Dataset["Review overlay / JSONL"]
     PS --> Branch["Checkpoint branch"]
+    WP --> Blueprint["Training site blueprints"]
+    Blueprint --> Artifact["Party-scoped artifact snapshots"]
+    Artifact --> Events["Typed interaction events"]
+    Events --> PS
 ```
 
 - **WorldPack** — шаблон. Он не изменяется во время партии.
@@ -78,6 +82,8 @@ flowchart LR
 - **Memory chapters** — сжатые эпизоды для narrator prompt, но не замена raw history.
 - **Legacy journal** — сохранённые записи прежних версий; текущий runtime их не генерирует.
 - **Dataset labels** — отдельная кураторская разметка; она не переписывает игру.
+- **Training artifact snapshot** — валидированный экземпляр шаблона с публичным текстом narrator; произвольный HTML модели не исполняется.
+- **Interaction event** — типизированное действие `opened`, `submitted` или `reported`, которое Gateway привязывает к партии и учитывает детерминированно.
 
 ## Почему Gateway — authority
 
@@ -85,10 +91,11 @@ flowchart LR
 
 1. определяет владельца и партию;
 2. загружает state и историю именно этой party/branch;
-3. интерпретирует текущую реплику;
-4. выполняет режимный Rule Engine;
-5. получает `Outcome` и предварительный state patch;
-6. собирает ограниченный prompt.
+3. загружает неиспользованные типизированные события training artifacts;
+4. интерпретирует текущую реплику;
+5. выполняет режимный Rule Engine;
+6. получает `Outcome` и предварительный state patch;
+7. собирает ограниченный prompt и контракт ожидаемых artifacts.
 
 После LLM-вызова Gateway валидирует текст, при необходимости просит исправление, применяет patch и сохраняет turn, request status и audit. Поэтому модель может красиво описать исход, но не заменить его другим.
 

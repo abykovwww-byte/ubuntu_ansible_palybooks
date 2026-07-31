@@ -10,6 +10,7 @@ sequenceDiagram
     participant API as Gateway API
     participant Store as StateStore
     participant Rules as Intent + RuleEngine
+    participant Art as TrainingArtifactService
     participant LLM as Narrator LLM
     participant Val as OutputValidator
     participant Jobs as Service jobs
@@ -18,18 +19,21 @@ sequenceDiagram
     API->>Store: begin_turn_request
     Store-->>API: acquired / running / completed
     API->>Store: state + history + memory + lore
-    API->>Rules: resolve(state, action, scenario_type)
+    API->>Art: pending typed events + expected artifact contract
+    Art-->>API: deterministic evidence
+    API->>Rules: resolve(state, action, scenario_type, evidence)
     Rules-->>API: Outcome + StatePatch
     API->>LLM: bounded prompt + AUTHORITATIVE_OUTCOME
-    LLM-->>API: narration
+    LLM-->>API: narration + optional artifact fields
+    API->>Art: validate and materialize snapshot
     API->>Val: validate(narration, outcome, state)
     alt Нарушение контракта
         API->>LLM: repair instruction
         LLM-->>API: repaired narration
         API->>Val: validate again
     end
-    API->>Store: apply patch + record turn + audit
-    API-->>UI: assistant message + state version
+    API->>Store: atomically apply patch + record turn/artifact + consume events
+    API-->>UI: assistant message + state version + public artifact
     API-->>Jobs: memory jobs in background
 ```
 
@@ -58,7 +62,7 @@ Gateway проверяет owner, загружает `Party`, создаёт par
 - `Outcome` — что разрешено и чем закончилась попытка;
 - JSON Patch — какие canonical fields должны измениться.
 
-В `rp` это может включать D20, skill, difficulty, modifiers и blockers. В `novel` случайных проверок нет. В `training` применяется authored schedule/scoring и продвигается ровно один предусмотренный turn.
+В `rp` это может включать D20, skill, difficulty, modifiers и blockers. В `novel` случайных проверок нет. В `training` применяется authored schedule/scoring, включая накопленные типизированные события сайта, и продвигается ровно один предусмотренный turn.
 
 ### 4. Narrator LLM
 
@@ -95,6 +99,10 @@ Gateway пробует primary model и разрешённые fallback models �
 
 Если процесс падает раньше, request отмечается как failed, а state не должен частично продвинуться.
 
+## Интерактивное действие между ходами
+
+Открытие сайта, отправка формы и сообщение о подозрении не запускают narrator и не продвигают authored turn. UI отправляет idempotent event в party- или showroom-scoped endpoint; Gateway проверяет владельца, artifact, разрешённый тип действия и сохраняет только типизированный факт. При следующем игровом ходе неиспользованные события становятся evidence для RuleEngine и потребляются атомарно вместе с turn commit.
+
 ## Старт партии
 
 `POST /api/parties/{party_id}/start` создаёт opening scene один раз. Для training-сценария Gateway также материализует первую authored window в state. Повторный start защищён history/idempotency и не должен создавать вторую начальную сцену.
@@ -125,3 +133,4 @@ Draft может быть быстрым детерминированным ил
 - [Narrative client](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
 - [Validator](../../roles/apps/files/rp-stack/rp-gateway/app/services/validator.py)
 - [State store](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
+- [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)

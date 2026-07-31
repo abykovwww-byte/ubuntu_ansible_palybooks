@@ -18,6 +18,10 @@ worldpacks/<slug>/
 ├── world-info/index.md
 ├── characters/index.md
 ├── rules/checks.md
+├── rules/site-interactions.json
+├── artifacts/sites/
+│   ├── index.json
+│   └── <blueprint>.json
 ├── quick-replies/notes.md
 ├── setup-flow.md
 └── sillytavern/<slug>.json
@@ -30,6 +34,8 @@ worldpacks/<slug>/
 - `gm-system.md` и `authors-note.md` — активные runtime prompts;
 - `campaign-bible.md` — авторский замысел, а для training — точная карта ходов;
 - `rules/checks.md` — правила resolution/scoring;
+- `artifacts/sites/` — фиксированные UI-blueprints с разрешёнными slots и actions;
+- `rules/site-interactions.json` — server-only соответствие typed events детерминированным evidence и score;
 - SillyTavern JSON — compatibility artifact, а не authority Light GUI.
 
 При создании партии Gateway копирует seed в новый `state_campaign_id`. Изменение party state никогда не переписывает исходный WorldPack.
@@ -60,7 +66,7 @@ Gateway отклоняет несовместимую комбинацию, но
 | Slug | Название | Рекомендуемый режим | Поддержка | Особенности |
 |---|---|---|---|---|
 | `awareness` | Awareness | `training` | `training` | Недельный awareness-курс, corporate portal и showroom result |
-| `awareness-one-day` | Awareness. One day | `training` | `training` | 10 сообщений за рабочий день, scoring безопасность/роль/коммуникация |
+| `awareness-one-day` | Awareness. One day | `training` | `training` | 10 сообщений, 10 site blueprints, интерактивные фишинговые surfaces и детерминированный scoring |
 | `ellinoid` | Эллиноид | `novel` | `novel`, `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp`, `novel` | Долгая приключенческая партия |
@@ -96,6 +102,12 @@ ShowroomScenario — storefront aggregate, а не копия мира. Это �
 - `showroom_result` — принадлежащая миру привязка к numeric canonical state path.
 
 Schedule, correctness и scoring никогда не переходят в portal metadata.
+
+## Интерактивные учебные сайты
+
+WorldPack заранее содержит ограниченный набор типовых site blueprints. Authored schedule указывает, на каком ходе какой template разрешён и какие публичные поля narrator должен вернуть вместе с письмом или чатом. Gateway валидирует bundle, материализует immutable snapshot и выдаёт capability URL; отдельного LLM-запроса и отдельного runtime-сервиса для сборки страницы нет.
+
+Оба интерфейса используют один статический renderer из `ui-shared/`. Blueprint определяет стиль, структуру, поля формы и разрешённые действия; модель не генерирует HTML, CSS, JavaScript, URL назначения или scoring policy.
 
 ## Создание миров
 

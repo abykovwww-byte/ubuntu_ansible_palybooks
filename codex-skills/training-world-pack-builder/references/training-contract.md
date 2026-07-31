@@ -28,6 +28,11 @@ must not choose the metric or state path. Verify that `state_path` exists in
 - State stores score/counters, schedule, completion conditions, and the debrief gate.
 - Before debrief, never reveal correctness, answers, hidden scoring, hints, remediation, or best-practice commentary.
 - During debrief, explain outcomes through observable actions and the authored rubric.
+- Browser interaction events are immutable sub-turn evidence. They do not
+  advance the schedule and are consumed exactly once by the next learner turn.
+- Typed UI evidence takes precedence over contradictory prose. Never transmit
+  form values: credential exposure is inferred only from a configured field
+  being non-empty when submit is pressed.
 
 ## Memory Contract
 
@@ -45,3 +50,5 @@ entries as the authoritative schedule or score.
 4. Verify a pre-debrief response contains neither a hint nor score/correctness.
 5. Reach the authored completion gate and verify the debrief follows its rubric.
 6. Create a second party and verify no state, history, or chapter leaks between them.
+7. Open and submit an interactive site, verify zero extra LLM calls, no field
+   values in requests/storage, exactly-once scoring, and restoration from history.

@@ -29,6 +29,10 @@ Ask only for missing information, at most three questions at once:
 2. Scenario duration and schedule: number of turns, decision surfaces, and exact debrief point.
 3. Assessment rubric: observable actions, score/state fields, pass conditions, and feedback style at debrief.
 
+Also ask whether the world needs interactive simulated sites. When enabled and
+the user does not choose another size, author ten reusable site blueprints and
+read `references/site-artifacts-contract.md` before writing them.
+
 Also establish audience level, permitted fictionalization, language, accessibility
 or content constraints, and whether the user requests draft-only. If proceeding
 with assumptions, record each in `manifest.json`; do not invent a mandatory
@@ -41,6 +45,7 @@ Before editing, inspect the actual nested IaC repo and read:
 - the existing training pack `worldpacks/awareness/` as the working example;
 - `docs/decisions/007-light-gui-party-memory.md`, `009-long-context-memory-policy.md`, and `010-party-scenario-types.md`;
 - `references/training-contract.md` when authoring or reviewing the deterministic schedule, scoring, memory, and debrief contracts;
+- `references/site-artifacts-contract.md` when the world contains links that open simulated sites;
 - the state schema, existing manifests, and `inventories/local/group_vars/server.yml`.
 
 Verify paths with `rg --files`. Default source location:
@@ -70,6 +75,13 @@ rules/checks.md
 quick-replies/notes.md
 setup-flow.md
 ```
+
+For an interactive-site world, also create `artifacts/sites/index.json`, ten
+allowlisted blueprint JSON files, and server-only
+`rules/site-interactions.json`. Put fixed URLs, field semantics and interaction
+classification in authored files; the narrator may fill only visible prose
+slots. Include a realistic mix of legitimate, ambiguous and hostile sites so
+interactivity is not an answer cue.
 
 Set `manifest.player_role`; make `scenario_types.recommended` and the only
 supported type `training`. Keep `rules/checks.md` as the deterministic
@@ -149,6 +161,10 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 - Confirm `corporate_portal.characters` contains at most five unique IDs; every dynamic card uses `{employee_position}` and every portal character is used by the authored scenario.
 - Confirm `showroom_result.metric` is `state_path`, its `state_path` resolves to a numeric canonical-state field, and the field is updated only by the authored deterministic scoring contract.
 - Scan narrowly for API-key-looking strings and unsafe real data.
+- For site artifacts, run the checks in `site-artifacts-contract.md`: duplicate
+  IDs, unknown renderer/theme/slot/action, unsafe URL or markup, missing
+  fallback, missing scheduled reference, missing score rule, and public policy
+  leakage are hard failures.
 
 ## IaC and Delivery
 
