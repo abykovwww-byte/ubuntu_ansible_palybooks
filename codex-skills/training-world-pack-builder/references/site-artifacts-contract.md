@@ -54,6 +54,26 @@ configured credential field is non-empty and submit is pressed; its contents
 are neither checked nor transmitted. `reported` and `site_closed` remain
 separate facts. A later safe action never erases an earlier unsafe event.
 
+## Runtime semantics
+
+1. Render a history artifact from its persisted public snapshot; rendering
+   alone emits no event.
+2. Opening the simulated site records `link_opened` with a client-generated
+   idempotency key.
+3. Submitting a form records only the semantic submit event and declared IDs of
+   non-empty fields. Never send values, lengths, hashes, masks or validation
+   results.
+4. Reporting and closing are separate events. Recording any site event is a
+   sub-turn operation: no narrator call, state patch or schedule advancement.
+5. Before the next learner message, flush queued events. Commit the turn, state
+   patch, any new artifact, and event consumption atomically.
+6. Apply each `score_rule_id` once. Typed evidence outranks prose for the same
+   decision, and later safe behavior cannot erase an earlier unsafe event.
+7. If the main narrator bundle is missing, invalid or unavailable, materialize
+   the scheduled snapshot from authored fallback without a second model call.
+8. Both Light GUI and Showroom must use the shared allowlisted DOM renderer and
+   restore the same persisted snapshot from history.
+
 ## Validation
 
 Reject:
@@ -67,3 +87,37 @@ Reject:
 - server-only policy copied into public blueprint, prompts or state;
 - only hostile links being interactive;
 - any design requiring a second LLM call when the simulated site opens.
+
+## Acceptance matrix
+
+Static and focused checks:
+
+- parse every blueprint, catalog and policy JSON;
+- validate unique IDs, scheduled references, allowed URLs/renderers/themes,
+  fallback completeness, action-policy coverage and absence of public scoring;
+- run the shared renderer syntax/unit tests and the focused Gateway artifact
+  suite;
+- verify duplicate event IDs return the saved result, while reuse with a
+  different payload is rejected.
+
+Container and live checks after deployment:
+
+- confirm the applied server revision, successful Ansible recap and healthy
+  Gateway, Light GUI and Showroom containers;
+- confirm shared JS/CSS return their correct MIME types and restrictive CSP;
+- in each applicable UI, reach an authored site surface, open it and perform one
+  synthetic submit or report; check the browser console and the public response;
+- prove event endpoints return without an LLM attempt or authored-turn advance;
+- inspect only redacted event metadata and assert synthetic field values are
+  absent from request logs and Gateway storage;
+- send the next learner action and verify pending events become consumed in the
+  same committed turn, canonical counters/evidence change as authored, and the
+  same score rule cannot apply twice;
+- force or observe a provider failure and verify deterministic fallback still
+  preserves the scheduled artifact and scoring path; report the provider error
+  as a separate operational warning;
+- reload history and verify the persisted snapshot remains renderable without
+  regenerating content.
+
+Use invented non-secret strings for acceptance. Never copy a real username,
+password, token or raw private database row into logs, docs or handoff text.

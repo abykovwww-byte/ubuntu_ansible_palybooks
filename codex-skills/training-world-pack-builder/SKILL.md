@@ -1,6 +1,6 @@
 ---
 name: training-world-pack-builder
-description: Build or update deterministic scored learning world packs for the SillyTavern/rp-gateway/Light GUI stack. Use when Codex needs to create a simulation, scenario-based exercise, awareness course, assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, or output-validator contract. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
+description: Build or update deterministic scored learning world packs for the SillyTavern/rp-gateway/Light GUI stack, including interactive simulated or phishing sites with LLM-filled visible slots and typed browser-event scoring. Use when Codex needs to create a simulation, scenario-based exercise, awareness course, assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, output-validator contract, or training landing-page interaction. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
 ---
 
 # Training World Pack Builder
@@ -15,6 +15,9 @@ Gateway mechanics or deploy directly.
 - Treat Gateway canonical party state as authority. Light GUI creates isolated state from `state-seed.json`; never overwrite `state/current.json` for normal play.
 - Use deterministic authored progression only: no dice, random outcomes, `/check`, or hidden model adjudication of correctness.
 - Resolve only player actions explicitly stated in the current turn. Advance exactly one scheduled scenario turn after each response.
+- Treat site actions as immutable sub-turn events: recording `link_opened`, submit, report, or close must not call an LLM or advance the authored schedule. Consume pending events atomically with the next committed learner turn.
+- Give typed UI evidence precedence over contradictory prose for the same decision. Apply every authored `score_rule_id` at most once unless the policy explicitly permits repetition; a later safe action never erases earlier unsafe evidence.
+- Let the browser send only artifact identity, semantic event type, and declared field IDs. Never transmit or persist field values, lengths, hashes, masks, clipboard data, or inferred credentials.
 - Keep rubrics, score fields, validators, completion rules, and the current schedule in canonical state or explicit pack rules, not only in prose memory.
 - Withhold hints, correctness, hidden scoring, remediation, and best-practice teaching until the authored debrief point. Do not make the simulation unwinnable or imply that every event is hostile.
 - Do not embed a gameplay model, credentials, real secrets, personal data, exploit payloads, or operationally harmful instructions in a pack.
@@ -82,6 +85,12 @@ allowlisted blueprint JSON files, and server-only
 classification in authored files; the narrator may fill only visible prose
 slots. Include a realistic mix of legitimate, ambiguous and hostile sites so
 interactivity is not an answer cue.
+
+For every scheduled site, author one artifact key, one blueprint revision, the
+allowed event types, complete fallback slot content, and score-rule mappings.
+The main narrator response must return narrative and declared visible slots in
+one bundle. Opening a site never triggers a second model call; invalid or failed
+narration must still materialize the scheduled site from authored fallback.
 
 Set `manifest.player_role`; make `scenario_types.recommended` and the only
 supported type `training`. Keep `rules/checks.md` as the deterministic
@@ -165,6 +174,12 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
   IDs, unknown renderer/theme/slot/action, unsafe URL or markup, missing
   fallback, missing scheduled reference, missing score rule, and public policy
   leakage are hard failures.
+- Run the complete static, container and browser acceptance matrix in
+  `site-artifacts-contract.md`. At minimum prove idempotent event recording,
+  zero LLM/schedule advancement for sub-turn events, no field values in request
+  or storage, atomic next-turn consumption, score-once behavior, history
+  restoration, deterministic provider fallback, shared renderer MIME/CSP, and
+  equivalent Light GUI/Showroom behavior.
 
 ## IaC and Delivery
 
@@ -178,6 +193,12 @@ local validation -> commit -> push origin/main -> server pull-based Ansible appl
 After deployment, verify the manifest is listed by `/api/worldpacks`, the
 party can be created explicitly as `training`, its isolated state starts at
 turn one, and the lorebook exists under the managed SillyTavern worlds path.
+For interactive sites, run the focused Gateway artifact tests inside the rebuilt
+container, then perform one synthetic end-to-end path through artifact open,
+submit or report, and the following scoring turn. Inspect typed evidence and
+canonical counters without publishing raw DB rows or any field values. Record
+provider errors separately from artifact behavior; a successful deterministic
+fallback does not make the provider error disappear.
 If SSH/sudo/network blocks the apply, report the committed/pushed state and
 the exact remaining server-side action; do not claim it is live.
 

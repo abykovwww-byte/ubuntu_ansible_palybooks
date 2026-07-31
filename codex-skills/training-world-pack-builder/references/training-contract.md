@@ -29,10 +29,14 @@ must not choose the metric or state path. Verify that `state_path` exists in
 - Before debrief, never reveal correctness, answers, hidden scoring, hints, remediation, or best-practice commentary.
 - During debrief, explain outcomes through observable actions and the authored rubric.
 - Browser interaction events are immutable sub-turn evidence. They do not
-  advance the schedule and are consumed exactly once by the next learner turn.
+  invoke a model or advance the schedule and are consumed atomically with the
+  next committed learner turn.
 - Typed UI evidence takes precedence over contradictory prose. Never transmit
   form values: credential exposure is inferred only from a configured field
   being non-empty when submit is pressed.
+- A scheduled artifact must be present even when narrator output is invalid or
+  the provider fails; use the authored fallback from the same turn instead of a
+  second LLM request.
 
 ## Memory Contract
 
@@ -50,5 +54,11 @@ entries as the authoritative schedule or score.
 4. Verify a pre-debrief response contains neither a hint nor score/correctness.
 5. Reach the authored completion gate and verify the debrief follows its rubric.
 6. Create a second party and verify no state, history, or chapter leaks between them.
-7. Open and submit an interactive site, verify zero extra LLM calls, no field
-   values in requests/storage, exactly-once scoring, and restoration from history.
+7. Open and submit an interactive site, verify zero extra LLM calls, no schedule
+   advancement, no field values in requests/storage, idempotent event handling,
+   and restoration from history.
+8. Commit the next learner turn and verify typed events are consumed atomically,
+   score rules apply once, canonical evidence names the UI facts, and later prose
+   does not erase an earlier unsafe event.
+9. Force invalid narrator output or a provider error on a scheduled artifact
+   turn and verify the authored fallback still produces the correct safe snapshot.
