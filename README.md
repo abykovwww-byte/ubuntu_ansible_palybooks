@@ -2,6 +2,16 @@
 
 Ansible foundation for a local Ubuntu server that will host application deployments. The repository is intentionally small and predictable: playbooks compose focused roles, shared settings live in `group_vars`, host-specific connection data lives in `host_vars`, and secrets are expected to be stored with Ansible Vault.
 
+## RP Stack Wiki
+
+The repository includes a multi-page, human-readable description of the RP,
+collaborative-novel, and deterministic-training platform:
+
+- [RP Stack Wiki](docs/wiki/README.md)
+- [Architecture](docs/wiki/01-architecture.md)
+- [WorldPacks and scenario modes](docs/wiki/04-worldpacks-and-modes.md)
+- [Operations and repository map](docs/wiki/09-operations-and-repository.md)
+
 ## Repository Layout
 
 ```text

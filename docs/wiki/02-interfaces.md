@@ -1,0 +1,94 @@
+# Интерфейсы
+
+[← Архитектура](01-architecture.md) · [Главная](README.md) · [Далее: жизненный цикл хода →](03-turn-lifecycle.md)
+
+## Light GUI
+
+Light GUI — основной интерфейс владельца партии. Это статические HTML/CSS/JavaScript, которые nginx отдаёт на `:8010` и проксирует `/api` в Gateway.
+
+Основные возможности:
+
+- вход через Gateway-сессию;
+- список и создание партий;
+- явный выбор WorldPack, персонажа, `scenario_type`, provider и narrator model;
+- основной чат с восстановлением pending-запроса после refresh;
+- редактирование персонажей вручную и генерация служебной моделью;
+- выбор party-scoped BYOK-ключа;
+- GM preview/apply/discard, state, checks и rollback;
+- Prompt Inspector, реальный размер последнего prompt, память и lore cards;
+- checkpoints, branches и история LLM-autotest;
+- 👍/👎 для полной пары «реплика игрока → ответ модели»;
+- admin-раздел: пользователи, глобальная служебная модель, видимость миров, Showroom, автотесты и dataset review.
+
+Light GUI не вызывает provider API напрямую. Даже если ключ введён пользователем, он сохраняется Gateway для конкретной партии и не возвращается в браузер целиком.
+
+## Showroom
+
+Showroom — отдельная витрина на `:8011` для прохождения опубликованных сценариев без регистрации.
+
+```mermaid
+sequenceDiagram
+    participant Visitor as Посетитель
+    participant UI as Showroom
+    participant GW as Gateway
+    participant Party as Внутренняя Party
+
+    Visitor->>UI: Открывает сценарий
+    UI->>GW: POST /api/showroom/scenarios/{id}/runs
+    GW-->>Visitor: HttpOnly visitor cookie
+    GW->>Party: Создаёт character + state + history
+    GW-->>UI: run_id без party_id
+    Visitor->>UI: Отправляет действие
+    UI->>GW: POST /api/showroom/runs/{run_id}/messages
+    GW->>Party: Обычный party turn pipeline
+    Party-->>GW: Ответ и state version
+    GW-->>UI: Публичное представление
+```
+
+`ShowroomScenario` и `WorldPack` — разные сущности. Scenario добавляет публичное название, описание, режим, модель, обложку, порядок и leaderboard policy к ссылке на WorldPack. Несколько сценариев могут использовать один мир.
+
+Посетитель получает случайную HttpOnly-cookie. Gateway связывает её с `ShowroomRun`, а run — с внутренней Party. Публичному клиенту не выдаются raw party ID, скрытый score, rubric или answer key.
+
+Для training-миров Showroom умеет:
+
+- показывать immutable snapshot корпоративного портала до пяти персонажей;
+- материализовать динамическую должность из описания сотрудника;
+- отображать структурированные письма и чаты безопасными text nodes;
+- собирать opt-in leaderboard по numeric state path или числу ходов;
+- хранить обратную связь 👍/👎 с проверкой владельца visitor cookie.
+
+Ссылки и вложения в текущем structured-content renderer намеренно не интерактивны. Мини-сайты для фишинговых сообщений находятся в плане, а не в runtime.
+
+## Административный контур
+
+Админка живёт в Light GUI и использует те же Gateway session/role проверки. Она управляет:
+
+- пользователями и их статусами;
+- сменой паролей;
+- глобальной служебной моделью;
+- public/private видимостью WorldPacks;
+- Showroom-сценариями и обложками;
+- party-scoped LLM-vs-LLM autotests;
+- review статусами партий и ходов;
+- JSONL-экспортом одобренных samples.
+
+Администратор не получает raw API key через публичный API: ответ содержит метаданные и последние четыре символа.
+
+## Compatibility API
+
+Gateway сохраняет OpenAI-compatible `/v1/chat/completions` и legacy single-campaign endpoints. Они нужны для интеграций и отладки, но не должны становиться основой новых функций.
+
+| Свойство | Light GUI | Showroom | `/v1/chat/completions` |
+|---|---|---|---|
+| Пользователь | Gateway account | Анонимная visitor cookie | Внешняя интеграция |
+| Контекст | Явный `party_id` | `run_id -> party` внутри Gateway | Legacy/default campaign |
+| Админ-инструменты | Да, по роли | Нет | Нет |
+| Provider key | Server или party BYOK | Модель сценария | Заголовок/настройки совместимости |
+| Рекомендуемый путь | Да | Да | Только compatibility |
+
+## Исходники
+
+- [Light GUI](../../roles/apps/files/rp-stack/rp-light-gui)
+- [Showroom](../../roles/apps/files/rp-stack/rp-showcase-gui)
+- [Showroom ADR](../../roles/apps/files/rp-stack/docs/decisions/012-public-showroom-scenarios.md)
+- [Gateway endpoints](../../roles/apps/files/rp-stack/rp-gateway/app/main.py)
