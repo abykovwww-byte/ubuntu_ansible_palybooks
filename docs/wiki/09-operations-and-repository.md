@@ -60,6 +60,26 @@ curl -fsS http://192.168.1.88:8011/health
 
 Для UI-изменений дополнительно проверяются authenticated DOM, фактические API responses и применённая server revision.
 
+## Live verification интерактивных training artifacts
+
+Snapshot от 31 июля 2026 года для revision `8b8a8fe`:
+
+| Проверка | Результат |
+|---|---|
+| Server checkout | `/opt/ubuntu_ansible_palybooks` указывает на `8b8a8fecdef857ed0d0acbcd183a742aa09c2227` |
+| Ansible | `Result=success`; recap: `ok=65`, `changed=6`, `unreachable=0`, `failed=0` |
+| Контейнеры | Gateway, Light GUI, Showroom и Local LLM в состоянии `healthy` |
+| HTTP/API | Light GUI и Showroom вернули `200`; публичный список Showroom-сценариев вернул `200`; защищённый `/api/worldpacks` без сессии ожидаемо вернул `401` |
+| Gateway tests | Полный контейнерный прогон: `123 passed`, `3 failed`; focused artifacts: `5 passed` |
+| Static UI assets | Shared JS/CSS вернули корректные MIME types; CSP запрещает внешние формы, frames и objects |
+| Browser | Showroom и авторизованный Light GUI загрузились без console errors; Showroom отобразил письмо, artifact trigger и DOM-собранный credential-form |
+| Privacy | Синтетические значения полей не появились в Gateway DB; сохранились только field IDs |
+| Scoring | `link_opened`, `credentials_submitted` и `site_closed` потреблены следующим ходом и отражены в canonical evidence/counters |
+
+Три падения полной suite воспроизводят существующий baseline вокруг Awareness safe fallback и счётчика autotest fallback; focused suite новой функции чистая. Во время браузерного прогона один narrator-вызов OpenRouter вернул `403`, после чего training safe fallback сохранил HTTP `200`, authored surface и дальнейшее deterministic scoring. Это operational warning провайдера, а не потеря artifact event.
+
+Live-прогон использовал существующую тестовую Showroom-партию и продвинул её до пятого authored хода; это намеренная тестовая запись в persistent history.
+
 ## Карта репозитория
 
 ```text

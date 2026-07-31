@@ -56,6 +56,8 @@ Narrator не может передать произвольный HTML, CSS и�
 
 Значения credential-полей остаются в браузере: при submit клиент передаёт только тип события, artifact ID и idempotency key. Artifact snapshots содержат видимый учебный текст и поэтому подчиняются тем же правилам privacy/review, что и raw turns; server-only interaction policy и скрытый scoring в публичный API не выдаются.
 
+Live-проверка с синтетическими значениями подтвердила этот privacy boundary: в `training_artifact_events` сохранились только тип события и идентификаторы полей `login` / `password`, а сами введённые строки в Gateway SQLite отсутствовали. Проверка не использовала реальные учётные данные.
+
 ## Аутентификация
 
 - Пароли хранятся как PBKDF2-HMAC-SHA256 с отдельной солью и 260 000 итераций.
