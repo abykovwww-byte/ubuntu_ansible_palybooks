@@ -207,7 +207,8 @@ rp_stack_gateway_log_level: INFO
 rp_stack_gateway_log_prompts: "false"
 rp_stack_gateway_max_repair_attempts: 1
 rp_stack_gateway_request_timeout_seconds: 900
-rp_stack_gateway_model_attempt_timeout_seconds: 45
+rp_stack_gateway_model_attempt_timeout_seconds: 75
+rp_stack_gateway_party_start_model_attempt_timeout_seconds: 300
 rp_stack_post_turn_helpers_inline: false
 rp_stack_party_context_max_tokens: 131072
 rp_stack_party_context_completion_reserve_tokens: 16384
