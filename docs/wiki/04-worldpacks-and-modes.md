@@ -151,6 +151,14 @@ resource revision со стабильным `folder_id`, а run фиксируе
 
 Light GUI может создать простой private WorldPack из текста. Gateway детерминированно формирует registry entry и seed; отдельный LLM-вызов для этого не требуется. Такие миры принадлежат пользователю и могут использоваться обычным party flow.
 
+Источник generated-мира выбирается явно:
+
+- `text` — ручной prompt до 6000 символов; он нормализуется в одну строку и сохраняется в manifest/state по прежнему контракту;
+- `markdown_file` — произвольный UTF-8 `.md` до 200 000 символов; полный текст сохраняется рядом с generated pack как `world.md` и подключается через `manifest.files.gm_system`;
+- для Markdown в manifest и canonical state остаётся только фрагмент до 6000 символов, а полный документ читается как стабильный `WORLD_SYSTEM_PROMPT`. Это не дублирует сотни килобайт в state/API и сохраняет prompt-prefix caching.
+
+Gateway сохраняет basename исходного файла и размер текста как метаданные, но не исполняет Markdown и не превращает его в HTML. Сценарный контракт `rp` / `novel` / `training` всё равно имеет приоритет над инструкциями импортированного мира.
+
 ## Источники
 
 - [WorldPacks](../../roles/apps/files/rp-stack/worldpacks)
