@@ -34,11 +34,18 @@ flowchart LR
     P["Party model profile"] --> R["Runtime settings"]
     K1["Server-managed key"] --> R
     K2["Party-scoped BYOK"] --> R
-    R --> A["Primary model"]
-    A -->|"timeout / HTTP"| F["Allowed fallback models"]
+    R --> D{"OpenRouter DeepSeek V4 Flash?"}
+    D -->|"да"| O["reasoning=minimal<br/>provider.sort=throughput"]
+    D -->|"нет"| A["Primary model"]
+    O --> A
+    A -->|"wall-clock timeout / HTTP"| F["Allowed fallback models"]
 ```
 
 Fallback не должен перескочить на другого provider с другим ключом. Ошибка и выбранная попытка попадают в audit/turn metadata.
+
+Для `deepseek/deepseek-v4-flash` через OpenRouter Gateway явно отправляет `reasoning.effort=minimal` и требует endpoint, поддерживающий параметры запроса. Ограничение `max_tokens` автоматически не добавляется. Provider routing сортируется по `throughput`, поэтому выбор endpoint оптимизируется по скорости генерации, а не по стандартному price-first порядку OpenRouter.
+
+`MODEL_ATTEMPT_TIMEOUT_SECONDS` является wall-clock deadline одной попытки narrator: он включает получение полного non-streaming ответа. Для repair используется компактный prompt без повторной истории и memory; на DeepSeek V4 Flash сохраняется тот же `minimal` reasoning.
 
 ## Глобальная служебная модель
 

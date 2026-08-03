@@ -28,7 +28,7 @@ sequenceDiagram
     API->>Art: validate and materialize snapshot
     API->>Val: validate(narration, outcome, state)
     alt Нарушение контракта
-        API->>LLM: repair instruction
+        API->>LLM: compact repair: failed text + outcome + violations
         LLM-->>API: repaired narration
         API->>Val: validate again
     end
@@ -78,7 +78,9 @@ Gateway пробует primary model и разрешённые fallback models �
 
 ### 5. Валидация и repair
 
-`OutputValidator` проверяет соответствие state, outcome и режиму. При нарушении Gateway может выполнить один repair-вызов с конкретной инструкцией.
+`OutputValidator` проверяет соответствие state, outcome и режиму. При нарушении Gateway может выполнить один repair-вызов с конкретной инструкцией. Repair не повторяет полный prompt партии: в него входят только нарушенный текст, `AUTHORITATIVE_OUTCOME`, номер/окно текущего training-хода и, если нужен, artifact contract. История, memory и retrieval повторно модели не отправляются.
+
+Каждая попытка narrator ограничена настоящим wall-clock deadline через `asyncio.timeout`: лимит охватывает ожидание заголовков и чтение всего тела ответа, а не только паузу между сетевыми пакетами. Истечение deadline обрабатывается тем же безопасным timeout/fallback-контрактом, что и transport timeout.
 
 Если ответ снова невалиден:
 
