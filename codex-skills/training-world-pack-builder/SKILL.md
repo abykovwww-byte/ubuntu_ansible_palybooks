@@ -32,6 +32,13 @@ Gateway mechanics or deploy directly.
 - Keep the pack defensive, fictionalized, and safety-bounded for security, medical, legal, or other high-stakes topics. Escalate any need for real policy or regulated content to the user.
 - Use `abykovserv-iac-deploy` for GitHub + Ansible deployment; never make durable `/srv` or `/opt` edits by hand.
 
+The implemented Gateway authority lives in `app/services/training_capabilities.py`,
+`training_artifacts.py`, and `training_workspace.py`. Showroom persists both
+scenario flags and immutable run snapshots in `app/services/showroom.py`.
+`worldpacks/awareness/` and `worldpacks/awareness-one-day/` are executable
+examples containing both contracts, a party-start policy resource, a dynamic
+turn file, hidden event policy, and capability-off-compatible chat paths.
+
 ## Intake
 
 Ask only for missing information, at most three questions at once:
@@ -223,6 +230,10 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
   renderer/media allowlists, immutable revisions, resource classification,
   fallback completeness, hidden-policy separation and event-to-score coverage
   are hard failures.
+- Run `pytest tests/test_training_capabilities.py` plus the Showroom capability
+  test in `tests/test_gateway.py`; do not accept a manifest merely because its
+  top-level schema string is present. Gateway must load and validate every
+  referenced catalog, blueprint, resource and server-only policy file.
 - Run the complete static, container and browser acceptance matrix in
   `site-artifacts-contract.md`. At minimum prove idempotent event recording,
   zero LLM/schedule advancement for sub-turn events, no field values in request

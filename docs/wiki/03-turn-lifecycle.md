@@ -105,14 +105,14 @@ Gateway пробует primary model и разрешённые fallback models �
 
 Открытие сайта, отправка формы и сообщение о подозрении не запускают narrator и не продвигают authored turn. UI отправляет idempotent event в party- или showroom-scoped endpoint; Gateway проверяет владельца, artifact, разрешённый тип действия и сохраняет только типизированный факт. При следующем игровом ходе неиспользованные события становятся evidence для RuleEngine и потребляются атомарно вместе с turn commit.
 
-### Планируемая capability gate и рабочие файлы
+### Capability gate и рабочие файлы
 
-> Статус: не реализовано.
+> Статус: реализовано в Gateway и Showroom; live-статус зависит от применённой ревизии.
 
-Перед сборкой narrator prompt Gateway будет читать два флага из run snapshot.
+Перед сборкой narrator prompt Gateway читает два флага из run snapshot.
 Выключенная capability не добавляет prompt contract, не создаёт public snapshot,
 не принимает события и не влияет на score. При включённом рабочем диске
-`TrainingWorkspaceService` сможет материализовать authored файл в том же
+`TrainingWorkspaceService` материализует authored файл в том же
 narrator completion или из fallback. Открытие файла останется sub-turn event,
 но его допустимость будет проверяться по интервалу доступности файла, а не
 только по текущему surface turn сайта.

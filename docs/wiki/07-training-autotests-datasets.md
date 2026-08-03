@@ -40,10 +40,10 @@ WorldPack сам связывает публичный результат с num
 
 Corporate portal — только presentational snapshot. Он не содержит schedule, rubric или скрытые ответы.
 
-### Планируемые capability dimensions
+### Capability dimensions
 
-После реализации каждый run, leaderboard result, autotest и dataset record
-должен содержать обе training-only dimensions:
+Каждый Showroom run содержит обе training-only dimensions; leaderboard,
+autotest, dataset и analytics consumers должны сохранять их как dimensions:
 
 ```json
 {
@@ -56,8 +56,8 @@ Corporate portal — только presentational snapshot. Он не содер�
 подсказки и менять сложность. Для фишингового файла public snapshot не содержит
 классификацию; server-only policy превращает `file_opened` в score-once evidence.
 Поздний `file_reported` добавляет новый факт, но не удаляет уже совершённое
-небезопасное открытие. Это запланировано в Decision 015 и ещё не работает в
-текущем runtime.
+небезопасное открытие. Typed workspace events уже поступают в RuleEngine;
+downstream-отчёты не должны смешивать разные комбинации флагов.
 
 ## LLM-vs-LLM autotests
 
@@ -156,6 +156,9 @@ GET/POST  /api/admin/autotests...
 GET/POST  /api/parties/{party_id}/branches...
 GET/POST  /api/parties/{party_id}/artifacts...
 POST      /api/showroom/runs/{run_id}/artifact-events
+GET       /api/showroom/runs/{run_id}/workspace
+GET       /api/showroom/runs/{run_id}/workspace/files/{file_id}/content
+POST      /api/showroom/runs/{run_id}/workspace-events
 PATCH     /api/admin/datasets/parties/{party_id}
 GET/PUT   /api/admin/datasets/parties/{party_id}/turns...
 GET       /api/admin/datasets/export.jsonl

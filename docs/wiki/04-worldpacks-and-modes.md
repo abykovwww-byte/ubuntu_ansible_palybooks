@@ -109,9 +109,9 @@ WorldPack заранее содержит ограниченный набор т
 
 Оба интерфейса используют один статический renderer из `ui-shared/`. Blueprint определяет стиль, структуру, поля формы и разрешённые действия; модель не генерирует HTML, CSS, JavaScript, URL назначения или scoring policy.
 
-## План: поддержка links и workspace как независимых capabilities
+## Links и workspace как независимые capabilities
 
-> Статус: новая активация и workspace contract ещё не реализованы.
+> Статус: активация, workspace contract и runtime реализованы в IaC.
 
 Детальный контракт означает, что мир поддерживает capability:
 
@@ -123,7 +123,7 @@ WorldPack заранее содержит ограниченный набор т
 фиксирует выбор. Если capability опциональна, WorldPack обязан содержать
 полноценный capability-off путь, чтобы обучение оставалось проходимым.
 
-Планируемая workspace-часть пакета:
+Workspace-часть пакета:
 
 ```text
 artifacts/workspace/

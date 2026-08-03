@@ -141,11 +141,11 @@ ubuntu_ansible_palybooks/
 | Новый training мир | `worldpacks/<slug>/` и `training-world-pack-builder` |
 | Runtime/env/ports | `server.yml`, Compose/env templates |
 
-### Планируемая зависимость training workspace
+### Зависимость training workspace
 
-Decision 015 пока не меняет Compose и не требует Ansible apply. Будущая
-реализация двух capability-флагов затронет Gateway schemas/ShowroomStore,
-snapshot run, `TrainingArtifactService`, новый логический
+Decision 015 не добавляет новый контейнер, но runtime-файлы доставляются обычным
+Ansible apply. Реализация двух capability-флагов затрагивает Gateway schemas/ShowroomStore,
+snapshot run, `TrainingArtifactService`, логический
 `TrainingWorkspaceService`, StateStore, Showroom UI, shared safe renderers,
 training builder contract и четыре комбинации тестов.
 

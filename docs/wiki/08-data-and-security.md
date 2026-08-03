@@ -61,11 +61,11 @@ Narrator не может передать произвольный HTML, CSS и�
 
 Live-проверка с синтетическими значениями подтвердила этот privacy boundary: в `training_artifact_events` сохранились только тип события и идентификаторы полей `login` / `password`, а сами введённые строки в Gateway SQLite отсутствовали. Проверка не использовала реальные учётные данные.
 
-### Планируемые workspace resources
+### Workspace resources
 
-Рабочий диск пока не реализован. Архитектура требует versioned resource library,
+Рабочий диск реализован для training-сценариев как versioned resource library,
 immutable file revisions и server-only workspace interaction policy. Публичные
-ответы и DOM не должны содержать признак `phishing`, correctness или score rule.
+ответы и DOM не содержат признак `phishing`, correctness или score rule.
 
 Ресурсы делятся минимум на `public_training` и `restricted_internal`. Текущая
 анонимная visitor cookie Showroom не даёт достаточной авторизации для реальной

@@ -47,6 +47,9 @@ sequenceDiagram
     Visitor->>UI: Открывает / отправляет форму / сообщает о сайте
     UI->>GW: POST /api/showroom/runs/{run_id}/artifact-events
     GW->>Party: Сохраняет typed event без LLM и продвижения хода
+    Visitor->>UI: Открывает / скачивает / сообщает о файле
+    UI->>GW: POST /api/showroom/runs/{run_id}/workspace-events
+    GW->>Party: Сохраняет workspace event без LLM и продвижения хода
 ```
 
 `ShowroomScenario` и `WorldPack` — разные сущности. Scenario добавляет публичное название, описание, режим, модель, обложку, порядок и leaderboard policy к ссылке на WorldPack. Несколько сценариев могут использовать один мир.
@@ -79,9 +82,9 @@ sequenceDiagram
 
 Администратор не получает raw API key через публичный API: ответ содержит метаданные и последние четыре символа.
 
-### Планируемые галки training-сценария
+### Галки training-сценария
 
-> Статус: UI и API ещё не реализованы.
+> Статус: UI и Gateway API реализованы в IaC; live-статус зависит от применённой ревизии.
 
 После выбора `Тип сценария = Training` редактор Showroom должен показывать две
 независимые галки:
