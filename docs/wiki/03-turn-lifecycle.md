@@ -148,7 +148,7 @@ narrator completion или из fallback. Открытие файла остан
 
 Opening scene получает отдельный wall-clock deadline `300` секунд на одну попытку
 narrator, потому что стартовый prompt может включать большой импортированный мир.
-Обычные последующие ходы используют deadline `75` секунд. Если provider не успел
+Обычные последующие ходы используют deadline `150` секунд. Если provider не успел
 передать полное тело стартового ответа, Gateway помечает `turn_requests` как
 `failed` и возвращает HTTP `504`; Light GUI видит terminal status через endpoint
 запроса и прекращает recovery polling, не оставляя партию в состоянии `running`.

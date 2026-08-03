@@ -45,7 +45,7 @@ Fallback не должен перескочить на другого provider �
 
 Для `deepseek/deepseek-v4-flash` через OpenRouter Gateway явно отправляет `reasoning.effort=minimal` и требует endpoint, поддерживающий параметры запроса. Ограничение `max_tokens` автоматически не добавляется. Provider routing сортируется по `throughput`, поэтому выбор endpoint оптимизируется по скорости генерации, а не по стандартному price-first порядку OpenRouter.
 
-`MODEL_ATTEMPT_TIMEOUT_SECONDS=75` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory; на DeepSeek V4 Flash сохраняется тот же `minimal` reasoning. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
+`MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory; на DeepSeek V4 Flash сохраняется тот же `minimal` reasoning. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
 
 ## Глобальная служебная модель
 
