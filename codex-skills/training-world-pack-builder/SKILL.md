@@ -19,6 +19,7 @@ Gateway mechanics or deploy directly.
 - Give typed UI evidence precedence over contradictory prose for the same decision. Apply every authored `score_rule_id` at most once unless the policy explicitly permits repetition; a later safe action never erases earlier unsafe evidence.
 - Let the browser send only artifact identity, semantic event type, and declared field IDs. Never transmit or persist field values, lengths, hashes, masks, clipboard data, or inferred credentials.
 - Keep rubrics, score fields, validators, completion rules, and the current schedule in canonical state or explicit pack rules, not only in prose memory.
+- Training must never enqueue, load, inject, display, or reserve context for the RP-only `RP_STORY_MEMORY` layer. Keep its existing episodic chapters, raw history, retrieval, and 81920-token default history budget unchanged.
 - Withhold hints, correctness, hidden scoring, remediation, and best-practice teaching until the authored debrief point. Do not make the simulation unwinnable or imply that every event is hostile.
 - Treat the stored learner name, profession and responsibilities as mandatory scenario input when the user supplies them. Make authored work requests observably change when that profile changes; do not replace it with a generic department, invented backlog or random corporate project.
 - Orient before asking for retrospective context. The first turn must provide enough situation, task ownership and a bounded decision for a new learner to act. A request for a weekly recap, backlog reconstruction or work plan is appropriate only after the scenario has established the work it refers to.
@@ -58,7 +59,7 @@ policy, score threshold, or safe procedure.
 Before editing, inspect the actual nested IaC repo and read:
 
 - the existing training pack `worldpacks/awareness/` as the working example;
-- `docs/decisions/007-light-gui-party-memory.md`, `009-long-context-memory-policy.md`, and `010-party-scenario-types.md`;
+- `docs/decisions/007-light-gui-party-memory.md`, `009-long-context-memory-policy.md`, `010-party-scenario-types.md`, and the negative Training boundary in `016-rp-living-story-memory.md`;
 - `references/training-contract.md` when authoring or reviewing the deterministic schedule, scoring, memory, and debrief contracts;
 - `references/site-artifacts-contract.md` when the world contains links that open simulated sites;
 - `references/workspace-artifacts-contract.md` when the world contains a department workspace or scored files;
@@ -184,6 +185,10 @@ The Gateway prompt has separate layers:
 3. Budgeted recent raw turns; retain all raw turns durably.
 4. Relevant characters, dynamic canonical state, `AUTHORITATIVE_OUTCOME`, then the current player action.
 
+The RP-only living story-memory block is deliberately absent from this list. A
+Training change must not activate its service job, API/UI fields, prompt block,
+or token reserve.
+
 State and outcome override memory. Do not store the rubric only in episodic
 memory, repeat a raw range already covered by a chapter, or use human-facing
 journal recaps as narrator memory. Design detailed chapter continuity but keep
@@ -200,6 +205,7 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 ```
 
 - Test deterministic paths: initial turn header; one explicit action updates only expected state; `/check` is rejected; no score/hint leaks before debrief; debrief output includes planned explanation; party and memory isolation hold.
+- Assert that Training enqueues no `rp_story_memory` job, contains no `RP_STORY_MEMORY` prompt block, and retains the pre-RP-story context budget.
 - Test at least two materially different player profiles and prove the opening task and later work requests change accordingly. Exercise the validation-failure fallback too; it must use the same stored profile rather than reverting to generic corporate copy.
 - Assert the exact authored set of link-bearing turns. For every other turn, reject both a non-empty structured link field and any URL in free text; the presence of a site catalog must not make links ubiquitous.
 - Exercise the four capability combinations when both contracts are supported: neither, links only, workspace only, and both. Reject enabled capabilities unsupported by the manifest and reject both flags for `rp`/`novel`.

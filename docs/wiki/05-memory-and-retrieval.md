@@ -2,122 +2,128 @@
 
 [← WorldPacks и режимы](04-worldpacks-and-modes.md) · [Главная](README.md) · [Далее: модели →](06-models-and-providers.md)
 
-## Пять разных механизмов
+## Слои памяти
 
-В RP Stack слово «память» не означает одну таблицу или один summary.
+В RP Stack слово «память» обозначает несколько независимых механизмов.
 
-| Слой | Назначение | Authority | Хранение/поиск |
-|---|---|---:|---|
-| Canonical state | Текущие подтверждённые факты и механика | Да | Версионный JSON/SQLite |
-| Raw turns | Полный первичный диалог и metadata | Нет, но это source history | SQLite, неизменяемо для review |
-| Memory chapters | Сжатые старые эпизоды для narrator | Нет | Immutable party-scoped chapters |
-| Legacy journal | Сохранённые итоги прежних версий | Нет | Таблица остаётся совместимой, активная сборка отключена |
-| Retrieval | Возвращает релевантные lore/scenes/NPC | Нет | Лексический и структурный поиск |
+| Слой | Назначение | Для каких режимов | Authority |
+|---|---|---|---:|
+| Canonical state | Текущие подтверждённые факты и механика | Все | Да |
+| Raw turns | Полный первичный диалог и metadata | Все | Нет, но это source history |
+| RP story memory | Живой кумулятивный реестр всей истории | Только `rp` | Нет |
+| Memory chapters | Неизменяемые сжатые эпизоды старых сцен | Все | Нет |
+| Lore/retrieval | Выбранные карточки, NPC и архивные сцены | Все | Нет |
+| Legacy journal | Итоги прежних версий | Только совместимость | Нет |
 
-State не заменяет сюжетную историю, а summary не может подтвердить факт, отсутствующий в state.
+Canonical state и `AUTHORITATIVE_OUTCOME` всегда выше любого текста памяти. Raw turns не удаляются после сжатия. Ни story memory, ни chapter не могут превратить попытку игрока или слух в подтверждённый факт.
 
-## Бюджет контекста
+## RP story memory
 
-Текущая серверная политика:
+`RPStoryMemoryUpdater` поддерживает отдельный bounded snapshot для каждой RP-партии. Это аналог постоянно обновляемого файла-сводки длинной кампании со следующей схемой:
 
 ```text
-PARTY_CONTEXT_MAX_TOKENS                 131072
-PARTY_CONTEXT_COMPLETION_RESERVE_TOKENS  16384
-PARTY_CONTEXT_SYSTEM_RESERVE_TOKENS      32768
-PARTY_CONTEXT_MIN_HISTORY_TOKENS          8192
-MEMORY_SUMMARY_BATCH_TOKENS              10000
-PARTY_MEMORY_CHAPTER_MAX_TOKENS           6000
-PARTY_MEMORY_PROMPT_MAX_CHARS             60000
+schema_version
+canon
+rules_and_abilities
+inventory_and_assets
+characters
+active_threads
+resolved_threads
+unresolved_hooks
+current_situation
+chronology
 ```
 
-Gateway сначала учитывает меньший из stack limit и известного model context. Затем резервирует место под ответ и system/runtime blocks. Остаток используется для последних полных turn pairs.
+После каждого RP-хода Gateway ставит job `rp_story_memory`. По умолчанию реальное обновление начинается после четырёх новых ходов; ручная команда «Собрать сейчас» может форсировать неполный пакет. Глобальная service model получает предыдущий snapshot, ограниченный пакет новых подтверждённых turns и компактный excerpt canonical state без `characters.*.secrets`. Она обязана вернуть полный replacement JSON, а не patch.
 
-Размер оценивается приближённо, поэтому это защитный budget, а не точный tokenizer конкретной модели. Prompt Inspector сохраняет и показывает фактический `prompt_json` последнего нового хода.
+Каждая удачная версия записывается в `rp_story_memory_snapshots` с `revision`, диапазоном покрытых turn IDs, state version и model. Старые snapshots остаются для аудита; narrator получает только последний. При fork последний snapshot, полностью покрытый checkpoint, копируется в новую campaign identity как revision 1.
 
-## Сборка prompt
+Story memory существует **только при `scenario_type == "rp"`**:
 
-Фактический порядок динамических слоёв:
+- `training` не получает job, snapshot, API-поля, UI-блок, prompt-блок или отдельный token reserve;
+- `novel` также продолжает использовать прежние chapters/raw/retrieval без story memory;
+- общая таблица SQLite сама по себе не активирует механизм для других режимов.
+
+Ошибка service model fail-open: сохранённый игровой ход не откатывается, предыдущий snapshot продолжает работать, а job повторяется по общей retry policy.
+
+## Эпизодические главы
+
+Когда raw turns перестают помещаться в history budget, `MemorySummarizer` берёт старейший ещё не покрытый пакет и создаёт immutable `memory_chapter`. Глава хранит последовательность сцен, действия игрока, значимые реакции NPC, открытия, предметы, тон, открытые нити, отношения и обязательства.
+
+Следующая глава не переписывает предыдущую. Покрытые raw turns остаются в SQLite, но больше не дублируются в обычном prompt. Пока chapter не создан, ограниченный `UNCOMPACTED_ARCHIVE_FALLBACK` временно удерживает выпавшие ходы в prompt.
+
+Этот механизм не изменён для `training`.
+
+## Бюджет 132k
+
+Общий stack limit остаётся 131072 токена:
+
+```text
+PARTY_CONTEXT_MAX_TOKENS                  131072
+PARTY_CONTEXT_COMPLETION_RESERVE_TOKENS   16384
+PARTY_CONTEXT_SYSTEM_RESERVE_TOKENS       32768
+PARTY_CONTEXT_MIN_HISTORY_TOKENS            8192
+RP_STORY_MEMORY_RESERVE_TOKENS             10000  # только rp
+RP_STORY_MEMORY_PROMPT_MAX_CHARS           24000
+PARTY_MEMORY_PROMPT_MAX_CHARS              60000
+```
+
+Для `rp` защитный raw-history budget по умолчанию равен:
+
+```text
+131072 - 16384 - 32768 - 10000 = 71920 tokens
+```
+
+Для `training` и `novel` новый резерв равен нулю, поэтому прежний budget остаётся 81920 tokens. `RP_STORY_MEMORY_PROMPT_MAX_CHARS=24000` — это верхняя граница текста story block, а не постоянная гарантия использования 10k токенов. Фактический блок обычно меньше.
+
+Если полный prompt всё же не помещается, Gateway сначала удаляет/сокращает вторичные динамические слои. Canonical state, `AUTHORITATIVE_OUTCOME` и текущее действие имеют более высокий приоритет, чем story memory.
+
+## Размер контекста service model
+
+Обновление story memory ограничено независимо от narrator:
+
+- предыдущий snapshot — до 24000 символов;
+- state excerpt — до 8000 символов;
+- пакет новых turns — до 6000 приблизительных input tokens;
+- ответ — до 6000 tokens.
+
+Таким образом, настроенное окно локальной Gemma в 32768 tokens достаточно для штатного update. Service model не получает весь 132k prompt narrator и не должна перечитывать всю кампанию на каждом запуске: она сворачивает предыдущий snapshot плюс только новый пакет.
+
+## Порядок RP prompt
 
 ```mermaid
 flowchart TB
     A["1. Scenario contract"] --> B["2. World system prompt"]
     B --> C["3. Author's note"]
-    C --> D["4. Memory chapters"]
-    D --> E["5. Lore cards"]
-    E --> F["6. Uncompacted overflow fallback"]
-    F --> G["7. Recent raw turn pairs"]
-    G --> H["8. Retrieved archived scenes"]
-    H --> I["9. Relevant characters"]
-    I --> J["10. State summary"]
-    J --> K["11. AUTHORITATIVE_OUTCOME"]
-    K --> L["12. Current player action"]
+    C --> D["4. RP_STORY_MEMORY — только rp"]
+    D --> E["5. Memory chapters"]
+    E --> F["6. Lore cards"]
+    F --> G["7. Uncompacted overflow fallback"]
+    G --> H["8. Recent raw turn pairs"]
+    H --> I["9. Retrieved archived scenes"]
+    I --> J["10. Relevant characters"]
+    J --> K["11. State summary"]
+    K --> L["12. AUTHORITATIVE_OUTCOME"]
+    L --> M["13. Current player action"]
 ```
 
-Текущее действие всегда последнее. Это одновременно сохраняет его приоритет и позволяет провайдерам переиспользовать стабильный prefix.
-
-## Эпизодические главы
-
-Когда новые raw turns перестают помещаться в history budget, `MemorySummarizer` берёт старейший ещё не покрытый пакет и просит глобальную служебную модель создать одну хронологическую главу.
-
-Глава сохраняет:
-
-- последовательность сцен;
-- действия игрока и значимые реакции NPC;
-- открытия, локации, предметы и тон;
-- подтверждённые факты;
-- unresolved threads;
-- изменения отношений;
-- обещания игрока и обязательства NPC.
-
-Глава immutable и содержит диапазон turn IDs, state version и model. Следующая глава не переписывает предыдущую.
-
-Raw turns при этом не удаляются из SQLite. Если summary ещё не готов, Gateway может добавить ограниченный `UNCOMPACTED_ARCHIVE` fallback. Он защищает недавнюю непрерывность, но тоже имеет лимит символов; поэтому долговременная полнота обеспечивается durable raw history и последовательным созданием chapters, а не обещанием поместить весь лог в каждый LLM-вызов.
+Для `training` узел 4 отсутствует, а остальные блоки сохраняют прежний порядок. Текущее действие всегда последнее.
 
 ## Retrieval без embeddings
 
-В широком архитектурном смысле RAG есть, но это не semantic vector RAG.
+`search_archived_turns()` использует точные слова, упрощённые stems, символьные 3-граммы и небольшой recency bonus. По умолчанию возвращается до трёх party-scoped сцен и не больше 9000 символов. Lore cards выбираются по keywords/stems или флагу `always_on`. Relevant characters выбираются по упоминанию, общей локации, активным нитям и `Outcome.target`; поле `secrets` в narrator block не передаётся.
 
-### Архивные сцены
+Embedding endpoint, vector store и cross-party semantic index не используются. Если понадобится vector retrieval, он должен сохранить обязательный party filter и объяснимость результатов.
 
-`search_archived_turns()` ищет по точным словам, упрощённым стемам, символьным 3-граммам и небольшому recency bonus. По умолчанию возвращается до трёх сцен и не больше 9000 символов.
+## Изоляция и UI
 
-### Lore cards
-
-Party lore cards выбираются по keywords/stems и флагу `always_on`. В prompt попадает ограниченное число карточек.
-
-### Relevant characters
-
-NPC выбираются детерминированно по:
-
-- прямому упоминанию в текущем действии;
-- общей локации с игроком;
-- активным сюжетным нитям;
-- `Outcome.target`.
-
-В prompt попадает компактное представление только выбранных NPC и их нужных отношений. Поле `secrets` не передаётся.
-
-### Чего нет
-
-- endpoint `/embeddings`;
-- embedding model;
-- FAISS, Chroma, Qdrant, pgvector, Milvus;
-- vector store в Compose;
-- cross-party semantic index.
-
-Это делает retrieval объяснимым и дешёвым, но ухудшает recall для синонимов и сложных перефразировок. Если появится измеримая проблема, безопасное расширение — hybrid lexical + vector с жёстким party filter, а не замена существующего механизма.
-
-## Legacy journal
-
-В schema/store сохраняются `journal_entries`, созданные прежними версиями, но текущий Gateway не публикует journal endpoints и не ставит новые journal jobs. Старый `journal` job завершается как no-op. Для актуального narrator context используются memory chapters, raw history и retrieval; для аудита — raw turns и audit events.
-
-## Изоляция
-
-Все запросы памяти, lore и archive search выполняются через `state_campaign_id`. Checkpoint branch получает собственную campaign identity и копии нужных слоёв на момент fork. Retrieval другой Party или branch запрещён архитектурно.
+Все memory-запросы используют `state_campaign_id`. Branch получает собственную campaign identity и копию допустимого snapshot на момент fork. Light GUI показывает RP story memory только у RP-партий: revision, покрытие, текущую ситуацию, канон, персонажей и сюжетные линии. Prompt Inspector отдельно показывает её фактическое присутствие и reserve.
 
 ## Источники
 
-- [Memory service](../../roles/apps/files/rp-stack/rp-gateway/app/services/memory.py)
+- [RP story memory service](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
+- [Episodic memory service](../../roles/apps/files/rp-stack/rp-gateway/app/services/memory.py)
 - [Prompt assembly](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
-- [Context budget](../../roles/apps/files/rp-stack/rp-gateway/app/services/context_budget.py)
-- [Character retrieval](../../roles/apps/files/rp-stack/rp-gateway/app/services/character_retrieval.py)
+- [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
+- [RP living-memory ADR](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md)
 - [Long-context ADR](../../roles/apps/files/rp-stack/docs/decisions/009-long-context-memory-policy.md)

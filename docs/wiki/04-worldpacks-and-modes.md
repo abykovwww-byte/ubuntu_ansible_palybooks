@@ -44,9 +44,9 @@ worldpacks/<slug>/
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
 |---|---|---|---|
-| `rp` | Ролевая игра с проверками | Intent, D20, skills, modifiers, blockers, check records | LLM не может изменить рассчитанный outcome |
-| `novel` | Совместный роман | Непрерывная проза, directorial input, state boundary patch без броска | Dice, DC, skills, игровые меню, захват agency |
-| `training` | Учебная симуляция и оценивание | Authored schedule, явные actions, deterministic score, validators, debrief gate | Случайность, `/check`, подсказки и score до debrief |
+| `rp` | Ролевая игра с проверками | Intent, D20, skills, modifiers, blockers, check records, RP living story memory | LLM не может изменить рассчитанный outcome |
+| `novel` | Совместный роман | Непрерывная проза, directorial input, state boundary patch без броска; chapters/raw без RP story memory | Dice, DC, skills, игровые меню, захват agency |
+| `training` | Учебная симуляция и оценивание | Authored schedule, явные actions, deterministic score, validators, debrief gate; прежний memory path без RP story memory | Случайность, `/check`, подсказки и score до debrief |
 
 Пользователь выбирает режим явно при создании Party. WorldPack объявляет только:
 

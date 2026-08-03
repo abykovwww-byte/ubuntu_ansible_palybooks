@@ -221,6 +221,12 @@ rp_stack_party_memory_prompt_max_chars: 60000
 rp_stack_party_memory_retrieval_enabled: true
 rp_stack_party_memory_retrieval_limit: 3
 rp_stack_party_memory_retrieval_max_chars: 9000
+rp_stack_rp_story_memory_update_turns: 4
+rp_stack_rp_story_memory_batch_tokens: 6000
+rp_stack_rp_story_memory_max_tokens: 6000
+rp_stack_rp_story_memory_max_chars: 24000
+rp_stack_rp_story_memory_prompt_max_chars: 24000
+rp_stack_rp_story_memory_reserve_tokens: 10000
 rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 docker_apps:

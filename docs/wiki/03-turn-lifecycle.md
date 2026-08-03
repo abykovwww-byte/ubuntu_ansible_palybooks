@@ -136,7 +136,9 @@ Draft может быть быстрым детерминированным ил
 
 ## Фоновые задачи
 
-После сохранения хода Gateway планирует long-term memory как service job. По умолчанию она выполняется вне latency path: пользователь получает уже сохранённый ответ, пока helper продолжает работу. Jobs имеют статус, retry policy и восстанавливаются после перезапуска. Старый тип `journal` распознаётся только как terminal no-op, чтобы задачи от прежних версий не зацикливались.
+После сохранения хода Gateway всегда планирует episodic `memory` как service job. Только для `scenario_type=rp` рядом ставится второй job `rp_story_memory`, который после четырёх новых ходов обновляет кумулятивный living snapshot. В `training` и `novel` этот job не создаётся.
+
+Обе задачи выполняются вне latency path: пользователь получает уже сохранённый ответ, пока helper продолжает работу. Jobs имеют статус, retry policy и восстанавливаются после перезапуска. Ошибка story-memory updater не откатывает ход и не изменяет canonical state. Старый тип `journal` распознаётся только как terminal no-op, чтобы задачи от прежних версий не зацикливались.
 
 ## Код
 
@@ -145,4 +147,5 @@ Draft может быть быстрым детерминированным ил
 - [Narrative client](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
 - [Validator](../../roles/apps/files/rp-stack/rp-gateway/app/services/validator.py)
 - [State store](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
+- [RP story memory](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
 - [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)

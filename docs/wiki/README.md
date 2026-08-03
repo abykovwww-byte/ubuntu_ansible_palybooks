@@ -2,11 +2,14 @@
 
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр, совместного романа и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki проверена 3 августа 2026 года. Она отделяет фактический runtime от
-принятой, но ещё не реализованной архитектуры. Интерактивные training artifacts
-из revision `8b8a8fe` применены на `abykovserv` и прошли контейнерные, HTTP/API и
-браузерные live-проверки; независимые флаги links/workspace и рабочий диск пока
-описаны только в [Decision 015](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md).
+Эта Wiki проверена 3 августа 2026 года и отделяет source revision от фактического
+runtime. RP-only living story memory реализована в исходном коде и описана в
+[Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
+но статус push, Ansible apply и live verification всегда сообщается отдельно.
+Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
+и прошли контейнерные, HTTP/API и браузерные live-проверки; независимые флаги
+links/workspace и рабочий диск пока описаны только как принятая архитектура в
+[Decision 015](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md).
 
 ## Главное за минуту
 
@@ -27,7 +30,7 @@ flowchart LR
 - **LLM не определяет факты мира.** Сначала Gateway вычисляет результат и state patch, затем модель описывает уже зафиксированный `AUTHORITATIVE_OUTCOME`.
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
-- **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а state остаётся отдельным авторитетным слоем.
+- **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push GitHub -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
 
 ## Текущие сервисы
@@ -47,7 +50,7 @@ SillyTavern не входит в текущий Compose RP Stack. Lorebook JSON 
 2. [Интерфейсы](02-interfaces.md) — Light GUI, Showroom, админка и compatibility API.
 3. [Жизненный цикл хода](03-turn-lifecycle.md) — от сообщения игрока до state, валидации и фоновых задач.
 4. [WorldPacks и режимы](04-worldpacks-and-modes.md) — структура миров, `rp` / `novel` / `training`, публичность.
-5. [Память, контекст и retrieval](05-memory-and-retrieval.md) — главы, raw history, lore, NPC и отсутствие embeddings.
+5. [Память, контекст и retrieval](05-memory-and-retrieval.md) — RP story memory, главы, raw history, бюджеты, lore, NPC и отсутствие embeddings.
 6. [Модели и провайдеры](06-models-and-providers.md) — narrator, служебная модель, BYOK и local Gemma.
 7. [Обучение, автотесты и датасеты](07-training-autotests-datasets.md) — детерминированный scoring, ветки и SFT JSONL.
 8. [Данные, изоляция и безопасность](08-data-and-security.md) — SQLite, сессии, секреты, cookies и риски.

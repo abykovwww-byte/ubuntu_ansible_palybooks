@@ -13,6 +13,7 @@ Party = WorldPack
       + ScenarioType
       + CanonicalState
       + TurnHistory
+      + RPStoryMemory (только scenario_type=rp)
 ```
 
 Браузер хранит cookie сессии и последнее выбранное представление. Он не является владельцем state, prompt history или provider key.
@@ -54,7 +55,7 @@ Gateway не публикует host port. Снаружи доступны то�
 | Gateway | Auth, party scope, state, history, правила, LLM routing, snapshots и события artifacts, branches, datasets | Верстку интерфейсов и ручное хранение секретов в браузере |
 | WorldPack | Неизменяемый замысел мира, seed, prompts, authored training schedule, site blueprints и interaction policy | Выбор модели, party owner, runtime state конкретного прохождения |
 | Narrator LLM | Финальная сцена, диалог и разрешённые текстовые поля artifact | Истину state, HTML/CSS/JS, scoring, права, выбор режима |
-| Service model | Память, world-state drafts, генерация персонажей | Обычное ведение партии и использование party BYOK |
+| Service model | Эпизодические главы, RP-only living story memory, world-state drafts, генерация персонажей | Обычное ведение партии, изменение canonical state и использование party BYOK |
 | Ansible | Доставка source/config/Compose на сервер | Игровое состояние и данные пользователей |
 
 ## Слои данных
@@ -66,6 +67,7 @@ flowchart LR
     PS --> SV["State versions"]
     PS --> Turns["Raw turns"]
     Turns --> Mem["Memory chapters"]
+    Turns --> Story["RP-only story-memory snapshots"]
     Turns --> Journal["Legacy journal records"]
     Turns --> Dataset["Review overlay / JSONL"]
     PS --> Branch["Checkpoint branch"]
@@ -80,6 +82,7 @@ flowchart LR
 - **State versions** — история версий для rollback и audit.
 - **Raw turns** — первичный журнал сообщений и фактических LLM-вызовов.
 - **Memory chapters** — сжатые эпизоды для narrator prompt, но не замена raw history.
+- **RP story memory** — кумулятивный реестр длинной RP-кампании; не создаётся для `novel` и `training` и не является authority.
 - **Legacy journal** — сохранённые записи прежних версий; текущий runtime их не генерирует.
 - **Dataset labels** — отдельная кураторская разметка; она не переписывает игру.
 - **Training artifact snapshot** — валидированный экземпляр шаблона с публичным текстом narrator; произвольный HTML модели не исполняется.

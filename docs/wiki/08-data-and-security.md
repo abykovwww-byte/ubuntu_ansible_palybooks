@@ -23,7 +23,7 @@ SQLite используется несколькими service stores, но scop
 | Identity | `users`, `sessions`, `global_settings` |
 | Party registry | `worldpacks`, `player_characters`, `model_profiles`, `parties` |
 | State/history | `campaigns`, `state_versions`, `turns`, `checks`, `state_patches`, `audit_events` |
-| Memory | `memory_chapters`, legacy `memory_summaries`, `journal_entries`, `lore_cards`, `service_jobs` |
+| Memory | `rp_story_memory_snapshots`, `memory_chapters`, legacy `memory_summaries`, `journal_entries`, `lore_cards`, `service_jobs` |
 | Reliability | `turn_requests`, `memory_checkpoints`, `party_branches`, `autotest_runs` |
 | Dataset | `dataset_turn_labels`, `turn_feedback` |
 | Showroom | `showroom_scenarios`, `showroom_visitors`, `showroom_runs` |
@@ -38,7 +38,8 @@ flowchart TB
     U --> P["Parties"]
     P --> K["Party BYOK"]
     P --> C["state_campaign_id"]
-    C --> T["Turns / checks / memory / legacy journal"]
+    C --> T["Turns / checks / chapters / legacy journal"]
+    C --> RPS["RP-only story-memory snapshots"]
     C --> B["Branch campaign IDs"]
     C --> TA["Training artifact snapshots / events"]
 
@@ -49,6 +50,8 @@ flowchart TB
 Обычный API получает owner из Gateway session. `PartyStore` фильтрует parties и characters по `owner_user_id`; `StateStore` — по `state_campaign_id`. Admin role даёт административные операции, но сама игра всё равно адресуется конкретной Party.
 
 Showroom использует отдельный visitor token. Run доступен только cookie-владельцу; raw party ID не возвращается клиенту.
+
+`rp_story_memory_snapshots` всегда фильтруется по `state_campaign_id`. Updater получает NPC без поля `secrets`; в prompt narrator этот snapshot поступает только для RP-партии. Snapshot не имеет права менять canonical state и не создаётся для `training`.
 
 ## Безопасность training artifacts
 

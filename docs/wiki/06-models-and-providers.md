@@ -60,6 +60,7 @@ Fallback не должен перескочить на другого provider �
 | Repair невалидного narration | Narrator Party |
 | Journal summary | Не вызывается текущим runtime; сохранён только legacy storage/no-op job |
 | Long-term memory chapter | Глобальная service model |
+| RP living story-memory update | Глобальная service model, только `scenario_type=rp` |
 | LLM world-state draft | Глобальная service model |
 | Генерация/дополнение NPC | Глобальная service model |
 | Intent parsing и context estimation | Без LLM |
@@ -83,6 +84,8 @@ Cloud fallback: none inside local profile
 ```
 
 Модель и runner доступны только Gateway. Пока local runner доступен, local profile не переключается на cloud fallback. Если сохранённый глобальный выбор указывает на local model, но runner затем отключён конфигурацией, service runtime имеет отдельный stack-managed NVIDIA fallback для сохранения работоспособности; party BYOK для него всё равно не используется.
+
+Окна 32768 tokens достаточно для RP story-memory updater: предыдущий snapshot ограничен 24000 символов, state excerpt — 8000 символов, новый turn batch — примерно 6000 input tokens, output — 6000 tokens. Это отдельный служебный запрос; полный narrator prompt на 132k в Gemma не передаётся.
 
 Основной объём GGUF может отражаться как mmap/GPU/UMA memory, поэтому `docker stats` не показывает всю фактическую нагрузку в RSS контейнера.
 

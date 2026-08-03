@@ -24,6 +24,9 @@ learning scenarios. Use `abykovserv-iac-deploy` for GitHub and live server work.
 - Preserve player agency and treat canonical state and Gateway outcomes as final.
 - Keep raw turns durable and party-scoped. Memory chapters are chronological
   context, not a substitute for state.
+- Keep the cumulative `RP_STORY_MEMORY` layer strictly limited to
+  `scenario_type == "rp"`. Do not enqueue it, inject it into prompts, reserve
+  context for it, or expose its controls for `novel` or `training`.
 
 ## Intake
 
@@ -78,9 +81,22 @@ Prompt rules:
 - `novel`: no dice, checks, difficulty, result labels, or game menus; prioritize
   collaborative prose, character voice, continuity, pacing, and consent.
 
-Prompt order remains scenario contract, world system, author note, episodic
-chapters, recent raw turns, relevant characters, dynamic state,
-`AUTHORITATIVE_OUTCOME`, and current player action.
+Long-party memory has four distinct roles:
+
+1. Canonical state is the only current-fact and mechanics authority.
+2. RP living story memory is a bounded cumulative ledger of canon, abilities,
+   inventory, characters, active/resolved threads, hooks, current situation,
+   and chronology. It exists only for `rp` and never mutates state.
+3. Episodic chapters are immutable compressed ranges of older raw turns for
+   every scenario mode.
+4. Recent raw turns preserve verbatim immediate continuity and remain durable
+   even after they leave the narrator prompt.
+
+For `rp`, prompt order is scenario contract, world system, author note,
+`RP_STORY_MEMORY`, episodic chapters, lore/fallback/raw/retrieval, relevant
+characters, dynamic state, `AUTHORITATIVE_OUTCOME`, and current player action.
+For `novel` and especially `training`, omit the RP story layer and its token
+reserve while preserving the existing prompt path.
 
 ## Validate
 
@@ -93,6 +109,9 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 ```
 
 - Run Gateway tests when code or behavior changed.
+- When memory behavior changes, test RP activation plus negative `training`
+  and `novel` cases, prompt order, context budget, branch isolation, and secret
+  exclusion.
 - Scan narrowly for credentials and API-key-looking values.
 
 ## Deploy and present

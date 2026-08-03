@@ -118,6 +118,7 @@ ubuntu_ansible_palybooks/
 | `services/narrative.py` | Provider calls, prompt assembly, cache controls, model fallback |
 | `services/validator.py` | Проверка narration и training debrief |
 | `services/memory.py` | Immutable episodic chapters |
+| `services/rp_story_memory.py` | RP-only cumulative living-memory snapshots и service-model update |
 | `services/character_retrieval.py` | Выбор релевантных NPC без embeddings |
 | `services/world_instructor.py` | Draft/preview/apply контракт изменения мира |
 | `services/auth_store.py` | Users, sessions, provider keys, global settings |
@@ -132,7 +133,7 @@ ubuntu_ansible_palybooks/
 |---|---|
 | Новый endpoint | `rp-gateway/app/main.py`, schemas и tests |
 | Изменить обработку хода | `adjudicator.py`, `rule_engine.py`, `validator.py` |
-| Изменить prompt/memory | `narrative.py`, `memory.py`, `context_budget.py`, `state_store.py` |
+| Изменить prompt/memory | `narrative.py`, `memory.py`, `rp_story_memory.py`, `context_budget.py`, `state_store.py` |
 | Изменить Light GUI | `rp-light-gui/index.html`, `app.js`, `styles.css` |
 | Изменить Showroom | `rp-showcase-gui/` и `showroom.py` |
 | Изменить training artifacts | `training_artifacts.py`, `ui-shared/`, оба UI и WorldPack contract |
@@ -175,6 +176,7 @@ pytest
 
 ```bash
 node --check app.js
+node character-editor.test.js
 node structured-content.test.js
 node training-artifacts.test.js
 ```
