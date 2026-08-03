@@ -3,6 +3,12 @@
 Use this contract only for deterministic training worlds that need simulated
 sites opened from authored emails or messenger messages.
 
+The contract declares support, not activation. A Showroom scenario enables it
+with `interactive_links_enabled`; the run snapshots that flag. When the flag is
+false, Gateway must omit the narrator site contract and public snapshots,
+reject site events, and follow the authored capability-off path. Do not infer
+permission from `manifest.training_artifacts` alone.
+
 ## Manifest and files
 
 Add:
@@ -54,6 +60,10 @@ scenario. Owning ten reusable blueprints does not mean scheduling ten sites or
 putting a URL in every response. On a non-site turn, the structured message
 must carry the scenario's explicit no-link value and the narration must contain
 no URL. Add validation and fallback tests for the exact link-bearing turn set.
+Also author a complete links-disabled path for every Showroom scenario that is
+allowed to uncheck the capability. It may retain an ordinary non-clickable URL
+only when that exact text is authored and unscored; it must not materialize a
+site or accept a site event.
 
 `link_opened` is policy-dependent. `credentials_submitted` is emitted when any
 configured credential field is non-empty and submit is pressed; its contents
@@ -93,6 +103,8 @@ Reject:
 - server-only policy copied into public blueprint, prompts or state;
 - only hostile links being interactive;
 - any design requiring a second LLM call when the simulated site opens.
+- a Showroom-publishable optional site schedule without a coherent
+  links-disabled fallback.
 
 ## Acceptance matrix
 
@@ -105,6 +117,9 @@ Static and focused checks:
   suite;
 - verify duplicate event IDs return the saved result, while reuse with a
   different payload is rejected.
+- verify `interactive_links_enabled=false` suppresses prompt contracts,
+  snapshots and event ingestion even when the WorldPack owns a valid catalog;
+  verify scenario edits do not change an active run snapshot.
 
 Container and live checks after deployment:
 

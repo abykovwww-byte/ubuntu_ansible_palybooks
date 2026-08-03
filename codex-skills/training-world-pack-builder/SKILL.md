@@ -1,6 +1,6 @@
 ---
 name: training-world-pack-builder
-description: Build or update deterministic scored learning world packs for the SillyTavern/rp-gateway/Light GUI stack, including interactive simulated or phishing sites with LLM-filled visible slots and typed browser-event scoring. Use when Codex needs to create a simulation, scenario-based exercise, awareness course, assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, output-validator contract, or training landing-page interaction. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
+description: Build or update deterministic scored learning world packs for the SillyTavern/rp-gateway/Light GUI stack, including independently optional interactive links and department workspaces with static or dynamic files, LLM-filled visible slots, and typed browser-event scoring. Use when Codex needs to create a simulation, scenario-based exercise, awareness course, assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, training site, phishing file, workspace, output-validator contract, or training landing-page interaction. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
 ---
 
 # Training World Pack Builder
@@ -23,6 +23,10 @@ Gateway mechanics or deploy directly.
 - Treat the stored learner name, profession and responsibilities as mandatory scenario input when the user supplies them. Make authored work requests observably change when that profile changes; do not replace it with a generic department, invented backlog or random corporate project.
 - Orient before asking for retrospective context. The first turn must provide enough situation, task ownership and a bounded decision for a new learner to act. A request for a weekly recap, backlog reconstruction or work plan is appropriate only after the scenario has established the work it refers to.
 - Schedule links intentionally. A reusable site catalog is capacity, not a requirement to place a URL in every narrator response. Mark link-bearing turns explicitly and require a no-link value in the structured output on every other turn.
+- Treat interactive links and the interactive workspace as independent optional capabilities. A Showroom scenario may enable neither, either one, or both. A catalog means support, while the scenario/run snapshot grants permission. Never infer enablement from catalog presence or let narrator/browser output activate a disabled capability.
+- Author a complete capability-off path for every optional interaction surface. Disabling links or the workspace must leave the training coherent, assessable, and free of correctness cues; if that is impossible, declare the capability required instead of presenting an editable checkbox.
+- Treat workspace actions as immutable sub-turn events. Opening, downloading, reporting, or enabling authored active content must not call an LLM or advance the schedule. File availability follows an authored lifecycle across turns; site events retain their narrower authored-surface ownership checks.
+- Keep phishing/safe file classification, score mappings and answer keys server-only. Public file snapshots contain only player-visible content and neutral actions.
 - Do not embed a gameplay model, credentials, real secrets, personal data, exploit payloads, or operationally harmful instructions in a pack.
 - Keep the pack defensive, fictionalized, and safety-bounded for security, medical, legal, or other high-stakes topics. Escalate any need for real policy or regulated content to the user.
 - Use `abykovserv-iac-deploy` for GitHub + Ansible deployment; never make durable `/srv` or `/opt` edits by hand.
@@ -35,9 +39,14 @@ Ask only for missing information, at most three questions at once:
 2. Scenario duration and schedule: number of turns, decision surfaces, and exact debrief point.
 3. Assessment rubric: observable actions, score/state fields, pass conditions, and feedback style at debrief.
 
-Also ask whether the world needs interactive simulated sites. When enabled and
-the user does not choose another size, author ten reusable site blueprints and
-read `references/site-artifacts-contract.md` before writing them.
+Ask separately whether the world supports interactive simulated links and an
+interactive department workspace. These are independent capabilities. When
+links are supported and the user does not choose another size, author ten
+reusable site blueprints and read `references/site-artifacts-contract.md`.
+When a workspace is supported, read
+`references/workspace-artifacts-contract.md` and establish static folders,
+resource classification, dynamic file schedule, file events, scoring and both
+capability-off paths before writing artifacts.
 
 Also establish audience level, permitted fictionalization, language, accessibility
 or content constraints, and whether the user requests draft-only. If proceeding
@@ -52,6 +61,7 @@ Before editing, inspect the actual nested IaC repo and read:
 - `docs/decisions/007-light-gui-party-memory.md`, `009-long-context-memory-policy.md`, and `010-party-scenario-types.md`;
 - `references/training-contract.md` when authoring or reviewing the deterministic schedule, scoring, memory, and debrief contracts;
 - `references/site-artifacts-contract.md` when the world contains links that open simulated sites;
+- `references/workspace-artifacts-contract.md` when the world contains a department workspace or scored files;
 - the state schema, existing manifests, and `inventories/local/group_vars/server.yml`.
 
 Verify paths with `rg --files`. Default source location:
@@ -98,6 +108,23 @@ Keep the schedule sparse enough to remain plausible for the scenario. On every
 non-site turn, require the structured message's link field to say that there is
 no link and forbid URLs elsewhere in the narration; never let the model infer a
 portal link merely because the simulator capability exists.
+
+For an interactive-workspace world, also create
+`artifacts/workspace/folders.json`, `artifacts/workspace/files/index.json`,
+versioned file blueprints, and server-only
+`rules/workspace-interactions.json`. WorldPack folder and file IDs, renderer,
+media family, lifecycle, phishing classification and score mapping are authored;
+the narrator may fill only declared visible slots. Provide complete fallbacks
+for files materialized at party start and on later turns. Real organization
+documents are versioned Showroom resources bound to stable folder IDs, not
+committed into a public WorldPack by default and not sent to the narrator unless
+an explicit reviewed retrieval policy permits it.
+
+For every Showroom-publishable training world, document whether each supported
+capability is optional or required. Optional links and workspace must each have
+a coherent disabled schedule/fallback. Do not create four copies of the
+WorldPack; the Showroom scenario stores two independent booleans and the run
+snapshots the chosen combination.
 
 Set `manifest.player_role`; make `scenario_types.recommended` and the only
 supported type `training`. Keep `rules/checks.md` as the deterministic
@@ -175,6 +202,8 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 - Test deterministic paths: initial turn header; one explicit action updates only expected state; `/check` is rejected; no score/hint leaks before debrief; debrief output includes planned explanation; party and memory isolation hold.
 - Test at least two materially different player profiles and prove the opening task and later work requests change accordingly. Exercise the validation-failure fallback too; it must use the same stored profile rather than reverting to generic corporate copy.
 - Assert the exact authored set of link-bearing turns. For every other turn, reject both a non-empty structured link field and any URL in free text; the presence of a site catalog must not make links ubiquitous.
+- Exercise the four capability combinations when both contracts are supported: neither, links only, workspace only, and both. Reject enabled capabilities unsupported by the manifest and reject both flags for `rp`/`novel`.
+- Verify capability-off paths remain playable, do not materialize disabled snapshots, reject disabled event endpoints, and do not leak an answer cue through missing UI affordances.
 - Test output templates and relevant validator rules. If generic Gateway validation cannot enforce a requested course contract, declare the gap and add code/tests only with user approval.
 - Confirm `corporate_portal.characters` contains at most five unique IDs; every dynamic card uses `{employee_position}` and every portal character is used by the authored scenario.
 - Confirm `showroom_result.metric` is `state_path`, its `state_path` resolves to a numeric canonical-state field, and the field is updated only by the authored deterministic scoring contract.
@@ -183,12 +212,21 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
   IDs, unknown renderer/theme/slot/action, unsafe URL or markup, missing
   fallback, missing scheduled reference, missing score rule, and public policy
   leakage are hard failures.
+- For workspace artifacts, run the checks in
+  `workspace-artifacts-contract.md`: folder/file ID integrity, lifecycle,
+  renderer/media allowlists, immutable revisions, resource classification,
+  fallback completeness, hidden-policy separation and event-to-score coverage
+  are hard failures.
 - Run the complete static, container and browser acceptance matrix in
   `site-artifacts-contract.md`. At minimum prove idempotent event recording,
   zero LLM/schedule advancement for sub-turn events, no field values in request
   or storage, atomic next-turn consumption, score-once behavior, history
   restoration, deterministic provider fallback, shared renderer MIME/CSP, and
   equivalent Light GUI/Showroom behavior.
+- Prove a run snapshots both `interactive_links_enabled` and
+  `interactive_workspace_enabled`; editing the scenario later must not alter
+  the active run. Keep leaderboard, autotest and dataset results partitionable
+  by the two flags.
 
 ## IaC and Delivery
 
@@ -208,6 +246,10 @@ submit or report, and the following scoring turn. Inspect typed evidence and
 canonical counters without publishing raw DB rows or any field values. Record
 provider errors separately from artifact behavior; a successful deterministic
 fallback does not make the provider error disappear.
+For interactive workspaces, also verify initial static folders, one dynamic
+file, immutable history restoration, an idempotent scored file event, absence
+of phishing classification in public responses, and rejection of restricted
+resources in anonymous Showroom. Opening a file must add no narrator request.
 If SSH/sudo/network blocks the apply, report the committed/pushed state and
 the exact remaining server-side action; do not claim it is live.
 

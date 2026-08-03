@@ -40,6 +40,25 @@ WorldPack сам связывает публичный результат с num
 
 Corporate portal — только presentational snapshot. Он не содержит schedule, rubric или скрытые ответы.
 
+### Планируемые capability dimensions
+
+После реализации каждый run, leaderboard result, autotest и dataset record
+должен содержать обе training-only dimensions:
+
+```json
+{
+  "interactive_links_enabled": true,
+  "interactive_workspace_enabled": false
+}
+```
+
+Результаты разных комбинаций нельзя молча смешивать: рабочий диск может давать
+подсказки и менять сложность. Для фишингового файла public snapshot не содержит
+классификацию; server-only policy превращает `file_opened` в score-once evidence.
+Поздний `file_reported` добавляет новый факт, но не удаляет уже совершённое
+небезопасное открытие. Это запланировано в Decision 015 и ещё не работает в
+текущем runtime.
+
 ## LLM-vs-LLM autotests
 
 Администратор может запустить до 30 автоматических player turns. Auto-player выбирается независимо от narrator и поддерживает OpenRouter или Local Gemma.
@@ -152,3 +171,4 @@ PUT       /api/showroom/runs/{run_id}/turns/{turn_id}/feedback
 - [Autotest service](../../roles/apps/files/rp-stack/rp-gateway/app/services/autotest.py)
 - [Party and dataset store](../../roles/apps/files/rp-stack/rp-gateway/app/services/party_store.py)
 - [Interactive artifact ADR](../../roles/apps/files/rp-stack/docs/decisions/014-interactive-training-site-artifacts.md)
+- [Training capability ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)

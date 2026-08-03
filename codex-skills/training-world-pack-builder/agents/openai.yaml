@@ -1,4 +1,4 @@
 interface:
   display_name: "Training World Builder"
-  short_description: "Build scored training worlds and simulated sites"
-  default_prompt: "Use $training-world-pack-builder to create a deterministic scored RP Gateway training world with optional interactive simulated sites."
+  short_description: "Build scored worlds with links and workspaces"
+  default_prompt: "Use $training-world-pack-builder to create a deterministic scored RP Gateway training world with independently optional interactive links and a department workspace."

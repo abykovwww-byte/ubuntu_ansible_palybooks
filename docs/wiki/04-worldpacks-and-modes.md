@@ -109,6 +109,35 @@ WorldPack заранее содержит ограниченный набор т
 
 Оба интерфейса используют один статический renderer из `ui-shared/`. Blueprint определяет стиль, структуру, поля формы и разрешённые действия; модель не генерирует HTML, CSS, JavaScript, URL назначения или scoring policy.
 
+## План: поддержка links и workspace как независимых capabilities
+
+> Статус: новая активация и workspace contract ещё не реализованы.
+
+Детальный контракт означает, что мир поддерживает capability:
+
+- `manifest.training_artifacts` — интерактивные ссылки;
+- `manifest.training_workspace` — интерактивный рабочий диск.
+
+Второй список boolean-флагов в manifest не добавляется: он мог бы разойтись с
+детальными файлами. Showroom scenario выбирает разрешённое подмножество, а run
+фиксирует выбор. Если capability опциональна, WorldPack обязан содержать
+полноценный capability-off путь, чтобы обучение оставалось проходимым.
+
+Планируемая workspace-часть пакета:
+
+```text
+artifacts/workspace/
+├── folders.json
+├── files/index.json
+└── files/<blueprint>.json
+rules/workspace-interactions.json
+```
+
+WorldPack владеет стабильными folder/file IDs, renderer, lifecycle, LLM slots,
+fallback и server-only scoring policy. Реальные документы организации не
+коммитятся в публичный WorldPack по умолчанию: Showroom связывает versioned
+resource revision со стабильным `folder_id`, а run фиксирует точную версию.
+
 ## Создание миров
 
 В репозитории есть два специализированных skill-контракта:
@@ -129,3 +158,4 @@ Light GUI может создать простой private WorldPack из тек
 - [Scenario type ADR](../../roles/apps/files/rp-stack/docs/decisions/010-party-scenario-types.md)
 - [RP builder skill](../../codex-skills/rp-world-pack-builder/SKILL.md)
 - [Training builder skill](../../codex-skills/training-world-pack-builder/SKILL.md)
+- [Training capability ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)

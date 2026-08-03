@@ -2,7 +2,11 @@
 
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр, совместного романа и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki описывает фактический `main` репозитория на 31 июля 2026 года. Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv` и прошли контейнерные, HTTP/API и браузерные live-проверки; подробный snapshot приведён в разделе [«Эксплуатация»](09-operations-and-repository.md#live-verification-интерактивных-training-artifacts).
+Эта Wiki проверена 3 августа 2026 года. Она отделяет фактический runtime от
+принятой, но ещё не реализованной архитектуры. Интерактивные training artifacts
+из revision `8b8a8fe` применены на `abykovserv` и прошли контейнерные, HTTP/API и
+браузерные live-проверки; независимые флаги links/workspace и рабочий диск пока
+описаны только в [Decision 015](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md).
 
 ## Главное за минуту
 
@@ -63,6 +67,9 @@ SillyTavern не входит в текущий Compose RP Stack. Lorebook JSON 
 
 - семантический RAG через embeddings и vector database;
 - динамические варианты ответа игрока — пока только архитектурная идея, не API и не UI;
+- две независимые training-only галки Showroom
+  `interactive_links_enabled` / `interactive_workspace_enabled`, snapshot этих
+  флагов в run и интерактивный рабочий диск со статическими/динамическими файлами;
 - встроенный GitHub Wiki-репозиторий — эта Wiki хранится в `docs/wiki/`, потому что `ubuntu_ansible_palybooks.wiki.git` ещё не инициализирован.
 
 ## Источники истины

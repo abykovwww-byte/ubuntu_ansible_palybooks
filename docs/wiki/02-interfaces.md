@@ -79,6 +79,30 @@ sequenceDiagram
 
 Администратор не получает raw API key через публичный API: ответ содержит метаданные и последние четыре символа.
 
+### Планируемые галки training-сценария
+
+> Статус: UI и API ещё не реализованы.
+
+После выбора `Тип сценария = Training` редактор Showroom должен показывать две
+независимые галки:
+
+```text
+[ ] Подключить интерактивные ссылки
+[ ] Подключить интерактивный диск
+```
+
+Для `rp` и `novel` они скрыты или заблокированы и всегда сохраняются как
+`false`. Gateway, а не браузер, проверяет поддержку выбранным WorldPack. Один
+сценарий хранит одну комбинацию; четыре копии мира и автоматические четыре
+карточки не создаются. Для сравнения режимов администратор может опубликовать
+несколько сценариев, ссылающихся на один WorldPack.
+
+При старте Gateway копирует `interactive_links_enabled` и
+`interactive_workspace_enabled` в run. Последующее редактирование сценария не
+меняет уже начатую тренировку. Рабочая папка появляется в пользовательском UI
+только при включённом snapshot-флаге; ссылки аналогично получают интерактивный
+site snapshot только при включённом флаге.
+
 ## Compatibility API
 
 Gateway сохраняет OpenAI-compatible `/v1/chat/completions` и legacy single-campaign endpoints. Они нужны для интеграций и отладки, но не должны становиться основой новых функций.
@@ -96,4 +120,5 @@ Gateway сохраняет OpenAI-compatible `/v1/chat/completions` и legacy si
 - [Light GUI](../../roles/apps/files/rp-stack/rp-light-gui)
 - [Showroom](../../roles/apps/files/rp-stack/rp-showcase-gui)
 - [Showroom ADR](../../roles/apps/files/rp-stack/docs/decisions/012-public-showroom-scenarios.md)
+- [Training capabilities ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
 - [Gateway endpoints](../../roles/apps/files/rp-stack/rp-gateway/app/main.py)

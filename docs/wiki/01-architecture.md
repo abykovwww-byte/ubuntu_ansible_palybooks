@@ -99,6 +99,32 @@ flowchart LR
 
 После LLM-вызова Gateway валидирует текст, при необходимости просит исправление, применяет patch и сохраняет turn, request status и audit. Поэтому модель может красиво описать исход, но не заменить его другим.
 
+## План: независимые training capabilities
+
+> Статус: архитектура принята, runtime ещё не реализован.
+
+Showroom-сценарий получит две независимые training-only настройки:
+интерактивные ссылки и интерактивный рабочий диск. Наличие site/workspace
+контракта в WorldPack будет означать поддержку, но не автоматическое включение.
+Gateway проверит выбор и сохранит обе галки в immutable snapshot каждого run.
+
+```mermaid
+flowchart LR
+    WP["Training WorldPack\nsite/workspace contracts"] --> Gate["Gateway capability gate"]
+    Admin["Showroom admin\nlinks + workspace"] --> Gate
+    Gate --> Run["Run snapshot\n00 / 10 / 01 / 11"]
+    Run -->|"links"| Site["TrainingArtifactService"]
+    Run -->|"workspace"| Disk["TrainingWorkspaceService"]
+    Site --> Rules["Normalized typed evidence"]
+    Disk --> Rules
+    Rules --> Score["RuleEngine / canonical score"]
+```
+
+`TrainingWorkspaceService` планируется как логический модуль Gateway, а не
+новый синхронный контейнер. Открытие папки, файла или сайта останется
+SQLite/JSON-операцией без LLM. Отдельный фоновый worker допустим только для
+предварительной проверки и конвертации загружаемых документов.
+
 ## Основные границы совместимости
 
 Текущий Compose содержит `rp-gateway`, `rp-light-gui`, `rp-showcase-gui` и опциональный `rp-local-llm`. SillyTavern-контейнера в нём нет.
@@ -115,4 +141,5 @@ flowchart LR
 
 - [Decision 006 — party flow](../../roles/apps/files/rp-stack/docs/decisions/006-light-gui-party-flow.md)
 - [Decision 010 — scenario types](../../roles/apps/files/rp-stack/docs/decisions/010-party-scenario-types.md)
+- [Decision 015 — training interaction capabilities](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
 - [Compose](../../roles/apps/templates/rp-stack.compose.yml.j2)

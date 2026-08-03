@@ -140,6 +140,22 @@ ubuntu_ansible_palybooks/
 | Новый training мир | `worldpacks/<slug>/` и `training-world-pack-builder` |
 | Runtime/env/ports | `server.yml`, Compose/env templates |
 
+### Планируемая зависимость training workspace
+
+Decision 015 пока не меняет Compose и не требует Ansible apply. Будущая
+реализация двух capability-флагов затронет Gateway schemas/ShowroomStore,
+snapshot run, `TrainingArtifactService`, новый логический
+`TrainingWorkspaceService`, StateStore, Showroom UI, shared safe renderers,
+training builder contract и четыре комбинации тестов.
+
+Новый контейнер не нужен для обычных JSON-файлов. Отдельный asynchronous worker
+и новые persistent data paths допускаются только если будет одобрена загрузка и
+предварительная конвертация реальных Office/PDF-ресурсов; это отдельное IaC
+изменение, а не часть latency path открытия файла.
+
+- [Decision 015](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
+- [Plan 015](../../roles/apps/files/rp-stack/docs/plans/015-training-scenario-interaction-capabilities.md)
+
 ## Проверки
 
 Минимальный локальный набор для documentation-only change:
