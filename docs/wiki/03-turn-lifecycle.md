@@ -10,7 +10,8 @@ sequenceDiagram
     participant API as Gateway API
     participant Store as StateStore
     participant Rules as Intent + RuleEngine
-    participant Art as TrainingArtifactService
+    participant Runtime as TrainingRuntimeService
+    participant Art as Site / Workspace services
     participant LLM as Narrator LLM
     participant Val as OutputValidator
     participant Jobs as Service jobs
@@ -18,16 +19,21 @@ sequenceDiagram
     UI->>API: player message + idempotency key
     API->>Store: begin_turn_request
     Store-->>API: acquired / running / completed
-    API->>Store: state + history + memory + lore
-    API->>Art: pending typed events + expected artifact contract
+    API->>Store: state + history + memory + runtime snapshot
+    API->>Art: pending typed events
     Art-->>API: deterministic evidence
-    API->>Rules: resolve(state, action, scenario_type, evidence)
+    API->>Rules: resolve(state, action, scenario_type, evidence, runtime)
+    Rules->>Runtime: generic detectors + effects + progression
+    Runtime-->>Rules: WorldPack-authored patch operations
     Rules-->>API: Outcome + StatePatch
-    API->>LLM: bounded prompt + AUTHORITATIVE_OUTCOME
+    API->>Runtime: active sanitized turn contract
+    API->>LLM: bounded prompt + outcome + active contract
     LLM-->>API: narration + optional artifact fields
     API->>Art: validate and materialize snapshot
-    API->>Val: validate(narration, outcome, state)
-    alt Нарушение контракта
+    API->>Val: validate narration + runtime surface
+    alt Новый training runtime: нарушение или provider failure
+        API->>Runtime: authored fallback текущего хода
+    else Обычный режим: допустим repair
         API->>LLM: compact repair: failed text + outcome + violations
         LLM-->>API: repaired narration
         API->>Val: validate again
@@ -53,7 +59,12 @@ sequenceDiagram
 
 Gateway проверяет owner, загружает `Party`, создаёт party-specific `StateStore` и строит runtime settings из выбранного model profile, scenario type и party BYOK.
 
-В prompt попадают только разрешённые слои: world prompts, memory chapters, budgeted raw history, lore cards, лексически найденные архивные сцены, релевантные NPC, state summary, outcome и текущее действие.
+В prompt попадают только разрешённые слои: универсальные правила режима, world
+prompts, memory chapters, budgeted raw history, lore cards, релевантные NPC,
+sanitized state summary, outcome и текущее действие. Для нового training runtime
+добавляется только текущий `ACTIVE_TRAINING_TURN_CONTRACT`: имя и роль игрока,
+текущая surface, явно разрешённые state paths и включённые interaction
+contracts. Score, assessment, fallback и будущие ходы до debrief не передаются.
 
 ### 3. Детерминированное решение
 
@@ -62,7 +73,12 @@ Gateway проверяет owner, загружает `Party`, создаёт par
 - `Outcome` — что разрешено и чем закончилась попытка;
 - JSON Patch — какие canonical fields должны измениться.
 
-В `rp` это может включать D20, skill, difficulty, modifiers и blockers. В `novel` случайных проверок нет. В `training` применяется authored schedule/scoring, включая накопленные типизированные события сайта, и продвигается ровно один предусмотренный turn.
+В `rp` это может включать D20, skill, difficulty, modifiers и blockers. В
+`novel` случайных проверок нет. В `training` универсальный RuleEngine передаёт
+текущую явную реплику и typed evidence в party snapshot
+`TrainingRuntimeService`. Детекторы, веса, evidence labels, aggregates и
+следующее окно берутся из WorldPack; Gateway не знает предмет курса и
+продвигает ровно один предусмотренный turn.
 
 ### 4. Narrator LLM
 
@@ -78,14 +94,18 @@ Gateway пробует primary model и разрешённые fallback models �
 
 ### 5. Валидация и repair
 
-`OutputValidator` проверяет соответствие state, outcome и режиму. При нарушении Gateway может выполнить один repair-вызов с конкретной инструкцией. Repair не повторяет полный prompt партии: в него входят только нарушенный текст, `AUTHORITATIVE_OUTCOME`, номер/окно текущего training-хода и, если нужен, artifact contract. История, memory и retrieval повторно модели не отправляются.
+`OutputValidator` проверяет соответствие state, outcome и режиму. Для `rp`,
+`novel` и legacy-training Gateway может выполнить один repair-вызов с
+конкретной инструкцией. Новый WorldPack runtime делает не более одного narrator
+вызова: невалидный ответ сразу заменяется fallback той же surface. Так latency
+не удваивается, а fallback не превращается в статический основной сценарий.
 
 Каждая попытка narrator ограничена настоящим wall-clock deadline через `asyncio.timeout`: лимит охватывает ожидание заголовков и чтение всего тела ответа, а не только паузу между сетевыми пакетами. Истечение deadline обрабатывается тем же безопасным timeout/fallback-контрактом, что и transport timeout.
 
 Если ответ снова невалиден:
 
 - для обычных `rp`/`novel` ход завершается ошибкой до применения state;
-- для разрешённых training/fallback сценариев Gateway может записать безопасный детерминированный текст, чтобы автопрогон не оборвался;
+- для WorldPack-runtime training Gateway записывает authored fallback того же хода, сохраняя surface, профиль и включённые capabilities;
 - причина, число вызовов и validator status попадают в metadata и audit.
 
 ### 6. Commit хода
@@ -119,7 +139,12 @@ narrator completion или из fallback. Открытие файла остан
 
 ## Старт партии
 
-`POST /api/parties/{party_id}/start` создаёт opening scene один раз. Для training-сценария Gateway также материализует первую authored window в state. Повторный start защищён history/idempotency и не должен создавать вторую начальную сцену.
+`POST /api/parties/{party_id}/start` создаёт opening scene один раз. Для мира с
+`training_runtime` Gateway валидирует и сохраняет immutable contract hash,
+материализует первую authored window и использует тот же one-call/fallback
+контракт при ошибке provider. Повторный start защищён history/idempotency и не
+создаёт вторую начальную сцену. Checkpoint branch копирует runtime snapshot,
+поэтому обновление source WorldPack не меняет уже начатое прохождение.
 
 ## GM world changes
 
@@ -151,3 +176,5 @@ Draft может быть быстрым детерминированным ил
 - [State store](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
 - [RP story memory](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
 - [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
+- [Training runtime](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_runtime.py)
+- [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)

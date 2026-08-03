@@ -13,6 +13,7 @@ Party = WorldPack
       + ScenarioType
       + CanonicalState
       + TurnHistory
+      + TrainingRuntimeSnapshot (если WorldPack объявил training_runtime)
       + RPStoryMemory (только scenario_type=rp)
 ```
 
@@ -52,8 +53,8 @@ Gateway не публикует host port. Снаружи доступны то�
 |---|---|---|
 | Light GUI | Чат, создание партии, GM-инструменты, Prompt Inspector, админка, безопасный рендеринг training artifacts | Правила, state, ключи провайдеров, долговременную память |
 | Showroom | Витрина, анонимный запуск, минимальный чат, portal, training artifacts, рейтинг | Прямой доступ к party ID, скрытый scoring, администрирование без Gateway role |
-| Gateway | Auth, party scope, state, history, правила, LLM routing, snapshots и события artifacts, branches, datasets | Верстку интерфейсов и ручное хранение секретов в браузере |
-| WorldPack | Неизменяемый замысел мира, seed, prompts, authored training schedule, site blueprints и interaction policy | Выбор модели, party owner, runtime state конкретного прохождения |
+| Gateway | Auth, party scope, state, history, универсальные интерпретаторы правил, LLM routing, snapshots и события artifacts, branches, datasets | Предметную программу обучения, верстку интерфейсов и ручное хранение секретов в браузере |
+| WorldPack | Неизменяемый замысел мира, seed, prompts, executable training program/assessment/fallbacks, site/workspace blueprints и interaction policy | Выбор модели, party owner, runtime state конкретного прохождения |
 | Narrator LLM | Финальная сцена, диалог и разрешённые текстовые поля artifact | Истину state, HTML/CSS/JS, scoring, права, выбор режима |
 | Service model | Эпизодические главы, RP-only living story memory, world-state drafts, генерация персонажей | Обычное ведение партии, изменение canonical state и использование party BYOK |
 | Ansible | Доставка source/config/Compose на сервер | Игровое состояние и данные пользователей |
@@ -63,7 +64,10 @@ Gateway не публикует host port. Снаружи доступны то�
 ```mermaid
 flowchart LR
     WP["WorldPack source\nGit, read-only runtime"] --> Seed["state-seed.json"]
+    WP --> Runtime["training program + assessment + fallbacks"]
+    Runtime --> RuntimeSnap["Immutable party runtime snapshot"]
     Seed --> PS["Изолированный Party State"]
+    RuntimeSnap --> PS
     PS --> SV["State versions"]
     PS --> Turns["Raw turns"]
     Turns --> Mem["Memory chapters"]
@@ -78,6 +82,7 @@ flowchart LR
 ```
 
 - **WorldPack** — шаблон. Он не изменяется во время партии.
+- **Training runtime snapshot** — хешированный executable-контракт программы, оценки и fallback; обновление source влияет только на новые партии.
 - **Party state** — текущие подтверждённые факты конкретного прохождения.
 - **State versions** — история версий для rollback и audit.
 - **Raw turns** — первичный журнал сообщений и фактических LLM-вызовов.
@@ -94,19 +99,23 @@ flowchart LR
 
 1. определяет владельца и партию;
 2. загружает state и историю именно этой party/branch;
-3. загружает неиспользованные типизированные события training artifacts;
+3. загружает immutable training-runtime snapshot и неиспользованные типизированные события training artifacts/workspace;
 4. интерпретирует текущую реплику;
-5. выполняет режимный Rule Engine;
+5. выполняет режимный Rule Engine; для нового training-контракта он интерпретирует WorldPack assessment без знания предметной области;
 6. получает `Outcome` и предварительный state patch;
-7. собирает ограниченный prompt и контракт ожидаемых artifacts.
+7. собирает ограниченный prompt, sanitized `ACTIVE_TRAINING_TURN_CONTRACT` и контракты только включённых artifacts/workspace.
 
-После LLM-вызова Gateway валидирует текст, при необходимости просит исправление, применяет patch и сохраняет turn, request status и audit. Поэтому модель может красиво описать исход, но не заменить его другим.
+После LLM-вызова Gateway валидирует текст, применяет patch и сохраняет turn,
+request status и audit. Обычные режимы могут использовать repair. Новый
+training runtime делает не более одного narrator-вызова и при нарушении
+переходит к fallback текущего WorldPack-хода. Поэтому модель может заново
+сформулировать сцену, но не заменить событие или score другим.
 
 ## Независимые training capabilities
 
 > Статус: runtime реализован в IaC; применение ревизии и live-проверка фиксируются отдельно.
 
-Showroom-сценарий получит две независимые training-only настройки:
+Showroom-сценарий имеет две независимые training-only настройки:
 интерактивные ссылки и интерактивный рабочий диск. Наличие site/workspace
 контракта в WorldPack будет означать поддержку, но не автоматическое включение.
 Gateway проверит выбор и сохранит обе галки в immutable snapshot каждого run.
@@ -120,7 +129,7 @@ flowchart LR
     Run -->|"workspace"| Disk["TrainingWorkspaceService"]
     Site --> Rules["Normalized typed evidence"]
     Disk --> Rules
-    Rules --> Score["RuleEngine / canonical score"]
+    Rules --> Score["WorldPack assessment\nчерез универсальный runtime"]
 ```
 
 `TrainingWorkspaceService` работает как логический модуль Gateway, а не
@@ -145,4 +154,5 @@ SQLite/JSON-операцией без LLM. Отдельный фоновый wor
 - [Decision 006 — party flow](../../roles/apps/files/rp-stack/docs/decisions/006-light-gui-party-flow.md)
 - [Decision 010 — scenario types](../../roles/apps/files/rp-stack/docs/decisions/010-party-scenario-types.md)
 - [Decision 015 — training interaction capabilities](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
+- [Decision 017 — WorldPack-owned training runtime](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
 - [Compose](../../roles/apps/templates/rp-stack.compose.yml.j2)

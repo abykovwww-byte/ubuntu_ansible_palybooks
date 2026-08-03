@@ -8,17 +8,25 @@ Training WorldPack не является обычным RP-миром с доб�
 
 - фиксированное число decision surfaces;
 - одно явное действие игрока на ход;
-- authored schedule и переходы;
+- `training/program.json` с authored schedule, surface validation, debrief и fallback;
+- `training/assessment.json` с наблюдаемыми detectors, effects и aggregates;
 - наблюдаемые score fields в canonical state;
 - output templates и validators;
 - точку debrief, до которой запрещены hints, correctness и remediation.
 
-Gateway не бросает dice и не делегирует LLM решение «правильно/неправильно». Модель оформляет сцену, а RuleEngine обновляет state по авторскому контракту.
+Gateway не бросает dice и не делегирует LLM решение
+«правильно/неправильно». Модель заново оформляет только активную сцену, а
+универсальный `TrainingRuntimeService` интерпретирует program/assessment
+WorldPack и обновляет state. Предметные слова, веса и fallback не находятся в
+Gateway.
 
 ```mermaid
 flowchart LR
-    Surface["Authored surface N"] --> Action["Явное действие игрока"]
-    Action --> Rules["Deterministic resolver"]
+    Pack["WorldPack runtime snapshot"] --> Surface["Active surface N"]
+    Surface --> LLM["One narrator call"]
+    LLM --> Valid["WorldPack validation or fallback"]
+    Valid --> Action["Явное действие игрока"]
+    Action --> Rules["Generic detectors + authored rules"]
     Rules --> Score["Canonical score/evidence"]
     Score --> Next["Surface N+1"]
     Next -->|"final gate"| Debrief["Debrief из state"]
@@ -26,13 +34,26 @@ flowchart LR
 
 Для интерактивного surface путь расширяется без второго LLM-вызова: narrator возвращает письмо и разрешённые текстовые slots сайта одним bundle, Gateway создаёт snapshot, а `opened` / `submitted` / `reported` становятся типизированным evidence следующего хода. Отправка непустой формы считается `fail` только там, где это задаёт authored policy конкретной surface; содержимое полей не проверяется и не сохраняется.
 
+Runtime-контракт хешируется и сохраняется на party. Branch копирует тот же
+snapshot. Обновление файлов мира не переписывает активное обучение. На каждом
+ходе prompt содержит только текущую surface, профиль игрока, разрешённый
+visible state и включённые interaction contracts; score, future turns и
+assessment появляются только в отдельном debrief.
+
 Live acceptance на `awareness-one-day` подтвердил полный путь: authored ход создал письмо и `corporate-sso` snapshot, Showroom открыл credential-form, Gateway принял `link_opened`, `credentials_submitted` и `site_closed`, а следующий ход атомарно пометил события consumed и добавил UI-evidence в canonical scoring. В тестовом fail-пути увеличились `credential-exposure`, `suspicious-artifacts-opened` и `unsafe-actions`; решение принял RuleEngine, не narrator.
 
 В `awareness-one-day` итоговая модель оценки разделена на безопасность, ролевую уместность и деловую коммуникацию. Основание начисления сохраняется по конкретному ходу, а итоговые категории сверяются с canonical state, чтобы narrator не мог придумать красивое, но ложное объяснение баллов.
 
-В authored расписании мира сайты появляются на ходах 2, 4, 6, 7, 8 и 9. Payment review, lookalike SSO, MFA confirmation и document approval проверяют безопасное поведение в рискованном контексте; project file share и meeting room являются легитимными поверхностями с тем же UI. Поэтому наличие кнопки «Открыть сайт» не раскрывает правильность решения.
+В authored расписании `awareness-one-day` сайты появляются только на ходах 4,
+6 и 9. Ходы 4 и 9 рискованные, ход 6 легитимный; остальные семь сообщений
+явно содержат `Ссылки: нет`. Одинаковое UI-affordance не раскрывает
+правильность решения, а отключённая links capability использует тот же
+WorldPack-authored no-link fallback.
 
-Недельный `awareness` использует тот же server-authoritative контракт, но своё расписание и прежний `player.resources.awareness-score`. Сайты появляются на ходах 1, 3, 5, 7, 8 и 9: project file share и HR survey легитимны, а lookalike SSO, MFA confirmation, support package и document approval рискованны. Ходы 2, 4, 6 и 10 остаются не-сайтовыми точками решения, поэтому симулятор не вытесняет социальную инженерию из почты, мессенджера и личного контекста.
+Недельный `awareness` сохраняет прежний `player.resources.awareness-score` и
+legacy compatibility resolver до отдельной миграции его программы. Сайты
+появляются на ходах 1, 3, 5, 7, 8 и 9. Новую предметную логику в legacy-ветку
+не добавляют: новые и мигрированные курсы используют `training_runtime`.
 
 ## Showroom и результат
 
@@ -82,7 +103,7 @@ gitGraph
 Run:
 
 1. создаёт checkpoint текущего head;
-2. копирует state, видимый turn prefix, checks, memory, journal и lore;
+2. копирует state, training runtime snapshot, видимый turn prefix, checks, memory, journal и lore;
 3. назначает branch-local IDs;
 4. пишет новые ходы только в branch;
 5. оставляет source Party доступной и неизменной;
@@ -106,6 +127,7 @@ Runs сохраняют status, requested/completed turns, fallback count, provi
 - authoritative outcome;
 - публичные artifact snapshots и потреблённые typed evidence без значений полей;
 - validator result, repair и fallback;
+- training runtime contract hash;
 - origin: human/main или autotest branch.
 
 Это operational log, а не автоматически хороший датасет.
@@ -175,3 +197,5 @@ PUT       /api/showroom/runs/{run_id}/turns/{turn_id}/feedback
 - [Party and dataset store](../../roles/apps/files/rp-stack/rp-gateway/app/services/party_store.py)
 - [Interactive artifact ADR](../../roles/apps/files/rp-stack/docs/decisions/014-interactive-training-site-artifacts.md)
 - [Training capability ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
+- [WorldPack training runtime ADR](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
+- [Training runtime tests](../../roles/apps/files/rp-stack/rp-gateway/tests/test_training_runtime.py)

@@ -19,6 +19,10 @@ worldpacks/<slug>/
 ├── characters/index.md
 ├── rules/checks.md
 ├── rules/site-interactions.json
+├── training/
+│   ├── program.json
+│   ├── assessment.json
+│   └── fallbacks.json
 ├── artifacts/sites/
 │   ├── index.json
 │   └── <blueprint>.json
@@ -33,7 +37,9 @@ worldpacks/<slug>/
 - `state-seed.json` — исходный canonical state для новой партии;
 - `gm-system.md` и `authors-note.md` — активные runtime prompts;
 - `campaign-bible.md` — авторский замысел, а для training — точная карта ходов;
-- `rules/checks.md` — правила resolution/scoring;
+- `training/program.json` — executable schedule, текущие output contracts, debrief и полные fallback;
+- `training/assessment.json` — executable detectors, scoring/evidence effects и aggregates;
+- `rules/checks.md` — человекочитаемое описание resolution/scoring, не runtime authority;
 - `artifacts/sites/` — фиксированные UI-blueprints с разрешёнными slots и actions;
 - `rules/site-interactions.json` — server-only соответствие typed events детерминированным evidence и score;
 - SillyTavern JSON — compatibility artifact, а не authority Light GUI.
@@ -46,7 +52,7 @@ worldpacks/<slug>/
 |---|---|---|---|
 | `rp` | Ролевая игра с проверками | Intent, D20, skills, modifiers, blockers, check records, RP living story memory | LLM не может изменить рассчитанный outcome |
 | `novel` | Совместный роман | Непрерывная проза, directorial input, state boundary patch без броска; chapters/raw без RP story memory | Dice, DC, skills, игровые меню, захват agency |
-| `training` | Учебная симуляция и оценивание | Authored schedule, явные actions, deterministic score, validators, debrief gate; прежний memory path без RP story memory | Случайность, `/check`, подсказки и score до debrief |
+| `training` | Учебная симуляция и оценивание | Универсальный interpreter + WorldPack program/assessment/fallback, явные actions, deterministic score и debrief gate; прежний memory path без RP story memory | Случайность, `/check`, предметная логика в Gateway, подсказки и score до debrief |
 
 Пользователь выбирает режим явно при создании Party. WorldPack объявляет только:
 
@@ -61,12 +67,40 @@ worldpacks/<slug>/
 
 Gateway отклоняет несовместимую комбинацию, но не меняет режим автоматически. Prompt мира не может снова включить механику, запрещённую контрактом режима.
 
+## Executable training runtime
+
+Новый training-мир объявляет `manifest.training_runtime` со схемой
+`rp-training-runtime.v1`. Gateway загружает `program.json`, `assessment.json` и
+`fallbacks.json`, валидирует ссылки на state и сохраняет их общий hash/snapshot
+для партии. После старта source WorldPack можно обновить: текущая party и её
+branches продолжают работать на исходном snapshot, а новую ревизию получают
+только новые партии.
+
+Разделение ответственности принципиально:
+
+| Сущность | Контракт |
+|---|---|
+| Gateway | Универсальные detector/effect primitives, state patch, prompt sanitization, один LLM-вызов, validation и persistence |
+| `program.json` | Ходы, sender/channel/facts, format, role adaptation, links policy, debrief, fallback |
+| `assessment.json` | Наблюдаемые text/UI detectors, правила, баллы, counters, evidence, aggregates |
+| Narrator LLM | Новая естественная формулировка только текущей сцены |
+| Site/workspace services | Независимые опциональные snapshots и typed sub-turn evidence |
+
+До debrief LLM не получает score resources, assessment, future turns или
+fallback. Он видит только активный контракт, профиль игрока, явно разрешённый
+visible state и включённые interaction contracts. Невалидный ответ или ошибка
+provider ведёт к authored fallback текущего хода без второго repair-вызова.
+
+Замена фишинговой программы на ОБЖ поэтому меняет WorldPack JSON, prompts и
+seed, но не Gateway. Legacy training packs без `training_runtime` временно
+остаются на compatibility resolver и не являются образцом для новых миров.
+
 ## Текущие WorldPacks
 
 | Slug | Название | Рекомендуемый режим | Поддержка | Особенности |
 |---|---|---|---|---|
 | `awareness` | Awareness | `training` | `training` | Недельный курс, 10 site blueprints, 6 интерактивных ходов (4 рискованных и 2 легитимных), corporate portal и собственный `awareness-score` |
-| `awareness-one-day` | Awareness. One day | `training` | `training` | 10 сообщений, 10 site blueprints, 3 интерактивных хода (2 рискованных и 1 легитимный), 7 ходов без ссылок и детерминированный scoring |
+| `awareness-one-day` | Awareness. One day | `training` | `training` | WorldPack-owned runtime, 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
 | `ellinoid` | Эллиноид | `novel` | `novel`, `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp`, `novel` | Долгая приключенческая партия |
@@ -167,3 +201,4 @@ Gateway сохраняет basename исходного файла и разме�
 - [RP builder skill](../../codex-skills/rp-world-pack-builder/SKILL.md)
 - [Training builder skill](../../codex-skills/training-world-pack-builder/SKILL.md)
 - [Training capability ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
+- [WorldPack training runtime ADR](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)

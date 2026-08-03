@@ -9,6 +9,12 @@ Use this compact checklist while authoring or reviewing a training pack.
 "showroom_result": {
   "metric": "state_path",
   "state_path": "player.resources.total-score"
+},
+"training_runtime": {
+  "schema_version": "rp-training-runtime.v1",
+  "program": "training/program.json",
+  "assessment": "training/assessment.json",
+  "fallbacks": "training/fallbacks.json"
 }
 ```
 
@@ -27,6 +33,81 @@ The Showroom scenario stores independent `interactive_links_enabled` and
 `interactive_workspace_enabled` flags, and each run snapshots them. Do not add
 a second manifest boolean list that can drift from the detailed contracts.
 
+## Authority and lifecycle
+
+`training_runtime` is mandatory for new deterministic training packs.
+
+- Gateway owns the versioned interpreter, state patching, party isolation,
+  idempotency, one-call orchestration, validation execution, provider failure
+  handling and persistence. It has no knowledge of the course subject.
+- WorldPack `program.json` owns turn order, visible event facts, allowed output
+  surface, role adaptation, permitted visible state, link policy, debrief and
+  complete fallback text.
+- WorldPack `assessment.json` owns text/UI detectors, boolean rules, score and
+  counter effects, evidence labels and bounded aggregates.
+- `training_artifacts` and `training_workspace` declare independent optional
+  interaction support. The Showroom run snapshot activates neither, either or
+  both; activation is never inferred from the runtime or catalogs.
+- Light GUI and Showroom render Gateway-issued data and submit typed events.
+  They never choose turns, scoring, correctness or capability activation.
+
+At first runtime access, Gateway hashes and snapshots the combined program,
+assessment and fallback files for the party. Existing parties and branches keep
+that immutable snapshot after a WorldPack update; new parties receive the new
+revision. A missing or newly invalid source file must not corrupt an existing
+party snapshot.
+
+## Program contract
+
+`training/program.json` uses `rp-training-program.v1` and contains:
+
+- `progression`: positive `total_turns` and state resource IDs for current
+  window, remaining turns and completion status;
+- ordered, contiguous `turns` starting at one;
+- per turn `window`, exact `header`, narrator `instruction`, optional
+  `visible_state_paths`, neutral `question`, and one `surface`;
+- a surface type (`email` or `messenger`), count, required fields/regexes,
+  forbidden regexes, link policy (`none` or `artifact`), role-adaptation gate,
+  question gate and a complete fallback;
+- optional regex-based `role_adapters` and a default role task;
+- `debrief` with canonical score resource bindings, evidence resource IDs,
+  instruction and fallback.
+
+The Gateway gives the LLM only the active turn (or debrief), learner name and
+description, explicitly allowlisted visible state and the enabled interaction
+contract. It strips fallback text and never includes detectors, score counters,
+future turns or answer keys before debrief. The LLM generates fresh wording;
+the validator checks the authored facts. Validation or provider failure uses
+the same turn's fallback without a repair call.
+
+Fallback placeholders are allowlisted: `player.name`, `player.description`,
+`role.task`, `artifact.url`, and `resource.<id>`. Resource placeholders are for
+canonical state values and normally belong only in the debrief. Unknown
+placeholders and path traversal are deployment failures.
+
+## Assessment contract
+
+`training/assessment.json` uses `rp-training-assessment.v1`. Its detectors are
+generic primitives interpreted by Gateway:
+
+- `text_regex` and `text_regex_count` for explicit learner wording, with
+  optional `exclude_patterns` for negated or otherwise disqualifying wording;
+- `interaction_event` for normalized, score-eligible site/workspace evidence;
+- `profile_overlap` for an observable relation to the stored learner role;
+- `expression` combining detector IDs with `all`, `any` and `not`.
+
+Rules select exact turns or `"*"`, evaluate a detector expression and apply
+only allowlisted state effects: `increment`, `set`, and `append_evidence`.
+Aggregates recompute bounded sums from canonical resources after effects. Every
+effect, aggregate component, debrief score and evidence binding must resolve to
+`state-seed.json`. Scoring reads only the current learner response and pending
+typed events; narrator output never becomes correctness evidence.
+
+Adding a detector primitive or surface type is a versioned generic Gateway
+schema change. Adding phishing, fire safety, patient care or any other domain
+rule is a WorldPack change and must not introduce a campaign-ID branch in
+Gateway.
+
 ## Runtime Contract
 
 - No dice, skill checks, randomness, or `/check`-driven correctness.
@@ -44,6 +125,8 @@ a second manifest boolean list that can drift from the detailed contracts.
 - A scheduled artifact must be present even when narrator output is invalid or
   the provider fails; use the authored fallback from the same turn instead of a
   second LLM request.
+- A runtime turn makes at most one narrator request. Invalid content is not sent
+  through a repair completion; validation falls back deterministically.
 - A disabled capability contributes no narrator contract, public snapshot,
   event endpoint or scoring evidence. Its authored off-path must keep the
   training coherent and assessable.
@@ -83,3 +166,9 @@ entries as the authoritative schedule or score.
 12. Open a scored phishing file and verify public responses omit its hidden
     classification, the event applies once, and a later report does not erase
     the earlier open evidence.
+13. Replace the training subject with a materially different fixture (for
+    example phishing to ОБЖ), then verify the same Gateway interpreter loads
+    the new active prompt, fallback, resources and scoring with no domain code.
+14. Start a party, edit its source WorldPack runtime files, and verify the active
+    party and its branches retain the original contract hash while a new party
+    receives the new revision.

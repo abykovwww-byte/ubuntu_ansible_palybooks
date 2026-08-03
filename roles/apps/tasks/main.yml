@@ -6,6 +6,19 @@
     fail_msg: "docker_apps must be a list of Docker Compose application definitions."
   tags: [apps, preflight]
 
+- name: Validate RP Stack training runtime WorldPacks
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ role_path }}/files/rp-stack/scripts/validate-training-runtime.py"
+      - --worldpacks
+      - "{{ role_path }}/files/rp-stack/worldpacks"
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+  when: rp_stack_enabled | default(false) | bool
+  tags: [apps, preflight, rp-stack]
+
 - name: Prepare local Vulkan LLM runtime
   ansible.builtin.import_tasks: local-llm.yml
   when: rp_stack_local_llm_enabled | default(false) | bool

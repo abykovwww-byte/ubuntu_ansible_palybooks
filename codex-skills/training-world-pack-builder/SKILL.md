@@ -19,6 +19,8 @@ Gateway mechanics or deploy directly.
 - Give typed UI evidence precedence over contradictory prose for the same decision. Apply every authored `score_rule_id` at most once unless the policy explicitly permits repetition; a later safe action never erases earlier unsafe evidence.
 - Let the browser send only artifact identity, semantic event type, and declared field IDs. Never transmit or persist field values, lengths, hashes, masks, clipboard data, or inferred credentials.
 - Keep rubrics, score fields, validators, completion rules, and the current schedule in canonical state or explicit pack rules, not only in prose memory.
+- Put every domain-specific turn, output constraint, detector, scoring effect, aggregate and fallback in the WorldPack `training_runtime` contract. Gateway may interpret the generic schema, snapshot it and apply it, but must not gain a campaign-ID branch, phishing regex, ОБЖ rule or other course-specific constant.
+- Keep LLM narration enabled. `training/program.json` constrains the visible event and validates the result; it does not replace fresh narrator wording. Use the authored fallback only for provider or validation failure, and make at most one narrator call for a runtime turn.
 - Training must never enqueue, load, inject, display, or reserve context for the RP-only `RP_STORY_MEMORY` layer. Keep its existing episodic chapters, raw history, retrieval, and 81920-token default history budget unchanged.
 - Withhold hints, correctness, hidden scoring, remediation, and best-practice teaching until the authored debrief point. Do not make the simulation unwinnable or imply that every event is hostile.
 - Treat the stored learner name, profession and responsibilities as mandatory scenario input when the user supplies them. Make authored work requests observably change when that profile changes; do not replace it with a generic department, invented backlog or random corporate project.
@@ -32,8 +34,9 @@ Gateway mechanics or deploy directly.
 - Keep the pack defensive, fictionalized, and safety-bounded for security, medical, legal, or other high-stakes topics. Escalate any need for real policy or regulated content to the user.
 - Use `abykovserv-iac-deploy` for GitHub + Ansible deployment; never make durable `/srv` or `/opt` edits by hand.
 
-The implemented Gateway authority lives in `app/services/training_capabilities.py`,
-`training_artifacts.py`, and `training_workspace.py`. Showroom persists both
+The implemented Gateway authority lives in `app/services/training_runtime.py`,
+`training_capabilities.py`, `training_artifacts.py`, and
+`training_workspace.py`. Showroom persists both
 scenario flags and immutable run snapshots in `app/services/showroom.py`.
 `worldpacks/awareness/` and `worldpacks/awareness-one-day/` are executable
 examples containing both contracts, a party-start policy resource, a dynamic
@@ -98,7 +101,18 @@ characters/index.md
 rules/checks.md
 quick-replies/notes.md
 setup-flow.md
+training/program.json
+training/assessment.json
+training/fallbacks.json
 ```
+
+Every new deterministic training pack declares `manifest.training_runtime`
+with schema `rp-training-runtime.v1`. `program.json` owns ordered turns,
+surface validation, role adapters, debrief and complete provider fallbacks.
+`assessment.json` owns observable detectors, boolean rules, state effects and
+bounded aggregates. `fallbacks.json` is reserved for shared fallback material;
+turn fallbacks may stay colocated with their surfaces. Read
+`references/training-contract.md` for the exact contract and ownership split.
 
 For an interactive-site world, also create `artifacts/sites/index.json`, ten
 allowlisted blueprint JSON files, and server-only
@@ -135,8 +149,9 @@ WorldPack; the Showroom scenario stores two independent booleans and the run
 snapshots the chosen combination.
 
 Set `manifest.player_role`; make `scenario_types.recommended` and the only
-supported type `training`. Keep `rules/checks.md` as the deterministic
-resolution-and-scoring contract; it must not describe Gateway checks.
+supported type `training`. Keep `rules/checks.md` as the human-readable mirror
+of `training/assessment.json`; the executable contract is the JSON and neither
+file may describe Gateway checks.
 
 For corporate showroom training worlds, add `manifest.corporate_portal` with
 one to five authored characters who actually participate in the scenario.
@@ -158,7 +173,7 @@ presentation settings.
 
 Put the following in `state-seed.json` under schema-valid fields:
 
-- current schedule/window, turn count, completion state, and remaining turns;
+- current schedule/window, turn count, completion state, and remaining turns referenced by `training/program.json`;
 - named score counters for observable learner actions;
 - constraints, validated facts, and data the narrator needs to produce the next exact surface;
 - no secret answer key exposed as player-facing state.
@@ -187,10 +202,11 @@ the source of score, schedule, or correctness.
 
 The Gateway prompt has separate layers:
 
-1. Scenario contract and immutable world prompts.
+1. Universal scenario-mode rules and immutable world prompts.
 2. Party-scoped immutable episodic `memory_chapters` for older scenes.
 3. Budgeted recent raw turns; retain all raw turns durably.
-4. Relevant characters, dynamic canonical state, `AUTHORITATIVE_OUTCOME`, then the current player action.
+4. One sanitized `ACTIVE_TRAINING_TURN_CONTRACT` loaded from the party's immutable WorldPack runtime snapshot.
+5. Relevant characters, permitted dynamic canonical state, `AUTHORITATIVE_OUTCOME`, then the current player action.
 
 The RP-only living story-memory block is deliberately absent from this list. A
 Training change must not activate its service job, API/UI fields, prompt block,
@@ -199,11 +215,22 @@ or token reserve.
 State and outcome override memory. Do not store the rubric only in episodic
 memory, repeat a raw range already covered by a chapter, or use human-facing
 journal recaps as narrator memory. Design detailed chapter continuity but keep
-the current schedule, score, and debrief gate compact and authoritative.
+the current schedule, score, and debrief gate compact and authoritative. Before
+debrief, the active prompt contract may contain learner identity, profession,
+the active surface, explicit visible state paths and enabled interaction
+contracts; it must not serialize score resources, detector definitions,
+answer keys or future turns.
 
 ## Validate
 
 - Parse every JSON file.
+- Run the same IaC preflight used before deployment:
+
+```powershell
+python roles\apps\files\rp-stack\scripts\validate-training-runtime.py --worldpacks roles\apps\files\rp-stack\worldpacks
+```
+
+- Verify `training_runtime` files cannot escape the pack root; turns are contiguous; all regexes compile; every detector reference, effect, aggregate, debrief score and fallback resource resolves to the state seed.
 - Confirm only `training` appears in `scenario_types` and that it is recommended.
 - Validate from the RP-stack source root:
 
@@ -217,7 +244,7 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 - Assert the exact authored set of link-bearing turns. For every other turn, reject both a non-empty structured link field and any URL in free text; the presence of a site catalog must not make links ubiquitous.
 - Exercise the four capability combinations when both contracts are supported: neither, links only, workspace only, and both. Reject enabled capabilities unsupported by the manifest and reject both flags for `rp`/`novel`.
 - Verify capability-off paths remain playable, do not materialize disabled snapshots, reject disabled event endpoints, and do not leak an answer cue through missing UI affordances.
-- Test output templates and relevant validator rules. If generic Gateway validation cannot enforce a requested course contract, declare the gap and add code/tests only with user approval.
+- Test output templates and relevant validator rules. If generic Gateway validation cannot enforce a requested course contract, extend the versioned generic runtime schema/interpreter with tests; never add a world ID or subject-specific rule to Gateway. Declare the schema change before implementing it when it broadens the user's requested scope.
 - Confirm `corporate_portal.characters` contains at most five unique IDs; every dynamic card uses `{employee_position}` and every portal character is used by the authored scenario.
 - Confirm `showroom_result.metric` is `state_path`, its `state_path` resolves to a numeric canonical-state field, and the field is updated only by the authored deterministic scoring contract.
 - Scan narrowly for API-key-looking strings and unsafe real data.
@@ -234,6 +261,9 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
   test in `tests/test_gateway.py`; do not accept a manifest merely because its
   top-level schema string is present. Gateway must load and validate every
   referenced catalog, blueprint, resource and server-only policy file.
+- Run `pytest tests/test_training_runtime.py`. Add a non-domain twin fixture
+  (for example ОБЖ for an awareness change) proving that the same Gateway code
+  loads different turns and scoring without subject-specific branches.
 - Run the complete static, container and browser acceptance matrix in
   `site-artifacts-contract.md`. At minimum prove idempotent event recording,
   zero LLM/schedule advancement for sub-turn events, no field values in request
