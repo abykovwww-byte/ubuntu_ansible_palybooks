@@ -80,6 +80,13 @@ future turns or answer keys before debrief. The LLM generates fresh wording;
 the validator checks the authored facts. Validation or provider failure uses
 the same turn's fallback without a repair call.
 
+The sanitized active-turn contract includes the exact authored `header` and
+`question`. Plain narration starts and ends with those values. An interactive
+turn returns one JSON object and puts the complete visible turn inside
+`narrative_text`; no analysis, preamble or Markdown fence is part of the
+contract. Gateway may unwrap one provider-added JSON fence before schema
+validation, but still rejects multiple or malformed bundles.
+
 Fallback placeholders are allowlisted: `player.name`, `player.description`,
 `role.task`, `artifact.url`, and `resource.<id>`. Resource placeholders are for
 canonical state values and normally belong only in the debrief. Unknown
@@ -172,3 +179,9 @@ entries as the authoritative schedule or score.
 14. Start a party, edit its source WorldPack runtime files, and verify the active
     party and its branches retain the original contract hash while a new party
     receives the new revision.
+15. Inspect the active prompt and verify the exact current header/question are
+    present while fallback, scoring and future turns are absent; exercise raw,
+    fenced and malformed interaction bundles.
+16. Force validation fallback and verify the delivered fallback validates,
+    turn metadata reports final validator success plus the original reason, and
+    audit separates provider fallback from Gateway validation fallback.

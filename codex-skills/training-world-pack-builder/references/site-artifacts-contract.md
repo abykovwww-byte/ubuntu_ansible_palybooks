@@ -89,6 +89,10 @@ separate facts. A later safe action never erases an earlier unsafe event.
    the scheduled snapshot from authored fallback without a second model call.
 8. Both Light GUI and Showroom must use the shared allowlisted DOM renderer and
    restore the same persisted snapshot from history.
+9. The narrator returns one bare JSON object. Gateway may unwrap one
+   provider-added JSON fence, even after a non-JSON preamble, then applies the
+   same strict bundle, slot, markup and narrative validation. Multiple fenced
+   objects and mixed JSON payloads remain invalid.
 
 ## Validation
 

@@ -43,6 +43,16 @@ sequenceDiagram
     API-->>Jobs: memory jobs in background
 ```
 
+Для training prompt-контракт явно содержит точные `header` и `question`
+активного хода из immutable snapshot WorldPack. Обычный ответ содержит только
+готовую реплику; интерактивный ход содержит один JSON bundle, а полный видимый
+текст лежит в `narrative_text`. Gateway может снять одну добавленную провайдером
+Markdown-обёртку JSON, но не ослабляет schema, slot и narrative validation.
+
+После deterministic fallback повторно валидируется уже фактически выданный
+текст. В metadata сохраняется итоговая валидность и причина исходного fallback,
+а audit отдельно различает provider failure и Gateway validation failure.
+
 ## Шаги подробно
 
 ### 1. Идемпотентность

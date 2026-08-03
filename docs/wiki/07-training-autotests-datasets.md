@@ -40,6 +40,13 @@ snapshot. Обновление файлов мира не переписывае
 visible state и включённые interaction contracts; score, future turns и
 assessment появляются только в отдельном debrief.
 
+Границы формата тоже принадлежат WorldPack: активный prompt получает точные
+`header` и `question`, но не fallback. На обычном ходу модель возвращает только
+видимый текст; при включённом interaction contract — один JSON object с полным
+текстом в `narrative_text`. Одна provider-added Markdown fence нормализуется
+Gateway до строгой schema validation; malformed или multiple bundles уходят в
+authored fallback без второго LLM-вызова.
+
 Live acceptance на `awareness-one-day` подтвердил полный путь: authored ход создал письмо и `corporate-sso` snapshot, Showroom открыл credential-form, Gateway принял `link_opened`, `credentials_submitted` и `site_closed`, а следующий ход атомарно пометил события consumed и добавил UI-evidence в canonical scoring. В тестовом fail-пути увеличились `credential-exposure`, `suspicious-artifacts-opened` и `unsafe-actions`; решение принял RuleEngine, не narrator.
 
 В `awareness-one-day` итоговая модель оценки разделена на безопасность, ролевую уместность и деловую коммуникацию. Основание начисления сохраняется по конкретному ходу, а итоговые категории сверяются с canonical state, чтобы narrator не мог придумать красивое, но ложное объяснение баллов.

@@ -194,6 +194,10 @@ Use a complete, plausible mix of normal, ambiguous, inconvenient, and
 assessment-relevant events. Never label threats or safe answers in the scene.
 For structured artifacts such as email, chat, report, patient record, or ticket,
 specify all visible fields and validate them against the authored template.
+Every active turn must author a non-empty exact `header` and neutral `question`.
+Gateway passes both values from the immutable WorldPack snapshot to the narrator
+and validates the final text against them; do not rely on `instruction` or the
+conversation history to make the model guess either boundary.
 
 The lorebook is a compatibility artifact. Create focused entries; it is not
 the source of score, schedule, or correctness.
@@ -221,6 +225,13 @@ the active surface, explicit visible state paths and enabled interaction
 contracts; it must not serialize score resources, detector definitions,
 answer keys or future turns.
 
+The narrator returns only the visible narration. When an interaction contract
+requires a narrative bundle, it returns one JSON object with the complete turn
+inside `narrative_text`, without a preamble or Markdown fence. Gateway may
+normalize one provider-added JSON fence before schema validation, but the
+WorldPack must not depend on that tolerance and must never put domain rules in
+the normalization layer.
+
 ## Validate
 
 - Parse every JSON file.
@@ -239,12 +250,20 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 ```
 
 - Test deterministic paths: initial turn header; one explicit action updates only expected state; `/check` is rejected; no score/hint leaks before debrief; debrief output includes planned explanation; party and memory isolation hold.
+- Inspect the serialized active prompt contract and assert it contains the
+  exact authored header and question for the current turn while excluding the
+  fallback, assessment, score resources and future turns.
 - Assert that Training enqueues no `rp_story_memory` job, contains no `RP_STORY_MEMORY` prompt block, and retains the pre-RP-story context budget.
 - Test at least two materially different player profiles and prove the opening task and later work requests change accordingly. Exercise the validation-failure fallback too; it must use the same stored profile rather than reverting to generic corporate copy.
 - Assert the exact authored set of link-bearing turns. For every other turn, reject both a non-empty structured link field and any URL in free text; the presence of a site catalog must not make links ubiquitous.
 - Exercise the four capability combinations when both contracts are supported: neither, links only, workspace only, and both. Reject enabled capabilities unsupported by the manifest and reject both flags for `rp`/`novel`.
 - Verify capability-off paths remain playable, do not materialize disabled snapshots, reject disabled event endpoints, and do not leak an answer cue through missing UI affordances.
 - Test output templates and relevant validator rules. If generic Gateway validation cannot enforce a requested course contract, extend the versioned generic runtime schema/interpreter with tests; never add a world ID or subject-specific rule to Gateway. Declare the schema change before implementing it when it broadens the user's requested scope.
+- For bundle surfaces, test raw JSON, a single provider-added fenced JSON
+  object, malformed/multiple bundles and fallback materialization. Final turn
+  metadata must describe the delivered response as validator-valid while
+  preserving the original `fallback_reason`; audit events must distinguish
+  provider failure from Gateway validation failure.
 - Confirm `corporate_portal.characters` contains at most five unique IDs; every dynamic card uses `{employee_position}` and every portal character is used by the authored scenario.
 - Confirm `showroom_result.metric` is `state_path`, its `state_path` resolves to a numeric canonical-state field, and the field is updated only by the authored deterministic scoring contract.
 - Scan narrowly for API-key-looking strings and unsafe real data.
