@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $rpRoot = Join-Path $repoRoot "roles\apps\files\rp-stack"
 $gatewayRoot = Join-Path $rpRoot "rp-gateway"
+$gatewayTestDeps = Join-Path $gatewayRoot ".test-deps"
 
 function Resolve-Tool {
     param([string]$Name, [string]$OverrideEnvironmentVariable, [string]$BundledRelativePath)
@@ -46,6 +47,11 @@ $node = Resolve-Tool -Name "node" -OverrideEnvironmentVariable "CODEX_NODE" -Bun
 Push-Location $repoRoot
 try {
     Invoke-Checked "repository contracts" { & $python scripts/validate-repository.py }
+    if ([string]::IsNullOrWhiteSpace($env:CI)) {
+        Invoke-Checked "installed Codex skill drift" {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/sync-codex-skills.ps1 -Mode Check
+        }
+    }
     Invoke-Checked "devkit policy and MCP" { powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-devkit.ps1 }
     Push-Location $rpRoot
     try {
@@ -76,11 +82,26 @@ try {
     }
 
     if (-not $SkipGatewayTests) {
+        if (-not (Test-Path -LiteralPath (Join-Path $gatewayTestDeps "pytest"))) {
+            Write-Host "[ci] restoring declared Gateway dependencies into $gatewayTestDeps"
+            Invoke-Checked "Gateway dependency restore" {
+                & $python -m pip install --disable-pip-version-check --target $gatewayTestDeps -r (Join-Path $gatewayRoot "requirements.txt")
+            }
+        }
+        $previousPythonPath = $env:PYTHONPATH
+        if (Test-Path -LiteralPath $gatewayTestDeps) {
+            $env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($previousPythonPath)) {
+                $gatewayTestDeps
+            } else {
+                "$gatewayTestDeps$([IO.Path]::PathSeparator)$previousPythonPath"
+            }
+        }
         Push-Location $gatewayRoot
         try {
             Invoke-Checked "Gateway pytest" { & $python -m pytest -q }
         } finally {
             Pop-Location
+            $env:PYTHONPATH = $previousPythonPath
         }
     }
 } finally {

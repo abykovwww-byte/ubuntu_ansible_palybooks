@@ -12,11 +12,12 @@ It packages:
 
 The plugin does not contain credentials and has no live mutation or deployment tool.
 
-Remote diagnostics use the local OpenSSH configuration by default. Set
-`RP_STACK_OPS_IDENTITY_FILE` to an existing private-key file when an explicit
-identity is required; the key path remains local and is never stored in the
-repository. `RP_STACK_OPS_HOST` and `RP_STACK_OPS_SSH` can override the default
-target and SSH executable.
+Remote diagnostics pass `%USERPROFILE%\.ssh\id_ed25519_codex_abykovserv` with
+`-i` by default when that file exists. `RP_STACK_OPS_IDENTITY_FILE` can select a
+different existing private-key file; the key path remains local and is never
+stored in the repository. `RP_STACK_OPS_HOST` and `RP_STACK_OPS_SSH` can
+override the default target and SSH executable. See
+`docs/repository-work-standard.md` for the checked workstation contract.
 
 ## Install from this repository
 

@@ -8,12 +8,14 @@ description: Develop, test, diagnose, publish, and verify the Tavern RP Stack th
 ## Start here
 
 1. Read the repository `AGENTS.md` and the closest nested `AGENTS.md`.
-2. Read the relevant repository skill completely:
+2. Read `docs/repository-work-standard.md` for the checked workstation, SSH,
+   sudo, toolchain, plugin, Graphify, and skill-sync contract.
+3. Read the relevant repository skill completely:
    - `codex-skills/abykovserv-iac-deploy/SKILL.md` for deployment or live verification;
    - `codex-skills/rp-stack-wiki/SKILL.md` for architecture or significant behavior;
    - `codex-skills/rp-world-pack-builder/SKILL.md` for RP/novel worlds;
    - `codex-skills/training-world-pack-builder/SKILL.md` for deterministic training.
-3. Query Graphify first for architecture or relationship questions when `graphify-out/` exists, then confirm decisive claims in source.
+4. Query Graphify first for architecture or relationship questions when `graphify-out/` exists, then confirm decisive claims in source.
 
 ## Development path
 
@@ -22,7 +24,8 @@ description: Develop, test, diagnose, publish, and verify the Tavern RP Stack th
 3. Add focused tests and update the RP Stack Wiki in the same change where required.
 4. Run `powershell.exe -File scripts/ci.ps1` for the deterministic local gate.
 5. Use `scripts/run-rp-stack-evals.ps1 -Mode Offline` for the offline eval report.
-6. Publish intentionally: commit, push, draft PR, then apply only when explicitly requested.
+6. Publish intentionally: commit, push, draft PR, then stop for the user's
+   interactive sudo apply; never request or capture the sudo password.
 7. After apply, run container, HTTP, and—when UI behavior changed—authenticated browser verification.
 
 ## Safe operations

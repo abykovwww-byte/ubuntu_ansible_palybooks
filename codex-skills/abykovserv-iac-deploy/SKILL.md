@@ -14,7 +14,7 @@ user's home server:
 - observed hostname: `abykovserv`
 - SSH user: `abykov`
 - IaC repository: `https://github.com/abykovwww-byte/ubuntu_ansible_palybooks`
-- local workspace: `$env:USERPROFILE\Documents\Tavern\ubuntu_ansible_palybooks`
+- local workspace: `C:\Users\Адександр\Documents\Tavern\ubuntu_ansible_palybooks`
 - server checkout: `/opt/ubuntu_ansible_palybooks`
 
 The core model is pull-based:
@@ -29,12 +29,21 @@ with a server-only read-only deploy key and applies Ansible locally.
 
 ## First Rules
 
-- Do not start local app servers unless the user explicitly asks. The normal
-  target is the live server at `192.168.1.88`.
+- Read `docs/repository-work-standard.md` for the checked workstation contract.
+- Allow project-scoped developer tools and dependencies on Windows for editing,
+  builds, tests, and validation when explicitly approved. This is not a local
+  RP Stack deployment; do not start local app servers unless the user asks.
 - Any SSH command to `192.168.1.88` or `abykovserv` needs sandbox escape:
   use `sandbox_permissions: "require_escalated"` with a short justification.
   Prefer a scoped prefix rule for OpenSSH, for example
   `["C:\\Windows\\System32\\OpenSSH\\ssh.exe"]`.
+- Always pass the workstation identity explicitly:
+  `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 ...`.
+  The same identity is present in the local SSH config, but `ssh-agent` is
+  stopped and disabled; repository instructions must not depend on agent state.
+- Remote `sudo` requires interactive user entry and `sudo -n` fails. Stop after
+  push and ask the user to run the Ansible apply interactively. Never request,
+  log, or store the sudo password.
 - Do not put secrets, tokens, real passwords, API keys, or local-only private
   values in GitHub. Use `/etc/ansible/local-overrides.yml` on the server.
 - Treat GitHub + Ansible as the source of truth. Avoid hand-editing files under
@@ -65,11 +74,12 @@ published from `docs/wiki/README.md`.
    change is significant.
 5. Run focused local checks that do not start a local server.
 6. Commit and push to `origin/main` when the change is ready.
-7. SSH to `abykov@192.168.1.88` with sandbox escalation.
-8. Run `sudo systemctl start ansible-local-apply.service`.
-9. Check `sudo journalctl -u ansible-local-apply.service -n 100 --no-pager`.
-10. Verify the deployed service on the server with Docker Compose, container
-   tests, HTTP smoke checks, and Browser checks for UI work.
+7. Verify access with
+   `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 hostname`.
+8. Stop at `pushed` and ask the user to run
+   `sudo systemctl start ansible-local-apply.service` interactively.
+9. After the user confirms apply completion, inspect status/journal and verify
+   Docker Compose, container tests, HTTP, and Browser checks as appropriate.
 
 ## Key Commands
 

@@ -9,6 +9,7 @@
 
 ## Required workflows
 
+- At the start of repository work, read `docs/repository-work-standard.md` for the current workstation, SSH, sudo, toolchain, plugin, Graphify, and skill-sync facts.
 - For RP Stack architecture or significant behavior changes, use `codex-skills/rp-stack-wiki/SKILL.md` and update the Wiki in the same change.
 - For `abykovserv` deployment, use `codex-skills/abykovserv-iac-deploy/SKILL.md`. Deployment is `commit -> push -> ansible-local-apply.service -> runtime verification`.
 - For RP/novel WorldPacks, use `codex-skills/rp-world-pack-builder/SKILL.md`.
@@ -26,6 +27,7 @@
 
 ## Documentation and generated state
 
+- Treat any change to a working-format contract (path, identity key, permissions, tool availability, plugin location, or contract schema) as incomplete until `docs/repository-work-standard.md`, every affected repository skill/plugin instruction, and the corresponding `scripts/validate-repository.py` guard are updated in the same change.
 - Keep `docs/wiki/README.md` navigation valid and update the relevant page for architecture, operations, security, testing, provider, training, or deployment changes.
 - Do not commit Graphify runtime caches or generated environment folders. A Graphify update is complete only after source changes, semantic merge/health checks, and a focused query confirm the updated graph.
 - Do not add Sentry, OpenTelemetry, PostHog, or other application telemetry as part of the RP Stack devkit work; instrumentation requires a separate scoped decision.

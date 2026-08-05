@@ -10,6 +10,7 @@ __pycache__/
 .venv/
 venv/
 artifacts/evals/
+**/.test-deps/
 
 # Ansible secrets
 *.vault.yml
