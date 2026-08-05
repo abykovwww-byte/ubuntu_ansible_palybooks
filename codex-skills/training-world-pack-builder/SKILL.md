@@ -20,7 +20,7 @@ Gateway mechanics or deploy directly.
 - Let the browser send only artifact identity, semantic event type, and declared field IDs. Never transmit or persist field values, lengths, hashes, masks, clipboard data, or inferred credentials.
 - Keep rubrics, score fields, validators, completion rules, and the current schedule in canonical state or explicit pack rules, not only in prose memory.
 - Put every domain-specific turn, output constraint, detector, scoring effect, aggregate and fallback in the WorldPack `training_runtime` contract. Gateway may interpret the generic schema, snapshot it and apply it, but must not gain a campaign-ID branch, phishing regex, ОБЖ rule or other course-specific constant.
-- Keep LLM narration enabled. `training/program.json` constrains the visible event and validates the result; it does not replace fresh narrator wording. Use the authored fallback only for provider or validation failure, and make at most one narrator call for a runtime turn.
+- Keep LLM narration enabled. `training/program.json` constrains the visible event and validates the result; it does not replace fresh narrator wording. Use the authored fallback for provider failure or a hard validation failure. A soft format/profile failure may receive exactly one bounded repair call through the training-specific repair limit.
 - Training must never enqueue, load, inject, display, or reserve context for the RP-only `RP_STORY_MEMORY` layer. Keep its existing episodic chapters, raw history, retrieval, and 81920-token default history budget unchanged.
 - Withhold hints, correctness, hidden scoring, remediation, and best-practice teaching until the authored debrief point. Do not make the simulation unwinnable or imply that every event is hostile.
 - Treat the stored learner name, profession and responsibilities as mandatory scenario input when the user supplies them. Make authored work requests observably change when that profile changes; do not replace it with a generic department, invented backlog or random corporate project.
@@ -107,7 +107,8 @@ training/fallbacks.json
 ```
 
 Every new deterministic training pack declares `manifest.training_runtime`
-with schema `rp-training-runtime.v1`. `program.json` owns ordered turns,
+with schema `rp-training-runtime.v2`. `program.json` uses
+`rp-training-program.v2` and owns ordered turns,
 surface validation, role adapters, debrief and complete provider fallbacks.
 `assessment.json` owns observable detectors, boolean rules, state effects and
 bounded aggregates. `fallbacks.json` is reserved for shared fallback material;
@@ -196,8 +197,14 @@ For structured artifacts such as email, chat, report, patient record, or ticket,
 specify all visible fields and validate them against the authored template.
 Every active turn must author a non-empty exact `header` and neutral `question`.
 Gateway passes both values from the immutable WorldPack snapshot to the narrator
-and validates the final text against them; do not rely on `instruction` or the
-conversation history to make the model guess either boundary.
+and normalizes the final text to those canonical boundaries; do not rely on
+`instruction` or conversation history to make the model guess either boundary.
+Author `surface.must_include` as short natural-language requirements mirroring
+the machine-only `required_patterns`; raw regexes stay in the validator and are
+not narrator instructions. Author a non-empty optional `variation_budget` list
+on each turn when fresh wording is desired, naming only elements the model may
+change (for example subject, body wording, time inside the window, task detail,
+or tone). Omitting the field remains valid and grants no extra freedom.
 
 The lorebook is a compatibility artifact. Create focused entries; it is not
 the source of score, schedule, or correctness.

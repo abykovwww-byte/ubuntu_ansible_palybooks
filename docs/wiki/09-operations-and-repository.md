@@ -284,6 +284,13 @@ Host-specific и secret values находятся в:
 
 Файл не коммитится. Не нужно переносить постоянные исправления напрямую в `/srv/apps/rp-stack`: следующий IaC apply может их заменить. Emergency hotfix должен быть немедленно отражён в Git.
 
+Repair-лимиты разделены: `MAX_REPAIR_ATTEMPTS` сохраняет прежнее поведение
+`rp`/`novel`, а `TRAINING_REPAIR_ATTEMPTS` (IaC:
+`rp_stack_gateway_training_repair_attempts`, default `1`) разрешает не более
+одной коррекции только для мягкого нарушения `training_runtime`. Значение `0`
+возвращает training к немедленному authored fallback; hard violations и
+provider failures repair не получают при любом значении.
+
 ## Rollback
 
 Код откатывается новым revert/fix commit и повторным Ansible apply. Игровые данные восстанавливаются отдельно из `/srv/backups/rp-stack` после остановки контейнеров и проверки target paths.

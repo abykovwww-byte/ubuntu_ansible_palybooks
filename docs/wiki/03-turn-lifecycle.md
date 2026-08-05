@@ -32,10 +32,11 @@ sequenceDiagram
     API->>LLM: bounded prompt + outcome + active contract
     LLM-->>API: narration + optional artifact fields
     API->>Art: validate and materialize snapshot
+    API->>Runtime: normalize canonical header/question/no-link marker
     API->>Val: validate narration + runtime surface
-    alt Новый training runtime: нарушение или provider failure
+    alt Training runtime: hard violation или provider failure
         API->>Runtime: authored fallback текущего хода
-    else Обычный режим: допустим repair
+    else Обычный режим или soft training violation: допустим один repair
         API->>LLM: compact repair: failed text + outcome + violations
         LLM-->>API: repaired narration
         API->>Val: validate again
@@ -111,10 +112,12 @@ Gateway пробует primary model и разрешённые fallback models �
 ### 5. Валидация и repair
 
 `OutputValidator` проверяет соответствие state, outcome и режиму. Для `rp`,
-`novel` и legacy-training Gateway может выполнить один repair-вызов с
-конкретной инструкцией. Новый WorldPack runtime делает не более одного narrator
-вызова: невалидный ответ сразу заменяется fallback той же surface. Так latency
-не удваивается, а fallback не превращается в статический основной сценарий.
+`novel` и legacy-training Gateway сохраняет прежний `MAX_REPAIR_ATTEMPTS`.
+WorldPack runtime отдельно использует `TRAINING_REPAIR_ATTEMPTS`: canonical
+header/question/no-link marker сначала чинятся без LLM, soft field/profile
+нарушение может получить один repair с русским списком реально проваленных
+ограничений, а hard identity/shape/URL/attachment/score или provider failure
+сразу заменяется fallback той же surface.
 
 Каждая попытка narrator ограничена настоящим wall-clock deadline через `asyncio.timeout`: лимит охватывает ожидание заголовков и чтение всего тела ответа, а не только паузу между сетевыми пакетами. Истечение deadline обрабатывается тем же безопасным timeout/fallback-контрактом, что и transport timeout.
 
@@ -164,8 +167,9 @@ narrator completion или из fallback. Открытие файла остан
 
 `POST /api/parties/{party_id}/start` создаёт opening scene один раз. Для мира с
 `training_runtime` Gateway валидирует и сохраняет immutable contract hash,
-материализует первую authored window и использует тот же one-call/fallback
-контракт при ошибке provider. Повторный start защищён history/idempotency и не
+материализует первую authored window и использует тот же
+normalize/soft-repair/hard-fallback контракт; ошибка provider сразу ведёт к
+fallback. Повторный start защищён history/idempotency и не
 создаёт вторую начальную сцену. Checkpoint branch копирует runtime snapshot,
 поэтому обновление source WorldPack не меняет уже начатое прохождение.
 
