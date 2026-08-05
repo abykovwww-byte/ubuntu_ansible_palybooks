@@ -11,7 +11,7 @@ Use this compact checklist while authoring or reviewing a training pack.
   "state_path": "player.resources.total-score"
 },
 "training_runtime": {
-  "schema_version": "rp-training-runtime.v1",
+  "schema_version": "rp-training-runtime.v2",
   "program": "training/program.json",
   "assessment": "training/assessment.json",
   "fallbacks": "training/fallbacks.json"
@@ -38,7 +38,7 @@ a second manifest boolean list that can drift from the detailed contracts.
 `training_runtime` is mandatory for new deterministic training packs.
 
 - Gateway owns the versioned interpreter, state patching, party isolation,
-  idempotency, one-call orchestration, validation execution, provider failure
+  idempotency, bounded narration/repair orchestration, validation execution, provider failure
   handling and persistence. It has no knowledge of the course subject.
 - WorldPack `program.json` owns turn order, visible event facts, allowed output
   surface, role adaptation, permitted visible state, link policy, debrief and
@@ -59,16 +59,17 @@ party snapshot.
 
 ## Program contract
 
-`training/program.json` uses `rp-training-program.v1` and contains:
+`training/program.json` uses `rp-training-program.v2` and contains:
 
 - `progression`: positive `total_turns` and state resource IDs for current
   window, remaining turns and completion status;
 - ordered, contiguous `turns` starting at one;
 - per turn `window`, exact `header`, narrator `instruction`, optional
-  `visible_state_paths`, neutral `question`, and one `surface`;
+  `visible_state_paths`, neutral `question`, optional `variation_budget`, and one `surface`;
 - a surface type (`email` or `messenger`), count, required fields/regexes,
   forbidden regexes, link policy (`none` or `artifact`), role-adaptation gate,
-  question gate and a complete fallback;
+  question gate, natural-language `must_include` mirroring validator regexes,
+  and a complete fallback;
 - optional regex-based `role_adapters` and a default role task;
 - `debrief` with canonical score resource bindings, evidence resource IDs,
   instruction and fallback.
@@ -77,11 +78,16 @@ The Gateway gives the LLM only the active turn (or debrief), learner name and
 description, explicitly allowlisted visible state and the enabled interaction
 contract. It strips fallback text and never includes detectors, score counters,
 future turns or answer keys before debrief. The LLM generates fresh wording;
-the validator checks the authored facts. Validation or provider failure uses
-the same turn's fallback without a repair call.
+the validator checks the authored facts. Gateway normalizes the canonical
+header, final question, and a missing/distorted no-link marker. A soft field or
+profile failure may receive one training-specific repair call; hard identity,
+shape, URL, attachment, forbidden-content, or canonical-score failures and all
+provider failures use the same turn's fallback immediately.
 
 The sanitized active-turn contract includes the exact authored `header` and
-`question`. Plain narration starts and ends with those values. An interactive
+`question`, natural-language `must_include`, explicit profile instruction, and
+optional variation budget. It excludes `required_patterns` and other raw
+regexes. Gateway applies the exact opening and closing boundaries. An interactive
 turn returns one JSON object and puts the complete visible turn inside
 `narrative_text`; no analysis, preamble or Markdown fence is part of the
 contract. Gateway may unwrap one provider-added JSON fence before schema
@@ -130,10 +136,10 @@ Gateway.
   form values: credential exposure is inferred only from a configured field
   being non-empty when submit is pressed.
 - A scheduled artifact must be present even when narrator output is invalid or
-  the provider fails; use the authored fallback from the same turn instead of a
-  second LLM request.
-- A runtime turn makes at most one narrator request. Invalid content is not sent
-  through a repair completion; validation falls back deterministically.
+  the provider fails; after at most one soft repair, use the authored fallback
+  from the same turn.
+- A runtime turn makes one initial narrator request and at most one training
+  repair request. Hard violations and provider failures fall back without repair.
 - A disabled capability contributes no narrator contract, public snapshot,
   event endpoint or scoring evidence. Its authored off-path must keep the
   training coherent and assessable.
@@ -179,9 +185,12 @@ entries as the authoritative schedule or score.
 14. Start a party, edit its source WorldPack runtime files, and verify the active
     party and its branches retain the original contract hash while a new party
     receives the new revision.
-15. Inspect the active prompt and verify the exact current header/question are
-    present while fallback, scoring and future turns are absent; exercise raw,
+15. Inspect the active prompt and verify the exact current header/question,
+    prose `must_include`, profile instruction and variation budget are present
+    while regexes, fallback, scoring and future turns are absent; exercise raw,
     fenced and malformed interaction bundles.
 16. Force validation fallback and verify the delivered fallback validates,
     turn metadata reports final validator success plus the original reason, and
     audit separates provider fallback from Gateway validation fallback.
+17. Load a legacy `rp-training-runtime.v1`/`rp-training-program.v1` pack without
+    `variation_budget` and verify it remains valid; new generated packs emit v2.

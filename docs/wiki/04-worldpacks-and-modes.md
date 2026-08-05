@@ -70,7 +70,7 @@ Gateway отклоняет несовместимую комбинацию, но
 ## Executable training runtime
 
 Новый training-мир объявляет `manifest.training_runtime` со схемой
-`rp-training-runtime.v1`. Gateway загружает `program.json`, `assessment.json` и
+`rp-training-runtime.v2`, а `program.json` — `rp-training-program.v2`. Gateway загружает `program.json`, `assessment.json` и
 `fallbacks.json`, валидирует ссылки на state и сохраняет их общий hash/snapshot
 для партии. После старта source WorldPack можно обновить: текущая party и её
 branches продолжают работать на исходном snapshot, а новую ревизию получают
@@ -80,16 +80,25 @@ branches продолжают работать на исходном snapshot, �
 
 | Сущность | Контракт |
 |---|---|
-| Gateway | Универсальные detector/effect primitives, state patch, prompt sanitization, один LLM-вызов, validation и persistence |
-| `program.json` | Ходы, sender/channel/facts, format, role adaptation, links policy, debrief, fallback |
+| Gateway | Универсальные detector/effect primitives, state patch, prompt sanitization, canonical normalization, не более одного training-repair, validation и persistence |
+| `program.json` | Ходы, sender/channel/facts, format, prose `must_include`, optional `variation_budget`, role adaptation, links policy, debrief, fallback |
 | `assessment.json` | Наблюдаемые text/UI detectors, правила, баллы, counters, evidence, aggregates |
 | Narrator LLM | Новая естественная формулировка только текущей сцены |
 | Site/workspace services | Независимые опциональные snapshots и typed sub-turn evidence |
 
 До debrief LLM не получает score resources, assessment, future turns или
 fallback. Он видит только активный контракт, профиль игрока, явно разрешённый
-visible state и включённые interaction contracts. Невалидный ответ или ошибка
-provider ведёт к authored fallback текущего хода без второго repair-вызова.
+visible state и включённые interaction contracts. Regex остаются только в
+валидаторе. Gateway сам подставляет canonical header/question и no-link marker.
+Мягкая ошибка полей/профиля получает не более одного training-repair; hard
+ошибка identity/shape/URL/attachment/score или ошибка provider сразу ведёт к
+authored fallback.
+
+`variation_budget` — опциональный список разрешённой вариативности текущего
+хода: например тема, формулировки тела, время внутри authored window, деталь
+задачи и тон. Отсутствие поля валидно. Legacy-пары
+`rp-training-runtime.v1`/`rp-training-program.v1` продолжают загружаться, но
+builder создаёт новые курсы по v2.
 
 Замена фишинговой программы на ОБЖ поэтому меняет WorldPack JSON, prompts и
 seed, но не Gateway. Legacy training packs без `training_runtime` временно
