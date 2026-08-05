@@ -51,8 +51,17 @@ function Invoke-RpExternalCommand {
         [Parameter(Mandatory = $true)][string[]]$ArgumentList
     )
 
-    $lines = @(& $FilePath @ArgumentList 2>&1 | ForEach-Object { [string]$_ })
-    $exitCode = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Native tools such as Docker may write progress messages to stderr even
+        # when they exit successfully. Capture those lines without promoting them
+        # to terminating PowerShell errors so the native exit code remains authoritative.
+        $ErrorActionPreference = "Continue"
+        $lines = @(& $FilePath @ArgumentList 2>&1 | ForEach-Object { [string]$_ })
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     return [ordered]@{
         exit_code = $exitCode
         output = ($lines -join "`n")
