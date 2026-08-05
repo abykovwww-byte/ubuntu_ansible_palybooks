@@ -3,6 +3,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $projectHook = Join-Path $repoRoot ".codex\hooks\rp_stack_policy.ps1"
 $pluginHook = Join-Path $repoRoot "plugins\rp-stack-devkit\hooks\rp_stack_policy.ps1"
 $opsScript = Join-Path $repoRoot "plugins\rp-stack-devkit\scripts\rp-stack-ops.ps1"
+$opsModule = Join-Path $repoRoot "plugins\rp-stack-devkit\scripts\RpStackOps.psm1"
 $mcpScript = Join-Path $repoRoot "plugins\rp-stack-devkit\scripts\mcp-server.ps1"
 $powerShellExecutable = (Get-Process -Id $PID).Path
 
@@ -18,6 +19,19 @@ function Invoke-Hook {
     $json = $Payload | ConvertTo-Json -Depth 10 -Compress
     return ($json | & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File $projectHook | Out-String).Trim()
 }
+
+Import-Module $opsModule -Force
+$loadedOpsModule = Get-Module RpStackOps
+$nativeStderrResult = & $loadedOpsModule {
+    param([string]$Executable)
+    Invoke-RpExternalCommand -FilePath $Executable -ArgumentList @(
+        "-NoProfile",
+        "-Command",
+        "[Console]::Error.WriteLine('docker-progress'); exit 0"
+    )
+} $powerShellExecutable
+Assert-True ($nativeStderrResult.exit_code -eq 0) "Native stderr incorrectly changed a successful exit code."
+Assert-True ($nativeStderrResult.output -match 'docker-progress') "Native stderr was not captured in command output."
 
 $projectHookHash = (Get-FileHash -LiteralPath $projectHook -Algorithm SHA256).Hash
 $pluginHookHash = (Get-FileHash -LiteralPath $pluginHook -Algorithm SHA256).Hash
