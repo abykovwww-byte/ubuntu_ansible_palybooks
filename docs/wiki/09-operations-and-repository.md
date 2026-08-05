@@ -38,6 +38,47 @@ flowchart LR
 
 Push не означает deploy, а healthy containers не доказывают корректный пользовательский сценарий.
 
+## Codex devkit, worktrees и CI
+
+Репозиторий содержит собственный Codex-контур:
+
+```text
+AGENTS.md                                      repository authority и delivery rules
+.codex/config.toml                            project hooks и rp-stack-ops MCP
+.codex/hooks.json                             PreToolUse policy
+.agents/plugins/marketplace.json              repo-scoped plugin catalog
+plugins/rp-stack-devkit/                      skill, read-only MCP/CLI, hooks, checklist
+scripts/ci.ps1                                единый локальный deterministic gate
+scripts/run-rp-stack-evals.ps1                offline/provider/browser eval entrypoint
+.github/workflows/ci.yml                      GitHub Actions parity gate
+```
+
+Каждая независимая задача выполняется в `codex/` branch или отдельном worktree.
+Scheduled проверки также получают отдельный worktree и работают report-only:
+они не merge/push/deploy/restore и не меняют живые Party без нового явного
+запроса.
+
+Локальный `scripts/ci.ps1` проверяет JSON, Wiki links/fences, AGENTS/hooks/plugin,
+state и training contracts, workflow scripts, Python syntax, JS syntax/tests и
+полный Gateway pytest. GitHub Actions повторяет эти контракты на чистом runner и
+добавляет `ansible-playbook --syntax-check`. Dependabot раз в неделю проверяет
+GitHub Actions и Gateway Python dependencies.
+
+`rp-stack-ops` — read-only интерфейс диагностики, а не альтернативный deploy
+path. Публикация и apply остаются намеренно отдельными действиями. Для ручного
+CLI:
+
+```powershell
+powershell.exe -File scripts/rp-stack-ops.ps1 -Action local_revision
+powershell.exe -File scripts/rp-stack-ops.ps1 -Action compose_status
+powershell.exe -File scripts/rp-stack-ops.ps1 -Action gateway_test -Scope training
+```
+
+Provider canary запускается только с `-ConfirmProviderRun`, использует Gateway
+autotest branch и проверяет, что source history/state не изменились. Полные
+правила трёх уровней находятся в
+[RP Stack evals](../../roles/apps/files/rp-stack/evals/README.md).
+
 ## Серверные команды
 
 ```bash
@@ -103,6 +144,13 @@ ubuntu_ansible_palybooks/
 │   ├── abykovserv-iac-deploy/
 │   ├── rp-world-pack-builder/
 │   └── training-world-pack-builder/
+├── plugins/rp-stack-devkit/
+├── .codex/
+├── .github/workflows/ci.yml
+├── AGENTS.md
+├── scripts/ci.ps1
+├── scripts/rp-stack-ops.ps1
+├── scripts/run-rp-stack-evals.ps1
 └── docs/wiki/
 ```
 
@@ -170,6 +218,12 @@ git diff --check
 ```bash
 python -m compileall rp-gateway/app
 pytest
+```
+
+Единый local parity gate из корня репозитория:
+
+```powershell
+powershell.exe -File scripts/ci.ps1
 ```
 
 Для статических UI:

@@ -77,6 +77,28 @@ prompt; оцениваемые требования кодируются отд�
 выполняются до публикации асинхронно. Открытие файла не запускает Python
 конвертацию, filesystem scan или LLM.
 
+## Codex devkit и доступ к эксплуатации
+
+`rp-stack-ops` предоставляет Codex только фиксированный read-only allowlist:
+server revision, Ansible status/journal, Compose status, HTTP smoke, изолированный
+Gateway pytest, bounded logs/provider summary, trace по строго проверенному
+request ID и список backup-файлов. В MCP нет deploy, restore, delete, secret
+rotation или произвольного shell.
+
+Переменные `RP_STACK_OPS_HOST` и `RP_STACK_OPS_SSH` меняют только endpoint и
+локальный SSH executable. Аргументы service/scope/lines/request ID валидируются
+до построения server command, а вероятные bearer, API key, cookie, password,
+secret и token редактируются из результата. Это защита от случайной утечки, но
+не замена серверной авторизации и sandbox approval.
+
+Project `PreToolUse` hook блокирует hard reset/clean, force push, recursive
+delete, чтение server-only overrides, вероятные plaintext credentials и прямые
+мутации `/srv/apps/rp-stack`, `/srv/app-data/rp-stack` и backups. Постоянные
+секреты остаются только в `/etc/ansible/local-overrides.yml`.
+
+Sentry, OpenTelemetry, PostHog и другая прикладная телеметрия в devkit не
+добавляются: наблюдаемость приложения остаётся отдельным архитектурным решением.
+
 ## Аутентификация
 
 - Пароли хранятся как PBKDF2-HMAC-SHA256 с отдельной солью и 260 000 итераций.

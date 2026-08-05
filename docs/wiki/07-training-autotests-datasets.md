@@ -120,6 +120,28 @@ Auto-player видит только public character description и player/GM tr
 
 Runs сохраняют status, requested/completed turns, fallback count, provider/model, prompt, last action и error. Каждый narrator turn имеет idempotency key. Незавершённый run может продолжиться после рестарта Gateway без дублирования завершённого хода.
 
+## Три уровня eval-проверок
+
+Devkit не смешивает детерминированные тесты, реальные provider-вызовы и
+браузерную приёмку в один нечёткий статус:
+
+| Уровень | Что проверяет | Разрешённые эффекты |
+|---|---|---|
+| Offline | state/schema, WorldPack runtime, workflow scripts, полный Gateway pytest, JS syntax/tests | Нет сети, provider-вызовов и запуска приложения |
+| Provider canary | Реальный narrator/player путь, status, completed/fallback turns и неизменность source Party | Только явно подтверждённый bounded autotest branch, до 5 ходов из runner |
+| Browser smoke | Authenticated DOM, реальные API responses, exactly-once turn, artifacts и Showroom isolation | Один заранее выбранный безопасный тестовый ход на уже развёрнутой revision |
+
+Provider canary использует существующий `POST /api/admin/autotests`: до запуска
+он хеширует history/state source Party, после завершения сравнивает их снова и
+считает run неуспешным при любом изменении main-line. Session cookie или bearer
+берутся только из process environment, не попадают в аргументы, JSON report или
+Git. При poll timeout runner запрашивает stop, чтобы не оставлять бесконтрольный
+фоновой run.
+
+Browser smoke не заменяется `curl`: UI считается проверенным только после
+осмотра authenticated DOM, browser console и фактических network responses.
+Отчёты runner пишутся в ignored `artifacts/evals/`.
+
 ## Логи как исходный корпус
 
 Каждый новый turn сохраняет:
