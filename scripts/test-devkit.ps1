@@ -43,11 +43,11 @@ Assert-True ([string]::IsNullOrWhiteSpace($allowSourceToken)) "Hook unexpectedly
 $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("rp-stack-ops-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
 try {
-    Set-Content -LiteralPath (Join-Path $fixtureRoot "provider_summary.txt") -Encoding UTF8 -Value "Authorization: Bearer secret-value`napi_key=sk-this-must-be-redacted`nfallback_reason=validation_failed"
+    Set-Content -LiteralPath (Join-Path $fixtureRoot "provider_summary.txt") -Encoding UTF8 -Value "Authorization: Bearer secret-value`napi_key=sk-this-must-be-redacted`n'password_hash': '`$apr1`$must-not-leak'`nfallback_reason=validation_failed"
     $env:RP_STACK_OPS_FIXTURE_DIR = $fixtureRoot
     $result = & $opsScript -Action provider_summary -Lines 20 | ConvertFrom-Json
     Assert-True $result.ok "Fixture-backed provider summary failed."
-    Assert-True ($result.output -notmatch 'secret-value|sk-this-must-be-redacted') "Ops output leaked a probable credential."
+    Assert-True ($result.output -notmatch 'secret-value|sk-this-must-be-redacted|must-not-leak') "Ops output leaked a probable credential."
     Assert-True ($result.output -match 'fallback_reason=validation_failed') "Ops output lost non-secret diagnostic evidence."
 } finally {
     Remove-Item Env:RP_STACK_OPS_FIXTURE_DIR -ErrorAction SilentlyContinue
@@ -56,19 +56,34 @@ try {
     }
 }
 
-$mcpRequests = @(
-    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
-    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}',
-    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request_trace","arguments":{"request_id":"bad id"}}}'
-)
-$OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$mcpResponses = @($mcpRequests | & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File $mcpScript)
-Assert-True ($mcpResponses.Count -eq 3) "MCP server did not return three responses."
-$initialize = $mcpResponses[0] | ConvertFrom-Json
-$toolList = $mcpResponses[1] | ConvertFrom-Json
-$invalidCall = $mcpResponses[2] | ConvertFrom-Json
-Assert-True ($initialize.result.serverInfo.name -eq "rp-stack-ops") "MCP initialize response is invalid."
-Assert-True (($toolList.result.tools.name -contains "gateway_test") -and -not ($toolList.result.tools.name -contains "deploy")) "MCP tool allowlist is invalid."
-Assert-True $invalidCall.result.isError "MCP failed to reject an invalid request ID."
+$mcpFixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("rp-stack-mcp-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $mcpFixtureRoot | Out-Null
+try {
+    Set-Content -LiteralPath (Join-Path $mcpFixtureRoot "server_revision.txt") -Encoding UTF8 -Value "fixture-revision"
+    $env:RP_STACK_OPS_FIXTURE_DIR = $mcpFixtureRoot
+    $mcpRequests = @(
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
+        '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}',
+        '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request_trace","arguments":{"request_id":"bad id"}}}',
+        '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"server_revision","arguments":{}}}'
+    )
+    $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $mcpResponses = @($mcpRequests | & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File $mcpScript)
+    Assert-True ($mcpResponses.Count -eq 4) "MCP server did not return four responses."
+    $initialize = $mcpResponses[0] | ConvertFrom-Json
+    $toolList = $mcpResponses[1] | ConvertFrom-Json
+    $invalidCall = $mcpResponses[2] | ConvertFrom-Json
+    $emptyArgumentsCall = $mcpResponses[3] | ConvertFrom-Json
+    Assert-True ($initialize.result.serverInfo.name -eq "rp-stack-ops") "MCP initialize response is invalid."
+    Assert-True (($toolList.result.tools.name -contains "gateway_test") -and -not ($toolList.result.tools.name -contains "deploy")) "MCP tool allowlist is invalid."
+    Assert-True $invalidCall.result.isError "MCP failed to reject an invalid request ID."
+    Assert-True (-not $emptyArgumentsCall.result.isError) "MCP rejected a valid call with empty arguments."
+    Assert-True $emptyArgumentsCall.result.structuredContent.ok "Fixture-backed empty-argument MCP call failed."
+} finally {
+    Remove-Item Env:RP_STACK_OPS_FIXTURE_DIR -ErrorAction SilentlyContinue
+    if ((Resolve-Path $mcpFixtureRoot).Path.StartsWith([System.IO.Path]::GetTempPath(), [System.StringComparison]::OrdinalIgnoreCase)) {
+        Remove-Item -LiteralPath $mcpFixtureRoot -Recurse -Force
+    }
+}
 
 Write-Host "RP Stack devkit policy, redaction, argument validation, and MCP protocol tests passed."
