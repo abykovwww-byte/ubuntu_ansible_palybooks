@@ -99,12 +99,21 @@ function Invoke-RpStackRemote {
         }
     }
 
-    $sshResult = Invoke-RpExternalCommand -FilePath (Get-RpStackSshCommand) -ArgumentList @(
+    $sshArguments = @(
         "-o", "BatchMode=yes",
-        "-o", "ConnectTimeout=10",
-        (Get-RpStackHost),
-        $Command
+        "-o", "ConnectTimeout=10"
     )
+    $identityFile = $env:RP_STACK_OPS_IDENTITY_FILE
+    if (-not [string]::IsNullOrWhiteSpace($identityFile)) {
+        if (-not (Test-Path -LiteralPath $identityFile -PathType Leaf)) {
+            throw "RP_STACK_OPS_IDENTITY_FILE must point to an existing file."
+        }
+        $resolvedIdentityFile = (Resolve-Path -LiteralPath $identityFile).Path
+        $sshArguments += @("-i", $resolvedIdentityFile, "-o", "IdentitiesOnly=yes")
+    }
+    $sshArguments += @((Get-RpStackHost), $Command)
+
+    $sshResult = Invoke-RpExternalCommand -FilePath (Get-RpStackSshCommand) -ArgumentList $sshArguments
     $sshResult.source = "ssh"
     return $sshResult
 }

@@ -14,18 +14,18 @@ user's home server:
 - observed hostname: `abykovserv`
 - SSH user: `abykov`
 - IaC repository: `https://github.com/abykovwww-byte/ubuntu_ansible_palybooks`
-- local workspace: `C:\Users\albykov\Documents\Tavern\ubuntu_ansible_palybooks`
+- local workspace: `$env:USERPROFILE\Documents\Tavern\ubuntu_ansible_palybooks`
 - server checkout: `/opt/ubuntu_ansible_palybooks`
 
 The core model is pull-based:
 
 ```text
 local repo changes -> commit -> push to GitHub main
-server -> git pull --ff-only -> Ansible against localhost -> Docker Compose apps
+server -> read-only deploy key -> git pull --ff-only -> Ansible against localhost -> Docker Compose apps
 ```
 
-GitHub does not connect to the server. The server pulls GitHub and applies
-Ansible locally.
+GitHub does not connect to the server. The server reads the private repository
+with a server-only read-only deploy key and applies Ansible locally.
 
 ## First Rules
 

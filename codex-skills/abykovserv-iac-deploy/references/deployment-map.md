@@ -7,7 +7,7 @@ Server IP:        192.168.1.88
 SSH user:         abykov
 Observed host:    abykovserv
 GitHub IaC repo:  https://github.com/abykovwww-byte/ubuntu_ansible_palybooks
-Local checkout:   C:\Users\albykov\Documents\Tavern\ubuntu_ansible_palybooks
+Local checkout:   $env:USERPROFILE\Documents\Tavern\ubuntu_ansible_palybooks
 Server checkout:  /opt/ubuntu_ansible_palybooks
 Main branch:      main
 ```
@@ -20,8 +20,12 @@ Codex edits local checkout
 -> git push origin main
 -> SSH to server
 -> sudo systemctl start ansible-local-apply.service
--> server pulls GitHub and applies Ansible to localhost
+-> server uses a read-only deploy key, pulls GitHub, and applies Ansible to localhost
 ```
+
+The private deploy key is stored only in the server account's SSH directory.
+The repository-local `core.sshCommand` selects it for pull operations; the key
+is not committed and has no push permission.
 
 `scripts/apply-local.sh` performs:
 

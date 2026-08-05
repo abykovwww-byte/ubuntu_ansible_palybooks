@@ -27,7 +27,6 @@ if ($payload.PSObject.Properties.Name -contains "tool_input") {
 
 $inspectionText = "{0}`n{1}" -f $toolName, ($toolInput | ConvertTo-Json -Depth 20 -Compress)
 $denyReason = $null
-
 $rules = @(
     @{ Pattern = '(?i)git\s+reset\s+--hard'; Reason = 'Hard reset is disabled in this repository; preserve user work and use a scoped revert or fix.' },
     @{ Pattern = '(?i)git\s+clean\s+-(?:[^\s]*f[^\s]*|[^\s]*x[^\s]*)'; Reason = 'Destructive git clean is disabled; inspect exact untracked targets first.' },
