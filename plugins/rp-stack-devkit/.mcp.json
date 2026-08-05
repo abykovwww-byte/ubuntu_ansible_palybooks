@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "rp-stack-ops": {
+      "cwd": ".",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "./scripts/mcp-server.ps1"
+      ]
+    }
+  }
+}

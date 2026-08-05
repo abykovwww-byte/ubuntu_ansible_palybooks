@@ -1,0 +1,20 @@
+{
+  "name": "tavern-rp-stack",
+  "interface": {
+    "displayName": "Tavern Rp Stack"
+  },
+  "plugins": [
+    {
+      "name": "rp-stack-devkit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rp-stack-devkit"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "DeveloperTools"
+    }
+  ]
+}

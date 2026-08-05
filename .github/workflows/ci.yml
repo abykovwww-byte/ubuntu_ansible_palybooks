@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate repository contracts
+        run: python scripts/validate-repository.py
+      - name: Validate devkit policy and MCP protocol
+        shell: pwsh
+        run: ./scripts/test-devkit.ps1
+
+  gateway:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: roles/apps/files/rp-stack/rp-gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: roles/apps/files/rp-stack/rp-gateway/requirements.txt
+      - name: Install Gateway dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run Gateway tests
+        run: python -m pytest -q
+
+  rp-contracts:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: roles/apps/files/rp-stack
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate canonical state
+        shell: bash
+        run: |
+          find worldpacks -name state-seed.json -print0 | sort -z | while IFS= read -r -d '' state; do
+            python scripts/validate-state.py --state "$state" --schema state/schema.json
+          done
+      - name: Validate deterministic training runtime
+        run: python scripts/validate-training-runtime.py --worldpacks worldpacks
+      - name: Exercise state workflow
+        run: python scripts/test-state-workflow.py
+      - name: Exercise check workflow
+        run: python scripts/test-check-workflow.py
+
+  browser-clients:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check browser client syntax
+        shell: bash
+        run: |
+          node --check roles/apps/files/rp-stack/rp-light-gui/app.js
+          node --check roles/apps/files/rp-stack/rp-showcase-gui/app.js
+      - name: Run browser client tests
+        shell: bash
+        run: |
+          find roles/apps/files/rp-stack -name '*.test.js' -print0 | sort -z | xargs -0 -n1 node
+
+  ansible-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Ansible
+        run: python -m pip install ansible-core
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r collections/requirements.yml
+      - name: Check playbook syntax
+        run: ansible-playbook -i inventories/local/hosts.yml playbooks/site.yml --syntax-check
