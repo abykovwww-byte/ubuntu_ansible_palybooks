@@ -4,6 +4,7 @@ $projectHook = Join-Path $repoRoot ".codex\hooks\rp_stack_policy.ps1"
 $pluginHook = Join-Path $repoRoot "plugins\rp-stack-devkit\hooks\rp_stack_policy.ps1"
 $opsScript = Join-Path $repoRoot "plugins\rp-stack-devkit\scripts\rp-stack-ops.ps1"
 $mcpScript = Join-Path $repoRoot "plugins\rp-stack-devkit\scripts\mcp-server.ps1"
+$powerShellExecutable = (Get-Process -Id $PID).Path
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -15,13 +16,13 @@ function Assert-True {
 function Invoke-Hook {
     param([hashtable]$Payload)
     $json = $Payload | ConvertTo-Json -Depth 10 -Compress
-    return ($json | powershell.exe -NoProfile -ExecutionPolicy Bypass -File $projectHook | Out-String).Trim()
+    return ($json | & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File $projectHook | Out-String).Trim()
 }
 
 $denyReset = Invoke-Hook @{ tool_name = "shell_command"; tool_input = @{ command = "git reset --hard HEAD" } }
 Assert-True ($denyReset -match '"permissionDecision":"deny"') "Hook did not deny git reset --hard."
 
-$pluginDenyReset = ((@{ tool_name = "shell_command"; tool_input = @{ command = "git reset --hard HEAD" } } | ConvertTo-Json -Depth 10 -Compress) | powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pluginHook | Out-String).Trim()
+$pluginDenyReset = ((@{ tool_name = "shell_command"; tool_input = @{ command = "git reset --hard HEAD" } } | ConvertTo-Json -Depth 10 -Compress) | & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File $pluginHook | Out-String).Trim()
 Assert-True ($pluginDenyReset -match '"permissionDecision":"deny"') "Plugin hook did not deny git reset --hard."
 
 $denySecret = Invoke-Hook @{ tool_name = "shell_command"; tool_input = @{ command = "Get-Content /etc/ansible/local-overrides.yml" } }
@@ -61,7 +62,7 @@ $mcpRequests = @(
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request_trace","arguments":{"request_id":"bad id"}}}'
 )
 $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$mcpResponses = @($mcpRequests | powershell.exe -NoProfile -ExecutionPolicy Bypass -File $mcpScript)
+$mcpResponses = @($mcpRequests | & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File $mcpScript)
 Assert-True ($mcpResponses.Count -eq 3) "MCP server did not return three responses."
 $initialize = $mcpResponses[0] | ConvertFrom-Json
 $toolList = $mcpResponses[1] | ConvertFrom-Json
