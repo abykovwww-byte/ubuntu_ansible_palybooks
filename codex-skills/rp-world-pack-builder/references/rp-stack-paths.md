@@ -3,7 +3,7 @@
 ## Local repository
 
 ```text
-C:/Users/albykov/Documents/Tavern/ubuntu_ansible_palybooks
+$env:USERPROFILE/Documents/Tavern/ubuntu_ansible_palybooks
 roles/apps/files/rp-stack/
 roles/apps/files/rp-stack/worldpacks/<world-slug>/
 roles/apps/files/rp-stack/state/schema.json
@@ -33,7 +33,7 @@ Gateway: internal http://rp-gateway:8088
 ## Validation
 
 ```powershell
-cd C:/Users/albykov/Documents/Tavern/ubuntu_ansible_palybooks/roles/apps/files/rp-stack
+Set-Location "$env:USERPROFILE/Documents/Tavern/ubuntu_ansible_palybooks/roles/apps/files/rp-stack"
 python scripts/validate-state.py --state worldpacks/<slug>/state-seed.json --schema state/schema.json
 ```
 

@@ -10,7 +10,7 @@ with the implementation.
 
 ## Canonical Locations
 
-- repository: `C:\Users\albykov\Documents\Tavern\ubuntu_ansible_palybooks`
+- repository: `$env:USERPROFILE\Documents\Tavern\ubuntu_ansible_palybooks`
 - Wiki hub: `docs/wiki/README.md`
 - Wiki pages: `docs/wiki/01-architecture.md` through
   `docs/wiki/09-operations-and-repository.md`

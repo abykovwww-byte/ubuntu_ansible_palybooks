@@ -7,7 +7,7 @@ Server IP:        192.168.1.88
 SSH user:         abykov
 Observed host:    abykovserv
 GitHub IaC repo:  https://github.com/abykovwww-byte/ubuntu_ansible_palybooks
-Local checkout:   C:\Users\albykov\Documents\Tavern\ubuntu_ansible_palybooks
+Local checkout:   $env:USERPROFILE\Documents\Tavern\ubuntu_ansible_palybooks
 Server checkout:  /opt/ubuntu_ansible_palybooks
 Main branch:      main
 ```

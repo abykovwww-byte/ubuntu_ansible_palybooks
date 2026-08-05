@@ -429,7 +429,7 @@ curl -fsS http://127.0.0.1:5601/api/status
 AD CSV snapshots can be loaded from the Windows export folder through the SSH tunnel:
 
 ```powershell
-cd C:\Users\albykov\Documents\Пользователи\opensearch-ad
+Set-Location "$env:USERPROFILE\Documents\Пользователи\opensearch-ad"
 $env:OPENSEARCH_URL = "https://127.0.0.1:9200"
 $env:OPENSEARCH_USER = "admin"
 $env:OPENSEARCH_PASSWORD = "PASTE_SERVER_PASSWORD_HERE"
