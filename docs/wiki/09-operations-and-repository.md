@@ -9,11 +9,15 @@ RP Stack развёртывается pull-based. GitHub не подключае
 ```mermaid
 flowchart LR
     W["Windows workspace"] -->|"commit + push"| GH["GitHub main"]
-    GH -->|"git pull --ff-only"| CO["/opt/ubuntu_ansible_palybooks"]
+    GH -->|"read-only deploy key + git pull --ff-only"| CO["/opt/ubuntu_ansible_palybooks"]
     CO -->|"Ansible localhost"| APP["/srv/apps/rp-stack"]
     APP -->|"docker compose up"| RT["Running containers"]
     DATA["/srv/app-data/rp-stack"] --> RT
 ```
+
+Репозиторий приватный. Сервер читает его по SSH с отдельным read-only deploy key;
+приватная часть ключа хранится только на `abykovserv`, не попадает в Git и не
+используется для push.
 
 Обычный цикл:
 

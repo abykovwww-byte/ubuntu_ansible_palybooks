@@ -21,11 +21,11 @@ The core model is pull-based:
 
 ```text
 local repo changes -> commit -> push to GitHub main
-server -> git pull --ff-only -> Ansible against localhost -> Docker Compose apps
+server -> read-only deploy key -> git pull --ff-only -> Ansible against localhost -> Docker Compose apps
 ```
 
-GitHub does not connect to the server. The server pulls GitHub and applies
-Ansible locally.
+GitHub does not connect to the server. The server reads the private repository
+with a server-only read-only deploy key and applies Ansible locally.
 
 ## First Rules
 

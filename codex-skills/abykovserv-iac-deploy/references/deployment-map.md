@@ -20,8 +20,12 @@ Codex edits local checkout
 -> git push origin main
 -> SSH to server
 -> sudo systemctl start ansible-local-apply.service
--> server pulls GitHub and applies Ansible to localhost
+-> server uses a read-only deploy key, pulls GitHub, and applies Ansible to localhost
 ```
+
+The private deploy key is stored only in the server account's SSH directory.
+The repository-local `core.sshCommand` selects it for pull operations; the key
+is not committed and has no push permission.
 
 `scripts/apply-local.sh` performs:
 

@@ -133,19 +133,19 @@ ansible-playbook playbooks/site.yml --check --diff
 
 ## Pull Model On The Target Server
 
-For a self-hosted local server that pulls this public repository from GitHub and applies Ansible to itself:
+For a self-hosted local server that pulls this private repository from GitHub with a read-only deploy key and applies Ansible to itself:
 
 ```bash
 sudo apt update
 sudo apt install -y git python3-venv python3-pip
-sudo git clone https://github.com/abykovwww-byte/ubuntu_ansible_palybooks.git /opt/ubuntu_ansible_palybooks
-sudo chown -R "$USER:$USER" /opt/ubuntu_ansible_palybooks
+sudo install -d -o "$USER" -g "$USER" /opt/ubuntu_ansible_palybooks
+git clone git@github.com:abykovwww-byte/ubuntu_ansible_palybooks.git /opt/ubuntu_ansible_palybooks
 cd /opt/ubuntu_ansible_palybooks
 chmod +x scripts/apply-local.sh
 ./scripts/apply-local.sh playbooks/bootstrap.yml
 ```
 
-Local-only overrides can be placed in `/etc/ansible/local-overrides.yml`. Do not commit that file. Use it for real SSH public keys, local domains, firewall flags, and other host-specific values that should not live in the public repository.
+Configure the deploy key in the server account's SSH configuration before cloning; grant it read-only access to this repository and never commit the private key. Local-only overrides can be placed in `/etc/ansible/local-overrides.yml`. Do not commit that file. Use it for real SSH public keys, local domains, firewall flags, and other host-specific values that should not live in the repository.
 
 ## Tags
 

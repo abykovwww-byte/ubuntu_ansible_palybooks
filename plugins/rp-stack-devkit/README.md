@@ -12,6 +12,12 @@ It packages:
 
 The plugin does not contain credentials and has no live mutation or deployment tool.
 
+Remote diagnostics use the local OpenSSH configuration by default. Set
+`RP_STACK_OPS_IDENTITY_FILE` to an existing private-key file when an explicit
+identity is required; the key path remains local and is never stored in the
+repository. `RP_STACK_OPS_HOST` and `RP_STACK_OPS_SSH` can override the default
+target and SSH executable.
+
 ## Install from this repository
 
 ```powershell

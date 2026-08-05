@@ -16,11 +16,11 @@ Hostname observed: abykovserv
 The server uses a pull-based self-hosted Ansible model:
 
 ```text
-Ubuntu server -> GitHub public repository over HTTPS
+Ubuntu server -> private GitHub repository over SSH with a read-only deploy key
 Ubuntu server -> applies Ansible playbooks to localhost
 ```
 
-GitHub does not connect to the server. The server pulls the public repository and runs Ansible locally.
+GitHub does not connect to the server. The server pulls the private repository with a server-only read-only deploy key and runs Ansible locally.
 
 ## Repository On Server
 
@@ -33,7 +33,7 @@ The repository is cloned here:
 Remote repository:
 
 ```text
-https://github.com/abykovwww-byte/ubuntu_ansible_palybooks
+git@github.com:abykovwww-byte/ubuntu_ansible_palybooks.git
 ```
 
 The checkout was verified on branch:
@@ -112,7 +112,7 @@ ansible_connection: local
 
 ## Local-Only Overrides
 
-Host-specific values that must not be committed to the public repository are stored here:
+Host-specific values that must not be committed to the repository are stored here:
 
 ```text
 /etc/ansible/local-overrides.yml
@@ -141,7 +141,7 @@ Coolify enablement
 private registry settings
 ```
 
-Do not put secrets or real private values into the public repository.
+Do not put secrets or real private values into the repository. The GitHub deploy key is also server-only and must remain outside Git.
 
 ## Systemd Manual Apply Service
 
