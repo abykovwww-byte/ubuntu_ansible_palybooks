@@ -1397,6 +1397,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     text = artifact_result.text
                 if workspace_result.valid:
                     text = workspace_result.text
+                if runtime_service.enabled:
+                    text = runtime_service.normalize_narrative(text, narrative_state, interaction_contract)
                 if artifact_result.valid and workspace_result.valid:
                     response = Adjudicator.merge_interaction_response(response, text, artifact_result, workspace_result)
             else:
@@ -1413,23 +1415,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 training_runtime=runtime_service,
                 interaction_contract=interaction_contract,
             )
+            training_runtime_enabled = runtime_service.enabled
+            repair_attempts = (
+                party_settings.training_repair_attempts
+                if training_runtime_enabled
+                else party_settings.max_repair_attempts
+            )
+            training_repair_allowed = True
+            if training_runtime_enabled:
+                runtime_violations = runtime_service.validate_narrative(
+                    text, narrative_state, interaction_contract
+                )
+                runtime_violation_set = set(runtime_violations)
+                training_repair_allowed = not runtime_service.hard_violations(
+                    text, narrative_state, interaction_contract
+                ) and not any(
+                    violation not in runtime_violation_set for violation in validation.violations
+                )
             if (
                 not validation.valid or not artifact_result.valid or not workspace_result.valid
-            ) and party_settings.max_repair_attempts > 0 and not runtime_service.enabled:
+            ) and repair_attempts > 0 and training_repair_allowed:
                 repaired = True
-                repair_instruction = validation.repair_instruction
+                repair_instruction = (
+                    runtime_service.repair_instruction(text, narrative_state, interaction_contract)
+                    if training_runtime_enabled
+                    else validation.repair_instruction
+                )
                 if not artifact_result.valid:
                     repair_instruction = " ".join(
                         [
                             repair_instruction,
-                            "Return a valid narrative bundle: " + "; ".join(artifact_result.violations),
+                            "Верни корректный JSON bundle: объект artifact должен содержать только разрешённые ключи и slots; fixed display_url оставь только в строке «Ссылки:» видимого narrative_text.",
                         ]
                     ).strip()
                 if not workspace_result.valid:
                     repair_instruction = " ".join(
                         [
                             repair_instruction,
-                            "Return valid workspace_files: " + "; ".join(workspace_result.violations),
+                            "Верни корректный workspace_files только с разрешёнными file_key, blueprint_id и строковыми slots.",
                         ]
                     ).strip()
                 raw = await narrative.complete(
@@ -1453,6 +1476,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     text = artifact_result.text
                 if workspace_result.valid:
                     text = workspace_result.text
+                if runtime_service.enabled:
+                    text = runtime_service.normalize_narrative(text, narrative_state, interaction_contract)
                 if artifact_result.valid and workspace_result.valid:
                     response = Adjudicator.merge_interaction_response(response, text, artifact_result, workspace_result)
                 validation = validator.validate(

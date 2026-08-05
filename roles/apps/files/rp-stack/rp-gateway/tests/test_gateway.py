@@ -3299,7 +3299,7 @@ def test_training_runtime_repairs_only_soft_validation_failures(
         llm_calls += 1
         sender = "Посторонний" if failure_kind == "hard-sender" else "Анна Петрова <petrova@ptsecurity.com>"
         profile_detail = "по текущей задаче" if llm_calls == 1 else "по работе Investigator"
-        content = (
+        narrative_text = (
             "ПИСЬМО\n"
             "Канал: корпоративная почта\n"
             f"От: {sender}\n"
@@ -3311,6 +3311,25 @@ def test_training_runtime_repairs_only_soft_validation_failures(
             "Тело:\n"
             f"К 09:35 пришли первый результат или конкретный вопрос {profile_detail}.\n"
             "Подпись:\nАнна Петрова"
+        )
+        interaction_contract = kwargs.get("artifact_contract") or {}
+        workspace_contract = interaction_contract.get("workspace") or {}
+        workspace_files = [
+            {
+                "file_key": item["file_key"],
+                "blueprint_id": item["blueprint_id"],
+                "slots": {slot_id: f"Учебный текст {slot_id}" for slot_id in item["slots"]},
+            }
+            for item in workspace_contract.get("files", [])
+        ]
+        content = json.dumps(
+            {
+                "schema_version": "rp-gateway.narrative-bundle.v2",
+                "narrative_text": narrative_text,
+                "artifacts": [],
+                "workspace_files": workspace_files,
+            },
+            ensure_ascii=False,
         )
         return {
             "id": f"training-repair-{llm_calls}",
