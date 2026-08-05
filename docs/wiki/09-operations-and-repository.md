@@ -24,21 +24,23 @@ flowchart LR
 1. изменить source/IaC локально;
 2. выполнить статические и focused checks;
 3. commit и push в `origin/main`;
-4. на `abykovserv` запустить `sudo systemctl start ansible-local-apply.service`;
+4. пользователь интерактивно запускает на `abykovserv`
+   `sudo systemctl start ansible-local-apply.service`;
 5. проверить journal, containers, pytest и HTTP/UI.
 
 Команда Ansible прогоняет весь `site.yml`, но роли идемпотентны. Apps role отслеживает изменённые app artifacts, а Docker Compose не должен пересоздавать неизменный сервис без изменения image/config.
 
 ## Статусы доставки
 
-Это четыре разных утверждения:
+Это разные утверждения, которые нельзя сворачивать в одно:
 
 | Статус | Что доказано |
 |---|---|
 | Локально готово | Файлы изменены и проверены в workspace |
 | Закоммичено | Есть Git commit |
 | Запушено | Commit доступен в GitHub |
-| Развёрнуто и live verified | Сервер подтянул revision, Ansible завершился, runtime проверен |
+| Ansible применён | Пользователь ввёл sudo-пароль интерактивно, сервер подтянул revision и apply завершился |
+| Container/HTTP/browser verified | Соответствующий runtime-уровень проверен отдельно |
 
 Push не означает deploy, а healthy containers не доказывают корректный пользовательский сценарий.
 
@@ -56,7 +58,23 @@ plugins/rp-stack-devkit/.mcp.json             объявление read-only MCP
 scripts/ci.ps1                                единый локальный deterministic gate
 scripts/run-rp-stack-evals.ps1                offline/provider/browser eval entrypoint
 .github/workflows/ci.yml                      GitHub Actions parity gate
+docs/repository-work-standard.md              короткий проверяемый контракт окружения
+scripts/sync-codex-skills.ps1                 repo -> installed skills check/install
 ```
+
+`.codex/config.toml` содержит только `[features] hooks = true`; MCP объявлен
+плагином через `plugins/rp-stack-devkit/.mcp.json`, а не через project
+`[mcp_servers]`. Канонические standalone-скиллы находятся в `codex-skills/`;
+копии в `%USERPROFILE%\.codex\skills\` устанавливаются командой
+`powershell.exe -File scripts/sync-codex-skills.ps1 -Mode Install` и не
+редактируются отдельно. После синхронизации или обновления плагина нужна новая
+задача Codex.
+
+На проверенной Windows-машине SSH использует явный ключ
+`~/.ssh/id_ed25519_codex_abykovserv`; `ssh-agent` остановлен и отключён. Devkit
+передаёт ключ через `-i`. `sudo -n` на сервере не проходит, поэтому Codex
+останавливается на статусе `pushed`, а apply запускает пользователь
+интерактивно без передачи пароля в задачу.
 
 Каждая независимая задача выполняется в `codex/` branch или отдельном worktree.
 Scheduled проверки также получают отдельный worktree и работают report-only:

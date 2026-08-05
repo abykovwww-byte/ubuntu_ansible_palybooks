@@ -113,6 +113,12 @@ function Invoke-RpStackRemote {
         "-o", "ConnectTimeout=10"
     )
     $identityFile = $env:RP_STACK_OPS_IDENTITY_FILE
+    if ([string]::IsNullOrWhiteSpace($identityFile)) {
+        $defaultIdentityFile = Join-Path $env:USERPROFILE ".ssh\id_ed25519_codex_abykovserv"
+        if (Test-Path -LiteralPath $defaultIdentityFile -PathType Leaf) {
+            $identityFile = $defaultIdentityFile
+        }
+    }
     if (-not [string]::IsNullOrWhiteSpace($identityFile)) {
         if (-not (Test-Path -LiteralPath $identityFile -PathType Leaf)) {
             throw "RP_STACK_OPS_IDENTITY_FILE must point to an existing file."

@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+# Keep this file byte-identical to the plugin policy copy.
 
 $rawInput = [Console]::In.ReadToEnd()
 if ([string]::IsNullOrWhiteSpace($rawInput)) {

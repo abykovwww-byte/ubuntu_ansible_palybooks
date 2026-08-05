@@ -1,0 +1,8 @@
+.tools/
+tmp/
+codex-worktrees/
+graphify-out/
+**/.venv/
+**/.test-deps/
+**/.pytest_cache/
+**/__pycache__/

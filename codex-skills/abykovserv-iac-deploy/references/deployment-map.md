@@ -7,7 +7,7 @@ Server IP:        192.168.1.88
 SSH user:         abykov
 Observed host:    abykovserv
 GitHub IaC repo:  https://github.com/abykovwww-byte/ubuntu_ansible_palybooks
-Local checkout:   $env:USERPROFILE\Documents\Tavern\ubuntu_ansible_palybooks
+Local checkout:   C:\Users\Адександр\Documents\Tavern\ubuntu_ansible_palybooks
 Server checkout:  /opt/ubuntu_ansible_palybooks
 Main branch:      main
 ```
@@ -18,8 +18,8 @@ The server is self-hosted and pull-based:
 Codex edits local checkout
 -> git commit
 -> git push origin main
--> SSH to server
--> sudo systemctl start ansible-local-apply.service
+-> verify SSH with the explicit workstation identity
+-> user runs sudo systemctl start ansible-local-apply.service interactively
 -> server uses a read-only deploy key, pulls GitHub, and applies Ansible to localhost
 ```
 
@@ -59,8 +59,23 @@ server, use escalation:
 }
 ```
 
-Use `C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "..."` from
-PowerShell. Do not try to work around the sandbox with unrelated tools.
+Use
+`C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "..."`
+from PowerShell. The local SSH config also names this identity, but the agent is
+stopped and disabled, so repository commands keep `-i` explicit. Do not try to
+work around the sandbox with unrelated tools.
+
+`sudo -n` fails on this host. Codex must stop at `pushed` and ask the user to
+run the apply interactively; never request or capture the sudo password.
+
+## Workstation tools
+
+`gh` 2.97.0 is authorized as `abykovwww-byte` with `gist`, `read:org`, `repo`,
+and `workflow` scopes when normal network access is available. Bundled Python
+3.12.13 and Node.js 24.14.0 live under
+`%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\`.
+Do not call the unusable PATH `python`; use `scripts/ci.ps1`, which resolves the
+bundled runtime.
 
 ## Ansible Structure
 
@@ -188,28 +203,34 @@ git push origin main
 Remote apply:
 
 ```powershell
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "sudo systemctl start ansible-local-apply.service"
+# Run this interactively by the user; Codex does not supply the sudo password.
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "sudo systemctl start ansible-local-apply.service"
 ```
 
 Remote apply status:
 
 ```powershell
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "sudo systemctl status ansible-local-apply.service --no-pager -l"
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "sudo journalctl -u ansible-local-apply.service -n 100 --no-pager"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "systemctl status ansible-local-apply.service --no-pager -l"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "journalctl -u ansible-local-apply.service -n 100 --no-pager"
 ```
 
-If sudo requires a password, use the already established secure local method if
-available in the thread context. Never reveal the password.
+The apply command is intentionally user-interactive. Never ask the user to paste
+the password into Codex or make it available to automation.
 
 ## Verification
 
 RP Stack:
 
 ```powershell
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "cd /srv/apps/rp-stack && docker compose ps"
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "cd /srv/apps/rp-stack && docker compose run --rm rp-gateway pytest"
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "curl -fsS -o /tmp/rp-light-gui.html -w '%{http_code} %{size_download}\n' http://192.168.1.88:8010/"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "cd /srv/apps/rp-stack && docker compose ps"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "cd /srv/apps/rp-stack && docker compose run --rm rp-gateway pytest"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "curl -fsS -o /tmp/rp-light-gui.html -w '%{http_code} %{size_download}\n' http://192.168.1.88:8010/"
 ```
+
+For a production Python probe, send a local script on stdin instead of nesting
+PowerShell, SSH, and Python quoting. Open SQLite only with
+`file:/data/rp_gateway.db?mode=ro` and `uri=True`; do not print secret-bearing
+rows.
 
 Useful health checks:
 

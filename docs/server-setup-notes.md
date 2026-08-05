@@ -2,6 +2,10 @@
 
 Date: 2026-06-08
 
+Current workstation/Codex facts are maintained separately in
+[`repository-work-standard.md`](repository-work-standard.md); this file remains
+the longer server-setup record.
+
 Target server:
 
 ```text
@@ -180,8 +184,9 @@ sudo git config --system --add safe.directory /opt/ubuntu_ansible_palybooks
 
 1. Change Ansible code in GitHub or locally.
 2. Push changes to `main`.
-3. SSH to the server.
-4. Run:
+3. Verify the server with
+   `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 hostname`.
+4. The user runs interactively:
 
 ```bash
 sudo systemctl start ansible-local-apply.service
@@ -192,6 +197,10 @@ sudo systemctl start ansible-local-apply.service
 ```bash
 sudo journalctl -u ansible-local-apply.service -n 100 --no-pager
 ```
+
+The workstation has no non-interactive sudo path (`sudo -n` fails). Do not ask
+for or capture the password; automation stops at `pushed` until the user reports
+that the apply completed.
 
 ## Safer Manual Playbook Runs
 

@@ -10,7 +10,7 @@ with the implementation.
 
 ## Canonical Locations
 
-- repository: `$env:USERPROFILE\Documents\Tavern\ubuntu_ansible_palybooks`
+- repository: `C:\Users\Адександр\Documents\Tavern\ubuntu_ansible_palybooks`
 - Wiki hub: `docs/wiki/README.md`
 - Wiki pages: `docs/wiki/01-architecture.md` through
   `docs/wiki/09-operations-and-repository.md`
@@ -24,12 +24,14 @@ for implementation facts.
 ## Start Here
 
 1. Read `docs/wiki/README.md` completely.
-2. Read every Wiki page relevant to the request. For a full architecture review,
+2. Read `docs/repository-work-standard.md` for the checked workstation and
+   delivery contract.
+3. Read every Wiki page relevant to the request. For a full architecture review,
    read all numbered pages and `_Sidebar.md`.
-3. Inspect the current Git status and preserve unrelated work.
-4. Verify claims against current source and IaC. Use Graphify for navigation when
+4. Inspect the current Git status and preserve unrelated work.
+5. Verify claims against current source and IaC. Use Graphify for navigation when
    `graphify-out/` exists, but confirm important facts in source.
-5. Distinguish implemented behavior, planned work, compatibility surfaces, and
+6. Distinguish implemented behavior, planned work, compatibility surfaces, and
    retired behavior explicitly.
 
 Do not use an older Wiki revision, adjacent task, ADR, or graph result as proof

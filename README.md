@@ -11,6 +11,7 @@ collaborative-novel, and deterministic-training platform:
 - [Architecture](docs/wiki/01-architecture.md)
 - [WorldPacks and scenario modes](docs/wiki/04-worldpacks-and-modes.md)
 - [Operations and repository map](docs/wiki/09-operations-and-repository.md)
+- [Checked repository work standard](docs/repository-work-standard.md)
 
 ## Repository Layout
 

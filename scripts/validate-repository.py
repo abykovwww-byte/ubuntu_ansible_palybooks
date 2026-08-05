@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,6 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 IGNORED_PARTS = {".git", ".venv", "graphify-out", "node_modules", "__pycache__"}
 LINK_RE = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
+SSH_COMMAND_RE = re.compile(
+    r"(?i)(?:^|[\\/\s])ssh(?:\.exe)?\s+(?:-[A-Za-z]|[A-Za-z0-9._-]+@[A-Za-z0-9])"
+)
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -66,6 +70,8 @@ def validate_agents(errors: list[str]) -> None:
         ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks" / "AGENTS.md",
         ROOT / ".codex" / "config.toml",
         ROOT / ".codex" / "hooks.json",
+        ROOT / "docs" / "repository-work-standard.md",
+        ROOT / "scripts" / "sync-codex-skills.ps1",
     ]
     for path in required:
         if not path.is_file():
@@ -118,18 +124,86 @@ def validate_plugin(errors: list[str]) -> None:
                 fail(errors, "marketplace plugin source path is not canonical")
 
 
+def tracked_files(errors: list[str]) -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fail(errors, "cannot enumerate tracked files with git ls-files")
+        return []
+    return [ROOT / item.decode("utf-8") for item in result.stdout.split(b"\0") if item]
+
+
+def markdown_command_fragments(text: str) -> list[str]:
+    fragments: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            fragments.append(line)
+        fragments.extend(re.findall(r"`([^`]+)`", line))
+    return fragments
+
+
+def validate_environment_contracts(errors: list[str]) -> None:
+    marketplace = Path(".agents/plugins/marketplace.json")
+    old_profile = b"C:" + b"\\Users\\" + b"albykov"
+    old_plugin_path = b".agents/plugins/" + b"rp-stack-devkit/"
+    tracked = tracked_files(errors)
+    for path in tracked:
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        relative = path.relative_to(ROOT)
+        if old_profile in data:
+            fail(errors, f"tracked file contains obsolete profile path: {relative}")
+        if relative != marketplace and old_plugin_path in data:
+            fail(errors, f"tracked file contains obsolete devkit path: {relative}")
+
+    project_policy = ROOT / ".codex" / "hooks" / "rp_stack_policy.ps1"
+    plugin_policy = ROOT / "plugins" / "rp-stack-devkit" / "hooks" / "rp_stack_policy.ps1"
+    if project_policy.is_file() and plugin_policy.is_file() and project_policy.read_bytes() != plugin_policy.read_bytes():
+        fail(errors, "project and plugin rp_stack_policy.ps1 copies differ")
+
+    for base in (ROOT / "codex-skills", ROOT / "plugins"):
+        for path in base.rglob("*.md"):
+            text = path.read_text(encoding="utf-8")
+            for fragment in markdown_command_fragments(text):
+                if SSH_COMMAND_RE.search(fragment) and "-i" not in fragment and "keyless-example" not in fragment:
+                    fail(errors, f"SSH command lacks explicit -i: {path.relative_to(ROOT)}: {fragment.strip()}")
+
+    ignore_path = ROOT / ".graphifyignore"
+    required_ignores = {".tools/", "tmp/", "codex-worktrees/", "graphify-out/"}
+    if not ignore_path.is_file():
+        fail(errors, "missing .graphifyignore")
+    else:
+        actual_ignores = {
+            line.strip().replace("\\", "/")
+            for line in ignore_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        for required in sorted(required_ignores - actual_ignores):
+            fail(errors, f".graphifyignore missing required entry: {required}")
+
+
 def main() -> int:
     errors: list[str] = []
     validate_json(errors)
     validate_wiki(errors)
     validate_agents(errors)
     validate_plugin(errors)
+    validate_environment_contracts(errors)
     if errors:
         print("Repository validation failed:")
         for error in errors:
             print(f"- {error}")
         return 1
-    print("Repository contracts valid: JSON, Wiki links/fences, AGENTS, hooks, and plugin manifests.")
+    print("Repository contracts valid: JSON, Wiki, AGENTS, plugin, environment, SSH, policy, and Graphify guards.")
     return 0
 
 

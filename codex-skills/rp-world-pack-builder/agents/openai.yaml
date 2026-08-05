@@ -1,6 +1,6 @@
 interface:
   display_name: "Gateway World Pack Builder"
   short_description: "Build RP and novel worlds for Light GUI"
-  default_prompt: "Use $rp-world-pack-builder to create a validated RP or collaborative-novel world pack for the rp-gateway and Light GUI stack. Route deterministic training scenarios to $training-world-pack-builder. Preserve the RP-only living story-memory boundary. If live deployment is needed, follow $abykovserv-iac-deploy for abykovserv."
+  default_prompt: "Use $rp-world-pack-builder to create a validated RP or collaborative-novel world pack for the SillyTavern/rp-gateway/Light GUI stack. Route deterministic training scenarios to $training-world-pack-builder and preserve the RP-only living story-memory boundary. If live deployment is needed, follow $abykovserv-iac-deploy for abykovserv."
 policy:
   allow_implicit_invocation: true
