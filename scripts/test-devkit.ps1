@@ -19,6 +19,10 @@ function Invoke-Hook {
     return ($json | & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File $projectHook | Out-String).Trim()
 }
 
+$projectHookHash = (Get-FileHash -LiteralPath $projectHook -Algorithm SHA256).Hash
+$pluginHookHash = (Get-FileHash -LiteralPath $pluginHook -Algorithm SHA256).Hash
+Assert-True ($projectHookHash -eq $pluginHookHash) "Project and plugin policy hooks must be byte-identical."
+
 $denyReset = Invoke-Hook @{ tool_name = "shell_command"; tool_input = @{ command = "git reset --hard HEAD" } }
 Assert-True ($denyReset -match '"permissionDecision":"deny"') "Hook did not deny git reset --hard."
 

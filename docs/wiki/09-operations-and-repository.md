@@ -44,10 +44,11 @@ Push не означает deploy, а healthy containers не доказываю
 
 ```text
 AGENTS.md                                      repository authority и delivery rules
-.codex/config.toml                            project hooks и rp-stack-ops MCP
+.codex/config.toml                            project hooks
 .codex/hooks.json                             PreToolUse policy
 .agents/plugins/marketplace.json              repo-scoped plugin catalog
 plugins/rp-stack-devkit/                      skill, read-only MCP/CLI, hooks, checklist
+plugins/rp-stack-devkit/.mcp.json             объявление read-only MCP rp-stack-ops
 scripts/ci.ps1                                единый локальный deterministic gate
 scripts/run-rp-stack-evals.ps1                offline/provider/browser eval entrypoint
 .github/workflows/ci.yml                      GitHub Actions parity gate
