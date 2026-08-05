@@ -18,8 +18,9 @@ function Get-RpArgument {
     if ($Arguments -is [System.Collections.IDictionary] -and $Arguments.Contains($Name)) {
         return $Arguments[$Name]
     }
-    if ($Arguments.PSObject.Properties.Name -contains $Name) {
-        return $Arguments.$Name
+    $property = $Arguments.PSObject.Properties[$Name]
+    if ($null -ne $property) {
+        return $property.Value
     }
     return $Default
 }
@@ -35,8 +36,8 @@ function Protect-RpStackOutput {
     $redacted = [regex]::Replace($redacted, '(?i)\bsk-[A-Za-z0-9_-]{8,}\b', '[REDACTED_API_KEY]')
     $redacted = [regex]::Replace(
         $redacted,
-        '(?im)\b(api[_-]?key|authorization|cookie|password|secret|token)\b(\s*[:=]\s*)([^\s,;]+)',
-        '$1$2[REDACTED]'
+        '(?im)\b(api[_-]?key|authorization|cookie|password(?:[_-]?hash)?|secret|token)\b[''"]?\s*[:=]\s*[''"]?[^\s,;}\)]+',
+        '$1=[REDACTED]'
     )
     if ($redacted.Length -gt 40000) {
         $redacted = $redacted.Substring(0, 40000) + "`n[OUTPUT_TRUNCATED]"
@@ -171,13 +172,13 @@ function Invoke-RpStackOperation {
             $command = "git -C /opt/ubuntu_ansible_palybooks rev-parse HEAD && git -C /opt/ubuntu_ansible_palybooks status --short --branch"
         }
         "ansible_status" {
-            $command = "sudo systemctl status ansible-local-apply.service --no-pager -l; sudo journalctl -u ansible-local-apply.service -n 80 --no-pager"
+            $command = "systemctl status ansible-local-apply.service --no-pager -l; journalctl -u ansible-local-apply.service -n 80 --no-pager"
         }
         "compose_status" {
             $command = "cd /srv/apps/rp-stack && docker compose ps"
         }
         "http_smoke" {
-            $command = "set -eu; curl -fsS http://127.0.0.1:8010/health; printf '\n'; curl -fsS http://127.0.0.1:8010/api/worldpacks >/dev/null; curl -fsS http://127.0.0.1:8011/health"
+            $command = "set -eu; curl -fsS http://192.168.1.88:8010/health; printf '\n'; curl -sS -o /dev/null -w '%{http_code}\n' http://192.168.1.88:8010/api/worldpacks | grep -qx 401; printf 'worldpacks_unauth=401\n'; curl -fsS http://192.168.1.88:8011/health; printf '\n'; curl -fsS http://192.168.1.88:8011/api/showroom/scenarios >/dev/null; printf 'showroom_scenarios=200\n'"
         }
         "gateway_test" {
             if ($scope -eq "full") {
