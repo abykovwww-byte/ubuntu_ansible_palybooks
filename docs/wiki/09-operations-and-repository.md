@@ -266,6 +266,14 @@ Windows может не иметь runtime dependencies. Авторитетны�
 python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --schema state\schema.json
 ```
 
+## Отдельное приложение USE Framework
+
+USE Framework не входит в RP Stack и не меняет authority Gateway. Он описан отдельным элементом `docker_apps` в `inventories/local/group_vars/server.yml`, клонируется из закрытого GitHub-репозитория на полном commit SHA и обслуживается собственным Compose из application repository.
+
+Сервис публикуется только на `127.0.0.1:8765`, без nginx/DNS/LAN listener. Постоянные данные находятся в `/srv/app-data/use-framework`, backup — в `/srv/backups/use-framework`. Credential `use_framework_github_token` обязателен только в `/etc/ansible/local-overrides.yml`; роль не сохраняет его в remote URL или `.env` приложения.
+
+Полный runbook, включая health, backup/restore и rollback: [USE Framework на abykovserv](../use-framework.md).
+
 ## Secrets и local overrides
 
 Host-specific и secret values находятся в:

@@ -92,10 +92,38 @@
     - app.repo_url is defined
     - app_repo_token | length > 0
     - not docker_app_repo_state.results[app_index].stat.exists
+    - not (app.repo_version_is_commit | default(false) | bool)
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   no_log: true
   register: docker_app_token_clone
+  tags: [apps, source, git]
+
+- name: Clone commit-pinned token-auth Docker app repositories
+  ansible.builtin.command:
+    argv:
+      - git
+      - -c
+      - "http.extraHeader=Authorization: Basic {{ ('x-access-token:' ~ app_repo_token) | b64encode }}"
+      - clone
+      - --no-checkout
+      - "{{ app.repo_url }}"
+      - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+    index_var: app_index
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app_repo_token | length > 0
+    - not docker_app_repo_state.results[app_index].stat.exists
+    - app.repo_version_is_commit | default(false) | bool
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
+  no_log: true
+  register: docker_app_token_commit_clone
   tags: [apps, source, git]
 
 - name: Fetch token-auth Docker app repositories
@@ -268,6 +296,7 @@
       [
         docker_app_removed_non_git.results | default([]),
         docker_app_token_clone.results | default([]),
+        docker_app_token_commit_clone.results | default([]),
         docker_app_token_reset.results | default([]),
         docker_app_public_repo.results | default([]),
         docker_app_source_copy.results | default([]),

@@ -144,6 +144,17 @@ tovar_ai_external_browser_api_url: ""
 tovar_ai_external_browser_api_key: ""
 tovar_ai_external_browser_timeout_seconds: 90
 
+use_framework_enabled: true
+use_framework_repo_url: https://github.com/abykovwww-byte/Unacceptable-security-event-USE-Framework.git
+use_framework_repo_version: db16315eab1e14062f2f974f49b341411767aa6d
+# Required for this private repository; set only in /etc/ansible/local-overrides.yml.
+use_framework_github_token: ""
+use_framework_project_dir: "{{ app_deploy_base_dir }}/use-framework"
+use_framework_data_dir: "{{ app_data_base_dir }}/use-framework"
+use_framework_backup_dir: "{{ app_backup_base_dir }}/use-framework"
+use_framework_bind_host: "127.0.0.1"
+use_framework_host_port: 8765
+
 rp_stack_enabled: true
 rp_stack_project_dir: "{{ app_deploy_base_dir }}/rp-stack"
 rp_stack_storage_dir: "{{ app_data_base_dir }}/rp-stack"
@@ -288,6 +299,25 @@ docker_apps:
     managed_directories:
       - "{{ tovar_ai_data_dir }}"
       - "{{ tovar_ai_log_dir }}"
+  - name: use-framework
+    enabled: "{{ use_framework_enabled }}"
+    repo_url: "{{ use_framework_repo_url }}"
+    repo_version: "{{ use_framework_repo_version }}"
+    repo_version_is_commit: true
+    repo_token_var: use_framework_github_token
+    repo_recreate_if_not_git: true
+    project_dir: "{{ use_framework_project_dir }}"
+    owner: abykov
+    group: abykov
+    directory_mode: "0750"
+    env_template: use-framework.env.j2
+    env_example_template: use-framework.env.example.j2
+    env_mode: "0600"
+    compose_up: true
+    compose_remove_orphans: true
+    managed_directories:
+      - "{{ use_framework_data_dir }}"
+      - "{{ use_framework_backup_dir }}"
   - name: rp-stack
     enabled: "{{ rp_stack_enabled }}"
     source_dir: rp-stack
