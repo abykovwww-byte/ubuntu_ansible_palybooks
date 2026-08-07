@@ -2,7 +2,7 @@
 
 ## Состояние доставки
 
-Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `37a456f513025e63e1523f20dc7934ca0bce151a`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
+Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `4b463555310e74087308855a34e1987cc90b670f`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
 
 Данные хранятся отдельно от checkout:
 
@@ -44,4 +44,4 @@ docker exec use-framework /app/docker/backup.sh
 
 ## Обновление и rollback
 
-Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. Revision `37a456f513025e63e1523f20dc7934ca0bce151a` переносит технические сценарии в канонические узлы и рёбра, а затем отдельной fail-closed миграцией синхронизирует persistent binding-селекторы `hosts.yaml` со стабильным source id `ns1-hosts`. Заменяемые originals и manifest сохраняются соответственно в `/data/canonical-migrations/technical-scenario-paths-v1` и `/data/canonical-migrations/inventory-source-binding-v1`; неизвестное локальное расхождение останавливает запуск без перезаписи. Bootstrap вычисляет `captured_at` по серверному XLSX и архивирует legacy snapshots вне активного набора. Rollback кода — вернуть предыдущий SHA и повторить apply; rollback данных — остановить сервис, выполнить `/app/docker/restore.sh` для архива соответствующей revision и снова запустить apply. Производный SQLite при старте пересобирается из восстановленного YAML.
+Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. Revision `4b463555310e74087308855a34e1987cc90b670f` объединяет stable inventory binding, единую EDR-модель без отдельной AV-меры, явную маркировку generated/declared/confirmed данных, подтверждённость банковских каналов и evidence сценарных контролей. Fail-closed миграции принимают только известные SHA-256 persistent-модели, сначала валидируют временную канонику и сохраняют originals/manifest в `/data/canonical-migrations/<migration-id>/`; неизвестное локальное расхождение останавливает запуск без перезаписи. Bootstrap вычисляет `captured_at` по серверному XLSX и архивирует legacy snapshots вне активного набора. Rollback кода — вернуть предыдущий SHA и повторить apply; rollback данных — остановить сервис, выполнить `/app/docker/restore.sh` для архива соответствующей revision и снова запустить apply. Производный SQLite при старте пересобирается из восстановленного YAML.
