@@ -2,7 +2,7 @@
 
 ## Состояние доставки
 
-Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `e8876a1c83af0a0ffe1d17d09e6cb99448d7326a`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
+Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `d9a432ce7040fe60ea1e18d1e6a0c784d0c1a4da`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
 
 Данные хранятся отдельно от checkout:
 
@@ -40,8 +40,8 @@ docker exec use-framework nsgraph --root /data/canonical validate
 docker exec use-framework /app/docker/backup.sh
 ```
 
-Открыть `http://192.168.1.88:8765` из LAN и `http://100.117.52.16:8765` через Tailscale и проверить НС1: 16 вершин, 18 рёбер, 63 хоста, `example.test=0`; весь реестр EDR `33 yes / 5 no / 25 unknown`, точный селектор терминальных серверов — `17 yes + 2 unknown`, `rd.bc` — `EDR no`, `Sysmon/Security yes`, `stale`.
+Открыть `http://192.168.1.88:8765` из LAN и `http://100.117.52.16:8765` через Tailscale и проверить НС1: 34 вершины, 43 ребра, `scenario_projection=0`, 63 хоста, `example.test=0`, source id `ns1-hosts`, `captured_at` равен UTC-дате серверного XLSX и `stale=0`; весь реестр EDR `33 yes / 5 no / 25 unknown`, точный селектор терминальных серверов — `17 yes + 2 unknown`, `rd.bc` — `EDR no`, `Sysmon/Security yes`, `stale=false`.
 
 ## Обновление и rollback
 
-Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. Rollback кода — вернуть предыдущий SHA и повторить apply; rollback данных — остановить сервис, выполнить `/app/docker/restore.sh` для архива соответствующей revision и снова запустить apply. Производный SQLite при старте пересобирается из восстановленного YAML.
+Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. При первом старте revision `d9a432ce7040fe60ea1e18d1e6a0c784d0c1a4da` entrypoint переносит технические сценарии в канонические узлы и рёбра, сохраняет заменяемые исходники и manifest в `/data/canonical-migrations/technical-scenario-paths-v1` и отказывается перезаписывать неизвестное локальное изменение. Bootstrap одновременно заменяет годовой source id на стабильный `ns1-hosts`, вычисляет `captured_at` по серверному XLSX и архивирует legacy snapshots вне активного набора. Rollback кода — вернуть предыдущий SHA и повторить apply; rollback данных — остановить сервис, выполнить `/app/docker/restore.sh` для архива соответствующей revision и снова запустить apply. Производный SQLite при старте пересобирается из восстановленного YAML.
