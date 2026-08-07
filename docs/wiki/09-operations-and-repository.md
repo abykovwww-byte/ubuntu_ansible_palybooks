@@ -270,7 +270,7 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 
 USE Framework не входит в RP Stack и не меняет authority Gateway. Он описан отдельным элементом `docker_apps` в `inventories/local/group_vars/server.yml`, клонируется из закрытого GitHub-репозитория на полном commit SHA и обслуживается собственным Compose из application repository.
 
-По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN `192.168.1.88` и Tailscale `100.117.52.16`, без nginx и DNS. Постоянные данные находятся в `/srv/app-data/use-framework`, backup — в `/srv/backups/use-framework`. Credential `use_framework_github_token` обязателен только в `/etc/ansible/local-overrides.yml`; роль не сохраняет его в remote URL или `.env` приложения.
+По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN `192.168.1.88` и Tailscale `100.117.52.16`, без nginx и DNS. Постоянные данные находятся в `/srv/app-data/use-framework`, backup — в `/srv/backups/use-framework`. Приватный исходный реестр НС1 хранится только как `/srv/app-data/use-framework/import/ns1-assets.xlsx`; Ansible preflight запрещает запуск без него, а application bootstrap отклоняет тестовые `example.test` snapshots. Токен операций записи генерируется серверным Ansible в `/etc/ansible/use-framework-api-token` и попадает только в runtime `.env`. Credential `use_framework_github_token` обязателен только в `/etc/ansible/local-overrides.yml`; роль не сохраняет его в remote URL или `.env` приложения.
 
 Полный runbook, включая health, backup/restore и rollback: [USE Framework на abykovserv](../use-framework.md).
 

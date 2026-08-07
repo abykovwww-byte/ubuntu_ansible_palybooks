@@ -10,9 +10,12 @@
 |---|---|
 | `/srv/apps/use-framework` | закреплённый исходный код и Compose |
 | `/srv/app-data/use-framework` | канонический YAML, snapshots, mapping-профили, отчёты и SQLite |
+| `/srv/app-data/use-framework/import/ns1-assets.xlsx` | приватная серверная копия сохранённого реестра НС1; не хранится в Git |
 | `/srv/backups/use-framework` | архивы backup/restore |
 
 GitHub-репозиторий закрытый. До первого apply значение `use_framework_github_token` должно быть задано только в `/etc/ansible/local-overrides.yml`. Токен в Git и в этот документ не добавляется. Для этого app включён изолированный режим `repo_version_is_commit`: clone выполняется без checkout, затем роль делает fetch/reset на полный закреплённый SHA. Поведение остальных branch/tag-приложений не меняется.
+
+Ansible preflight требует приватный `ns1-assets.xlsx` до пересборки контейнера. Application entry point импортирует его через минимальный production mapping, не сохраняющий свободные пользовательские поля, и переносит прежний `example.test` snapshot в quarantine. Если приватный источник отсутствует, ложная тестовая фикстура не обслуживается. Токен операций записи генерируется локально на сервере в `/etc/ansible/use-framework-api-token`, передаётся только через runtime `.env` и не хранится в Git.
 
 ## Apply владельцем сервера
 
@@ -37,7 +40,7 @@ docker exec use-framework nsgraph --root /data/canonical validate
 docker exec use-framework /app/docker/backup.sh
 ```
 
-Открыть `http://192.168.1.88:8765` из LAN и `http://100.117.52.16:8765` через Tailscale и проверить НС1: 16 вершин, 18 рёбер, 63 хоста, EDR `17 yes + 2 unknown`, `rd.bc` — `no + stale`.
+Открыть `http://192.168.1.88:8765` из LAN и `http://100.117.52.16:8765` через Tailscale и проверить НС1: 16 вершин, 18 рёбер, 63 хоста, `example.test=0`; весь реестр EDR `33 yes / 5 no / 25 unknown`, точный селектор терминальных серверов — `17 yes + 2 unknown`, `rd.bc` — `EDR no`, `Sysmon/Security yes`, `stale`.
 
 ## Обновление и rollback
 

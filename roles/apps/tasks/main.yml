@@ -35,6 +35,24 @@
   when: item.0.enabled | default(true) | bool
   tags: [apps, directories]
 
+- name: Check USE Framework private inventory source
+  ansible.builtin.stat:
+    path: "{{ use_framework_inventory_source_host_path }}"
+  register: use_framework_inventory_source
+  when: use_framework_enabled | default(false) | bool
+  tags: [apps, preflight, use-framework]
+
+- name: Require USE Framework private inventory source
+  ansible.builtin.assert:
+    that:
+      - use_framework_inventory_source.stat.exists
+      - use_framework_inventory_source.stat.isreg
+    fail_msg: >-
+      USE Framework requires the server-private NS1 registry at
+      {{ use_framework_inventory_source_host_path }}; synthetic fixtures are forbidden in production.
+  when: use_framework_enabled | default(false) | bool
+  tags: [apps, preflight, use-framework]
+
 - name: Check token-auth Docker app repository state
   ansible.builtin.stat:
     path: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/.git"
