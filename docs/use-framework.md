@@ -2,7 +2,7 @@
 
 ## Состояние доставки
 
-Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `db16315eab1e14062f2f974f49b341411767aa6d`, создаёт server-only `.env`, собирает образ и запускает Compose. Сервис публикуется только на `127.0.0.1:8765`; nginx, DNS и LAN/WAN listener не создаются.
+Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `e8876a1c83af0a0ffe1d17d09e6cb99448d7326a`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
 
 Данные хранятся отдельно от checkout:
 
@@ -30,13 +30,14 @@ sudo journalctl -u ansible-local-apply.service -n 200 --no-pager
 
 ```text
 docker ps --filter name=use-framework
-curl --fail http://127.0.0.1:8765/health
-curl --fail 'http://127.0.0.1:8765/api/graph?event=ns1'
+curl --fail http://192.168.1.88:8765/health
+curl --fail http://100.117.52.16:8765/health
+curl --fail 'http://192.168.1.88:8765/api/graph?event=ns1'
 docker exec use-framework nsgraph --root /data/canonical validate
 docker exec use-framework /app/docker/backup.sh
 ```
 
-Через SSH tunnel открыть `http://127.0.0.1:8765` и проверить НС1: 16 вершин, 18 рёбер, 63 хоста, EDR `17 yes + 2 unknown`, `rd.bc` — `no + stale`. Снаружи сервера порт `8765` отвечать не должен.
+Открыть `http://192.168.1.88:8765` из LAN и `http://100.117.52.16:8765` через Tailscale и проверить НС1: 16 вершин, 18 рёбер, 63 хоста, EDR `17 yes + 2 unknown`, `rd.bc` — `no + stale`.
 
 ## Обновление и rollback
 
