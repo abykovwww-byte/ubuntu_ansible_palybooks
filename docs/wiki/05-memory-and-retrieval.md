@@ -46,6 +46,45 @@ Story memory существует **только при `scenario_type == "rp"`*
 
 Ошибка service model fail-open: сохранённый игровой ход не откатывается, предыдущий snapshot продолжает работать, а job повторяется по общей retry policy.
 
+## Планируемая RP continuity projection v2
+
+> Статус: только предложенное архитектурное решение. В текущем runtime не реализовано и не включено. До отдельной реализации и проверки действует описанная выше story memory v1.
+
+[Decision 018](../../roles/apps/files/rp-stack/docs/decisions/018-rp-continuity-projection-and-provenance-retrieval.md) предлагает заменить полное LLM-переписывание story-memory на производную continuity-проекцию с typed delta и обязательными ссылками на исходные raw turns.
+
+Планируемая граница остаётся прежней:
+
+```text
+Canonical state + AUTHORITATIVE_OUTCOME
+    = authority
+
+Committed raw turns
+    = первичная история и доказательство
+
+RP continuity projection
+    = неавторитетное актуальное представление длинной кампании
+```
+
+После каждого committed RP-хода service job должен анализировать финальную пару `player_message + narrative_response`, уже прошедшую repair/fallback и сохранённую пользователю. Служебная модель возвращает не новый полный JSON, а строгие операции над элементами continuity. Gateway валидирует provenance, применяет операции детерминированным projector и сохраняет append-only delta вместе с очередным snapshot.
+
+Каждый активный элемент получает stable ID, тип `explicit` или `inferred`, confidence и `source_turn_ids`. Когда такой элемент нужен Narrator, Gateway сможет точно запросить исходные сообщения по ID. Это exact provenance lookup, а не приблизительный vector search.
+
+Планируемая рабочая raw-история для RP:
+
+```text
+последние 10 committed turn pairs
+UNION
+все turns после covered_through_turn_id последнего continuity snapshot
+```
+
+Поэтому задержка или падение фонового updater не должно скрыть свежий ход. Exact source turns и approximate archived retrieval добавляются отдельно, с дедупликацией по turn ID.
+
+Для approximate retrieval сначала планируется использовать party-scoped SQLite FTS/BM25 вместе с текущими exact terms, stems, 3-граммами и recency. Embeddings и отдельная vector database отложены до eval, который подтвердит существенные пропуски локального объяснимого поиска.
+
+Lore cards остаются authored background, а continuity — party-specific динамикой. Служебная модель не должна молча создавать или переписывать WorldPack lore; Context Builder автоматически выбирает оба слоя.
+
+Rollout предусматривает shadow generation рядом с v1, сравнение контекста, opt-in на тестовых партиях и только затем переключение default. `training` и `novel` этим решением не меняются.
+
 ## Эпизодические главы
 
 Когда raw turns перестают помещаться в history budget, `MemorySummarizer` берёт старейший ещё не покрытый пакет и создаёт immutable `memory_chapter`. Глава хранит последовательность сцен, действия игрока, значимые реакции NPC, открытия, предметы, тон, открытые нити, отношения и обязательства.
@@ -91,6 +130,8 @@ PARTY_MEMORY_PROMPT_MAX_CHARS              60000
 
 ## Порядок RP prompt
 
+Текущий реализованный порядок v1:
+
 ```mermaid
 flowchart TB
     A["1. Scenario contract"] --> B["2. World system prompt"]
@@ -126,4 +167,5 @@ Embedding endpoint, vector store и cross-party semantic index не исполь
 - [Prompt assembly](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
 - [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
 - [RP living-memory ADR](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md)
+- [Proposed RP continuity ADR](../../roles/apps/files/rp-stack/docs/decisions/018-rp-continuity-projection-and-provenance-retrieval.md)
 - [Long-context ADR](../../roles/apps/files/rp-stack/docs/decisions/009-long-context-memory-policy.md)
