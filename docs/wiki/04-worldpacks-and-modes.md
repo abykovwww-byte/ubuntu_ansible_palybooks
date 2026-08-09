@@ -17,6 +17,7 @@ worldpacks/<slug>/
 │   └── opening-scene.md
 ├── world-info/index.md
 ├── characters/index.md
+├── relationships/model.json
 ├── rules/checks.md
 ├── rules/site-interactions.json
 ├── training/
@@ -46,7 +47,8 @@ worldpacks/<slug>/
 
 При создании партии Gateway копирует seed в новый `state_campaign_id`. Изменение party state никогда не переписывает исходный WorldPack.
 
-RP-пак может дополнительно объявить WorldPack-owned модель отношений:
+WorldPack, у которого `scenario_types.supported` содержит `rp`, обязан объявить
+WorldPack-owned модель отношений:
 
 ```json
 "relationships": {
@@ -54,6 +56,10 @@ RP-пак может дополнительно объявить WorldPack-owned
   "model": "relationships/model.json"
 }
 ```
+
+Без блока `manifest.relationships` Gateway не сообщает ошибку и молча оставляет
+слой отношений выключенным. Для паков без поддержки `rp` модель остаётся
+опциональной.
 
 В первом срезе модель владеет одной осью `loyalty`, границами и русскими
 метками полос, весами authored-событий, ролями, ранами и часами пограничных
