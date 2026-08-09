@@ -14,12 +14,14 @@ sequenceDiagram
     participant Art as Site / Workspace services
     participant LLM as Narrator LLM
     participant Val as OutputValidator
+    participant Rel as RP relationships
     participant Jobs as Service jobs
 
     UI->>API: player message + idempotency key
     API->>Store: begin_turn_request
     Store-->>API: acquired / running / completed
     API->>Store: state + history + memory + runtime snapshot
+    API->>Rel: advance clocks and build qualitative pressure (RP only)
     API->>Art: pending typed events
     Art-->>API: deterministic evidence
     API->>Rules: resolve(state, action, scenario_type, evidence, runtime)
@@ -40,7 +42,8 @@ sequenceDiagram
     end
     API->>Store: atomically apply patch + record turn/artifact + consume events
     API-->>UI: assistant message + state version + public artifact
-    API-->>Jobs: memory jobs in background
+    API-->>Jobs: memory + relationship extraction jobs in background
+    Jobs->>Rel: qualitative events -> deterministic causes and boundary events
 ```
 
 Для training prompt-контракт явно содержит точные `header` и `question`
@@ -71,7 +74,10 @@ Gateway проверяет owner, загружает `Party`, создаёт par
 
 В prompt попадают только разрешённые слои: универсальные правила режима, world
 prompts, memory chapters, budgeted raw history, lore cards, релевантные NPC,
-sanitized state summary, outcome и текущее действие. Для нового training runtime
+sanitized state summary, outcome, RP-only `RELATIONSHIP_PRESSURE` и текущее действие.
+Блок отношений содержит только имя персонажа, словесную метку полосы и
+качественное давление активного события; числа, сроки, сообщник, мишень и
+payload остаются в Gateway. Для нового training runtime
 добавляется только текущий `ACTIVE_TRAINING_TURN_CONTRACT`: имя и роль игрока,
 текущая surface, явно разрешённые state paths и включённые interaction
 contracts. Score, assessment, fallback и будущие ходы до debrief не передаются.
@@ -130,6 +136,13 @@ Gateway пробует primary model и разрешённые fallback models �
 6. пишет audit event.
 
 Если процесс падает раньше, request отмечается как failed, а state не должен частично продвинуться.
+
+После RP-хода очередь дополнительно получает `relationship_extraction`,
+привязанный к `request_id` сохранённого хода. Глобальная служебная модель может
+вернуть только `character_id`, authored `event_id` и цитату; веса, затухание,
+полосы, раны, роли, пограничные события, часы и каскад вычисляются Gateway.
+Повтор задания не создаёт вторую причину. Для `training` модель отношений не
+загружается, job не ставится и новые таблицы не получают строк.
 
 ## Интерактивное действие между ходами
 

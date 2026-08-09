@@ -62,6 +62,7 @@ try {
             }
         }
         Invoke-Checked "training runtime" { & $python scripts/validate-training-runtime.py --worldpacks worldpacks }
+        Invoke-Checked "relationship models" { & $python scripts/validate-relationships.py --worldpacks worldpacks }
         Invoke-Checked "state workflow" { & $python scripts/test-state-workflow.py }
         Invoke-Checked "check workflow" { & $python scripts/test-check-workflow.py }
     } finally {

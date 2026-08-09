@@ -46,6 +46,23 @@ worldpacks/<slug>/
 
 При создании партии Gateway копирует seed в новый `state_campaign_id`. Изменение party state никогда не переписывает исходный WorldPack.
 
+RP-пак может дополнительно объявить WorldPack-owned модель отношений:
+
+```json
+"relationships": {
+  "schema_version": "rp-relationships.v1",
+  "model": "relationships/model.json"
+}
+```
+
+В первом срезе модель владеет одной осью `loyalty`, границами и русскими
+метками полос, весами authored-событий, ролями, ранами и часами пограничных
+событий. Gateway валидирует файл preflight-скриптом
+`scripts/validate-relationships.py`; неизвестные роли/раны, пересекающиеся
+границы и веса вне диапазона блокируют поставку. Это отдельный runtime-слой:
+он не меняет `state/schema.json` и не переиспользует строковое поле
+`characters.*.loyalty`, где мир уже хранит принадлежность или фракцию.
+
 ## Три режима
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
