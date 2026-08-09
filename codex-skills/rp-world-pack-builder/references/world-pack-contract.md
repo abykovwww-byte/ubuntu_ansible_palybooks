@@ -23,7 +23,11 @@ characters/index.md
 rules/checks.md
 quick-replies/notes.md
 setup-flow.md
+relationships/model.json
 ```
+
+`relationships/model.json` is required when `scenario_types.supported`
+includes `rp` and optional otherwise.
 
 ## manifest.json
 
@@ -41,6 +45,10 @@ setup-flow.md
   "scenario_types": {
     "recommended": "novel",
     "supported": ["novel", "rp"]
+  },
+  "relationships": {
+    "schema_version": "rp-relationships.v1",
+    "model": "relationships/model.json"
   },
   "assumptions": [],
   "files": {
@@ -67,9 +75,37 @@ Light GUI reads `title`, `status`, `premise`, `player_role`, and
 `files.state_seed` through `GET /api/worldpacks`.
 
 `scenario_types.recommended` and every item in `scenario_types.supported` must
-be one of `rp`, `novel`, or `training`. The recommended value must also be in
-the supported list. The user still chooses the party type manually; this
-metadata does not auto-select it.
+be one of `rp` or `novel`. The recommended value must also be in the supported
+list. Route `training` packs to `training-world-pack-builder`. The user still
+chooses the party type manually; this metadata does not auto-select it.
+
+## RP Relationship Model
+
+When `scenario_types.supported` includes `rp`, `manifest.relationships` and
+`relationships/model.json` are required. For packs without RP support they are
+optional. If the manifest declaration is absent, Gateway does not report an
+error: it silently leaves the relationship-pressure layer disabled.
+
+Use
+`roles/apps/files/rp-stack/worldpacks/mechanist-new-world/relationships/model.json`
+as the executable example instead of embedding a second model copy here. The
+first slice supports only the `loyalty` axis, `wound` and `role` badges, and the
+boundary events `crack | ultimatum | plot | strike | favour`. The layer has no
+client surface and must not expose axis values, band labels, or active events.
+Plot tells are invented by the narrator and must not be authored as model
+fields.
+
+The validator enforces these authoring constraints:
+
+- every `character_weights` key exists in `state-seed.json` `characters`;
+- every referenced `role` exists in `roles`, and every event `wound` exists in
+  `wounds`;
+- band boundaries do not overlap, and every band defines exactly one of
+  `min`/`max`;
+- event `weight` is in `[-30, 15]`, and `decay_turns` is `null` or a positive
+  integer;
+- `plot.discovery_chance_per_turn` is in `[0, 1]`;
+- only the `loyalty` axis is declared in the first slice.
 
 ## state-seed.json
 
@@ -111,6 +147,13 @@ The seed must match the RP gateway state schema:
   "uncertain_facts": []
 }
 ```
+
+This `state-seed.json` `relationships` object is the canonical-state collection
+of NPC-to-NPC links (`from`, `to`, `trust`, and `suspicion`) defined by
+`state/schema.json`. It is unrelated to `manifest.relationships`, which points
+to the ADR 020 relationship-pressure model. The pressure layer stores its own
+causes, bands, badges, and narrative events and never writes them into canonical
+state.
 
 When a Light GUI party is created, the gateway copies this seed into isolated
 party state under `/srv/app-data/rp-stack/state/parties/<party_id>/current.json`
@@ -215,10 +258,6 @@ Add the applicable mode contract:
 
 - `rp`: D20 and Gateway outcomes are authoritative; failed checks cannot become hidden success.
 - `novel`: no dice, skills, checks, difficulty, result labels, or action menus; prioritize prose, relationships, pacing, and consent.
-- `training`: no randomness or `/check`; advance one authored turn, enforce templates and scoring, and withhold hints or assessment until the scheduled debrief.
-
-For `training`, `rules/checks.md` remains the required contract filename but
-contains deterministic resolution and scoring rules rather than check commands.
 
 ## Quick Reply Notes
 

@@ -308,7 +308,9 @@ For a playable pack, add the SillyTavern lorebook to `runtime_source_files` in
 `inventories/local/group_vars/server.yml` with `force: false`. Then follow:
 
 ```text
-local validation -> commit -> push origin/main -> server pull-based Ansible apply -> runtime verification
+local validation on a codex/ branch or in an isolated worktree -> commit
+-> push the branch -> open a PR -> merge -> server pull-based Ansible apply
+-> runtime verification
 ```
 
 After deployment, verify the manifest is listed by `/api/worldpacks`, the
