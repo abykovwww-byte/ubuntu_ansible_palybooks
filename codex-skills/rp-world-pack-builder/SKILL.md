@@ -103,7 +103,11 @@ characters/index.md
 rules/checks.md
 quick-replies/notes.md
 setup-flow.md
+relationships/model.json
 ```
+
+`relationships/model.json` is required when `scenario_types.supported`
+includes `rp` and optional otherwise.
 
 World-pack requirements:
 
@@ -112,6 +116,18 @@ World-pack requirements:
 - Include focused lorebook entries, not one giant encyclopedia entry.
 - Separate confirmed facts, rumors, and unresolved mysteries.
 - Give NPCs goals, constraints, secrets, and relationships rather than static descriptions.
+- For every pack whose `scenario_types.supported` includes `rp`, declare the
+  `rp-relationships.v1` model in `manifest.json` and author
+  `relationships/model.json`. If the declaration is absent, Gateway silently
+  leaves the relationship-pressure layer disabled; pack loading does not fail.
+- Use
+  `roles/apps/files/rp-stack/worldpacks/mechanist-new-world/relationships/model.json`
+  as the current executable example. Do not copy that model into this skill.
+- Keep the first relationship slice to the `loyalty` axis, `wound` and `role`
+  badges, and `crack | ultimatum | plot | strike | favour` boundary events.
+  Do not expose axis values, band labels, or active events in pack-authored
+  client surfaces. The narrator invents plot tells; do not author prepared
+  tells in the model.
 - Include a playable opening scene and immediate hooks.
 - Add explicit narrator "do not do" rules: preserve player agency, obey state, do not turn failed checks into hidden successes.
 
@@ -144,13 +160,35 @@ Before commit/deploy:
 
 - Validate every `.json` file parses.
 - Validate `scenario_types.recommended` is `rp` or `novel` and is included in `scenario_types.supported`.
-- Validate the state seed from the RP-stack root:
+- Use the bundled runtime, not `python` from `PATH`:
 
 ```powershell
-python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --schema state\schema.json
+$python = "$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 ```
 
-- Run relevant tests when gateway/app code or IaC behavior changed.
+- Run the full repository gate from the repository root:
+
+```powershell
+powershell.exe -File scripts\ci.ps1
+```
+
+- During iteration, run the focused repository and relationship checks:
+
+```powershell
+& $python scripts\validate-repository.py
+Push-Location roles\apps\files\rp-stack
+& $python scripts\validate-relationships.py --worldpacks worldpacks
+& $python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --schema state\schema.json
+Pop-Location
+```
+
+- For every relationship model, confirm that `character_weights` keys exist in
+  the state seed; referenced `role` and `wound` IDs are declared; bands do not
+  overlap and each defines exactly one of `min`/`max`; event weights are in
+  `[-30, 15]`; `decay_turns` is `null` or a positive integer;
+  `plot.discovery_chance_per_turn` is in `[0, 1]`; and the first slice declares
+  only the `loyalty` axis.
+- Run relevant focused tests when Gateway/app code or IaC behavior changed.
 - Run a narrow scan for API-key-looking strings.
 - Do not treat Windows-side `/srv` or `\srv` paths as runtime validation.
 
@@ -163,7 +201,8 @@ for the authoritative procedure.
 Expected route:
 
 ```text
-local Git/IaC edit -> validate -> commit -> push origin/main
+local Git/IaC edit on a codex/ branch or in an isolated worktree -> validate
+-> commit -> push the branch -> open a PR -> merge
 -> SSH to abykov@192.168.1.88
 -> run the established pull-based Ansible apply there
 -> verify runtime files and HTTP endpoints
