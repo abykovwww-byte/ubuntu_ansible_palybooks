@@ -107,12 +107,13 @@ training/fallbacks.json
 ```
 
 Every new deterministic training pack declares `manifest.training_runtime`
-with schema `rp-training-runtime.v2`. `program.json` uses
-`rp-training-program.v2` and owns ordered turns,
-surface validation, role adapters, debrief and complete provider fallbacks.
+with schema `rp-training-runtime.v3`. `program.json` uses
+`rp-training-program.v3` and owns ordered turns, one or more uniquely typed
+`surfaces` per turn, turn-level question/fallback policy, role adapters and debrief.
 `assessment.json` owns observable detectors, boolean rules, state effects and
-bounded aggregates. `fallbacks.json` is reserved for shared fallback material;
-turn fallbacks may stay colocated with their surfaces. Read
+bounded aggregates. `fallbacks.json` remains versioned metadata only; executable
+turn fallbacks stay colocated with their turns in `program.json`. Existing v1/v2
+packs remain valid and are not rewritten merely to adopt v3. Read
 `references/training-contract.md` for the exact contract and ownership split.
 
 For an interactive-site world, also create `artifacts/sites/index.json`, ten
@@ -199,7 +200,7 @@ Every active turn must author a non-empty exact `header` and neutral `question`.
 Gateway passes both values from the immutable WorldPack snapshot to the narrator
 and normalizes the final text to those canonical boundaries; do not rely on
 `instruction` or conversation history to make the model guess either boundary.
-Author `surface.must_include` as short natural-language requirements mirroring
+Author each `surfaces[].must_include` as short natural-language requirements mirroring
 the machine-only `required_patterns`; raw regexes stay in the validator and are
 not narrator instructions. Author a non-empty optional `variation_budget` list
 on each turn when fresh wording is desired, naming only elements the model may

@@ -11,7 +11,7 @@ Use this compact checklist while authoring or reviewing a training pack.
   "state_path": "player.resources.total-score"
 },
 "training_runtime": {
-  "schema_version": "rp-training-runtime.v2",
+  "schema_version": "rp-training-runtime.v3",
   "program": "training/program.json",
   "assessment": "training/assessment.json",
   "fallbacks": "training/fallbacks.json"
@@ -41,7 +41,7 @@ a second manifest boolean list that can drift from the detailed contracts.
   idempotency, bounded narration/repair orchestration, validation execution, provider failure
   handling and persistence. It has no knowledge of the course subject.
 - WorldPack `program.json` owns turn order, visible event facts, allowed output
-  surface, role adaptation, permitted visible state, link policy, debrief and
+  surfaces, role adaptation, permitted visible state, link policy, debrief and
   complete fallback text.
 - WorldPack `assessment.json` owns text/UI detectors, boolean rules, score and
   counter effects, evidence labels and bounded aggregates.
@@ -59,17 +59,19 @@ party snapshot.
 
 ## Program contract
 
-`training/program.json` uses `rp-training-program.v2` and contains:
+New packs use `rp-training-program.v3`; v1/v2 packs remain accepted without
+rewriting their singular `surface` or changing their contract hash. A v3 program contains:
 
 - `progression`: positive `total_turns` and state resource IDs for current
   window, remaining turns and completion status;
 - ordered, contiguous `turns` starting at one;
 - per turn `window`, exact `header`, narrator `instruction`, optional
-  `visible_state_paths`, neutral `question`, optional `variation_budget`, and one `surface`;
-- a surface type (`email` or `messenger`), count, required fields/regexes,
-  forbidden regexes, link policy (`none` or `artifact`), role-adaptation gate,
-  question gate, natural-language `must_include` mirroring validator regexes,
-  and a complete fallback;
+  `visible_state_paths`, neutral `question`, boolean `require_question`, optional
+  `variation_budget`, complete `fallback`, and a non-empty `surfaces` list;
+- each surface has a unique type within the turn (`email` or `messenger`), positive
+  `count`, required fields/regexes, forbidden regexes, link policy (`none` or
+  `artifact`), role-adaptation gate, and natural-language `must_include`
+  mirroring validator regexes;
 - optional regex-based `role_adapters` and a default role task;
 - `debrief` with canonical score resource bindings, evidence resource IDs,
   instruction and fallback.
@@ -79,10 +81,18 @@ description, explicitly allowlisted visible state and the enabled interaction
 contract. It strips fallback text and never includes detectors, score counters,
 future turns or answer keys before debrief. The LLM generates fresh wording;
 the validator checks the authored facts. Gateway normalizes the canonical
-header, final question, and a missing/distorted no-link marker. A soft field or
+header, final question, and, when every surface uses the same links policy, a
+missing/distorted no-link marker. With mixed link policies it does not rewrite
+blocks blindly: a link-policy violation remains hard. A soft field or
 profile failure may receive one training-specific repair call; hard identity,
 shape, URL, attachment, forbidden-content, or canonical-score failures and all
 provider failures use the same turn's fallback immediately.
+
+The sanitized prompt contract is `rp-gateway.training-turn-contract.v2` and
+always emits `surfaces` as a list. For v1/v2 programs Gateway normalizes the
+singular authored surface into a one-element list. Narrative output must contain
+exactly `count` marker blocks for every declared surface, and any email or
+messenger marker not declared by the turn is a hard violation.
 
 The sanitized active-turn contract includes the exact authored `header` and
 `question`, natural-language `must_include`, explicit profile instruction, and
