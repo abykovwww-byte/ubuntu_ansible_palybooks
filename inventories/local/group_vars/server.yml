@@ -211,6 +211,8 @@ rp_stack_openrouter_api_key: ""
 rp_stack_openrouter_models:
   - "openrouter/auto"
   - "openrouter/free"
+rp_stack_openrouter_fallback_models:
+  - "openrouter/auto"
 rp_stack_openrouter_model_catalog_live: true
 rp_stack_provider_model_catalog_ttl_seconds: 86400
 rp_stack_gateway_port: 8088
