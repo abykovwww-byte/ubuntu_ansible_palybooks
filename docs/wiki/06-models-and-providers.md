@@ -35,7 +35,7 @@ flowchart LR
     K1["Server-managed key"] --> R
     K2["Party-scoped BYOK"] --> R
     R --> D{"OpenRouter DeepSeek V4 Flash?"}
-    D -->|"да"| O["reasoning=minimal<br/>provider.sort=throughput"]
+    D -->|"да"| O["provider.sort=throughput<br/>без форсирования reasoning"]
     D -->|"нет"| A["Primary model"]
     O --> A
     A -->|"wall-clock timeout / HTTP"| F["Allowed fallback models"]
@@ -43,9 +43,9 @@ flowchart LR
 
 Fallback не должен перескочить на другого provider с другим ключом. Ошибка и выбранная попытка попадают в audit/turn metadata.
 
-Для `deepseek/deepseek-v4-flash` через OpenRouter Gateway явно отправляет `reasoning.effort=minimal` и требует endpoint, поддерживающий параметры запроса. Ограничение `max_tokens` автоматически не добавляется. Provider routing сортируется по `throughput`, поэтому выбор endpoint оптимизируется по скорости генерации, а не по стандартному price-first порядку OpenRouter.
+Для `deepseek/deepseek-v4-flash` через OpenRouter Gateway не форсирует уровень reasoning: доступные уровни и defaults принадлежат текущему provider endpoint. Ограничение `max_tokens` автоматически не добавляется. Provider routing сортируется по `throughput`, поэтому выбор endpoint оптимизируется по скорости генерации, а не по стандартному price-first порядку OpenRouter. При `403` (включая model-specific moderation), `410` и временных provider-ошибках партия пробует настроенный fallback того же провайдера; IaC default для OpenRouter — `openrouter/auto`.
 
-`MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory; на DeepSeek V4 Flash сохраняется тот же `minimal` reasoning. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
+`MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory; на DeepSeek V4 Flash сохраняется та же throughput-маршрутизация без принудительного reasoning. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
 
 ## Глобальная служебная модель
 
