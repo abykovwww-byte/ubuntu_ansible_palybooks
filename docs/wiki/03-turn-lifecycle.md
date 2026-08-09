@@ -13,7 +13,7 @@ sequenceDiagram
     participant Runtime as TrainingRuntimeService
     participant Art as Site / Workspace services
     participant LLM as Narrator LLM
-    participant Val as OutputValidator
+    participant Val as Novel / Training validator
     participant Rel as RP relationships
     participant Jobs as Service jobs
 
@@ -31,14 +31,19 @@ sequenceDiagram
     API->>Runtime: active sanitized turn contract
     API->>LLM: bounded prompt + outcome + active contract
     LLM-->>API: narration + optional artifact fields
-    API->>Art: validate and materialize snapshot
-    API->>Val: validate narration + runtime surface
-    alt Новый training runtime: нарушение или provider failure
-        API->>Runtime: authored fallback текущего хода
-    else Обычный режим: допустим repair
-        API->>LLM: compact repair: failed text + outcome + violations
-        LLM-->>API: repaired narration
-        API->>Val: validate again
+    alt RP
+        API->>API: parse provider format + require nonempty text
+    else Novel / Training
+        API->>Art: validate and materialize snapshot
+        API->>Runtime: normalize canonical header/question/no-link marker
+        API->>Val: validate narration + runtime surfaces
+        alt Training runtime: hard violation или provider failure
+            API->>Runtime: authored fallback текущего хода
+        else Novel или soft training violation: допустим один repair
+            API->>LLM: compact repair: failed text + outcome + violations
+            LLM-->>API: repaired narration
+            API->>Val: validate again
+        end
     end
     API->>Store: atomically apply patch + record turn/artifact + consume events
     API-->>UI: assistant message + state version + public artifact
@@ -46,8 +51,10 @@ sequenceDiagram
     Jobs->>Rel: qualitative events -> deterministic causes and boundary events
 ```
 
-Для training prompt-контракт явно содержит точные `header` и `question`
-активного хода из immutable snapshot WorldPack. Обычный ответ содержит только
+Для training prompt-контракт v2 явно содержит точные `header`, `question` и
+`surfaces[]` активного хода из immutable snapshot WorldPack. Паки program v1/v2
+нормализуются в одноэлементный список, а program v3 может объявить несколько
+каналов с отдельными `count` и link policy. Обычный ответ содержит только
 готовую реплику; интерактивный ход содержит один JSON bundle, а полный видимый
 текст лежит в `narrative_text`. Gateway может снять одну добавленную провайдером
 Markdown-обёртку JSON, но не ослабляет schema, slot и narrative validation.
@@ -55,6 +62,8 @@ Markdown-обёртку JSON, но не ослабляет schema, slot и narra
 После deterministic fallback повторно валидируется уже фактически выданный
 текст. В metadata сохраняется итоговая валидность и причина исходного fallback,
 а audit отдельно различает provider failure и Gateway validation failure.
+Каждый записанный ход также несёт `transport_status`: `ok`, `provider_error`,
+`provider_timeout` или `invalid_response`.
 
 ## Шаги подробно
 
@@ -79,7 +88,7 @@ sanitized state summary, outcome, RP-only `RELATIONSHIP_PRESSURE` и текущ�
 качественное давление активного события; числа, сроки, сообщник, мишень и
 payload остаются в Gateway. Для нового training runtime
 добавляется только текущий `ACTIVE_TRAINING_TURN_CONTRACT`: имя и роль игрока,
-текущая surface, явно разрешённые state paths и включённые interaction
+текущие `surfaces[]`, явно разрешённые state paths и включённые interaction
 contracts. Score, assessment, fallback и будущие ходы до debrief не передаются.
 
 ### 3. Детерминированное решение
@@ -110,18 +119,26 @@ Gateway пробует primary model и разрешённые fallback models �
 
 ### 5. Валидация и repair
 
-`OutputValidator` проверяет соответствие state, outcome и режиму. Для `rp`,
-`novel` и legacy-training Gateway может выполнить один repair-вызов с
-конкретной инструкцией. Новый WorldPack runtime делает не более одного narrator
-вызова: невалидный ответ сразу заменяется fallback той же surface. Так latency
-не удваивается, а fallback не превращается в статический основной сценарий.
+Для `rp` Gateway не вызывает `OutputValidator`, repair или `safe_fallback`:
+успешный непустой ответ провайдера сохраняется после разбора формата, а ошибка
+provider или пустой ответ завершает запрос явной ошибкой до применения state.
+Это гарантирует не более одного narrator completion на RP-ход. Deprecated-поля
+`validator_valid`, `repaired`, `fallback`, `fallback_reason` остаются в metadata
+на один релиз: для новых RP-ходов это `null`, `false`, `false`, `null`.
+
+Для `novel` прежний `OutputValidator` и `MAX_REPAIR_ATTEMPTS` сохраняются.
+WorldPack runtime отдельно использует `TRAINING_REPAIR_ATTEMPTS`: canonical
+header/question/no-link marker сначала чинятся без LLM, soft field/profile
+нарушение может получить один repair с русским списком реально проваленных
+ограничений, а hard identity/shape/URL/attachment/score или provider failure
+сразу заменяется fallback того же хода.
 
 Каждая попытка narrator ограничена настоящим wall-clock deadline через `asyncio.timeout`: лимит охватывает ожидание заголовков и чтение всего тела ответа, а не только паузу между сетевыми пакетами. Истечение deadline обрабатывается тем же безопасным timeout/fallback-контрактом, что и transport timeout.
 
-Если ответ снова невалиден:
+Если ответ снова невалиден в валидируемом режиме:
 
-- для обычных `rp`/`novel` ход завершается ошибкой до применения state;
-- для WorldPack-runtime training Gateway записывает authored fallback того же хода, сохраняя surface, профиль и включённые capabilities;
+- для `novel` ход завершается ошибкой до применения state;
+- для WorldPack-runtime training Gateway записывает authored fallback того же хода, сохраняя surfaces, профиль и включённые capabilities;
 - причина, число вызовов и validator status попадают в metadata и audit.
 
 ### 6. Commit хода
@@ -164,10 +181,13 @@ narrator completion или из fallback. Открытие файла остан
 
 `POST /api/parties/{party_id}/start` создаёт opening scene один раз. Для мира с
 `training_runtime` Gateway валидирует и сохраняет immutable contract hash,
-материализует первую authored window и использует тот же one-call/fallback
-контракт при ошибке provider. Повторный start защищён history/idempotency и не
+материализует первую authored window и использует тот же
+normalize/soft-repair/hard-fallback контракт; ошибка provider сразу ведёт к
+fallback. Повторный start защищён history/idempotency и не
 создаёт вторую начальную сцену. Checkpoint branch копирует runtime snapshot,
 поэтому обновление source WorldPack не меняет уже начатое прохождение.
+Для RP start действует тот же однопроходный контракт, что и для последующих
+ходов: один completion, только разбор формата и проверка непустого текста.
 
 Opening scene получает отдельный wall-clock deadline `300` секунд на одну попытку
 narrator, потому что стартовый prompt может включать большой импортированный мир.
@@ -189,7 +209,12 @@ flowchart LR
     S --> R["Rollback создаёт следующую версию"]
 ```
 
-Draft может быть быстрым детерминированным или созданным служебной моделью. Он не становится state до явного `apply`. Rollback не удаляет raw turns, memory или journal; он создаёт новую авторитетную версию.
+Draft может быть быстрым детерминированным или созданным служебной моделью. Он не становится state до явного `apply`. Rollback не удаляет raw turns, memory или journal; он создаёт новую авторитетную версию и помечает перекрытые ходы `excluded_from_memory=1`, поэтому следующие RP story-memory snapshots не возвращают отменённую ветку.
+
+Партию можно штатно завершить через `POST /api/parties/{party_id}/complete`:
+статус становится `completed`, а state, turns, audit и provider keys сохраняются.
+Повторный вызов идемпотентен; существующий `/activate` снова делает партию
+активной. Владелец завершает свою партию, администратор — любую.
 
 ## Фоновые задачи
 

@@ -23,8 +23,9 @@ Gateway.
 ```mermaid
 flowchart LR
     Pack["WorldPack runtime snapshot"] --> Surface["Active surface N"]
-    Surface --> LLM["One narrator call"]
-    LLM --> Valid["WorldPack validation or fallback"]
+    Surface --> LLM["Initial narrator call"]
+    LLM --> Norm["Canonical normalization"]
+    Norm --> Valid["Hard fallback or one soft repair"]
     Valid --> Action["Явное действие игрока"]
     Action --> Rules["Generic detectors + authored rules"]
     Rules --> Score["Canonical score/evidence"]
@@ -32,7 +33,12 @@ flowchart LR
     Next -->|"final gate"| Debrief["Debrief из state"]
 ```
 
-Для интерактивного surface путь расширяется без второго LLM-вызова: narrator возвращает письмо и разрешённые текстовые slots сайта одним bundle, Gateway создаёт snapshot, а `opened` / `submitted` / `reported` становятся типизированным evidence следующего хода. Отправка непустой формы считается `fail` только там, где это задаёт authored policy конкретной surface; содержимое полей не проверяется и не сохраняется.
+Для интерактивного surface письмо и разрешённые текстовые slots сайта приходят
+в одном bundle: отдельного LLM-вызова для построения сайта нет. Возможный общий
+soft-repair чинит тот же bundle целиком. Gateway создаёт snapshot, а `opened` /
+`submitted` / `reported` становятся типизированным evidence следующего хода.
+Отправка непустой формы считается `fail` только там, где это задаёт authored
+policy конкретной surface; содержимое полей не проверяется и не сохраняется.
 
 Runtime-контракт хешируется и сохраняется на party. Branch копирует тот же
 snapshot. Обновление файлов мира не переписывает активное обучение. На каждом
@@ -41,11 +47,14 @@ visible state и включённые interaction contracts; score, future turns
 assessment появляются только в отдельном debrief.
 
 Границы формата тоже принадлежат WorldPack: активный prompt получает точные
-`header` и `question`, но не fallback. На обычном ходу модель возвращает только
+`header` и `question`, prose `must_include` и optional `variation_budget`, но не
+fallback или raw regex. На обычном ходу модель возвращает только
 видимый текст; при включённом interaction contract — один JSON object с полным
 текстом в `narrative_text`. Одна provider-added Markdown fence нормализуется
-Gateway до строгой schema validation; malformed или multiple bundles уходят в
-authored fallback без второго LLM-вызова.
+Gateway до строгой schema validation. Gateway подставляет canonical
+header/question и no-link marker. Мягкое нарушение полей/профиля допускает один
+training-repair; hard shape/identity/URL/attachment/score и повторная ошибка
+уходят в authored fallback.
 
 Live acceptance на `awareness-one-day` подтвердил полный путь: authored ход создал письмо и `corporate-sso` snapshot, Showroom открыл credential-form, Gateway принял `link_opened`, `credentials_submitted` и `site_closed`, а следующий ход атомарно пометил события consumed и добавил UI-evidence в canonical scoring. В тестовом fail-пути увеличились `credential-exposure`, `suspicious-artifacts-opened` и `unsafe-actions`; решение принял RuleEngine, не narrator.
 

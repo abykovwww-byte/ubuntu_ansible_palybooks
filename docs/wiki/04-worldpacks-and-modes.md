@@ -67,7 +67,7 @@ RP-пак может дополнительно объявить WorldPack-owned
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
 |---|---|---|---|
-| `rp` | Ролевая игра с проверками | Intent, D20, skills, modifiers, blockers, check records, RP living story memory | LLM не может изменить рассчитанный outcome |
+| `rp` | Ролевая игра с проверками | Intent, D20, skills, modifiers, blockers, check records, RP living story memory; один narrator completion без semantic validator/repair/fallback | Gateway не переписывает успешный непустой ответ; provider/format failure завершает ход ошибкой до state commit |
 | `novel` | Совместный роман | Непрерывная проза, directorial input, state boundary patch без броска; chapters/raw без RP story memory | Dice, DC, skills, игровые меню, захват agency |
 | `training` | Учебная симуляция и оценивание | Универсальный interpreter + WorldPack program/assessment/fallback, явные actions, deterministic score и debrief gate; прежний memory path без RP story memory | Случайность, `/check`, предметная логика в Gateway, подсказки и score до debrief |
 
@@ -87,7 +87,7 @@ Gateway отклоняет несовместимую комбинацию, но
 ## Executable training runtime
 
 Новый training-мир объявляет `manifest.training_runtime` со схемой
-`rp-training-runtime.v1`. Gateway загружает `program.json`, `assessment.json` и
+`rp-training-runtime.v3`, а `program.json` — `rp-training-program.v3`. Gateway загружает `program.json`, `assessment.json` и
 `fallbacks.json`, валидирует ссылки на state и сохраняет их общий hash/snapshot
 для партии. После старта source WorldPack можно обновить: текущая party и её
 branches продолжают работать на исходном snapshot, а новую ревизию получают
@@ -97,26 +97,37 @@ branches продолжают работать на исходном snapshot, �
 
 | Сущность | Контракт |
 |---|---|
-| Gateway | Универсальные detector/effect primitives, state patch, prompt sanitization, один LLM-вызов, validation и persistence |
-| `program.json` | Ходы, sender/channel/facts, format, role adaptation, links policy, debrief, fallback |
+| Gateway | Универсальные detector/effect primitives, state patch, prompt sanitization, canonical normalization, не более одного training-repair, validation и persistence |
+| `program.json` | Ходы, `surfaces[]` с точным count по каналам, sender/channel/facts, format, prose `must_include`, optional `variation_budget`, role adaptation, links policy, debrief, turn-level fallback |
 | `assessment.json` | Наблюдаемые text/UI detectors, правила, баллы, counters, evidence, aggregates |
 | Narrator LLM | Новая естественная формулировка только текущей сцены |
 | Site/workspace services | Независимые опциональные snapshots и typed sub-turn evidence |
 
 До debrief LLM не получает score resources, assessment, future turns или
 fallback. Он видит только активный контракт, профиль игрока, явно разрешённый
-visible state и включённые interaction contracts. Невалидный ответ или ошибка
-provider ведёт к authored fallback текущего хода без второго repair-вызова.
+visible state и включённые interaction contracts. Regex остаются только в
+валидаторе. Gateway сам подставляет canonical header/question и no-link marker.
+Мягкая ошибка полей/профиля получает не более одного training-repair; hard
+ошибка identity/shape/URL/attachment/score или ошибка provider сразу ведёт к
+authored fallback.
+
+`variation_budget` — опциональный список разрешённой вариативности текущего
+хода: например тема, формулировки тела, время внутри authored window, деталь
+задачи и тон. Отсутствие поля валидно. Legacy-пары v1 и v2 продолжают
+загружаться без переписывания или смены contract hash, но builder создаёт новые
+курсы по v3. Prompt-контракт всегда отдаёт `surfaces` списком. Каждый заявленный
+маркер обязан встретиться ровно `count` раз, а незаявленный канал — hard error.
 
 Замена фишинговой программы на ОБЖ поэтому меняет WorldPack JSON, prompts и
-seed, но не Gateway. Legacy training packs без `training_runtime` временно
-остаются на compatibility resolver и не являются образцом для новых миров.
+seed, но не Gateway. Предметного compatibility resolver больше нет: training
+pack обязан объявить `training_runtime` и хранить расписание, scoring и fallback
+в собственных данных.
 
 ## Текущие WorldPacks
 
 | Slug | Название | Рекомендуемый режим | Поддержка | Особенности |
 |---|---|---|---|---|
-| `awareness` | Awareness | `training` | `training` | Недельный курс, 10 site blueprints, 6 интерактивных ходов (4 рискованных и 2 легитимных), corporate portal и собственный `awareness-score` |
+| `awareness` | Awareness | `training` | `training` | WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; предметной логики в Gateway нет |
 | `awareness-one-day` | Awareness. One day | `training` | `training` | WorldPack-owned runtime, 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
 | `ellinoid` | Эллиноид | `novel` | `novel`, `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |

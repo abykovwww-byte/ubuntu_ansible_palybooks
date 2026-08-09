@@ -18,12 +18,12 @@ from app.services.narrative import ProviderRateLimitError, NarrativeClient, resp
 from app.services.rp_story_memory import RPStoryMemoryUpdater
 from app.services.relationship_extraction import RelationshipExtractionService
 from app.services.relationships import RelationshipMechanics
-from app.services.rule_engine import RuleEngine, awareness_state_after_auto_start
+from app.services.rule_engine import RuleEngine
 from app.services.state_store import StateStore
 from app.services.training_artifacts import ArtifactMaterialization, TrainingArtifactService
 from app.services.training_runtime import TrainingRuntimeService
 from app.services.training_workspace import TrainingWorkspaceService, WorkspaceMaterialization
-from app.services.validator import OutputValidator, awareness_final_summary, safe_fallback
+from app.services.validator import OutputValidator, safe_fallback
 from app.services.world_instructor import WorldInstructor
 
 
@@ -121,6 +121,7 @@ class Adjudicator:
                         validator_valid=None,
                         repaired=False,
                         fallback_reason=None,
+                        transport_status="ok",
                     ),
                 )
                 self.store.complete_turn_request(idempotency_key, response)
@@ -128,14 +129,6 @@ class Adjudicator:
                 return response
 
             state = self.store.get_state()
-            if self.settings.scenario_type == "training" and not (
-                self.training_runtime and self.training_runtime.enabled
-            ):
-                state = awareness_state_after_auto_start(
-                    state,
-                    self.settings.campaign_id,
-                    self.has_auto_start_history(),
-                )
             intent = self.intent_parser.parse(latest)
             artifact_evidence = self.training_artifacts.pending_evidence() if self.training_artifacts else []
             workspace_evidence = self.training_workspace.pending_evidence() if self.training_workspace else []
@@ -175,6 +168,7 @@ class Adjudicator:
             repaired = False
             provider_fallback_reason: str | None = None
             gateway_fallback_reason: str | None = None
+            transport_status = "ok"
             prompt_messages: list[dict[str, str]] | None = None
             artifact_result: ArtifactMaterialization | None = None
             workspace_result: WorkspaceMaterialization | None = None
@@ -206,23 +200,7 @@ class Adjudicator:
                     training_turn_contract=training_turn_contract,
                     relationship_pressure=relationship_pressure,
                 )
-                if (
-                    self.settings.scenario_type == "training"
-                    and awareness_final_summary(narrative_state)
-                    and not (self.training_runtime and self.training_runtime.enabled)
-                ):
-                    # Scores and their evidence are canonical Gateway state.
-                    # Never let a free-form narrator reinterpret the debrief.
-                    text = safe_fallback(
-                        outcome,
-                        narrative_state,
-                        latest,
-                        self.settings.campaign_id,
-                        self.settings.scenario_type,
-                    )
-                    raw = with_text(raw, text)
-                else:
-                    text = response_text(raw)
+                text = response_text(raw)
                 if self.training_artifacts:
                     artifact_result = self.training_artifacts.materialize_response(raw, artifact_contract)
                     if artifact_result.valid:
@@ -231,9 +209,13 @@ class Adjudicator:
                     workspace_result = self.training_workspace.materialize_response(raw, workspace_contract)
                     if workspace_result.valid:
                         text = workspace_result.text
+                if self.training_runtime and self.training_runtime.enabled:
+                    text = self.training_runtime.normalize_narrative(text, narrative_state, interaction_contract)
                 if (artifact_result is None or artifact_result.valid) and (workspace_result is None or workspace_result.valid):
                     raw = self.merge_interaction_response(raw, text, artifact_result, workspace_result)
-                validation = self.validator.validate(
+                if self.settings.scenario_type == "rp" and not text.strip():
+                    raise RuntimeError("Narrative provider returned an invalid response")
+                validation = None if self.settings.scenario_type == "rp" else self.validator.validate(
                     text,
                     outcome,
                     narrative_state,
@@ -246,25 +228,46 @@ class Adjudicator:
                 interaction_valid = (artifact_result.valid if artifact_result else True) and (
                     workspace_result.valid if workspace_result else True
                 )
-                if (
+                training_runtime_enabled = bool(self.training_runtime and self.training_runtime.enabled)
+                repair_attempts = (
+                    self.settings.training_repair_attempts
+                    if training_runtime_enabled
+                    else self.settings.max_repair_attempts
+                )
+                training_repair_allowed = True
+                if training_runtime_enabled and self.training_runtime:
+                    runtime_violations = self.training_runtime.validate_narrative(
+                        text, narrative_state, interaction_contract
+                    )
+                    runtime_violation_set = set(runtime_violations)
+                    training_repair_allowed = not self.training_runtime.hard_violations(
+                        text, narrative_state, interaction_contract
+                    ) and not any(
+                        violation not in runtime_violation_set for violation in validation.violations
+                    )
+                if validation is not None and (
                     (not validation.valid or not interaction_valid)
-                    and self.settings.max_repair_attempts > 0
-                    and not (self.training_runtime and self.training_runtime.enabled)
+                    and repair_attempts > 0
+                    and training_repair_allowed
                 ):
                     repaired = True
-                    repair_instruction = validation.repair_instruction
+                    repair_instruction = (
+                        self.training_runtime.repair_instruction(text, narrative_state, interaction_contract)
+                        if training_runtime_enabled and self.training_runtime
+                        else validation.repair_instruction
+                    )
                     if artifact_result and not artifact_result.valid:
                         repair_instruction = " ".join(
                             [
                                 repair_instruction,
-                                "Return a valid narrative bundle: " + "; ".join(artifact_result.violations),
+                                "Верни корректный JSON bundle: объект artifact должен содержать только разрешённые ключи и slots; fixed display_url оставь только в строке «Ссылки:» видимого narrative_text.",
                             ]
                         ).strip()
                     if workspace_result and not workspace_result.valid:
                         repair_instruction = " ".join(
                             [
                                 repair_instruction,
-                                "Return valid workspace_files: " + "; ".join(workspace_result.violations),
+                                "Верни корректный workspace_files только с разрешёнными file_key, blueprint_id и строковыми slots.",
                             ]
                         ).strip()
                     llm_calls += 1
@@ -290,6 +293,8 @@ class Adjudicator:
                         workspace_result = self.training_workspace.materialize_response(raw, workspace_contract)
                         if workspace_result.valid:
                             text = workspace_result.text
+                    if self.training_runtime and self.training_runtime.enabled:
+                        text = self.training_runtime.normalize_narrative(text, narrative_state, interaction_contract)
                     if (artifact_result is None or artifact_result.valid) and (workspace_result is None or workspace_result.valid):
                         raw = self.merge_interaction_response(raw, text, artifact_result, workspace_result)
                     validation = self.validator.validate(
@@ -305,8 +310,9 @@ class Adjudicator:
                 interaction_valid = (artifact_result.valid if artifact_result else True) and (
                     workspace_result.valid if workspace_result else True
                 )
-                if not validation.valid or not interaction_valid:
+                if validation is not None and (not validation.valid or not interaction_valid):
                     gateway_fallback_reason = "validation_failed"
+                    transport_status = "invalid_response"
                     self.store.audit(
                         "llm_validation_failed",
                         {
@@ -338,29 +344,33 @@ class Adjudicator:
                     {"request_id": request_id, "model": self.settings.narrative_model, "status": status},
                     request_id,
                 )
-                if not allow_gateway_fallback:
+                if self.settings.scenario_type == "rp" or not allow_gateway_fallback:
                     raise RuntimeError(f"Narrative provider HTTP {status}") from exc
                 provider_fallback_reason = f"http_{status}"
+                transport_status = "provider_error"
                 text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
                 raw = self.provider_fallback_response(outcome, text, provider_fallback_reason, request_id)
             except httpx.TimeoutException as exc:
                 self.store.audit("llm_timeout", {"request_id": request_id, "model": self.settings.narrative_model}, request_id)
-                if not allow_gateway_fallback:
+                if self.settings.scenario_type == "rp" or not allow_gateway_fallback:
                     raise RuntimeError("Narrative provider timed out") from exc
                 provider_fallback_reason = "timeout"
+                transport_status = "provider_timeout"
                 text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
                 raw = self.provider_fallback_response(outcome, text, provider_fallback_reason, request_id)
             except ProviderRateLimitError as exc:
                 self.store.audit("llm_rate_limited", {"request_id": request_id, **exc.details}, request_id)
-                if not allow_gateway_fallback:
+                if self.settings.scenario_type == "rp" or not allow_gateway_fallback:
                     raise
                 provider_fallback_reason = "rate_limited"
+                transport_status = "provider_error"
                 text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
                 raw = self.provider_fallback_response(outcome, text, provider_fallback_reason, request_id)
             except RuntimeError as exc:
-                if not allow_gateway_fallback:
+                if self.settings.scenario_type == "rp" or not allow_gateway_fallback:
                     raise
                 provider_fallback_reason = "runtime_error"
+                transport_status = "provider_error"
                 self.store.audit(
                     "llm_runtime_error",
                     {"request_id": request_id, "model": self.settings.narrative_model, "error": str(exc)},
@@ -394,7 +404,7 @@ class Adjudicator:
             text = response_text(response)
             updated_state = self.store.apply_state_patch(patch, reason=f"turn:{request_id}")
             version = int(updated_state.get("meta", {}).get("state_version", 0))
-            final_validation = self.validator.validate(
+            final_validation = None if self.settings.scenario_type == "rp" else self.validator.validate(
                 text,
                 outcome,
                 updated_state,
@@ -414,9 +424,10 @@ class Adjudicator:
                 prompt_messages,
                 self.turn_metadata(
                     turn_kind="narrative",
-                    validator_valid=final_validation.valid,
+                    validator_valid=final_validation.valid if final_validation is not None else None,
                     repaired=repaired,
                     fallback_reason=provider_fallback_reason or gateway_fallback_reason,
+                    transport_status=transport_status,
                     outcome=outcome.model_dump(mode="json"),
                     llm_calls=llm_calls,
                     interaction_evidence=[item.model_dump(mode="json") for item in interaction_evidence],
@@ -438,7 +449,7 @@ class Adjudicator:
                     "duration_ms": duration_ms,
                     "llm_calls": llm_calls,
                     "model": self.settings.narrative_model,
-                    "validator_valid": final_validation.valid,
+                    "validator_valid": final_validation.valid if final_validation is not None else None,
                     "repair": repaired,
                     "fallback_reason": provider_fallback_reason or gateway_fallback_reason,
                     "provider_fallback_reason": provider_fallback_reason,
@@ -461,6 +472,7 @@ class Adjudicator:
         validator_valid: bool | None,
         repaired: bool,
         fallback_reason: str | None,
+        transport_status: str,
         outcome: dict[str, Any] | None = None,
         llm_calls: int = 0,
         interaction_evidence: list[dict[str, Any]] | None = None,
@@ -478,6 +490,7 @@ class Adjudicator:
             "repaired": repaired,
             "fallback": fallback_reason is not None,
             "fallback_reason": fallback_reason,
+            "transport_status": transport_status,
             "llm_calls": llm_calls,
             "outcome": outcome,
             "interaction_evidence": interaction_evidence or [],
@@ -503,12 +516,6 @@ class Adjudicator:
         candidate["last_turn"]["turn"] = candidate["meta"]["turn"]
         candidate["last_turn"]["state_patch_id"] = patch.check_id or f"gateway-v{version + 1}"
         return candidate
-
-    def has_auto_start_history(self) -> bool:
-        turns = self.store.turn_history(limit=1)
-        if not turns:
-            return False
-        return str(turns[-1].get("player_message") or "").startswith("[AUTO_START]")
 
     def safe_text(
         self,
