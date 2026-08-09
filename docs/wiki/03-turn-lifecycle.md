@@ -63,7 +63,11 @@ Markdown-обёртку JSON, но не ослабляет schema, slot и narra
 текст. В metadata сохраняется итоговая валидность и причина исходного fallback,
 а audit отдельно различает provider failure и Gateway validation failure.
 Каждый записанный ход также несёт `transport_status`: `ok`, `provider_error`,
-`provider_timeout` или `invalid_response`.
+`provider_timeout` или `invalid_response`. Для RP сохраняется только успешный
+непустой ответ, поэтому его записанный ход имеет `ok`; ошибочная попытка не
+создаёт ход и измеряется через `audit_events`: `llm_http_error`, `llm_timeout`,
+`llm_rate_limited` или `llm_invalid_response`. Последнее событие содержит только
+`request_id`, модель и безопасную причину `empty_response`, без текста модели.
 
 ## Шаги подробно
 
