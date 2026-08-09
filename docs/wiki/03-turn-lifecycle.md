@@ -13,7 +13,7 @@ sequenceDiagram
     participant Runtime as TrainingRuntimeService
     participant Art as Site / Workspace services
     participant LLM as Narrator LLM
-    participant Val as OutputValidator
+    participant Val as Novel / Training validator
     participant Rel as RP relationships
     participant Jobs as Service jobs
 
@@ -31,15 +31,19 @@ sequenceDiagram
     API->>Runtime: active sanitized turn contract
     API->>LLM: bounded prompt + outcome + active contract
     LLM-->>API: narration + optional artifact fields
-    API->>Art: validate and materialize snapshot
-    API->>Runtime: normalize canonical header/question/no-link marker
-    API->>Val: validate narration + runtime surfaces
-    alt Training runtime: hard violation или provider failure
-        API->>Runtime: authored fallback текущего хода
-    else Обычный режим или soft training violation: допустим один repair
-        API->>LLM: compact repair: failed text + outcome + violations
-        LLM-->>API: repaired narration
-        API->>Val: validate again
+    alt RP
+        API->>API: parse provider format + require nonempty text
+    else Novel / Training
+        API->>Art: validate and materialize snapshot
+        API->>Runtime: normalize canonical header/question/no-link marker
+        API->>Val: validate narration + runtime surfaces
+        alt Training runtime: hard violation или provider failure
+            API->>Runtime: authored fallback текущего хода
+        else Novel или soft training violation: допустим один repair
+            API->>LLM: compact repair: failed text + outcome + violations
+            LLM-->>API: repaired narration
+            API->>Val: validate again
+        end
     end
     API->>Store: atomically apply patch + record turn/artifact + consume events
     API-->>UI: assistant message + state version + public artifact
@@ -58,6 +62,8 @@ Markdown-обёртку JSON, но не ослабляет schema, slot и narra
 После deterministic fallback повторно валидируется уже фактически выданный
 текст. В metadata сохраняется итоговая валидность и причина исходного fallback,
 а audit отдельно различает provider failure и Gateway validation failure.
+Каждый записанный ход также несёт `transport_status`: `ok`, `provider_error`,
+`provider_timeout` или `invalid_response`.
 
 ## Шаги подробно
 
@@ -113,8 +119,14 @@ Gateway пробует primary model и разрешённые fallback models �
 
 ### 5. Валидация и repair
 
-`OutputValidator` проверяет соответствие state, outcome и режиму. Для `rp`,
-`novel` Gateway сохраняет прежний `MAX_REPAIR_ATTEMPTS`.
+Для `rp` Gateway не вызывает `OutputValidator`, repair или `safe_fallback`:
+успешный непустой ответ провайдера сохраняется после разбора формата, а ошибка
+provider или пустой ответ завершает запрос явной ошибкой до применения state.
+Это гарантирует не более одного narrator completion на RP-ход. Deprecated-поля
+`validator_valid`, `repaired`, `fallback`, `fallback_reason` остаются в metadata
+на один релиз: для новых RP-ходов это `null`, `false`, `false`, `null`.
+
+Для `novel` прежний `OutputValidator` и `MAX_REPAIR_ATTEMPTS` сохраняются.
 WorldPack runtime отдельно использует `TRAINING_REPAIR_ATTEMPTS`: canonical
 header/question/no-link marker сначала чинятся без LLM, soft field/profile
 нарушение может получить один repair с русским списком реально проваленных
@@ -123,9 +135,9 @@ header/question/no-link marker сначала чинятся без LLM, soft fi
 
 Каждая попытка narrator ограничена настоящим wall-clock deadline через `asyncio.timeout`: лимит охватывает ожидание заголовков и чтение всего тела ответа, а не только паузу между сетевыми пакетами. Истечение deadline обрабатывается тем же безопасным timeout/fallback-контрактом, что и transport timeout.
 
-Если ответ снова невалиден:
+Если ответ снова невалиден в валидируемом режиме:
 
-- для обычных `rp`/`novel` ход завершается ошибкой до применения state;
+- для `novel` ход завершается ошибкой до применения state;
 - для WorldPack-runtime training Gateway записывает authored fallback того же хода, сохраняя surfaces, профиль и включённые capabilities;
 - причина, число вызовов и validator status попадают в metadata и audit.
 
@@ -174,6 +186,8 @@ normalize/soft-repair/hard-fallback контракт; ошибка provider ср
 fallback. Повторный start защищён history/idempotency и не
 создаёт вторую начальную сцену. Checkpoint branch копирует runtime snapshot,
 поэтому обновление source WorldPack не меняет уже начатое прохождение.
+Для RP start действует тот же однопроходный контракт, что и для последующих
+ходов: один completion, только разбор формата и проверка непустого текста.
 
 Opening scene получает отдельный wall-clock deadline `300` секунд на одну попытку
 narrator, потому что стартовый prompt может включать большой импортированный мир.

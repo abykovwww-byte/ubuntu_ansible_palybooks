@@ -67,7 +67,7 @@ RP-пак может дополнительно объявить WorldPack-owned
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
 |---|---|---|---|
-| `rp` | Ролевая игра с проверками | Intent, D20, skills, modifiers, blockers, check records, RP living story memory | LLM не может изменить рассчитанный outcome |
+| `rp` | Ролевая игра с проверками | Intent, D20, skills, modifiers, blockers, check records, RP living story memory; один narrator completion без semantic validator/repair/fallback | Gateway не переписывает успешный непустой ответ; provider/format failure завершает ход ошибкой до state commit |
 | `novel` | Совместный роман | Непрерывная проза, directorial input, state boundary patch без броска; chapters/raw без RP story memory | Dice, DC, skills, игровые меню, захват agency |
 | `training` | Учебная симуляция и оценивание | Универсальный interpreter + WorldPack program/assessment/fallback, явные actions, deterministic score и debrief gate; прежний memory path без RP story memory | Случайность, `/check`, предметная логика в Gateway, подсказки и score до debrief |
 
