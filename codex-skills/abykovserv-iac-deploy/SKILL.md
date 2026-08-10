@@ -20,7 +20,8 @@ user's home server:
 The core model is pull-based:
 
 ```text
-local repo changes -> commit -> push to GitHub main
+local repo changes on a codex/ branch or in an isolated worktree -> commit
+-> push the working branch -> non-draft PR -> green CI -> merge into GitHub main
 server -> read-only deploy key -> git pull --ff-only -> Ansible against localhost -> Docker Compose apps
 ```
 
@@ -41,9 +42,12 @@ with a server-only read-only deploy key and applies Ansible locally.
   `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 ...`.
   The same identity is present in the local SSH config, but `ssh-agent` is
   stopped and disabled; repository instructions must not depend on agent state.
+- Work on a `codex/` branch or in an isolated worktree. Push only the working
+  branch, open a non-draft pull request, and merge it into `main` after CI is
+  green. Direct pushes to `main` are prohibited.
 - Remote `sudo` requires interactive user entry and `sudo -n` fails. Stop after
-  push and ask the user to run the Ansible apply interactively. Never request,
-  log, or store the sudo password.
+  the PR is merged and ask the user to run the Ansible apply interactively.
+  Never request, log, or store the sudo password.
 - Do not put secrets, tokens, real passwords, API keys, or local-only private
   values in GitHub. Use `/etc/ansible/local-overrides.yml` on the server.
 - Treat GitHub + Ansible as the source of truth. Avoid hand-editing files under
@@ -73,12 +77,14 @@ published from `docs/wiki/README.md`.
 4. Update affected Wiki pages and Mermaid diagrams in the same change when the
    change is significant.
 5. Run focused local checks that do not start a local server.
-6. Commit and push to `origin/main` when the change is ready.
-7. Verify access with
+6. Commit and push the working branch when the change is ready.
+7. Open a non-draft PR, wait for green CI, and merge it into `main`; do not
+   leave merge-ready work on the branch.
+8. Verify access with
    `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 hostname`.
-8. Stop at `pushed` and ask the user to run
+9. Stop at `merged` and ask the user to run
    `sudo systemctl start ansible-local-apply.service` interactively.
-9. After the user confirms apply completion, inspect status/journal and verify
+10. After the user confirms apply completion, inspect status/journal and verify
    Docker Compose, container tests, HTTP, and Browser checks as appropriate.
 
 ## Key Commands

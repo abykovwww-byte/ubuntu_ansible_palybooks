@@ -202,11 +202,15 @@ Expected route:
 
 ```text
 local Git/IaC edit on a codex/ branch or in an isolated worktree -> validate
--> commit -> push the branch -> open a PR -> merge
+-> commit -> push the working branch -> open a non-draft PR
+-> wait for green CI -> Codex merges the PR into main
 -> SSH to abykov@192.168.1.88
 -> run the established pull-based Ansible apply there
 -> verify runtime files and HTTP endpoints
 ```
+
+Direct pushes to `main` are prohibited; do not leave merge-ready work on the
+working branch.
 
 Deployment verification:
 

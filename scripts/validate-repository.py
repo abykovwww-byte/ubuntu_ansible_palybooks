@@ -77,6 +77,73 @@ def validate_agents(errors: list[str]) -> None:
         if not path.is_file():
             fail(errors, f"missing project policy file: {path.relative_to(ROOT)}")
 
+    merge_policy_files = [
+        ROOT / "AGENTS.md",
+        ROOT / "codex-skills" / "abykovserv-iac-deploy" / "SKILL.md",
+        ROOT / "codex-skills" / "abykovserv-iac-deploy" / "references" / "deployment-map.md",
+        ROOT / "codex-skills" / "rp-world-pack-builder" / "SKILL.md",
+        ROOT / "codex-skills" / "rp-world-pack-builder" / "references" / "world-pack-contract.md",
+        ROOT / "codex-skills" / "training-world-pack-builder" / "SKILL.md",
+        ROOT / "docs" / "repository-work-standard.md",
+        ROOT / "docs" / "server-setup-notes.md",
+        ROOT / "docs" / "use-framework.md",
+        ROOT / "docs" / "wiki" / "09-operations-and-repository.md",
+        ROOT / "docs" / "wiki" / "README.md",
+        ROOT / "plugins" / "rp-stack-devkit" / "skills" / "rp-stack-devkit" / "SKILL.md",
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "README.md",
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "docs" / "decisions" / "018-separate-training-and-rp-gateways.md",
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "docs" / "decisions" / "019-retire-legacy-awareness-gateway-path.md",
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "docs" / "decisions" / "020-rp-relationship-pressure-layer.md",
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "docs" / "plans" / "011-local-gemma4-vulkan.md",
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "docs" / "plans" / "014-interactive-training-site-artifacts.md",
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "docs" / "plans" / "015-training-scenario-interaction-capabilities.md",
+    ]
+    merge_policy_markers = {
+        "non-draft pull request": re.compile(r"(?i)non-draft (?:pull request|PR)"),
+        "green CI": re.compile(r"(?i)(?:green|зел[её]н\w*)[- ]CI|CI is green"),
+        "merge": re.compile(r"(?i)(?:merge|мерж)"),
+        "main": re.compile(r"(?i)\bmain\b"),
+    }
+    for path in merge_policy_files:
+        if not path.is_file():
+            fail(errors, f"missing merge-policy file: {path.relative_to(ROOT)}")
+            continue
+        text = path.read_text(encoding="utf-8")
+        missing = [name for name, pattern in merge_policy_markers.items() if not pattern.search(text)]
+        if missing:
+            fail(
+                errors,
+                f"merge policy missing from {path.relative_to(ROOT)}: {', '.join(missing)}",
+            )
+
+    direct_main_push = re.compile(
+        r"(?i)(?:git push origin main|push(?: changes)? (?:to|in|в) "
+        r"`?(?:GitHub )?(?:origin/)?main`?|push origin/main|commit \+ push.{0,80}GitHub main)"
+    )
+    prohibition = re.compile(r"(?i)(?:do not|must not|never|prohibit|запрещ)")
+    stale_pushed_stop = re.compile(
+        r"(?i)(?:stop(?:s|ped)? (?:after|at) .{0,20}pushed|"
+        r"automation stops at .{0,20}pushed|останавливается.{0,40}pushed)"
+    )
+    result = subprocess.run(
+        ["git", "ls-files", "*.md"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if result.returncode != 0:
+        fail(errors, "cannot enumerate Markdown files for merge-policy validation")
+        return
+    for relative_text in result.stdout.splitlines():
+        path = ROOT / relative_text
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if direct_main_push.search(line) and not prohibition.search(line):
+                fail(errors, f"direct push to main instruction: {relative_text}:{line_number}")
+            if stale_pushed_stop.search(line):
+                fail(errors, f"sudo boundary stops at pushed instead of merged: {relative_text}:{line_number}")
+
 
 def validate_plugin(errors: list[str]) -> None:
     plugin_root = ROOT / "plugins" / "rp-stack-devkit"

@@ -1,6 +1,6 @@
 {
   "name": "rp-stack-devkit",
-  "version": "0.1.0+codex.20260805142848",
+  "version": "0.1.0+codex.20260809210831",
   "description": "Safe development, evaluation, diagnostics, and deployment guidance for the Tavern RP Stack.",
   "author": {
     "name": "Tavern RP Stack"

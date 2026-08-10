@@ -309,9 +309,13 @@ For a playable pack, add the SillyTavern lorebook to `runtime_source_files` in
 
 ```text
 local validation on a codex/ branch or in an isolated worktree -> commit
--> push the branch -> open a PR -> merge -> server pull-based Ansible apply
+-> push the working branch -> open a non-draft PR -> wait for green CI
+-> Codex merges the PR into main -> server pull-based Ansible apply
 -> runtime verification
 ```
+
+Direct pushes to `main` are prohibited; do not leave merge-ready work on the
+working branch.
 
 After deployment, verify the manifest is listed by `/api/worldpacks`, the
 party can be created explicitly as `training`, its isolated state starts at

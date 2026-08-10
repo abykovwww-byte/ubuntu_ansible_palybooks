@@ -8,7 +8,8 @@ RP Stack развёртывается pull-based. GitHub не подключае
 
 ```mermaid
 flowchart LR
-    W["Windows workspace"] -->|"commit + push"| GH["GitHub main"]
+    W["Windows workspace"] -->|"commit + push branch"| BR["GitHub codex/*"]
+    BR -->|"non-draft PR + green CI + merge"| GH["GitHub main"]
     GH -->|"read-only deploy key + git pull --ff-only"| CO["/opt/ubuntu_ansible_palybooks"]
     CO -->|"Ansible localhost"| APP["/srv/apps/rp-stack"]
     APP -->|"docker compose up"| RT["Running containers"]
@@ -21,12 +22,15 @@ flowchart LR
 
 Обычный цикл:
 
-1. изменить source/IaC локально;
+1. изменить source/IaC в `codex/`-ветке или изолированном worktree;
 2. выполнить статические и focused checks;
-3. commit и push в `origin/main`;
-4. пользователь интерактивно запускает на `abykovserv`
+3. сделать commit и push только рабочей ветки;
+4. открыть non-draft PR, дождаться зелёного CI и смержить его в `main`;
+5. пользователь интерактивно запускает на `abykovserv`
    `sudo systemctl start ansible-local-apply.service`;
-5. проверить journal, containers, pytest и HTTP/UI.
+6. проверить journal, containers, pytest и HTTP/UI.
+
+Прямой push в `main` запрещён; готовую к merge работу нельзя оставлять в ветке.
 
 Команда Ansible прогоняет весь `site.yml`, но роли идемпотентны. Apps role отслеживает изменённые app artifacts, а Docker Compose не должен пересоздавать неизменный сервис без изменения image/config.
 
@@ -65,18 +69,21 @@ scripts/sync-codex-skills.ps1                 repo -> installed skills check/ins
 `.codex/config.toml` содержит только `[features] hooks = true`; MCP объявлен
 плагином через `plugins/rp-stack-devkit/.mcp.json`, а не через project
 `[mcp_servers]`. Канонические standalone-скиллы находятся в `codex-skills/`;
-копии в `%USERPROFILE%\.codex\skills\` устанавливаются командой
-`powershell.exe -File scripts/sync-codex-skills.ps1 -Mode Install` и не
+копии в `%USERPROFILE%\.codex\skills\` применяются командой
+`powershell.exe -File scripts/sync-codex-skills.ps1 -Mode Apply` и не
 редактируются отдельно. После синхронизации или обновления плагина нужна новая
 задача Codex.
 
 На проверенной Windows-машине SSH использует явный ключ
 `~/.ssh/id_ed25519_codex_abykovserv`; `ssh-agent` остановлен и отключён. Devkit
 передаёт ключ через `-i`. `sudo -n` на сервере не проходит, поэтому Codex
-останавливается на статусе `pushed`, а apply запускает пользователь
+останавливается на статусе `merged`, а apply запускает пользователь
 интерактивно без передачи пароля в задачу.
 
 Каждая независимая задача выполняется в `codex/` branch или отдельном worktree.
+Codex пушит только рабочую ветку, открывает non-draft PR, дожидается зелёного CI
+и сам мержит PR в `main`; прямой push в `main` запрещён, а готовая работа не
+остаётся лежать в ветке.
 Scheduled проверки также получают отдельный worktree и работают report-only:
 они не merge/push/deploy/restore и не меняют живые Party без нового явного
 запроса.

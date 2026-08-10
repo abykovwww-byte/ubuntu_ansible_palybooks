@@ -19,14 +19,17 @@ description: Develop, test, diagnose, publish, and verify the Tavern RP Stack th
 
 ## Development path
 
-1. Work in a `codex/` branch or isolated worktree and inspect the dirty tree before editing.
+1. Work in a `codex/` branch or isolated worktree and inspect the dirty tree before editing. Push only the working branch; direct pushes to `main` are prohibited.
 2. Preserve Gateway authority and keep UI changes presentation-only unless the API contract is deliberately changed.
 3. Add focused tests and update the RP Stack Wiki in the same change where required.
 4. Run `powershell.exe -File scripts/ci.ps1` for the deterministic local gate.
 5. Use `scripts/run-rp-stack-evals.ps1 -Mode Offline` for the offline eval report.
-6. Publish intentionally: commit, push, draft PR, then stop for the user's
-   interactive sudo apply; never request or capture the sudo password.
-7. After apply, run container, HTTP, and—when UI behavior changed—authenticated browser verification.
+6. Publish intentionally: commit, push the working branch, open a non-draft PR,
+   wait for green CI, and merge it into `main`; do not leave merge-ready work on
+   the branch.
+7. Stop at `merged` for the user's interactive sudo apply when deployment was
+   requested; never request or capture the sudo password.
+8. After apply, run container, HTTP, and—when UI behavior changed—authenticated browser verification.
 
 ## Safe operations
 

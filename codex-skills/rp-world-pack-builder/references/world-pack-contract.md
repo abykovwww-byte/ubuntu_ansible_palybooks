@@ -202,7 +202,9 @@ For playable Git/IaC worlds:
 - Add a `runtime_source_files` entry in `inventories/local/group_vars/server.yml` so the SillyTavern lorebook is copied into `/srv/app-data/rp-stack/data/default-user/worlds/`.
 - Use `force: false` by default to preserve user-owned runtime edits.
 - Do not manually copy files into `/srv` or `/opt` from Windows.
-- Use `abykovserv-iac-deploy` for commit/push/server apply and verification.
+- Use `abykovserv-iac-deploy` for commit, working-branch push, non-draft PR,
+  green-CI merge, server apply, and verification. Direct pushes to `main` are
+  prohibited.
 
 Template:
 
