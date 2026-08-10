@@ -11,7 +11,7 @@
 
 - At the start of repository work, read `docs/repository-work-standard.md` for the current workstation, SSH, sudo, toolchain, plugin, Graphify, and skill-sync facts.
 - For RP Stack architecture or significant behavior changes, use `codex-skills/rp-stack-wiki/SKILL.md` and update the Wiki in the same change.
-- For `abykovserv` deployment, use `codex-skills/abykovserv-iac-deploy/SKILL.md`. Deployment is `commit -> push -> ansible-local-apply.service -> runtime verification`.
+- For `abykovserv` deployment, use `codex-skills/abykovserv-iac-deploy/SKILL.md`. Deployment is `commit -> push the working branch -> non-draft PR -> green CI -> merge into main -> ansible-local-apply.service -> runtime verification`.
 - For RP/novel WorldPacks, use `codex-skills/rp-world-pack-builder/SKILL.md`.
 - For deterministic training WorldPacks, use `codex-skills/training-world-pack-builder/SKILL.md`.
 - For architecture and relationship questions, query the repository Graphify graph first when `graphify-out/` is present, then confirm decisive claims against source.
@@ -19,6 +19,7 @@
 ## Development discipline
 
 - Work on a `codex/` branch or an isolated worktree. Keep unrelated user changes intact.
+- Push only the working branch, open a non-draft pull request, and merge it into `main` after CI is green. Direct pushes to `main` are prohibited; do not leave merge-ready work on the branch.
 - Do not start local RP Stack application servers. Windows checks are static/offline evidence; the rebuilt Gateway container is the authoritative runtime test environment.
 - Prefer focused tests while iterating, then run `powershell.exe -File scripts/ci.ps1` before publishing.
 - Provider canaries must use the existing admin autotest branch flow. Never advance or mutate the source party.

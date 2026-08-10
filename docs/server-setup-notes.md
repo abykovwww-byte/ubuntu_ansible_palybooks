@@ -182,24 +182,26 @@ sudo git config --system --add safe.directory /opt/ubuntu_ansible_palybooks
 
 ## Day-To-Day Workflow
 
-1. Change Ansible code in GitHub or locally.
-2. Push changes to `main`.
-3. Verify the server with
+1. Change Ansible code on a `codex/` branch or in an isolated worktree.
+2. Run the relevant checks, commit, and push only the working branch.
+3. Open a non-draft pull request and merge it into `main` after CI is green;
+   direct pushes to `main` are prohibited.
+4. Verify the server with
    `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 hostname`.
-4. The user runs interactively:
+5. The user runs interactively:
 
 ```bash
 sudo systemctl start ansible-local-apply.service
 ```
 
-5. Check logs:
+6. Check logs:
 
 ```bash
 sudo journalctl -u ansible-local-apply.service -n 100 --no-pager
 ```
 
 The workstation has no non-interactive sudo path (`sudo -n` fails). Do not ask
-for or capture the password; automation stops at `pushed` until the user reports
+for or capture the password; automation stops at `merged` until the user reports
 that the apply completed.
 
 ## Safer Manual Playbook Runs

@@ -17,7 +17,9 @@ The server is self-hosted and pull-based:
 ```text
 Codex edits local checkout
 -> git commit
--> git push origin main
+-> push the working codex/ branch
+-> open a non-draft PR
+-> wait for green CI and merge the PR into main
 -> verify SSH with the explicit workstation identity
 -> user runs sudo systemctl start ansible-local-apply.service interactively
 -> server uses a read-only deploy key, pulls GitHub, and applies Ansible to localhost
@@ -65,7 +67,7 @@ from PowerShell. The local SSH config also names this identity, but the agent is
 stopped and disabled, so repository commands keep `-i` explicit. Do not try to
 work around the sandbox with unrelated tools.
 
-`sudo -n` fails on this host. Codex must stop at `pushed` and ask the user to
+`sudo -n` fails on this host. Codex must stop at `merged` and ask the user to
 run the apply interactively; never request or capture the sudo password.
 
 ## Workstation tools
@@ -197,8 +199,14 @@ git status --short --branch
 git diff
 git add <files>
 git commit -m "<message>"
-git push origin main
+git push -u origin <codex-branch>
+gh pr create --fill
+gh pr checks --watch
+gh pr merge --merge --delete-branch
 ```
+
+The pull request must be non-draft and merged only after CI is green. Direct
+pushes to `main` are prohibited.
 
 Remote apply:
 
@@ -249,8 +257,8 @@ Check visible Russian text, forms, console errors, and network-backed dropdowns.
 
 Preferred rollback:
 
-1. Revert or fix the bad commit in the IaC repository.
-2. Push to `origin/main`.
+1. Revert or fix the bad commit on a `codex/` branch or in an isolated worktree.
+2. Push the working branch, open a non-draft PR, and merge it after CI is green.
 3. Run `sudo systemctl start ansible-local-apply.service` on the server.
 4. Verify containers and HTTP endpoints.
 

@@ -11,6 +11,9 @@ detail.
   pre-rename worktrees (`deepseek-flash-latency`, `rp-validation-fix`, and
   `training-capabilities`) were verified against Git objects and removed on
   2026-08-05; recreate future worktrees from current repository refs.
+- Push only the working branch, open a non-draft pull request, and merge it into
+  `main` after CI is green. Direct pushes to `main` are prohibited; do not leave
+  merge-ready work on the branch.
 - Plugin source: `plugins/rp-stack-devkit/`; the repository marketplace is
   `.agents/plugins/marketplace.json`.
 - The plugin declares `rp-stack-ops` through
@@ -26,7 +29,7 @@ detail.
   while `ssh-agent` is stopped and disabled. Keep `-i` explicit in repository
   instructions and automation.
 - `sudo` requires interactive user entry; `sudo -n` fails. Codex stops at
-  `pushed` and asks the user to run `sudo systemctl start
+  `merged` and asks the user to run `sudo systemctl start
   ansible-local-apply.service` interactively. Never request, log, or store the
   password.
 - For a Python production probe, send a local script on stdin instead of nesting
@@ -64,8 +67,9 @@ detail.
 - The retired duplicate under the parent `Tavern/codex-skills/` was consolidated
   into the canonical `rp-world-pack-builder` and removed on 2026-08-05.
 - Check drift with `powershell.exe -File scripts/sync-codex-skills.ps1 -Mode
-  Check`; install exact repository copies with `-Mode Install`, then start a new
-  Codex task so the refreshed skills are loaded.
+  Check`; apply exact repository copies with `-Mode Apply` (`Install` remains a
+  compatibility alias), then start a new Codex task so the refreshed skills are
+  loaded.
 - `rp-stack-devkit` is installed from the repository plugin marketplace. After
   plugin source changes, refresh its manifest cachebuster/reinstall and start a
   new task.

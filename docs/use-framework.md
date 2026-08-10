@@ -19,7 +19,7 @@ Ansible preflight требует приватный `ns1-assets.xlsx` до пе�
 
 ## Apply владельцем сервера
 
-После push IaC:
+После merge в `main` прошедшего зелёный CI non-draft pull request с IaC:
 
 ```text
 sudo systemctl start ansible-local-apply.service

@@ -1,6 +1,6 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [ValidateSet("Check", "Install")]
+    [ValidateSet("Check", "Apply", "Install")]
     [string]$Mode = "Check",
     [string]$DestinationRoot = (Join-Path $env:USERPROFILE ".codex\skills")
 )
