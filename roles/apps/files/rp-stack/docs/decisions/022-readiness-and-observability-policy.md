@@ -362,13 +362,18 @@ call sites (перечисляются поиском, не рукописным
 | L1 | Реестр + валидатор словаря/реестра/корпуса + разведение решение/delivery + guard независимости оракула | `scripts/validate-adr-registry.py`, `roles/apps/files/rp-stack/docs/decisions/registry/*.yml` | ADR-файлы, манифест корпуса | Wave 0 |
 | L2 | Единый `ServiceModelClient` + лог промпта/ответа + маршрутизация рассредоточенных служебных вызовов + guard «мимо клиента ничего» + миграция | `rp-gateway/app/services/service_model_client.py` (new), `rp-gateway/app/services/memory.py`, `rp_story_memory.py`, `world_instructor.py`, миграция под ними | вызывающие сайты, `service_models.py` | Wave 0 |
 | L3 | Read-only MCP: `loop_probe` (диагностика), `causal_probe` (цепочка), `service_llm_trace` + тест девкита | `plugins/rp-stack-devkit/scripts/RpStackOps.psm1`, `scripts/test-devkit.ps1`, фикстуры девкита | контракты §B.4 | Wave 0 |
-| L4 | Приёмка: обезличенный корпус+манифест, оценщик, раздельные метрики, детектор тавтологии; offline-слой | `roles/apps/files/rp-stack/evals/**` (new), `rp-gateway/tests/test_semantic_acceptance.py` | контракты §B.4 | Wave 0 |
+| L4 | Приёмка: оценщик, раздельные метрики, детектор тавтологии; offline-слой | `roles/apps/files/rp-stack/evals/**` **кроме** `evals/acceptance/manifest.yml` и `evals/acceptance/corpus/**`, `rp-gateway/tests/test_semantic_acceptance.py` | контракты §B.4, `evals/acceptance/**` (read-only) | Wave 0 |
 | L5 | Словарь/оракул/метрики/слои в скиллах доставки и девкита | `plugins/rp-stack-devkit/skills/rp-stack-devkit/SKILL.md`, `plugins/rp-stack-devkit/README.md`, `codex-skills/abykovserv-iac-deploy/SKILL.md`, `codex-skills/rp-stack-wiki/SKILL.md` | словарь Wave 0 | Wave 0 |
 
 `AGENTS.md`, `scripts/validate-repository.py`, `scripts/ci.ps1`,
 `scripts/run-rp-stack-evals.ps1`, `rp-gateway/app/main.py` (служебные call sites:
-intent и генерация персонажей), `docs/wiki/`, реестр 022, манифест-регистрация
-порогов и Status **не принадлежат ни одной дорожке** — интеграционная волна.
+intent и генерация персонажей), `docs/wiki/`, реестр 022 и Status **не
+принадлежат ни одной дорожке** — интеграционная волна.
+
+`evals/acceptance/manifest.yml` и `evals/acceptance/corpus/**` — **вход
+пользователя**, а не работа дорожки: они уже зафиксированы в ветке до старта
+(размеченный корпус и предрегистрированные пороги). Ни одна дорожка их не пишет;
+L4 читает их read-only. Это и есть независимость оракула (инвариант 6).
 
 **Wave 0 — contract freeze (sequential, no agents).** Записать в ветку дословно:
 четыре ступени словаря; форму реестра; сигнатуру и роды утверждений `causal_probe`;

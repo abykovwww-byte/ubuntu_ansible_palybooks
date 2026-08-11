@@ -1,0 +1,129 @@
+# Приёмочный корпус — начальный набор (bootstrap), 8 ходов.
+# Обезличено: выведено из реальной RP-партии, нарративная проза сокращена до
+# сути, идентификатор партии не включён. Размечено пользователем (не Codex, не
+# Claude): метки — это ground truth того, каким должен был быть исход сцены.
+# Служебная модель прогоняется на `player_input`+`scene_summary`, её ответ
+# сверяется с `label`. Набор — семя, подлежит расширению; пороги в manifest.yml.
+version: 1
+labeled_by: user
+frozen_at: "2026-08-11"
+source: "derived from a real rp party, condensed and de-identified; party id withheld"
+service_role: relationship_extraction
+
+examples:
+  - id: starosta-t1
+    party_turn: 1
+    player_input: "Что здесь произошло? Слитки куда делись?"
+    scene_summary: "Игрок осматривает клеть, задаёт вопрос об пропавших слитках."
+    label:
+      scene_type: empty
+      expected_events: []
+      expected_badges: []
+      world_rule_ok: true
+      correction: none
+    note: "Игрок задал вопрос; отношения ни одного персонажа меняться не должны."
+
+  - id: starosta-t8
+    party_turn: 8
+    player_input: "Стоян, не лезь, когда не просят. Вопрос дани решу с княжеским человеком. Сядь."
+    scene_summary: "Игрок прилюдно осаживает Стояна, тот отступает, но не сломлен."
+    label:
+      scene_type: significant
+      expected_events:
+        - character: stoyan
+          event: insult_public
+          sign: "-"
+      expected_badges: []
+      world_rule_ok: true
+      correction: none
+    note: "Верное событие и верный персонаж — положительный контроль атрибуции."
+
+  - id: starosta-t19
+    party_turn: 19
+    player_input: "Лука, бери слиток и неси Любаве — она с кузнецом за него животом отвечают."
+    scene_summary: "Игрок доверяет Любаве важный ресурс (серебряный слиток) под ответственность."
+    label:
+      scene_type: significant
+      expected_events:
+        - character: lyubava
+          event: shared_risk
+          sign: "+"
+      expected_badges:
+        - character: lyubava
+          badge: obligation
+      world_rule_ok: true
+      correction: none
+    note: >-
+      Доверие Любаве — это не только положительный сдвиг, но и наложенный
+      бейдж-обязательство. Сейчас на Любаву не срабатывает НИЧЕГО за всю партию —
+      главный промах recall и неработающая механика бейджей.
+
+  - id: starosta-t23
+    party_turn: 23
+    player_input: "(разбор засады) Хлуд нас обманул, завёл в болото у излучины, ударил Варяжка по голове."
+    scene_summary: "Описывается конфликт между NPC Хлудом и NPC Варяжко; к игроку это не обращено."
+    label:
+      scene_type: empty
+      expected_events: []
+      expected_badges: []
+      world_rule_ok: true
+      correction: none
+    note: >-
+      Событие между двумя NPC (Хлуд↔Варяжко) НЕ должно менять отношения игрока.
+      Система выдумала событие и повесила его на Фрола — ложное срабатывание
+      целого класса (NPC↔NPC не трогает отношения игрока).
+
+  - id: starosta-t42
+    party_turn: 42
+    player_input: "Наратор, ты нарушил правила силы. Сила абсолютна, прочитай вводные. Переиграй ход!"
+    scene_summary: "Игрок через ГМ-режим требует вернуть нарратора к объявленному правилу мира (абсолютность силы)."
+    label:
+      scene_type: significant
+      expected_events: []
+      expected_badges: []
+      world_rule_ok: false
+      correction: attempted
+    note: "Нарратор нарушил правило абсолютной силы; игрок явно исправляет через ГМ-режим."
+
+  - id: starosta-t76
+    party_turn: 76
+    player_input: "Использую силу. Призываю его коленям и костям в ногах деформироваться, сломаться."
+    scene_summary: "Игрок силой ломает ноги персонажу Жиле, который стоит перед ним; Жила вскрикивает и падает."
+    label:
+      scene_type: significant
+      expected_events:
+        - character: zhila
+          event: physical_assault
+          sign: "-"
+      expected_badges: []
+      world_rule_ok: true
+      correction: none
+    note: >-
+      Увечье получает Жила. Система записала physical_assault на Ждана, которого
+      рядом не было, — ошибка character_id при в остальном верном событии.
+
+  - id: starosta-t77
+    party_turn: 77
+    player_input: "ГМ мод. Помнишь про правило абсолютности силы? Прочитай правила мира."
+    scene_summary: "Нарратор соглашается ('Ты прав, сила абсолютна'), но тут же вводит новое ограничение ('живые кости — ты не знаешь как')."
+    label:
+      scene_type: significant
+      expected_events: []
+      expected_badges: []
+      world_rule_ok: false
+      correction: not_retained
+    note: >-
+      Исправление правила НЕ удержалось: нарратор формально согласился и снова
+      нарушил. Прямой кейс для correction_retention.
+
+  - id: starosta-t134
+    party_turn: 134
+    player_input: "Любава. Позови Фрола ко мне."
+    scene_summary: "Игрок поручает Любаве позвать Фрола; бытовая задача."
+    label:
+      scene_type: empty
+      expected_events: []
+      expected_badges: []
+      world_rule_ok: true
+      correction: none
+    note: "Упоминание Любавы — это задача, а не событие отношений. Упоминание != событие."
