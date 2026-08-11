@@ -175,3 +175,7 @@ Backup содержит state, историю, users, provider keys и dataset l
 - [ShowroomStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/showroom.py)
 - [TrainingArtifactService](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
 - [Compose networks](../../roles/apps/templates/rp-stack.compose.yml.j2)
+
+### Relationship projection repair
+
+The relationship-pressure projection stores active boundary events and their deadlines. When resuming an older party, Gateway idempotently restores a missing `due_turn` from `opened_turn` and the current WorldPack clock before processing the turn. This updates only the derived projection, not raw turns or canonical state; new rows require a non-null deadline.
