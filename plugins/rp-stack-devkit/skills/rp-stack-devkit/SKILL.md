@@ -77,6 +77,13 @@ Use the `rp-stack-ops` MCP tools for read-only diagnostics:
 - `http_smoke`, `gateway_test`, `recent_logs`;
 - `provider_summary`, `request_trace`, `backup_status`.
 
+`causal_probe` accepts the registered expectations
+`seed_trust_influences_plot`, `relationship_pressure_reaches_next_turn_prompt`,
+`relationship_event_has_canonical_character_attribution`,
+`relationship_badge_has_canonical_character_attribution`, and
+`trust_gained_reaches_next_turn_prompt`. Treat the reported `break_at` as the
+evidence boundary; do not turn an earlier passing step into a readiness claim.
+
 The MCP intentionally exposes no deploy, restore, delete, or live-write operation. It redacts probable credentials and validates all variable arguments before constructing a remote command.
 
 ## Eval layers

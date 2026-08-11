@@ -115,6 +115,14 @@ powershell.exe -File scripts/rp-stack-ops.ps1 -Action causal_probe -PartyId <par
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action service_llm_trace -PartyId <party_id> -Turn <party_turn>
 ```
 
+`causal_probe` принимает только зарегистрированные expectation-ключи:
+`seed_trust_influences_plot`, `relationship_pressure_reaches_next_turn_prompt`,
+`relationship_event_has_canonical_character_attribution`,
+`relationship_badge_has_canonical_character_attribution` и
+`trust_gained_reaches_next_turn_prompt`. Пробы атрибуции и бейджа заканчиваются
+на durable-проекции; остальные перечисленные цепочки дополнительно ищут
+`RELATIONSHIP_PRESSURE` в более позднем prompt.
+
 `loop_probe` возвращает только necessary-not-sufficient счётчики. Для
 причинного утверждения используется `causal_probe`, который показывает каждую
 ступень и точку обрыва. `service_llm_trace` читает точные редактированные записи
