@@ -60,6 +60,37 @@ with a server-only read-only deploy key and applies Ansible locally.
   as such in the completion report.
 - Summarize remote command output to the user; they do not see tool output.
 
+## Decision 022 readiness gate
+
+For RP Stack requirements, use only the readiness levels `каркас` (code exists
+and module tests are green), `подключено` (execution in the real turn path), `наблюдается`
+(effect in the authoritative mechanic store and in a later real-party prompt),
+and `держится` (later scenes repeatedly account for the effect without drift).
+Do not use bare `implemented`, `working`, `ready`, `реализовано`, `работает`, or
+`готово` claims. Green CI is necessary for delivery, but is insufficient for
+`наблюдается` or `держится`.
+
+Treat `roles/apps/files/rp-stack/evals/acceptance/manifest.yml` and
+`roles/apps/files/rp-stack/evals/acceptance/corpus/**` as an independent,
+user-owned, read-only oracle. Never change its labels or thresholds during
+implementation. Read thresholds from the manifest and report
+`event_precision`, `event_recall`, `character_id_accuracy`,
+`empty_scene_false_positive_rate`, `positive_trust_recall`, and
+`correction_retention` separately, including per-event-class metrics when
+requested there.
+
+Do not collapse the evidence layers:
+
+- offline uses schemas and saved responses and never invokes providers;
+- provider-canary uses a real prompt and model through admin-autotest and does
+  not mutate the source party;
+- production-endurance uses a long live party and `causal_probe` through later
+  scene consequences; only it can establish `держится`.
+
+If the revision introduces `service_call_log`, stop after merge and before any
+apply that would record live data. Obtain the user's explicit decision on log
+retention and redaction depth even when CI is green or a default is configured.
+
 ## When More Detail Is Needed
 
 Read `references/deployment-map.md` for exact paths, commands, app layout,
@@ -82,9 +113,11 @@ published from `docs/wiki/README.md`.
    leave merge-ready work on the branch.
 8. Verify access with
    `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 hostname`.
-9. Stop at `merged` and ask the user to run
+9. If the revision introduces `service_call_log`, obtain the user's explicit
+   retention and redaction decision before proceeding to apply.
+10. Stop at `merged` and ask the user to run
    `sudo systemctl start ansible-local-apply.service` interactively.
-10. After the user confirms apply completion, inspect status/journal and verify
+11. After the user confirms apply completion, inspect status/journal and verify
    Docker Compose, container tests, HTTP, and Browser checks as appropriate.
 
 ## Key Commands

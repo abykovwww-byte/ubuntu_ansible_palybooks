@@ -47,6 +47,9 @@ $node = Resolve-Tool -Name "node" -OverrideEnvironmentVariable "CODEX_NODE" -Bun
 Push-Location $repoRoot
 try {
     Invoke-Checked "repository contracts" { & $python scripts/validate-repository.py }
+    Invoke-Checked "semantic acceptance (saved responses, no providers)" {
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-rp-stack-evals.ps1 -Mode SemanticAcceptance
+    }
     if ([string]::IsNullOrWhiteSpace($env:CI)) {
         Invoke-Checked "installed Codex skill drift" {
             powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/sync-codex-skills.ps1 -Mode Check
@@ -77,7 +80,11 @@ try {
     foreach ($file in $javascriptFiles) {
         Invoke-Checked "JavaScript syntax: $($file.Substring($repoRoot.Length + 1))" { & $node --check $file }
     }
-    $javascriptTests = @(Get-ChildItem -Path $rpRoot -Recurse -Filter "*.test.js" | Sort-Object FullName)
+    $javascriptTests = @(
+        & git -C $repoRoot ls-files "roles/apps/files/rp-stack/**/*.test.js" |
+            ForEach-Object { Get-Item -LiteralPath (Join-Path $repoRoot $_) } |
+            Sort-Object FullName
+    )
     foreach ($test in $javascriptTests) {
         Invoke-Checked "JavaScript test: $($test.FullName.Substring($repoRoot.Length + 1))" { & $node $test.FullName }
     }

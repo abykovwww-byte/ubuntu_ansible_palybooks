@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "party_id": "party_fixture_complete",
+  "expectation": "seed_trust_influences_plot",
+  "assertion": "prompt_presence",
+  "passed": true,
+  "break_at": null,
+  "steps": [
+    {
+      "step": "seeded_trust",
+      "assertion": "state_change",
+      "passed": true,
+      "evidence": {
+        "seeded_characters": 1,
+        "character_ids": ["npc_lyubava"]
+      }
+    },
+    {
+      "step": "event_projection",
+      "assertion": "projection",
+      "passed": true,
+      "evidence": {
+        "events": 1,
+        "first_opened_turn": 4
+      }
+    },
+    {
+      "step": "prompt_presence",
+      "assertion": "prompt_presence",
+      "passed": true,
+      "evidence": {
+        "turn_id": 5,
+        "party_turn": 5,
+        "quote": "RELATIONSHIP_PRESSURE - Любава — доверяет; обычная сцена учитывает это."
+      }
+    }
+  ]
+}

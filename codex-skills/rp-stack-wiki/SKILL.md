@@ -37,6 +37,36 @@ for implementation facts.
 Do not use an older Wiki revision, adjacent task, ADR, or graph result as proof
 that a feature is still implemented.
 
+## Decision 022 evidence language
+
+Describe RP Stack readiness only as `каркас` (code exists and module tests are green),
+`подключено` (execution in the real turn path), `наблюдается` (effect in the
+authoritative mechanic store and in a later real-party prompt), or `держится`
+(later scenes repeatedly account for the effect without drift). Do not use bare
+`implemented`, `working`, `ready`, `реализовано`, `работает`, or `готово` claims.
+Green CI is necessary delivery evidence, but is insufficient for
+`наблюдается` or `держится`.
+
+Document the acceptance oracle at
+`roles/apps/files/rp-stack/evals/acceptance/manifest.yml` and
+`roles/apps/files/rp-stack/evals/acceptance/corpus/**` as independent,
+user-owned, and read-only. Its labels and thresholds are not implementation
+inputs to rewrite. Reports must read thresholds from the manifest and keep
+`event_precision`, `event_recall`, `character_id_accuracy`,
+`empty_scene_false_positive_rate`, `positive_trust_recall`, and
+`correction_retention` separate, including per-event-class metrics when the
+manifest requires them.
+
+Keep evidence split into three layers: offline uses saved responses and no
+providers; provider-canary uses a real prompt and model through admin-autotest
+without mutating the source party; production-endurance uses a long live party
+and `causal_probe` through later scene consequences. Only production endurance
+can establish `держится`.
+
+When a change introduces `service_call_log`, record that deployment is paused
+until the user explicitly decides retention and redaction depth. A green PR or
+configured default does not authorize logging live data.
+
 ## Documentation Impact Gate
 
 Treat a change as significant when it changes any of these contracts:
