@@ -31,6 +31,44 @@ description: Develop, test, diagnose, publish, and verify the Tavern RP Stack th
    requested; never request or capture the sudo password.
 8. After apply, run container, HTTP, and—when UI behavior changed—authenticated browser verification.
 
+## Readiness evidence contract
+
+For Decision 022 requirements, report readiness only with this dictionary:
+
+- `каркас`: code exists and module tests are green; this says nothing
+  about a real party;
+- `подключено`: the code executes in the real turn path and its input reaches it;
+- `наблюдается`: the effect is present in the mechanic's authoritative store and
+  the causal chain reaches the next-turn prompt on a real party;
+- `держится`: the chain repeatedly reaches a scene that accounts for the effect,
+  without drift.
+
+Do not replace these levels with bare `implemented`, `working`, `ready`,
+`реализовано`, `работает`, or `готово` claims. Green CI is necessary evidence,
+but is insufficient for `наблюдается` or `держится`.
+
+The acceptance oracle is independent, user-owned, and read-only:
+`roles/apps/files/rp-stack/evals/acceptance/manifest.yml` and
+`roles/apps/files/rp-stack/evals/acceptance/corpus/**`. Do not relabel examples,
+change thresholds, or overwrite these files. Read every threshold from the
+manifest and report `event_precision`, `event_recall`,
+`character_id_accuracy`, `empty_scene_false_positive_rate`,
+`positive_trust_recall`, and `correction_retention` separately, including
+per-event-class results when required by the manifest.
+
+Keep the three evidence layers distinct:
+
+- offline: schemas, saved responses, tautology detection, and separate metrics;
+  never call a provider;
+- provider-canary: real prompt and model, repeated through admin-autotest; never
+  advance or mutate the source party;
+- production-endurance: a long live party and `causal_probe` through “scene
+  accounts for the effect”; only this layer can establish `держится`.
+
+Before deploying `service_call_log` against live data, stop and obtain the
+user's decision on retention and redaction depth. Do not infer approval from a
+green PR, a configured default, or an earlier environment setting.
+
 ## Safe operations
 
 Use the `rp-stack-ops` MCP tools for read-only diagnostics:
@@ -43,9 +81,18 @@ The MCP intentionally exposes no deploy, restore, delete, or live-write operatio
 
 ## Eval layers
 
-- Offline: schemas, deterministic WorldPack runtime, Gateway tests, UI tests, hook policy, Wiki links, and plugin validation.
-- Provider canary: `scripts/run-rp-stack-evals.ps1 -Mode ProviderCanary ... -ConfirmProviderRun`; this calls the existing admin autotest API, creates a checkpoint branch, and leaves the source party unchanged.
-- Browser smoke: follow `assets/browser-smoke-checklist.md` with the Browser skill against the deployed revision and save exact UI/API evidence.
+- Offline: `scripts/run-rp-stack-evals.ps1 -Mode Offline`; providers are not
+  called, and the report keeps the acceptance metrics separate.
+- Provider-canary: `scripts/run-rp-stack-evals.ps1 -Mode ProviderCanary ...
+  -ConfirmProviderRun`; this calls the existing admin autotest API, creates a
+  checkpoint branch, and leaves the source party unchanged.
+- Production-endurance: exercise a long live party and use `causal_probe` to
+  prove the chain through later scene consequences without drift.
+
+Browser smoke remains a post-deployment interface check: follow
+`assets/browser-smoke-checklist.md` with the Browser skill against the deployed
+revision and save exact UI/API evidence. It does not replace production
+endurance.
 
 ## Scheduled work
 

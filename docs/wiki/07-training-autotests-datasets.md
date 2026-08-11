@@ -129,16 +129,16 @@ Auto-player видит только public character description и player/GM tr
 
 Runs сохраняют status, requested/completed turns, fallback count, provider/model, prompt, last action и error. Каждый narrator turn имеет idempotency key. Незавершённый run может продолжиться после рестарта Gateway без дублирования завершённого хода.
 
-## Три уровня eval-проверок
+## Три уровня semantic evidence
 
 Devkit не смешивает детерминированные тесты, реальные provider-вызовы и
 браузерную приёмку в один нечёткий статус:
 
 | Уровень | Что проверяет | Разрешённые эффекты |
 |---|---|---|
-| Offline | state/schema, WorldPack runtime, workflow scripts, полный Gateway pytest, JS syntax/tests | Нет сети, provider-вызовов и запуска приложения |
-| Provider canary | Реальный narrator/player путь, status, completed/fallback turns и неизменность source Party | Только явно подтверждённый bounded autotest branch, до 5 ходов из runner |
-| Browser smoke | Authenticated DOM, реальные API responses, exactly-once turn, artifacts и Showroom isolation | Один заранее выбранный безопасный тестовый ход на уже развёрнутой revision |
+| Offline | Схемы, сохранённые service responses, детектор тавтологии, отдельные метрики, Gateway/JS tests | Нет сети, provider-вызовов и запуска приложения |
+| Provider canary | Реальный prompt/model через admin-autotest, повторные semantic reports и неизменность source Party | Только явно подтверждённый bounded autotest branch; сохранённые ответы помечены `producer: provider-canary` |
+| Production endurance | Длинная живая RP-партия и `causal_probe` до влияния на последующие сцены | Только read-only наблюдение уже записанного runtime; эта ступень одна может доказать `держится` |
 
 Provider canary использует существующий `POST /api/admin/autotests`: до запуска
 он хеширует history/state source Party, после завершения сравнивает их снова и
@@ -146,6 +146,14 @@ Provider canary использует существующий `POST /api/admin/a
 берутся только из process environment, не попадают в аргументы, JSON report или
 Git. При poll timeout runner запрашивает stop, чтобы не оставлять бесконтрольный
 фоновой run.
+
+Оракул `evals/acceptance/manifest.yml` и `acceptance/corpus/**` размечен
+пользователем и read-only для исполнителя. Пороги читаются только из манифеста.
+Отчёт не сворачивает метрики: отдельно показывает event precision/recall,
+character attribution accuracy, empty-scene false-positive rate,
+positive-trust recall, correction retention и разрезы по классу события. Ответ
+`events=[]` на всём корпусе обязан провалить recall. Зелёный offline CI даёт
+только `каркас`; он не доказывает реальную семантику provider и длинной партии.
 
 Browser smoke не заменяется `curl`: UI считается проверенным только после
 осмотра authenticated DOM, browser console и фактических network responses.

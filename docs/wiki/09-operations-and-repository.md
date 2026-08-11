@@ -48,6 +48,13 @@ flowchart LR
 
 Push не означает deploy, а healthy containers не доказывают корректный пользовательский сценарий.
 
+Готовность требований описывается отдельным словарём: `каркас` — код и модульные
+тесты; `подключено` — исполнение в реальном тракте; `наблюдается` — эффект в
+авторитетном хранилище и следующем prompt реальной партии; `держится` — повторные
+последующие сцены без дрейфа. Реестры находятся в
+`roles/apps/files/rp-stack/docs/decisions/registry/`, а Decision status не
+заменяет ни одну из этих ступеней.
+
 ## Codex devkit, worktrees и CI
 
 Репозиторий содержит собственный Codex-контур:
@@ -60,6 +67,7 @@ AGENTS.md                                      repository authority и delivery 
 plugins/rp-stack-devkit/                      skill, read-only MCP/CLI, hooks, checklist
 plugins/rp-stack-devkit/.mcp.json             объявление read-only MCP rp-stack-ops
 scripts/ci.ps1                                единый локальный deterministic gate
+scripts/validate-adr-registry.py              readiness/oracle/causal registry guard
 scripts/run-rp-stack-evals.ps1                offline/provider/browser eval entrypoint
 .github/workflows/ci.yml                      GitHub Actions parity gate
 docs/repository-work-standard.md              короткий проверяемый контракт окружения
@@ -102,10 +110,20 @@ CLI:
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action local_revision
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action compose_status
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action gateway_test -Scope training
+powershell.exe -File scripts/rp-stack-ops.ps1 -Action loop_probe -PartyId <party_id>
+powershell.exe -File scripts/rp-stack-ops.ps1 -Action causal_probe -PartyId <party_id> -Expectation seed_trust_influences_plot
+powershell.exe -File scripts/rp-stack-ops.ps1 -Action service_llm_trace -PartyId <party_id> -Turn <party_turn>
 ```
 
+`loop_probe` возвращает только necessary-not-sufficient счётчики. Для
+причинного утверждения используется `causal_probe`, который показывает каждую
+ступень и точку обрыва. `service_llm_trace` читает точные редактированные записи
+`service_call_log`; все три операции открывают SQLite через `mode=ro` и не имеют
+пути записи.
+
 Provider canary запускается только с `-ConfirmProviderRun`, использует Gateway
-autotest branch и проверяет, что source history/state не изменились. Полные
+autotest branch, принимает повторные `-SemanticResponsesFile` и проверяет, что
+source history/state не изменились. Полные
 правила трёх уровней находятся в
 [RP Stack evals](../../roles/apps/files/rp-stack/evals/README.md).
 
@@ -254,6 +272,7 @@ pytest
 
 ```powershell
 powershell.exe -File scripts/ci.ps1
+powershell.exe -File scripts/run-rp-stack-evals.ps1 -Mode SemanticAcceptance
 ```
 
 Для статических UI:

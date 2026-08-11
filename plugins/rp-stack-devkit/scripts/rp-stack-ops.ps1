@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("local_revision", "server_revision", "ansible_status", "compose_status", "http_smoke", "gateway_test", "recent_logs", "provider_summary", "request_trace", "backup_status")]
+    [ValidateSet("local_revision", "server_revision", "ansible_status", "compose_status", "http_smoke", "gateway_test", "recent_logs", "provider_summary", "request_trace", "loop_probe", "causal_probe", "service_llm_trace", "backup_status")]
     [string]$Action,
     [ValidateSet("smoke", "training", "full")]
     [string]$Scope = "smoke",
@@ -8,7 +8,10 @@ param(
     [string]$Service = "rp-gateway",
     [ValidateRange(1, 500)]
     [int]$Lines = 100,
-    [string]$RequestId = ""
+    [string]$RequestId = "",
+    [string]$PartyId = "",
+    [string]$Expectation = "",
+    [int]$Turn = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +24,15 @@ $arguments = @{
 }
 if (-not [string]::IsNullOrWhiteSpace($RequestId)) {
     $arguments.request_id = $RequestId
+}
+if (-not [string]::IsNullOrWhiteSpace($PartyId)) {
+    $arguments.party_id = $PartyId
+}
+if (-not [string]::IsNullOrWhiteSpace($Expectation)) {
+    $arguments.expectation = $Expectation
+}
+if ($Turn -gt 0) {
+    $arguments.turn = $Turn
 }
 
 try {

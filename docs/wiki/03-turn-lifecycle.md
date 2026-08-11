@@ -190,7 +190,7 @@ Extraction читает оба номера из уже записанного �
 
 ### Capability gate и рабочие файлы
 
-> Статус: реализовано в Gateway и Showroom; live-статус зависит от применённой ревизии.
+> Ступень готовности: `подключено` в Gateway и Showroom; live-статус зависит от применённой ревизии.
 
 Перед сборкой narrator prompt Gateway читает два флага из run snapshot.
 Выключенная capability не добавляет prompt contract, не создаёт public snapshot,
@@ -245,6 +245,15 @@ Draft может быть быстрым детерминированным ил
 
 Обе задачи выполняются вне latency path: пользователь получает уже сохранённый ответ, пока helper продолжает работу. Jobs имеют статус, retry policy и восстанавливаются после перезапуска. Ошибка story-memory updater не откатывает ход и не изменяет canonical state. Старый тип `journal` распознаётся только как terminal no-op, чтобы задачи от прежних версий не зацикливались.
 
+Все вызовы глобальной служебной модели — episodic memory, RP story memory,
+relationship extraction, world instruction и генерация персонажа — проходят
+через `ServiceModelClient`. Перед отправкой он фиксирует точные ordered messages,
+после ответа — сырой provider response и статус в отдельном диагностическом
+`service_call_log`; секреты редактируются на записи. Таблица не входит в
+canonical state/schema. Срок хранения конфигурируется
+`SERVICE_CALL_LOG_RETENTION_DAYS`; применение на живые данные остановлено до
+явного решения пользователя о retention и глубине редактирования.
+
 ## Код
 
 - [Adjudicator](../../roles/apps/files/rp-stack/rp-gateway/app/services/adjudicator.py)
@@ -253,6 +262,7 @@ Draft может быть быстрым детерминированным ил
 - [Validator](../../roles/apps/files/rp-stack/rp-gateway/app/services/validator.py)
 - [State store](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
 - [RP story memory](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
+- [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
 - [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
 - [Training runtime](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_runtime.py)
 - [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)

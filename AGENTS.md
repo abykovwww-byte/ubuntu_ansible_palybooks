@@ -26,6 +26,15 @@
 - Read-only diagnostics should use the `rp-stack-ops` MCP/CLI. It intentionally has no deploy, restore, or mutation tools.
 - Scheduled maintenance may inspect and report. It must not merge, push, deploy, restore, rotate secrets, or modify live state without a new explicit instruction.
 
+## Readiness and semantic evidence
+
+- Report RP Stack readiness only as `каркас`, `подключено`, `наблюдается`, or `держится`. Green CI is necessary delivery evidence, but it is not proof that a mechanic is observed or durable on a real party.
+- Keep Decision status separate from implementation readiness. Requirements live in `roles/apps/files/rp-stack/docs/decisions/registry/NNN.yml` and are checked by `scripts/validate-adr-registry.py`.
+- Treat `roles/apps/files/rp-stack/evals/acceptance/manifest.yml` and `evals/acceptance/corpus/**` as an independent user-owned, read-only oracle. Never change labels or thresholds in the same change as mechanism code.
+- Report event precision, event recall, character attribution accuracy, empty-scene false-positive rate, positive-trust recall, and correction retention separately; do not replace them with one aggregate score.
+- Keep evidence layers separate: offline uses saved responses and no providers; provider-canary uses a real model through an isolated admin-autotest branch; production-endurance follows `causal_probe` through later scene consequences.
+- Before applying a revision that introduces `service_call_log` to live data, stop for the user's explicit retention and redaction decision.
+
 ## Documentation and generated state
 
 - Treat any change to a working-format contract (path, identity key, permissions, tool availability, plugin location, or contract schema) as incomplete until `docs/repository-work-standard.md`, every affected repository skill/plugin instruction, and the corresponding `scripts/validate-repository.py` guard are updated in the same change.

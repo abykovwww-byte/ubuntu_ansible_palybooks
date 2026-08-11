@@ -258,6 +258,24 @@ def validate_environment_contracts(errors: list[str]) -> None:
             fail(errors, f".graphifyignore missing required entry: {required}")
 
 
+def validate_adr_registry(errors: list[str]) -> None:
+    validator = ROOT / "scripts" / "validate-adr-registry.py"
+    if not validator.is_file():
+        fail(errors, "missing scripts/validate-adr-registry.py")
+        return
+    result = subprocess.run(
+        [sys.executable, str(validator), "--root", str(ROOT)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stdout + result.stderr).strip()
+        fail(errors, f"ADR registry validation failed: {detail}")
+
+
 def main() -> int:
     errors: list[str] = []
     validate_json(errors)
@@ -265,6 +283,7 @@ def main() -> int:
     validate_agents(errors)
     validate_plugin(errors)
     validate_environment_contracts(errors)
+    validate_adr_registry(errors)
     if errors:
         print("Repository validation failed:")
         for error in errors:

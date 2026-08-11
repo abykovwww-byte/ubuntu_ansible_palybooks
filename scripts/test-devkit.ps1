@@ -5,6 +5,7 @@ $pluginHook = Join-Path $repoRoot "plugins\rp-stack-devkit\hooks\rp_stack_policy
 $opsScript = Join-Path $repoRoot "plugins\rp-stack-devkit\scripts\rp-stack-ops.ps1"
 $opsModule = Join-Path $repoRoot "plugins\rp-stack-devkit\scripts\RpStackOps.psm1"
 $mcpScript = Join-Path $repoRoot "plugins\rp-stack-devkit\scripts\mcp-server.ps1"
+$adr022FixtureRoot = Join-Path $repoRoot "plugins\rp-stack-devkit\tests\fixtures\adr-022"
 $powerShellExecutable = (Get-Process -Id $PID).Path
 
 function Assert-True {
@@ -22,6 +23,18 @@ function Invoke-Hook {
 
 Import-Module $opsModule -Force
 $loadedOpsModule = Get-Module RpStackOps
+$probeScripts = & $loadedOpsModule {
+    @("loop_probe", "causal_probe", "service_llm_trace") | ForEach-Object {
+        [ordered]@{ action = $_; script = Get-RpProbePython -Action $_ }
+    }
+}
+foreach ($probeScript in $probeScripts) {
+    Assert-True ($probeScript.script -match 'file:/data/rp_gateway\.db\?mode=ro') "$($probeScript.action) does not open SQLite in URI mode=ro."
+    Assert-True ($probeScript.script -notmatch '(?im)^\s*["'']?\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP|VACUUM|ATTACH|DETACH|REINDEX)\b') "$($probeScript.action) contains write-capable SQL."
+}
+$causalProbeSource = ($probeScripts | Where-Object { $_.action -eq "causal_probe" }).script
+Assert-True ($causalProbeSource -match "seed_cause_characters") "causal_probe does not require a seed cause for event projection."
+Assert-True ($causalProbeSource -match 'text\.startswith\("RELATIONSHIP_PRESSURE"\) and character_name in text') "causal_probe does not bind character evidence to one pressure block."
 $nativeStderrResult = & $loadedOpsModule {
     param([string]$Executable)
     Invoke-RpExternalCommand -FilePath $Executable -ArgumentList @(
@@ -84,6 +97,7 @@ try {
     $invalidCall = $mcpResponses[3] | ConvertFrom-Json
     Assert-True ($initialize.result.serverInfo.name -eq "rp-stack-ops") "MCP initialize response is invalid."
     Assert-True (($toolList.result.tools.name -contains "gateway_test") -and -not ($toolList.result.tools.name -contains "deploy")) "MCP tool allowlist is invalid."
+    Assert-True (($toolList.result.tools.name -contains "loop_probe") -and ($toolList.result.tools.name -contains "causal_probe") -and ($toolList.result.tools.name -contains "service_llm_trace")) "ADR 022 MCP tools are missing."
     Assert-True (-not $emptyArgumentsCall.result.isError) "MCP failed a valid call with empty arguments."
     Assert-True ($emptyArgumentsCall.result.structuredContent.source -eq "fixture") "MCP empty-arguments call did not use the fixture."
     Assert-True $emptyArgumentsCall.result.structuredContent.ok "Fixture-backed empty-argument MCP call failed."
@@ -93,6 +107,89 @@ try {
     if ((Resolve-Path $fixtureRoot).Path.StartsWith([System.IO.Path]::GetTempPath(), [System.StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
     }
+}
+
+$env:RP_STACK_OPS_FIXTURE_DIR = Join-Path $adr022FixtureRoot "complete"
+try {
+    $loop = Invoke-RpStackOperation -Action loop_probe -Arguments @{ party_id = "party_fixture_complete" }
+    Assert-True $loop.ok "Complete loop_probe fixture failed."
+    Assert-True $loop.necessary_not_sufficient "loop_probe did not mark counters necessary-not-sufficient."
+    Assert-True ($loop.operations_total -eq 4 -and $loop.operations_outside_timeline -eq 2) "loop_probe counters changed."
+    Assert-True ($loop.operation_counters.add -eq 3 -and $loop.nonempty_extraction_share.share -eq 0.5) "loop_probe detail counters changed."
+
+    $causal = Invoke-RpStackOperation -Action causal_probe -Arguments @{
+        party_id = "party_fixture_complete"
+        expectation = "seed_trust_influences_plot"
+    }
+    Assert-True ($causal.ok -and $causal.passed) "Complete causal chain did not pass."
+    Assert-True ($null -eq $causal.break_at) "Complete causal chain reported a break."
+    Assert-True (@($causal.steps | Where-Object { -not $_.passed }).Count -eq 0) "Complete causal chain contains a failed step."
+
+    $trace = Invoke-RpStackOperation -Action service_llm_trace -Arguments @{
+        party_id = "party_fixture_complete"
+        turn = 5
+    }
+    Assert-True ($trace.ok -and @($trace.records).Count -eq 1) "service_llm_trace fixture failed."
+    Assert-True ($trace.records[0].prompt_text -eq "Extract events exactly. Authorization=[REDACTED]") "service_llm_trace did not preserve and redact the exact prompt."
+    Assert-True ($trace.records[0].raw_response -match '\[REDACTED(?:_API_KEY)?\]') "service_llm_trace did not mark API-key redaction."
+    Assert-True ($trace.records[0].raw_response -notmatch 'fixturesecret') "service_llm_trace leaked fixture secret material."
+
+    $mcpProbeRequests = @(
+        '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"loop_probe","arguments":{"party_id":"party_fixture_complete"}}}',
+        '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"causal_probe","arguments":{"party_id":"party_fixture_complete","expectation":"seed_trust_influences_plot"}}}',
+        '{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"service_llm_trace","arguments":{"party_id":"party_fixture_complete","turn":5}}}'
+    )
+    $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $mcpProbeResponses = @($mcpProbeRequests | & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File $mcpScript)
+    Assert-True ($mcpProbeResponses.Count -eq 3) "MCP server did not return all ADR 022 probe responses."
+    foreach ($responseText in $mcpProbeResponses) {
+        $response = $responseText | ConvertFrom-Json
+        Assert-True (-not $response.result.isError) "MCP returned an error for a valid ADR 022 fixture."
+        Assert-True ($response.result.structuredContent.source -eq "fixture") "ADR 022 MCP call did not use its deterministic fixture."
+    }
+} finally {
+    Remove-Item Env:RP_STACK_OPS_FIXTURE_DIR -ErrorAction SilentlyContinue
+}
+
+$env:RP_STACK_OPS_FIXTURE_DIR = Join-Path $adr022FixtureRoot "broken-prompt-presence"
+try {
+    $broken = Invoke-RpStackOperation -Action causal_probe -Arguments @{
+        party_id = "party_fixture_broken"
+        expectation = "seed_trust_influences_plot"
+    }
+    Assert-True ($broken.ok -and -not $broken.passed) "Broken causal fixture unexpectedly passed."
+    Assert-True ($broken.break_at -eq "prompt_presence") "Broken causal fixture did not identify prompt_presence as the break."
+    Assert-True (($broken.steps | Where-Object { $_.step -eq "prompt_presence" }).passed -eq $false) "Broken causal fixture did not mark prompt_presence failed."
+} finally {
+    Remove-Item Env:RP_STACK_OPS_FIXTURE_DIR -ErrorAction SilentlyContinue
+}
+
+$env:RP_STACK_OPS_FIXTURE_DIR = Join-Path $adr022FixtureRoot "missing-service-log"
+try {
+    $missingTrace = Invoke-RpStackOperation -Action service_llm_trace -Arguments @{
+        party_id = "party_fixture_complete"
+        turn = 5
+    }
+    Assert-True (-not $missingTrace.ok -and $missingTrace.error_code -eq "service_call_log_missing") "Missing service_call_log was not reported as a structured probe failure."
+} finally {
+    Remove-Item Env:RP_STACK_OPS_FIXTURE_DIR -ErrorAction SilentlyContinue
+}
+
+$invalidCalls = @(
+    { Invoke-RpStackOperation -Action loop_probe -Arguments @{ party_id = "bad id" } },
+    { Invoke-RpStackOperation -Action loop_probe -Arguments @{ party_id = 123 } },
+    { Invoke-RpStackOperation -Action causal_probe -Arguments @{ party_id = "party_valid"; expectation = "unregistered" } },
+    { Invoke-RpStackOperation -Action service_llm_trace -Arguments @{ party_id = "party_valid"; turn = "1" } },
+    { Invoke-RpStackOperation -Action service_llm_trace -Arguments @{ party_id = "party_valid"; turn = 0 } }
+)
+foreach ($invalidCall in $invalidCalls) {
+    $rejected = $false
+    try {
+        & $invalidCall | Out-Null
+    } catch {
+        $rejected = $true
+    }
+    Assert-True $rejected "ADR 022 probe accepted invalid input."
 }
 
 Write-Host "RP Stack devkit policy, redaction, argument validation, and MCP protocol tests passed."
