@@ -7,7 +7,7 @@ labeled_by: user
 frozen_at: "2026-08-11"
 
 corpus: corpus/starosta-bootstrap.yml
-corpus_hash: "sha256:b6e9167867b008bfd99c2a7e7f488f58b93e3bd50ff31dbd68e8115c397704d8"
+corpus_hash: "sha256:1a534b3c00d8c41649e3fd5fc8bdd34b931aecbaf63d7338d49e61edaa51d67f"
 
 # Все метрики считаются ещё и отдельно по каждому классу события.
 per_event_class: true
