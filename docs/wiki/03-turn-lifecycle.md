@@ -256,3 +256,7 @@ Draft может быть быстрым детерминированным ил
 - [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
 - [Training runtime](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_runtime.py)
 - [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
+
+### Legacy relationship-event deadlines
+
+When an older database contains an active boundary event with a missing `due_turn`, `RelationshipMechanics` repairs it before advancing the party: `due_turn = opened_turn + clock` from the current WorldPack model. The repair is idempotent and changes only the derived `narrative_events` projection; raw turns and canonical state are not rewritten. Newly created schemas require `due_turn`.
