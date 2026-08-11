@@ -117,7 +117,7 @@ World-pack requirements:
 - Separate confirmed facts, rumors, and unresolved mysteries.
 - Give NPCs goals, constraints, secrets, and relationships rather than static descriptions.
 - For every pack whose `scenario_types.supported` includes `rp`, declare the
-  `rp-relationships.v1` model in `manifest.json` and author
+  `rp-relationships.v2` model in `manifest.json` and author
   `relationships/model.json`. If the declaration is absent, Gateway silently
   leaves the relationship-pressure layer disabled; pack loading does not fail.
 - Use
@@ -125,6 +125,11 @@ World-pack requirements:
   as the current executable example. Do not copy that model into this skill.
 - Keep the first relationship slice to the `loyalty` axis, `wound` and `role`
   badges, and `crack | ultimatum | plot | strike | favour` boundary events.
+  In v2, declare every state character in `characters.<id>.aliases`, keep
+  normalized alias forms unique across characters, declare positive clocks for
+  every boundary event, and include a monotonic linear `trust_mapping`.
+  Extraction returns `character_mention`, never `character_id`; evidence must
+  be a verbatim normalized substring of the current player+narrative turn.
   Do not expose axis values, band labels, or active events in pack-authored
   client surfaces. The narrator invents plot tells; do not author prepared
   tells in the model.
@@ -183,7 +188,9 @@ Pop-Location
 ```
 
 - For every relationship model, confirm that `character_weights` keys exist in
-  the state seed; referenced `role` and `wound` IDs are declared; bands do not
+  the state seed; every state character has at least one unique alias form;
+  referenced `role` and `wound` IDs are declared; all five boundary clocks are
+  positive; `trust_mapping` is monotonic; bands do not
   overlap and each defines exactly one of `min`/`max`; event weights are in
   `[-30, 15]`; `decay_turns` is `null` or a positive integer;
   `plot.discovery_chance_per_turn` is in `[0, 1]`; and the first slice declares
