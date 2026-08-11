@@ -43,6 +43,12 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Run Gateway tests
         run: python -m pytest -q
+      - name: Build Gateway image with test support
+        run: docker build --file rp-gateway/Dockerfile --tag rp-stack-gateway-ci .
+        working-directory: roles/apps/files/rp-stack
+      - name: Run full Gateway tests inside the image
+        run: docker run --rm rp-stack-gateway-ci pytest -q
+        working-directory: roles/apps/files/rp-stack
 
   rp-contracts:
     runs-on: ubuntu-latest
