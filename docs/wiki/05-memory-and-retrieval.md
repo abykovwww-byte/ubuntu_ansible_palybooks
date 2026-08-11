@@ -118,6 +118,12 @@ flowchart TB
 мишени и внутренний payload в prompt не попадают. Причины, связанные с ходом,
 исключённым rollback-механизмом, не участвуют в сумме.
 
+Начальный canonical `characters.*.trust` не переписывается и не превращается в
+вторую шкалу: WorldPack `trust_mapping` один раз создаёт derived cause с
+`source=seed` и `party_turn=0`. Текущее `trust` не включается в compact
+character/relationship retrieval и не показывается Light GUI; для narrator
+остаются только словесная полоса и качественное pressure активного события.
+
 ## Retrieval без embeddings
 
 `search_archived_turns()` использует точные слова, упрощённые stems, символьные 3-граммы и небольшой recency bonus. По умолчанию возвращается до трёх party-scoped сцен и не больше 9000 символов. Lore cards выбираются по keywords/stems или флагу `always_on`. Relevant characters выбираются по упоминанию, общей локации, активным нитям и `Outcome.target`; поле `secrets` в narrator block не передаётся.

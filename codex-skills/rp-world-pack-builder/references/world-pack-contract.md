@@ -47,7 +47,7 @@ includes `rp` and optional otherwise.
     "supported": ["novel", "rp"]
   },
   "relationships": {
-    "schema_version": "rp-relationships.v1",
+    "schema_version": "rp-relationships.v2",
     "model": "relationships/model.json"
   },
   "assumptions": [],
@@ -90,14 +90,20 @@ Use
 `roles/apps/files/rp-stack/worldpacks/mechanist-new-world/relationships/model.json`
 as the executable example instead of embedding a second model copy here. The
 first slice supports only the `loyalty` axis, `wound` and `role` badges, and the
-boundary events `crack | ultimatum | plot | strike | favour`. The layer has no
-client surface and must not expose axis values, band labels, or active events.
+boundary events `crack | ultimatum | plot | strike | favour`. In v2 the model
+also declares `characters.<id>.aliases` for every state character, positive
+clocks for all five boundary events, and a monotonic linear `trust_mapping`.
+Extraction returns `character_mention` plus exact turn evidence; Gateway resolves
+the mention to the internal character ID. The layer has no client surface and
+must not expose axis values, band labels, or active events.
 Plot tells are invented by the narrator and must not be authored as model
 fields.
 
 The validator enforces these authoring constraints:
 
 - every `character_weights` key exists in `state-seed.json` `characters`;
+- every state character has at least one non-empty alias form, and normalized
+  alias forms are unique across characters;
 - every referenced `role` exists in `roles`, and every event `wound` exists in
   `wounds`;
 - band boundaries do not overlap, and every band defines exactly one of
@@ -105,6 +111,9 @@ The validator enforces these authoring constraints:
 - event `weight` is in `[-30, 15]`, and `decay_turns` is `null` or a positive
   integer;
 - `plot.discovery_chance_per_turn` is in `[0, 1]`;
+- every boundary clock (`crack`, `ultimatum`, `plot`, `favour`, `strike`) is a
+  positive integer;
+- `trust_mapping` is a monotonic linear map with increasing integer ranges;
 - only the `loyalty` axis is declared in the first slice.
 
 ## state-seed.json
