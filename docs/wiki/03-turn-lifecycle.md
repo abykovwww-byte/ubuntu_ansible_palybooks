@@ -249,10 +249,11 @@ Draft может быть быстрым детерминированным ил
 relationship extraction, world instruction и генерация персонажа — проходят
 через `ServiceModelClient`. Перед отправкой он фиксирует точные ordered messages,
 после ответа — сырой provider response и статус в отдельном диагностическом
-`service_call_log`; секреты редактируются на записи. Таблица не входит в
-canonical state/schema. Срок хранения конфигурируется
-`SERVICE_CALL_LOG_RETENTION_DAYS`; применение на живые данные остановлено до
-явного решения пользователя о retention и глубине редактирования.
+`service_call_log`; секреты редактируются на записи. Все потребители передают
+полные ordered messages через `service_prompt_text`, поэтому вопрос верности
+диагностического prompt закрыт. Таблица не входит в canonical state/schema.
+Срок хранения конфигурируется `SERVICE_CALL_LOG_RETENTION_DAYS` и остаётся
+отдельным открытым решением пользователя.
 
 ## Код
 

@@ -1,5 +1,12 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$script:RegisteredCausalExpectations = @(
+    "seed_trust_influences_plot",
+    "relationship_pressure_reaches_next_turn_prompt",
+    "relationship_event_has_canonical_character_attribution",
+    "relationship_badge_has_canonical_character_attribution",
+    "trust_gained_reaches_next_turn_prompt"
+)
 
 function Get-RpStackRepoRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
@@ -244,6 +251,7 @@ if party is None:
     print(json.dumps({"ok": False, "error_code": "party_not_found", "party_id": party_id, "expectation": expectation}))
     raise SystemExit(0)
 
+canonical_names = {}
 seeded = {}
 initial = db.execute(
     "SELECT state_json FROM state_versions WHERE campaign_id = ? ORDER BY version ASC LIMIT 1",
@@ -259,6 +267,7 @@ if initial is not None:
         for character_id, character in characters.items():
             if not isinstance(character, dict):
                 continue
+            canonical_names[str(character_id)] = str(character.get("name") or character_id)
             trust = character.get("trust")
             if isinstance(trust, int) and not isinstance(trust, bool) and trust != 0:
                 seeded[str(character_id)] = str(character.get("name") or character_id)
@@ -275,26 +284,6 @@ if initial is not None:
                 character_id = str(endpoint)
                 seeded.setdefault(character_id, character_id)
 
-seed_cause_characters = set()
-for row in db.execute(
-    "SELECT character_id, weight FROM relationship_causes "
-    "WHERE campaign_id = ? AND event_id = 'seed_trust' AND source = 'seed'",
-    (party_id,),
-):
-    if int(row["weight"]) != 0:
-        character_id = str(row["character_id"])
-        seed_cause_characters.add(character_id)
-        seeded.setdefault(character_id, character_id)
-
-events = []
-for row in db.execute(
-    "SELECT character_id, event_id, opened_turn FROM narrative_events "
-    "WHERE campaign_id = ? ORDER BY opened_turn, id",
-    (party_id,),
-):
-    if str(row["character_id"]) in seed_cause_characters:
-        events.append(dict(row))
-
 def walk_strings(value):
     if isinstance(value, dict):
         for child in value.values():
@@ -305,66 +294,151 @@ def walk_strings(value):
     elif isinstance(value, str):
         yield value
 
-prompt_match = None
-for event in events:
-    character_id = str(event["character_id"])
-    character_name = seeded.get(character_id, character_id)
+def pressure_match(character_id, after_party_turn):
+    character_name = canonical_names.get(character_id)
+    if not character_name:
+        return None
     rows = db.execute(
         "SELECT id, party_turn, prompt_json FROM turns "
         "WHERE campaign_id = ? AND party_turn > ? AND prompt_json IS NOT NULL ORDER BY party_turn, id",
-        (party_id, int(event["opened_turn"])),
+        (party_id, int(after_party_turn)),
     )
     for row in rows:
         try:
             prompt = json.loads(row["prompt_json"] or "null")
         except (TypeError, ValueError):
             continue
-        pressure_blocks = [
+        blocks = [
             text for text in walk_strings(prompt)
             if text.startswith("RELATIONSHIP_PRESSURE") and character_name in text
         ]
-        if not pressure_blocks:
-            continue
-        quote = pressure_blocks[0][:160].replace("\n", " ")
-        prompt_match = {"turn_id": int(row["id"]), "party_turn": int(row["party_turn"]), "quote": quote}
-        break
-    if prompt_match is not None:
-        break
+        if blocks:
+            return {
+                "turn_id": int(row["id"]),
+                "party_turn": int(row["party_turn"]),
+                "quote": blocks[0][:160].replace("\n", " "),
+            }
+    return None
 
-steps = [
-    {
-        "step": "seeded_trust",
-        "assertion": "state_change",
-        "passed": bool(seeded),
-        "evidence": {"seeded_characters": len(seeded), "character_ids": sorted(seeded)},
-    },
-    {
-        "step": "event_projection",
-        "assertion": "projection",
-        "passed": bool(events),
-        "evidence": {
-            "seed_causes": len(seed_cause_characters),
-            "events": len(events),
-            "first_opened_turn": int(events[0]["opened_turn"]) if events else None,
-        },
-    },
-    {
-        "step": "prompt_presence",
-        "assertion": "prompt_presence",
-        "passed": prompt_match is not None,
-        "evidence": prompt_match or {"matching_turns": 0},
-    },
-]
-break_at = next((step["step"] for step in steps if not step["passed"]), None)
-print(json.dumps({
-    "ok": True,
-    "party_id": party_id,
-    "expectation": expectation,
-    "assertion": "prompt_presence",
-    "passed": break_at is None,
-    "break_at": break_at,
-    "steps": steps,
-}, ensure_ascii=False, sort_keys=True))
+def first_pressure_match(rows, turn_key):
+    for row in rows:
+        character_id = str(row["character_id"])
+        if character_id not in canonical_names:
+            continue
+        match = pressure_match(character_id, int(row[turn_key]))
+        if match is not None:
+            return match
+    return None
+
+def finish(assertion, steps):
+    break_at = next((step["step"] for step in steps if not step["passed"]), None)
+    print(json.dumps({
+        "ok": True,
+        "party_id": party_id,
+        "expectation": expectation,
+        "assertion": assertion,
+        "passed": break_at is None,
+        "break_at": break_at,
+        "steps": steps,
+    }, ensure_ascii=False, sort_keys=True))
+
+if expectation == "seed_trust_influences_plot":
+    seed_cause_characters = set()
+    for row in db.execute(
+        "SELECT character_id, weight FROM relationship_causes "
+        "WHERE campaign_id = ? AND event_id = 'seed_trust' AND source = 'seed'",
+        (party_id,),
+    ):
+        if int(row["weight"]) != 0:
+            character_id = str(row["character_id"])
+            seed_cause_characters.add(character_id)
+            seeded.setdefault(character_id, canonical_names.get(character_id, character_id))
+    events = [
+        dict(row) for row in db.execute(
+            "SELECT character_id, event_id, opened_turn FROM narrative_events "
+            "WHERE campaign_id = ? ORDER BY opened_turn, id",
+            (party_id,),
+        ) if str(row["character_id"]) in seed_cause_characters
+    ]
+    prompt = first_pressure_match(events, "opened_turn")
+    finish("prompt_presence", [
+        {"step": "seeded_trust", "assertion": "state_change", "passed": bool(seeded),
+         "evidence": {"seeded_characters": len(seeded), "character_ids": sorted(seeded)}},
+        {"step": "event_projection", "assertion": "projection", "passed": bool(events),
+         "evidence": {"seed_causes": len(seed_cause_characters), "events": len(events),
+                      "first_opened_turn": int(events[0]["opened_turn"]) if events else None}},
+        {"step": "prompt_presence", "assertion": "prompt_presence", "passed": prompt is not None,
+         "evidence": prompt or {"matching_turns": 0}},
+    ])
+
+elif expectation == "relationship_pressure_reaches_next_turn_prompt":
+    causes = [dict(row) for row in db.execute(
+        "SELECT character_id, event_id, party_turn, source FROM relationship_causes "
+        "WHERE campaign_id = ? AND weight != 0 AND source != 'seed' ORDER BY party_turn, id",
+        (party_id,),
+    )]
+    invalid = sorted({str(row["character_id"]) for row in causes if str(row["character_id"]) not in canonical_names})
+    prompt = first_pressure_match(causes, "party_turn")
+    finish("prompt_presence", [
+        {"step": "relationship_cause", "assertion": "state_change", "passed": bool(causes),
+         "evidence": {"causes": len(causes), "event_ids": sorted({str(row["event_id"]) for row in causes})}},
+        {"step": "canonical_character_attribution", "assertion": "projection",
+         "passed": bool(causes) and not invalid,
+         "evidence": {"canonical_causes": len(causes) - len(invalid), "invalid_character_ids": invalid}},
+        {"step": "prompt_presence", "assertion": "prompt_presence", "passed": prompt is not None,
+         "evidence": prompt or {"matching_turns": 0}},
+    ])
+
+elif expectation == "relationship_event_has_canonical_character_attribution":
+    extracted = [dict(row) for row in db.execute(
+        "SELECT character_id, event_id, party_turn FROM relationship_causes "
+        "WHERE campaign_id = ? AND source = 'extraction' ORDER BY party_turn, id",
+        (party_id,),
+    )]
+    invalid = sorted({str(row["character_id"]) for row in extracted if str(row["character_id"]) not in canonical_names})
+    finish("projection", [
+        {"step": "relationship_extraction", "assertion": "state_change", "passed": bool(extracted),
+         "evidence": {"events": len(extracted), "event_ids": sorted({str(row["event_id"]) for row in extracted})}},
+        {"step": "canonical_character_attribution", "assertion": "projection",
+         "passed": bool(extracted) and not invalid,
+         "evidence": {"attributed_events": len(extracted) - len(invalid), "invalid_character_ids": invalid}},
+    ])
+
+elif expectation == "relationship_badge_has_canonical_character_attribution":
+    badges = [dict(row) for row in db.execute(
+        "SELECT character_id, badge_kind, badge_id, party_turn FROM character_badges "
+        "WHERE campaign_id = ? AND active = 1 ORDER BY party_turn, id",
+        (party_id,),
+    )]
+    invalid = sorted({str(row["character_id"]) for row in badges if str(row["character_id"]) not in canonical_names})
+    finish("projection", [
+        {"step": "badge_projection", "assertion": "state_change", "passed": bool(badges),
+         "evidence": {"badges": len(badges), "badge_kinds": sorted({str(row["badge_kind"]) for row in badges})}},
+        {"step": "canonical_character_attribution", "assertion": "projection",
+         "passed": bool(badges) and not invalid,
+         "evidence": {"attributed_badges": len(badges) - len(invalid), "invalid_character_ids": invalid}},
+    ])
+
+elif expectation == "trust_gained_reaches_next_turn_prompt":
+    gained = [dict(row) for row in db.execute(
+        "SELECT character_id, event_id, party_turn FROM relationship_causes "
+        "WHERE campaign_id = ? AND event_id = 'trust_gained' AND weight > 0 ORDER BY party_turn, id",
+        (party_id,),
+    )]
+    invalid = sorted({str(row["character_id"]) for row in gained if str(row["character_id"]) not in canonical_names})
+    prompt = first_pressure_match(gained, "party_turn")
+    finish("prompt_presence", [
+        {"step": "trust_gained_projection", "assertion": "state_change", "passed": bool(gained),
+         "evidence": {"events": len(gained)}},
+        {"step": "canonical_character_attribution", "assertion": "projection",
+         "passed": bool(gained) and not invalid,
+         "evidence": {"attributed_events": len(gained) - len(invalid), "invalid_character_ids": invalid}},
+        {"step": "prompt_presence", "assertion": "prompt_presence", "passed": prompt is not None,
+         "evidence": prompt or {"matching_turns": 0}},
+    ])
+
+else:
+    print(json.dumps({"ok": False, "error_code": "expectation_not_registered", "expectation": expectation}))
 '@
         }
         "service_llm_trace" {
@@ -497,7 +571,7 @@ function Get-RpStackToolDefinitions {
         [ordered]@{ name = "provider_summary"; description = "Read a bounded Gateway log summary for provider attempts, fallbacks, timeouts, and validation failures."; inputSchema = @{ type = "object"; properties = @{ lines = @{ type = "integer"; minimum = 1; maximum = 500; default = 100 } }; additionalProperties = $false } },
         [ordered]@{ name = "request_trace"; description = "Find bounded Gateway log lines for one validated request ID."; inputSchema = @{ type = "object"; properties = @{ request_id = @{ type = "string"; minLength = 1; maxLength = 80 }; lines = @{ type = "integer"; minimum = 1; maximum = 500; default = 100 } }; required = @("request_id"); additionalProperties = $false } },
         [ordered]@{ name = "loop_probe"; description = "Read diagnostic party-loop counters; these counters are necessary but not sufficient evidence."; inputSchema = @{ type = "object"; properties = @{ party_id = @{ type = "string"; minLength = 1; maxLength = 80; pattern = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$" } }; required = @("party_id"); additionalProperties = $false } },
-        [ordered]@{ name = "causal_probe"; description = "Check each registered causal-chain step for a party without exposing narrative beyond a short quote."; inputSchema = @{ type = "object"; properties = @{ party_id = @{ type = "string"; minLength = 1; maxLength = 80; pattern = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$" }; expectation = @{ type = "string"; enum = @("seed_trust_influences_plot") } }; required = @("party_id", "expectation"); additionalProperties = $false } },
+        [ordered]@{ name = "causal_probe"; description = "Check each registered causal-chain step for a party without exposing narrative beyond a short quote."; inputSchema = @{ type = "object"; properties = @{ party_id = @{ type = "string"; minLength = 1; maxLength = 80; pattern = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$" }; expectation = @{ type = "string"; enum = @($script:RegisteredCausalExpectations) } }; required = @("party_id", "expectation"); additionalProperties = $false } },
         [ordered]@{ name = "service_llm_trace"; description = "Read exact redacted service-model prompts and raw responses for one party turn."; inputSchema = @{ type = "object"; properties = @{ party_id = @{ type = "string"; minLength = 1; maxLength = 80; pattern = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$" }; turn = @{ type = "integer"; minimum = 1 } }; required = @("party_id", "turn"); additionalProperties = $false } },
         [ordered]@{ name = "backup_status"; description = "List recent RP Stack backup archives without reading their contents."; inputSchema = @{ type = "object"; properties = @{ lines = @{ type = "integer"; minimum = 1; maximum = 100; default = 20 } }; additionalProperties = $false } }
     )
@@ -539,8 +613,8 @@ function Invoke-RpStackOperation {
     }
     $expectationValue = Get-RpArgument -Arguments $Arguments -Name "expectation"
     $expectation = if ($expectationValue -is [string]) { $expectationValue } else { "" }
-    if ($Action -eq "causal_probe" -and $expectation -cne "seed_trust_influences_plot") {
-        throw "expectation must be a registered expectation: seed_trust_influences_plot"
+    if ($Action -eq "causal_probe" -and $expectation -cnotin $script:RegisteredCausalExpectations) {
+        throw "expectation must be a registered expectation: $($script:RegisteredCausalExpectations -join ', ')"
     }
     $turn = Get-RpArgument -Arguments $Arguments -Name "turn"
     if ($Action -eq "service_llm_trace" -and (-not (Test-RpStackInteger $turn) -or [int64]$turn -lt 1)) {

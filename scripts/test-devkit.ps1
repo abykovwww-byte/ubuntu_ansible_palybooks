@@ -35,6 +35,24 @@ foreach ($probeScript in $probeScripts) {
 $causalProbeSource = ($probeScripts | Where-Object { $_.action -eq "causal_probe" }).script
 Assert-True ($causalProbeSource -match "seed_cause_characters") "causal_probe does not require a seed cause for event projection."
 Assert-True ($causalProbeSource -match 'text\.startswith\("RELATIONSHIP_PRESSURE"\) and character_name in text') "causal_probe does not bind character evidence to one pressure block."
+$registeredCausalExpectations = @(
+    "seed_trust_influences_plot",
+    "relationship_pressure_reaches_next_turn_prompt",
+    "relationship_event_has_canonical_character_attribution",
+    "relationship_badge_has_canonical_character_attribution",
+    "trust_gained_reaches_next_turn_prompt"
+)
+foreach ($expectation in $registeredCausalExpectations) {
+    Assert-True ($causalProbeSource -match [regex]::Escape(('"' + $expectation + '"'))) "causal_probe does not implement $expectation."
+}
+$causalTool = Get-RpStackToolDefinitions | Where-Object { $_.name -eq "causal_probe" }
+$toolExpectations = @($causalTool.inputSchema.properties.expectation.enum | Sort-Object)
+$expectedToolExpectations = @($registeredCausalExpectations | Sort-Object)
+Assert-True (($toolExpectations -join "|") -eq ($expectedToolExpectations -join "|")) "causal_probe MCP enum differs from implemented expectations."
+$rootOpsWrapper = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "scripts\rp-stack-ops.ps1")
+foreach ($parameter in @("PartyId", "Expectation", "Turn")) {
+    Assert-True ($rootOpsWrapper -match (('-' + $parameter + '\s+\$' + $parameter))) "Root rp-stack-ops wrapper does not forward $parameter."
+}
 $nativeStderrResult = & $loadedOpsModule {
     param([string]$Executable)
     Invoke-RpExternalCommand -FilePath $Executable -ArgumentList @(
