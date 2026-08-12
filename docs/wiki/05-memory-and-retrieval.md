@@ -14,6 +14,12 @@ model предлагает следующий snapshot, но Gateway слива�
 Raw turns при этом не переписываются. Revision 6 ограничивает effective prompt
 recent turns, memory chapters, relevant characters, active state и выборочным
 retrieval, сохраняя полный transcript в durable store.
+Для длинной RP-истории revision 6 дополнительно удаляет из provider prompt
+старейшие полные пары `user/assistant`, пока суммарный текст не уложится
+в 50% полного raw transcript. Обязательные system-блоки и текущий
+ввод игрока имеют приоритет и не режутся ради процента. Live-canary на 168-ходовой
+истории дал 129654 символа prompt при 260384 символах raw transcript — 49,79%,
+при этом source history не изменилась.
 
 ## Слои памяти
 
@@ -120,7 +126,7 @@ flowchart TB
     D --> E["5. Memory chapters"]
     E --> F["6. Lore cards"]
     F --> G["7. Uncompacted overflow fallback"]
-    G --> H["8. Recent raw turn pairs"]
+    G --> H["8. Bounded recent raw turn pairs · revision 6"]
     H --> I["9. Retrieved archived scenes"]
     I --> J["10. Relevant characters"]
     J --> W["11. WORLD_ABSOLUTE_RULES — rp-core.v2"]

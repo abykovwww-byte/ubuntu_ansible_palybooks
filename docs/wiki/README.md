@@ -9,9 +9,10 @@ runtime. RP-only living story memory реализована в исходном 
 
 Кумулятивная поставка RP-ядра S1–S6 описана в
 [Decision 026](../../roles/apps/files/rp-stack/docs/decisions/026-rp-core-delivery.md).
-В текущей ветке это только локальный `каркас`: значение observed revision в IaC
-остаётся `0`, поэтому новые обычные партии не получают candidate-поведение до
-отдельного deploy и live-canary.
+Candidate revision `6` применена на `abykovserv` и прошла изолированные
+provider-canary. IaC поднимает observed revision до `6`: после применения этой
+source revision новые обычные RP-партии получают `rp-core.v2` S1–S6. Существующие
+партии остаются на своей закреплённой revision; 50-turn endurance пока не заявлен.
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно
