@@ -77,6 +77,25 @@ Fallback не должен перескочить на другого provider �
 | OutputValidator | Без LLM |
 | Auto-player | Отдельно выбранный OpenRouter или Local Gemma profile |
 
+## Диагностика model attempts
+
+Turn Trace Workbench сохраняет фактическую, а не реконструированную историю
+вызовов. Каждая narrator-попытка, включая fallback/repair и ошибку без committed
+turn, попадает в `turn_trace_events` с exact redacted request/response,
+provider/model, attempt, latency, HTTP status, usage и безопасной ошибкой.
+
+Служебные completions продолжают храниться в одном `service_call_log`. К нему
+additive добавлены `request_id`, `party_turn`, `provider`, `model`, `attempt`,
+`latency_ms`, `http_status`, `usage_json`, `error_json` и
+`trace_schema_version`; legacy-строки с `null` остаются читаемыми. Диагностическая
+копия редактирует секреты, не изменяя фактический payload, отправленный provider.
+
+Оба источника связывает request-centric read model Gateway. Он доступен только
+владельцу партии или admin через Light GUI, не отдаётся Showroom и никогда не
+участвует в выборе модели, fallback policy, prompt assembly или state commit.
+Retention по умолчанию unlimited: `SERVICE_CALL_LOG_RETENTION_DAYS=0`;
+положительное значение явно включает очистку service log.
+
 ## Локальная Gemma
 
 Текущая конфигурация:
@@ -126,5 +145,8 @@ Gateway сохраняет из live-каталога OpenRouter цены обы
 - [Service models](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_models.py)
 - [Model catalog](../../roles/apps/files/rp-stack/rp-gateway/app/services/nvidia_catalog.py)
 - [Provider auth](../../roles/apps/files/rp-stack/rp-gateway/app/services/provider_auth.py)
+- [Narrative client](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
+- [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
+- [Turn Trace Workbench](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Local LLM Compose](../../roles/apps/templates/rp-stack.compose.yml.j2)
 - [Runtime variables](../../inventories/local/group_vars/server.yml)

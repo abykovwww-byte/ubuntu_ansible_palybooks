@@ -20,6 +20,11 @@ links/workspace и рабочий диск реализованы в следу�
 Relationship pressure, deterministic attribution и упрощённый RP-контракт
 `rp-core.v2` описаны в обновлённых разделах 03–05; их source revision, apply и
 live-проверка всегда фиксируются раздельно.
+Request-centric Turn Trace Workbench описан в
+[Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md):
+это owner-scoped диагностика Light GUI без доступа из Showroom. Она читает
+фактическую revision/version и фазы RP core, но не является runtime authority,
+readiness oracle или зависимостью реализации Decision 026.
 
 ## Главное за минуту
 
@@ -41,6 +46,7 @@ flowchart LR
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
+- **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
 - **Codex работает через repo policy.** `AGENTS.md`, project hooks, `rp-stack-devkit`, read-only ops MCP и три раздельных eval-уровня сохраняют authority и не смешивают local, pushed, applied и live-verified статусы.
 
