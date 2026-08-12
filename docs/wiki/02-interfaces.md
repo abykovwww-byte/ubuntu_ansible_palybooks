@@ -16,7 +16,7 @@ Light GUI — основной интерфейс владельца парти�
 - открытие валидированных training-сайтов и отправка накопленных событий перед следующим сообщением;
 - сценарно-зависимое редактирование персонажей вручную и генерация служебной моделью: в `rp` обычная форма показывает только имя, статус, локацию и текущую цель, не изменяя скрытые расширенные поля; в `training` сохраняется полный редактор;
 - выбор party-scoped BYOK-ключа;
-- GM preview/apply/discard, state, checks и rollback;
+- GM preview/apply/discard, state и rollback; отдельной RP-формы проверки нет;
 - Prompt Inspector, реальный размер последнего prompt, память и lore cards; для `rp` панель памяти отдельно показывает living story snapshot, его revision и покрытие, а для `training` этого UI нет;
 - checkpoints, branches и история LLM-autotest;
 - 👍/👎 для полной пары «реплика игрока → ответ модели»;
@@ -116,6 +116,10 @@ site snapshot только при включённом флаге.
 ## Compatibility API
 
 Gateway сохраняет OpenAI-compatible `/v1/chat/completions` и legacy single-campaign endpoints. Они нужны для интеграций и отладки, но не должны становиться основой новых функций.
+
+Party-scoped `POST /api/parties/{party_id}/checks` также сохранён для старых
+клиентов. Для партии `rp-core.v2` он возвращает нейтральный narrative envelope,
+не бросает кубик, не назначает success/failure и не создаёт запись проверки.
 
 | Свойство | Light GUI | Showroom | `/v1/chat/completions` |
 |---|---|---|---|

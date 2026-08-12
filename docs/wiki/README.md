@@ -11,9 +11,9 @@ runtime. RP-only living story memory реализована в исходном 
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно
 [Decision 015](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md);
 её Ansible apply и live-проверка фиксируются отдельно.
-Relationship pressure и deterministic attribution описаны в обновлённых
-разделах 03–05; версия модели `rp-relationships.v2` является локальным
-контрактом source tree до отдельной поставки.
+Relationship pressure, deterministic attribution и упрощённый RP-контракт
+`rp-core.v2` описаны в обновлённых разделах 03–05; их source revision, apply и
+live-проверка всегда фиксируются раздельно.
 
 ## Главное за минуту
 
@@ -29,9 +29,9 @@ flowchart LR
     G --> M["Локальная Gemma через Vulkan"]
 ```
 
-- **Gateway — сервер игры.** Это не тонкий LLM-прокси: он владеет партиями, canonical state, ходами, памятью, проверками, ветками, пользователями, моделями, Showroom и датасетами.
+- **Gateway — сервер игры.** Это не тонкий LLM-прокси: он владеет партиями, canonical state, ходами, памятью, совместимыми legacy-проверками, ветками, пользователями, моделями, Showroom и датасетами.
 - **Party — единица изоляции.** `Party = WorldPack + PlayerCharacter + ModelProfile + ScenarioType + State + TurnHistory`.
-- **LLM не определяет факты мира.** Сначала Gateway вычисляет результат и state patch, затем модель описывает уже зафиксированный `AUTHORITATIVE_OUTCOME`.
+- **LLM не определяет факты мира.** В `rp-core.v2` Gateway передаёт нейтральное продолжение сцены, активный state, абсолютные правила и relationship pressure, а затем проверяет ответ до commit; `training` по-прежнему получает детерминированный `AUTHORITATIVE_OUTCOME`.
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.

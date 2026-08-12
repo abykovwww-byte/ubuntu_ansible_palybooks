@@ -9,11 +9,11 @@ sequenceDiagram
     participant UI as Light GUI / Showroom
     participant API as Gateway API
     participant Store as StateStore
-    participant Rules as Intent + RuleEngine
+    participant Rules as Intent + Scenario resolver
     participant Runtime as TrainingRuntimeService
     participant Art as Site / Workspace services
     participant LLM as Narrator LLM
-    participant Val as Novel / Training validator
+    participant Val as RP v2 / Novel / Training validator
     participant Rel as RP relationships
     participant Jobs as Service jobs
 
@@ -31,7 +31,14 @@ sequenceDiagram
     API->>Runtime: active sanitized turn contract
     API->>LLM: bounded prompt + outcome + active contract
     LLM-->>API: narration + optional artifact fields
-    alt RP
+    alt RP core v2
+        API->>Val: absolute WorldPack rules + player agency
+        opt violation: one repair
+            API->>LLM: failed text + concrete violations
+            LLM-->>API: repaired narration
+            API->>Val: validate again
+        end
+    else Legacy RP v1
         API->>API: parse provider format + require nonempty text
     else Novel / Training
         API->>Art: validate and materialize snapshot
@@ -104,8 +111,9 @@ contracts. Score, assessment, fallback и будущие ходы до debrief �
 - `Outcome` — что разрешено и чем закончилась попытка;
 - JSON Patch — какие canonical fields должны измениться.
 
-В `rp` это может включать D20, skill, difficulty, modifiers и blockers. В
-`novel` случайных проверок нет. В `training` универсальный RuleEngine передаёт
+В `rp-core.v2` это нейтральный `narrative_continuation`: без D20, skill,
+difficulty, score, success/failure и записи check. В `novel` случайных проверок
+также нет. В `training` универсальный RuleEngine передаёт
 текущую явную реплику и typed evidence в party snapshot
 `TrainingRuntimeService`. Детекторы, веса, evidence labels, aggregates и
 следующее окно берутся из WorldPack; Gateway не знает предмет курса и
@@ -125,12 +133,11 @@ Gateway пробует primary model и разрешённые fallback models �
 
 ### 5. Валидация и repair
 
-Для `rp` Gateway не вызывает `OutputValidator`, repair или `safe_fallback`:
-успешный непустой ответ провайдера сохраняется после разбора формата, а ошибка
-provider или пустой ответ завершает запрос явной ошибкой до применения state.
-Это гарантирует не более одного narrator completion на RP-ход. Deprecated-поля
-`validator_valid`, `repaired`, `fallback`, `fallback_reason` остаются в metadata
-на один релиз: для новых RP-ходов это `null`, `false`, `false`, `null`.
+Для `rp-core.v2` Gateway проверяет player agency и типизированные абсолютные
+правила WorldPack после ответа модели. Допустим один существующий repair;
+повторное нарушение или ошибка provider завершает запрос контролируемой ошибкой
+до state/turn commit. Legacy-партии `rp-core.v1` сохраняют прежний однопроходный
+контракт до явной миграции.
 
 Для `novel` прежний `OutputValidator` и `MAX_REPAIR_ATTEMPTS` сохраняются.
 WorldPack runtime отдельно использует `TRAINING_REPAIR_ATTEMPTS`: canonical
@@ -154,7 +161,7 @@ header/question/no-link marker сначала чинятся без LLM, soft fi
 1. применяет patch новой версией state;
 2. сохраняет player message, assistant response и точный `prompt_json`;
 3. записывает provider response, outcome, model, repair/fallback metadata;
-4. сохраняет check record для `rp`;
+4. сохраняет check record только для legacy `rp-core.v1`; v2 его не создаёт;
 5. завершает idempotent request;
 6. пишет audit event.
 
@@ -214,8 +221,8 @@ normalize/soft-repair/hard-fallback контракт; ошибка provider ср
 fallback. Повторный start защищён history/idempotency и не
 создаёт вторую начальную сцену. Checkpoint branch копирует runtime snapshot,
 поэтому обновление source WorldPack не меняет уже начатое прохождение.
-Для RP start действует тот же однопроходный контракт, что и для последующих
-ходов: один completion, только разбор формата и проверка непустого текста.
+Для RP start действует тот же контракт версии партии, что и для последующих
+ходов: v2 проверяет абсолютные правила до commit, v1 сохраняет legacy-путь.
 
 Opening scene получает отдельный wall-clock deadline `300` секунд на одну попытку
 narrator, потому что стартовый prompt может включать большой импортированный мир.

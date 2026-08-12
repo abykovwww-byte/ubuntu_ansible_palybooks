@@ -16,7 +16,7 @@
 | Lore/retrieval | Выбранные карточки, NPC и архивные сцены | Все | Нет |
 | Legacy journal | Итоги прежних версий | Только совместимость | Нет |
 
-Canonical state и `AUTHORITATIVE_OUTCOME` всегда выше любого текста памяти. Raw turns не удаляются после сжатия. Ни story memory, ни chapter не могут превратить попытку игрока или слух в подтверждённый факт.
+Canonical state и типизированные абсолютные правила WorldPack всегда выше любого текста памяти. Raw turns не удаляются после сжатия. Ни story memory, ни chapter не могут превратить попытку игрока или слух в подтверждённый факт.
 
 ## RP story memory
 
@@ -36,6 +36,13 @@ chronology
 ```
 
 После каждого RP-хода Gateway ставит job `rp_story_memory`. По умолчанию реальное обновление начинается после четырёх новых ходов; ручная команда «Собрать сейчас» может форсировать неполный пакет. Глобальная service model получает предыдущий snapshot, ограниченный пакет новых подтверждённых turns и компактный excerpt canonical state без `characters.*.secrets`. Она обязана вернуть полный replacement JSON, а не patch.
+
+В схеме `rp-gateway.rp-story-memory.v2` `current_situation` — один объект, а
+остальные содержательные поля — массивы объектов. Каждая запись содержит
+`text`, `status: active|superseded|retracted`, `authority` и
+`source_turn_ids`. Legacy-строки читаются как `legacy_projection`; в effective
+prompt попадают только записи со статусом `active`, поэтому correction не
+стирает аудит, но прекращает влияние ошибочного факта на следующие сцены.
 
 Каждая удачная версия записывается в `rp_story_memory_snapshots` с `revision`, диапазоном покрытых turn IDs, state version и model. Старые snapshots остаются для аудита; narrator получает только последний. При fork последний snapshot, полностью покрытый checkpoint, копируется в новую campaign identity как revision 1.
 
@@ -103,10 +110,11 @@ flowchart TB
     G --> H["8. Recent raw turn pairs"]
     H --> I["9. Retrieved archived scenes"]
     I --> J["10. Relevant characters"]
-    J --> K["11. State summary"]
-    K --> L["12. AUTHORITATIVE_OUTCOME"]
-    L --> R["13. RELATIONSHIP_PRESSURE — только rp"]
-    R --> M["14. Current player action"]
+    J --> W["11. WORLD_ABSOLUTE_RULES — rp-core.v2"]
+    W --> K["12. Active state summary"]
+    K --> L["13. AUTHORITATIVE_OUTCOME / narrative continuation"]
+    L --> R["14. RELATIONSHIP_PRESSURE — только rp"]
+    R --> M["15. Current player action"]
 ```
 
 Для `training` узел 4 отсутствует, а остальные блоки сохраняют прежний порядок. Текущее действие всегда последнее.
