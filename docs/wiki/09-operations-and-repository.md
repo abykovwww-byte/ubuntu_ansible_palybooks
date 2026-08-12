@@ -242,7 +242,7 @@ ubuntu_ansible_palybooks/
 
 | Файл | Ответственность |
 |---|---|
-| `app/main.py` | FastAPI composition, auth guards, public/party/admin endpoints |
+| `app/main.py` | FastAPI composition and lifespan, auth guards, public/party/admin endpoints |
 | `services/party_store.py` | WorldPack registry, characters, profiles, parties, branches, autotests, dataset labels |
 | `services/state_store.py` | State versions, turns, requests, checks, memory, journal, lore, audit, patches |
 | `services/adjudicator.py` | Транзакционный pipeline хода и service jobs |
@@ -260,6 +260,11 @@ ubuntu_ansible_palybooks/
 | `services/service_models.py` | Глобальный service-model catalog/runtime |
 | `services/service_model_client.py` | Exact redacted service-model log, request/attempt metadata и retention |
 | `services/turn_trace.py` | Request/branch/revision-aware trace read model и аннотации |
+
+Gateway запускает восстановление через единый FastAPI `lifespan`, а не через
+устаревшие `startup`/`shutdown` handlers. До приёма запросов он согласует
+прерванную работу party и branch, возобновляет ожидающие service jobs и
+планирует resumable autotest runs. Отдельной shutdown-фазы сейчас нет.
 
 ## Где менять типовые функции
 
