@@ -2,6 +2,19 @@
 
 [← WorldPacks и режимы](04-worldpacks-and-modes.md) · [Главная](README.md) · [Далее: модели →](06-models-and-providers.md)
 
+## Correction-aware RP story memory
+
+Начиная с RP revision 2 каждая запись living-memory имеет стабильный `fact_id`,
+authority, source turn и статус `active`, `superseded` или `retracted`. Service
+model предлагает следующий snapshot, но Gateway сливает его с предыдущим:
+пропущенные записи сохраняются, weak inference не создаёт tombstone и не может
+воскресить отозванный факт. Только active-записи попадают в effective prompt;
+исторические статусы остаются в append-only snapshot для аудита.
+
+Raw turns при этом не переписываются. Revision 6 ограничивает effective prompt
+recent turns, memory chapters, relevant characters, active state и выборочным
+retrieval, сохраняя полный transcript в durable store.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.

@@ -47,7 +47,8 @@ includes `rp` and optional otherwise.
     "supported": ["novel", "rp"]
   },
   "rp_contract": {
-    "schema_version": "rp-core.v2"
+    "schema_version": "rp-core.v2",
+    "revision": 6
   },
   "relationships": {
     "schema_version": "rp-relationships.v2",
@@ -81,7 +82,10 @@ Light GUI reads `title`, `status`, `premise`, `player_role`, and
 be one of `rp` or `novel`. The recommended value must also be in the supported
 list. Route `training` packs to `training-world-pack-builder`. The user still
 chooses the party type manually; this metadata does not auto-select it.
-Every pack supporting `rp` declares `rp_contract.schema_version=rp-core.v2`.
+Every pack supporting `rp` declares `rp_contract.schema_version=rp-core.v2` and
+the highest cumulative `rp_contract.revision` it supports. Current authored RP
+packs use revision `6`. Gateway still caps ordinary party creation by the
+observed runtime revision; the manifest does not activate unverified behavior.
 
 ## RP Relationship Model
 

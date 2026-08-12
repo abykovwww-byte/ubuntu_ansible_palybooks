@@ -2,6 +2,19 @@
 
 [← Жизненный цикл хода](03-turn-lifecycle.md) · [Главная](README.md) · [Далее: память и retrieval →](05-memory-and-retrieval.md)
 
+## RP contract в manifest
+
+Актуальный RP WorldPack объявляет максимальную поддержанную версию:
+
+```json
+"rp_contract": {"schema_version": "rp-core.v2", "revision": 6}
+```
+
+Это capability pack, а не автоматическая активация. Gateway ограничивает обычные
+партии значением `RP_CONTRACT_OBSERVED_REVISION`; candidate revision разрешена
+только изолированной checkpoint/autotest-ветке. `training` и `novel` этот маркер
+не используют.
+
 ## Что такое WorldPack
 
 WorldPack — версионируемый набор авторского контента и начального состояния. Он описывает мир, а не конкретное прохождение.

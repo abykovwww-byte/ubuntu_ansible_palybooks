@@ -2,6 +2,22 @@
 
 [← Интерфейсы](02-interfaces.md) · [Главная](README.md) · [Далее: WorldPacks и режимы →](04-worldpacks-and-modes.md)
 
+## Кумулятивный RP-контракт
+
+- revision 1 убирает hidden D20/feasibility и оставляет нейтральное продолжение;
+- revision 2 включает Gateway merge living-memory с устойчивыми tombstone-фактами;
+- revision 3 валидирует абсолютные правила до commit, включая opening scene;
+- revision 4 замыкает relationship cause/event в фактический provider prompt и
+  наблюдаемое исполнение события;
+- revision 5 фиксирует consumer-or-retire для активных state paths;
+- revision 6 удерживает raw history неизменной и собирает выборочный prompt.
+
+На revision 3+ повторное нарушение абсолютного правила после одного repair
+завершает запрос контролируемой ошибкой без новой state version и turn. На revision
+4+ due `favour` получает `resolved/delivered`, а narrator получает служебное
+обязательство показать конкретную добровольную помощь в текущей сцене. Оба
+relationship-блока исключаются из публичного Prompt Inspector.
+
 ## Обычный ход
 
 ```mermaid
