@@ -155,6 +155,12 @@ curl -fsS http://192.168.1.88:8010/api/worldpacks
 curl -fsS http://192.168.1.88:8011/health
 ```
 
+Gateway строится из корня `rp-stack`: образ получает приложение и тесты из
+`rp-gateway`, а также `/evals`, `/scripts` и `/worldpacks`, которые нужны полному
+контейнерному pytest. Поэтому `docker compose run --rm rp-gateway pytest`
+проверяет тот же acceptance evaluator и WorldPack-контракты, что repository CI,
+а не урезанный набор без семантического оракула.
+
 Для UI-изменений дополнительно проверяются authenticated DOM, фактические API responses и применённая server revision.
 
 ## Live verification интерактивных training artifacts

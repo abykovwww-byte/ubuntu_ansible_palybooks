@@ -50,7 +50,8 @@ services:
 {% endif %}
   rp-gateway:
     build:
-      context: ./rp-gateway
+      context: .
+      dockerfile: rp-gateway/Dockerfile
     container_name: rp-stack-gateway
     restart: unless-stopped
     env_file:
