@@ -2,6 +2,13 @@
 
 [← Архитектура](01-architecture.md) · [Главная](README.md) · [Далее: жизненный цикл хода →](03-turn-lifecycle.md)
 
+## RP contract revision
+
+`PartySummary` совместимо добавляет целое поле `rp_contract_revision` (`0..6`).
+Обычная новая RP-партия получает не больше наблюдённой runtime-ревизии. Запрос
+создания manual branch или autotest может передать candidate-ревизию; она хранится
+только у ветки и не меняет source party. Существующие поля и endpoint сохраняются.
+
 ## Light GUI
 
 Light GUI — основной интерфейс владельца партии. Это статические HTML/CSS/JavaScript, которые nginx отдаёт на `:8010` и проксирует `/api` в Gateway.

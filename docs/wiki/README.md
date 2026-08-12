@@ -2,10 +2,16 @@
 
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр, совместного романа и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki проверена 11 августа 2026 года и отделяет source revision от фактического
+Эта Wiki проверена 12 августа 2026 года и отделяет source revision от фактического
 runtime. RP-only living story memory реализована в исходном коде и описана в
 [Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
 но статус push, Ansible apply и live verification всегда сообщается отдельно.
+
+Кумулятивная поставка RP-ядра S1–S6 описана в
+[Decision 026](../../roles/apps/files/rp-stack/docs/decisions/026-rp-core-delivery.md).
+В текущей ветке это только локальный `каркас`: значение observed revision в IaC
+остаётся `0`, поэтому новые обычные партии не получают candidate-поведение до
+отдельного deploy и live-canary.
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно

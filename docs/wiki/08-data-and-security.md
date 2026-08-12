@@ -2,6 +2,14 @@
 
 [← Обучение и датасеты](07-training-autotests-datasets.md) · [Главная](README.md) · [Далее: эксплуатация →](09-operations-and-repository.md)
 
+## Изоляция RP revision
+
+Таблицы `parties` и `party_branches` хранят `rp_contract_revision` отдельно.
+Миграция схемы присваивает существующим строкам revision `0` и не обновляет старые
+партии автоматически. Ветка копирует checkpoint в отдельный `state_campaign_id`;
+candidate-ревизия применяется только при выполнении этой ветки. Raw turns source
+party и branch остаются раздельными и не переписываются при сборке prompt.
+
 ## Где находятся данные
 
 ```text

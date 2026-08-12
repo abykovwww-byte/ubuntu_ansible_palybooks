@@ -113,7 +113,7 @@ World-pack requirements:
 
 - Put the starting player role in `manifest.player_role`; Light GUI uses it as the default player character description.
 - Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`. This metadata filters incompatible combinations but never auto-selects the party type.
-- For a pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2"}`. Do not author a new RP pack against the legacy mechanical v1 contract.
+- For a pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 6}`. This is the maximum contract understood by the pack, not a global activation flag: ordinary parties are capped by Gateway's observed revision, while checkpoint/autotest branches may explicitly request a deployed candidate revision. Do not author a new RP pack against the legacy mechanical v1 contract.
 - Include focused lorebook entries, not one giant encyclopedia entry.
 - Separate confirmed facts, rumors, and unresolved mysteries.
 - Give NPCs goals, constraints, secrets, and relationships rather than static descriptions.
@@ -143,6 +143,9 @@ World-pack requirements:
 Scenario prompt requirements:
 
 - `rp`: prohibit D20, skills, difficulty, score, success/failure labels, hidden checks, and mechanical `/check`; continue from WorldPack constraints, canonical state, information, resources, NPC goals, relationships, and prior consequences.
+- For RP relationship seeds, ensure a positive boundary can produce the declared
+  `favour` event and a concrete voluntary help scene before its WorldPack clock;
+  never expose numeric weights, internal IDs, or due turns in prompts.
 - `novel`: prohibit dice, skills, checks, difficulty, result labels, and game menus. Prioritize collaborative prose, character voice, relationships, pacing, continuity, and consent while preserving player agency.
 - For packs supporting both types, keep the shared prose contract free of mechanical checks.
 - Treat `prompts/gm-system.md` and `prompts/authors-note.md` as active Light GUI runtime inputs, not documentation-only files.
