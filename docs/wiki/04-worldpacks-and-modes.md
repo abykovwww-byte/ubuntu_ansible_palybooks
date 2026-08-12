@@ -47,6 +47,13 @@ worldpacks/<slug>/
 
 При создании партии Gateway копирует seed в новый `state_campaign_id`. Изменение party state никогда не переписывает исходный WorldPack.
 
+RP-пак объявляет `"rp_contract": {"schema_version": "rp-core.v2"}`. Gateway
+сохраняет версию в Party; отсутствие блока означает legacy v1 и не переключает
+существующие партии автоматически. В `world_constraints` только правило с
+`kind: absolute`, стабильным `id`, `source` и при необходимости
+`forbidden_claims` получает post-response enforcement; остальные ограничения
+считаются авторскими guidance.
+
 WorldPack, у которого `scenario_types.supported` содержит `rp`, обязан объявить
 WorldPack-owned модель отношений:
 
@@ -78,7 +85,7 @@ authored-событий, ролями, ранами, конечными часа
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
 |---|---|---|---|
-| `rp` | Ролевая игра с проверками | Intent, D20, skills, modifiers, blockers, check records, RP living story memory; один narrator completion без semantic validator/repair/fallback | Gateway не переписывает успешный непустой ответ; provider/format failure завершает ход ошибкой до state commit |
+| `rp` | Ролевая игра и совместная проза | Нейтральное продолжение сцены без скрытой механики, canonical state, absolute-rule validation/repair, relationship pressure и correction-aware living memory | D20, DC, skills, score, success/failure, механический `/check`, нарушение agency или абсолютного правила |
 | `novel` | Совместный роман | Непрерывная проза, directorial input, state boundary patch без броска; chapters/raw без RP story memory | Dice, DC, skills, игровые меню, захват agency |
 | `training` | Учебная симуляция и оценивание | Универсальный interpreter + WorldPack program/assessment/fallback, явные actions, deterministic score и debrief gate; прежний memory path без RP story memory | Случайность, `/check`, предметная логика в Gateway, подсказки и score до debrief |
 
@@ -222,7 +229,7 @@ resource revision со стабильным `folder_id`, а run фиксируе
 
 ## Generated prompt worlds
 
-Light GUI может создать простой private WorldPack из текста. Gateway детерминированно формирует registry entry и seed; отдельный LLM-вызов для этого не требуется. Такие миры принадлежат пользователю и могут использоваться обычным party flow.
+Light GUI может создать простой private WorldPack из текста. Gateway детерминированно формирует registry entry и seed с `rp-core.v2`; отдельный LLM-вызов для этого не требуется. Такие миры принадлежат пользователю и могут использоваться обычным party flow.
 
 Источник generated-мира выбирается явно:
 

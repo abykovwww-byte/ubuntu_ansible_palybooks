@@ -46,6 +46,9 @@ includes `rp` and optional otherwise.
     "recommended": "novel",
     "supported": ["novel", "rp"]
   },
+  "rp_contract": {
+    "schema_version": "rp-core.v2"
+  },
   "relationships": {
     "schema_version": "rp-relationships.v2",
     "model": "relationships/model.json"
@@ -78,6 +81,7 @@ Light GUI reads `title`, `status`, `premise`, `player_role`, and
 be one of `rp` or `novel`. The recommended value must also be in the supported
 list. Route `training` packs to `training-world-pack-builder`. The user still
 chooses the party type manually; this metadata does not auto-select it.
+Every pack supporting `rp` declares `rp_contract.schema_version=rp-core.v2`.
 
 ## RP Relationship Model
 
@@ -168,6 +172,12 @@ When a Light GUI party is created, the gateway copies this seed into isolated
 party state under `/srv/app-data/rp-stack/state/parties/<party_id>/current.json`
 and rewrites `meta.campaign_id`. Do not overwrite global `state/current.json`
 for normal Light GUI worlds.
+
+For `rp-core.v2`, declare a hard rule as an object in `world_constraints` with
+`kind: "absolute"`, a stable `id`, `source`, and narrowly phrased
+`forbidden_claims` when a deterministic post-response contradiction check is
+possible. An untyped constraint is legacy guidance and is still prompt context,
+but it is not a claim of machine-enforced authority.
 
 ## Lorebook JSON
 
@@ -262,12 +272,12 @@ Every `gm-system.md` should say:
 - preserve player agency;
 - do not decide player thoughts, feelings, choices, or consent;
 - obey `<AUTHORITATIVE_WORLD_STATE>` and gateway outcomes;
-- keep mechanics conditional on the selected party type;
+- keep RP and novel narration free of hidden checks and mechanical outcomes;
 - keep lore consistent with canonical state.
 
 Add the applicable mode contract:
 
-- `rp`: D20 and Gateway outcomes are authoritative; failed checks cannot become hidden success.
+- `rp`: no D20, skills, difficulty, score, success/failure labels, hidden checks, or mechanical `/check`; consequences follow from the world, state, resources, information, NPC goals, relationships, and prior events.
 - `novel`: no dice, skills, checks, difficulty, result labels, or action menus; prioritize prose, relationships, pacing, and consent.
 
 ## Quick Reply Notes
@@ -278,7 +288,7 @@ Document suggested buttons in `quick-replies/notes.md`, such as:
 ```text
 Мир
 Показать мир
-Проверка
+Намерение
 Слухи
 Журнал
 Отложить решение

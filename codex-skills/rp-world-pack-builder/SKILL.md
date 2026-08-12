@@ -1,6 +1,6 @@
 ---
 name: rp-world-pack-builder
-description: Build or update SillyTavern/rp-gateway/Light GUI world packs for roleplay and collaborative-novel parties from natural-language requests. Use when Codex needs to create or modify campaign worlds, lorebooks/world info, character notes, player-role seeds, RP/novel prompts, D20 resolution rules, Quick Reply guidance, or canonical rp-gateway state seeds. Route deterministic scored learning scenarios to training-world-pack-builder. For live deployment to abykovserv / 192.168.1.88, also use the abykovserv-iac-deploy skill.
+description: Build or update SillyTavern/rp-gateway/Light GUI world packs for roleplay and collaborative-novel parties from natural-language requests. Use when Codex needs to create or modify campaign worlds, lorebooks/world info, character notes, player-role seeds, RP/novel prompts, narrative consequence rules, Quick Reply guidance, or canonical rp-gateway state seeds. Route deterministic scored learning scenarios to training-world-pack-builder. For live deployment to abykovserv / 192.168.1.88, also use the abykovserv-iac-deploy skill.
 ---
 
 # RP World Pack Builder
@@ -113,9 +113,13 @@ World-pack requirements:
 
 - Put the starting player role in `manifest.player_role`; Light GUI uses it as the default player character description.
 - Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`. This metadata filters incompatible combinations but never auto-selects the party type.
+- For a pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2"}`. Do not author a new RP pack against the legacy mechanical v1 contract.
 - Include focused lorebook entries, not one giant encyclopedia entry.
 - Separate confirmed facts, rumors, and unresolved mysteries.
 - Give NPCs goals, constraints, secrets, and relationships rather than static descriptions.
+- Type genuinely invariant `world_constraints` as `kind: absolute` with a
+  stable `id`, `source`, and narrow `forbidden_claims` markers when deterministic
+  response enforcement is possible. Treat untyped constraints as guidance.
 - For every pack whose `scenario_types.supported` includes `rp`, declare the
   `rp-relationships.v2` model in `manifest.json` and author
   `relationships/model.json`. If the declaration is absent, Gateway silently
@@ -134,13 +138,13 @@ World-pack requirements:
   client surfaces. The narrator invents plot tells; do not author prepared
   tells in the model.
 - Include a playable opening scene and immediate hooks.
-- Add explicit narrator "do not do" rules: preserve player agency, obey state, do not turn failed checks into hidden successes.
+- Add explicit narrator "do not do" rules: preserve player agency, obey state, do not turn costs or setbacks into equivalent hidden victories, and obey typed absolute rules.
 
 Scenario prompt requirements:
 
-- `rp`: permit D20, skills, difficulty, modifiers, blockers, and fixed Gateway outcomes. Failed or blocked checks cannot become equivalent hidden success.
+- `rp`: prohibit D20, skills, difficulty, score, success/failure labels, hidden checks, and mechanical `/check`; continue from WorldPack constraints, canonical state, information, resources, NPC goals, relationships, and prior consequences.
 - `novel`: prohibit dice, skills, checks, difficulty, result labels, and game menus. Prioritize collaborative prose, character voice, relationships, pacing, continuity, and consent while preserving player agency.
-- For packs supporting both types, phrase mechanical rules conditionally. Never write an unconditional check rule that conflicts with `novel`.
+- For packs supporting both types, keep the shared prose contract free of mechanical checks.
 - Treat `prompts/gm-system.md` and `prompts/authors-note.md` as active Light GUI runtime inputs, not documentation-only files.
 
 RP-stack wiring for playable worlds:
