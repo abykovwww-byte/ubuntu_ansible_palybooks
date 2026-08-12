@@ -104,6 +104,41 @@ Markdown-обёртку JSON, но не ослабляет schema, slot и narra
 
 Это позволяет восстановить ожидание после refresh и не отправить одну сцену модели дважды.
 
+### Request-centric диагностическая трасса
+
+`turn_requests` одновременно задаёт корень Turn Trace Workbench. Стабильная
+идентичность исполнения — `(state_campaign_id, request_id)`, а `turn_id` и
+`party_turn` присоединяются только после commit. Поэтому timeout, отказ
+enforcement или исчерпанный fallback остаются доступны с `turn_id = null`.
+
+```mermaid
+sequenceDiagram
+    participant GW as Gateway
+    participant Trace as Trace stores
+    participant LLM as Narrator / service model
+    participant State as Authoritative stores
+    participant Jobs as Background jobs
+
+    GW->>Trace: request + фактические main phases
+    GW->>LLM: exact runtime payload
+    LLM-->>GW: response или ошибка
+    GW->>Trace: attempt, validation, repair/fallback
+    alt ход закоммичен
+        GW->>State: turn + authoritative projections
+        State-->>Trace: attach turn_id / party_turn + mutation refs
+    else commit не состоялся
+        GW->>Trace: terminal request, turn_id = null
+    end
+    GW-->>Jobs: memory / relationship work
+    Jobs->>Trace: background phases и service attempts
+```
+
+Фазы не задаются фиксированным клиентским enum: сохраняется то, что реально
+исполнялось в main или background lane. Для нового RP-пути trace detail сообщает
+эффективную `rp_contract_revision`, а для старой партии — legacy
+`rp_contract_version`. Workbench диагностирует этот pipeline, но его таблицы не
+читаются Rule Engine, prompt assembly или delivery Decision 026.
+
 ### 2. Контекст партии
 
 Gateway проверяет owner, загружает `Party`, создаёт party-specific `StateStore` и строит runtime settings из выбранного model profile, scenario type и party BYOK.
@@ -276,12 +311,20 @@ Draft может быть быстрым детерминированным ил
 Все вызовы глобальной служебной модели — episodic memory, RP story memory,
 relationship extraction, world instruction и генерация персонажа — проходят
 через `ServiceModelClient`. Перед отправкой он фиксирует точные ordered messages,
-после ответа — сырой provider response и статус в отдельном диагностическом
-`service_call_log`; секреты редактируются на записи. Все потребители передают
-полные ordered messages через `service_prompt_text`, поэтому вопрос верности
-диагностического prompt закрыт. Таблица не входит в canonical state/schema.
-Срок хранения конфигурируется `SERVICE_CALL_LOG_RETENTION_DAYS` и остаётся
-отдельным открытым решением пользователя.
+после ответа — сырой provider response и статус в существующем диагностическом
+`service_call_log`; секреты редактируются на записи. Журнал расширен nullable-
+полями `request_id`, `party_turn`, `provider`, `model`, `attempt`, `latency_ms`,
+`http_status`, `usage_json`, `error_json` и `trace_schema_version`, поэтому старые
+строки остаются читаемыми. Все потребители передают полные ordered messages через
+`service_prompt_text`; отдельный дублирующий журнал completions не создаётся.
+
+Narrator-attempts, включая repair и ошибку до commit, пишутся в
+`turn_trace_events`. Append-only авторитетные эффекты endpoint читает из их
+существующих stores; `turn_state_mutations` сохраняет exact before/after только
+для реально изменившихся in-place проекций. Все trace-таблицы диагностические и
+не входят в canonical state/schema. По умолчанию
+`SERVICE_CALL_LOG_RETENTION_DAYS=0`, то есть записи не удаляются по времени;
+положительное число явно включает очистку старых service rows.
 
 ## Код
 
@@ -295,6 +338,8 @@ relationship extraction, world instruction и генерация персона�
 - [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
 - [Training runtime](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_runtime.py)
 - [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
+- [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
+- [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 
 ### Legacy relationship-event deadlines
 

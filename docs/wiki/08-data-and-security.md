@@ -36,6 +36,7 @@ SQLite используется несколькими service stores, но scop
 | Dataset | `dataset_turn_labels`, `turn_feedback` |
 | Showroom | `showroom_scenarios`, `showroom_visitors`, `showroom_runs` |
 | Training artifacts | `training_artifacts`, `training_artifact_events` |
+| Diagnostics | `turn_trace_events`, `turn_state_mutations`, `turn_phase_annotations`, `service_call_log` |
 | Provider access | `provider_api_keys` |
 
 ## Изоляция пользователей и партий
@@ -50,6 +51,7 @@ flowchart TB
     C --> RPS["RP-only story-memory snapshots"]
     C --> B["Branch campaign IDs"]
     C --> TA["Training artifact snapshots / events"]
+    C --> DT["Trace events / mutations / annotations / service log"]
 
     AV["Anonymous visitor"] --> SR["ShowroomRun"]
     SR --> IP["Internal Party"]
@@ -162,16 +164,33 @@ Party BYOK:
 
 Private visibility в Gateway скрывает мир от runtime-пользователей и Showroom, но не делает уже закоммиченный public repository content секретным.
 
-## Диагностический журнал служебных моделей
+## Turn Trace Workbench и диагностические журналы
 
-`service_call_log` хранит полные ordered messages и сырой provider response для
-служебных вызовов памяти, relationship extraction, world instruction и
-генерации персонажа. Все call sites формируют диагностический prompt через
-`service_prompt_text`; секреты редактируются только при записи копии в журнал.
-Это закрывает вопрос верности trace, но не вопрос минимизации данных: записи
-могут содержать нарративный текст игрока. Retention задаётся
-`SERVICE_CALL_LOG_RETENTION_DAYS`; окончательный срок хранения остаётся явным
-решением владельца системы.
+Request-centric read model объединяет существующие авторитетные записи с тремя
+добавочными таблицами: `turn_trace_events` хранит факты исполнения и narrator
+attempts, `turn_state_mutations` — exact before/after и фактический main/background
+lane только для изменившихся
+in-place проекций, а `turn_phase_annotations` — идемпотентные пользовательские
+заметки. Существующий `service_call_log` сохраняет exact redacted ordered messages
+и raw provider response служебной модели; второй журнал completions не создаётся.
+
+Все записи изолированы по `state_campaign_id` и `request_id`. Gateway разрешает
+`party_id` и опциональный `branch_id` через существующую owner/admin policy.
+Showroom visitor cookie и `run_id` не дают доступа к trace API. Аннотация
+зеркалит безопасные метаданные в `audit_events`, но не меняет state, prompt,
+scoring или модельный маршрут.
+
+По умолчанию диагностические данные не истекают: новые trace-таблицы не имеют
+TTL, а `SERVICE_CALL_LOG_RETENTION_DAYS=0` означает unlimited. Положительное
+значение включает явную очистку старых service rows. Это увеличивает privacy и
+storage impact: exact prompt/response могут содержать нарратив пользователя,
+поэтому входят в Gateway backup scope, не экспортируются в dataset автоматически
+и должны редактировать вероятные ключи, bearer tokens, cookies и passwords на
+записи диагностической копии.
+
+Trace — только диагностика: ни одна игровая фаза не читает эти таблицы как
+authority или readiness signal. Отказ записи трассы не должен менять outcome,
+commit, repair/fallback или исполнение Decision 026.
 
 ### Импорт Markdown в generated WorldPack
 
@@ -185,7 +204,7 @@ Raw logs могут содержать личные данные, copyrighted te
 
 ## Backup и restore
 
-Backup содержит state, историю, users, provider keys и dataset labels. Перед restore нужно проверить архив и точные target paths, остановить stack и только затем восстанавливать. Нельзя пересылать backup через публичные каналы.
+Backup содержит state, историю, диагностическую трассу, users, provider keys и dataset labels. Перед restore нужно проверить архив и точные target paths, остановить stack и только затем восстанавливать. Нельзя пересылать backup через публичные каналы.
 
 ## Источники
 
@@ -193,6 +212,8 @@ Backup содержит state, историю, users, provider keys и dataset l
 - [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
 - [ShowroomStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/showroom.py)
 - [TrainingArtifactService](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
+- [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
+- [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Compose networks](../../roles/apps/templates/rp-stack.compose.yml.j2)
 
 ### Relationship projection repair

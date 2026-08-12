@@ -163,6 +163,28 @@ Gateway строится из корня `rp-stack`: образ получает
 
 Для UI-изменений дополнительно проверяются authenticated DOM, фактические API responses и применённая server revision.
 
+### Эксплуатация Turn Trace Workbench
+
+Workbench не добавляет контейнер, порт или новый data path: API, SQLite-таблицы и
+статические Light GUI assets доставляются существующими Gateway/Light GUI
+образами, а данные входят в обычный `/srv/app-data/rp-stack/gateway` и backup.
+
+После apply проверяются отдельно:
+
+1. owner/admin list и detail для исходной party и выбранного `branch_id`;
+2. failed request без committed turn и фактические main/background phases;
+3. идемпотентная annotation и соответствующий audit event без state change;
+4. отказ чужому owner и отсутствие trace route/page в Showroom;
+5. legacy `rp_contract_version`, новая `rp_contract_revision` и generic rendering
+   незнакомой фазы;
+6. отсутствие секретов в exact diagnostic payload и рост SQLite/backup при
+   unlimited retention.
+
+Диагностический просмотр SQLite выполняется только через read-only `mode=ro`.
+`SERVICE_CALL_LOG_RETENTION_DAYS=0` — unlimited default; положительный срок
+включается осознанно и проверяется отдельным cutoff-тестом. Healthy container или
+HTTP `200` не заменяет authenticated browser canary и проверку сохранённых строк.
+
 ## Live verification интерактивных training artifacts
 
 Snapshot от 31 июля 2026 года для revision `8b8a8fe`:
@@ -236,6 +258,8 @@ ubuntu_ansible_palybooks/
 | `services/training_artifacts.py` | Blueprint validation, party snapshots, idempotent events и public views |
 | `services/autotest.py` | Ограниченный auto-player client |
 | `services/service_models.py` | Глобальный service-model catalog/runtime |
+| `services/service_model_client.py` | Exact redacted service-model log, request/attempt metadata и retention |
+| `services/turn_trace.py` | Request/branch/revision-aware trace read model и аннотации |
 
 ## Где менять типовые функции
 
@@ -245,6 +269,7 @@ ubuntu_ansible_palybooks/
 | Изменить обработку хода | `adjudicator.py`, `rule_engine.py`, `validator.py` |
 | Изменить prompt/memory | `narrative.py`, `memory.py`, `rp_story_memory.py`, `context_budget.py`, `state_store.py` |
 | Изменить Light GUI | `rp-light-gui/index.html`, `app.js`, `styles.css` |
+| Изменить Turn Trace Workbench | `turn_trace.py`, `state_store.py`, `narrative.py`, `service_model_client.py`, `main.py`, Light GUI trace assets и tests |
 | Изменить Showroom | `rp-showcase-gui/` и `showroom.py` |
 | Изменить training artifacts | `training_artifacts.py`, `ui-shared/`, оба UI и WorldPack contract |
 | Новый RP/novel мир | `worldpacks/<slug>/` и `rp-world-pack-builder` |
@@ -341,3 +366,4 @@ provider failures repair не получают при любом значени�
 - [Compose](../../roles/apps/templates/rp-stack.compose.yml.j2)
 - [Operations](../../roles/apps/files/rp-stack/docs/operations.md)
 - [Gateway tests](../../roles/apps/files/rp-stack/rp-gateway/tests)
+- [Decision 027 — Turn Trace Workbench](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
