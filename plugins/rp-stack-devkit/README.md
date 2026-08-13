@@ -37,9 +37,11 @@ admin-autotest without mutating the source party; production-endurance uses a
 long live party and `causal_probe` through later scene consequences. Only
 production-endurance can establish `держится`.
 
-Deployment must pause before `service_call_log` starts recording live data until
-the user confirms retention and redaction depth. A green PR or configured
-default is not that confirmation.
+Deployment must pause when a revision introduces or materially expands exact
+diagnostic prompt/response capture (`service_call_log`, `turn_trace_events`), or
+changes retention/redaction, until the user confirms retention and redaction
+depth. An accepted ADR for that exact revision is confirmation; a green PR or
+configured default is not.
 
 Remote diagnostics pass `%USERPROFILE%\.ssh\id_ed25519_codex_abykovserv` with
 `-i` by default when that file exists. `RP_STACK_OPS_IDENTITY_FILE` can select a

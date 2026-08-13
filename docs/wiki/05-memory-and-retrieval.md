@@ -6,7 +6,9 @@
 
 Начиная с RP revision 2 каждая запись living-memory имеет стабильный `fact_id`,
 authority, source turn и статус `active`, `superseded` или `retracted`. Service
-model предлагает следующий snapshot, но Gateway сливает его с предыдущим:
+model предлагает следующий snapshot, но не назначает себе authority: Gateway
+принудительно трактует все новые и изменённые записи как `inference`, ограничивает
+их provenance фактическим пакетом turn IDs и затем сливает с предыдущим snapshot:
 пропущенные записи сохраняются, weak inference не создаёт tombstone и не может
 воскресить отозванный факт. Только active-записи попадают в effective prompt;
 исторические статусы остаются в append-only snapshot для аудита.
@@ -59,11 +61,32 @@ chronology
 В схеме `rp-gateway.rp-story-memory.v2` `current_situation` — один объект, а
 остальные содержательные поля — массивы объектов. Каждая запись содержит
 `text`, `status: active|superseded|retracted`, `authority` и
-`source_turn_ids`. Legacy-строки читаются как `legacy_projection`; в effective
-prompt попадают только записи со статусом `active`, поэтому correction не
-стирает аудит, но прекращает влияние ошибочного факта на следующие сцены.
+`source_turn_ids`. Legacy-строки читаются как `legacy_projection`, но начиная с
+revision 2 не активируются в effective prompt без отдельной доверенной миграции.
+Из v2-записей в prompt попадают только active-факты, поэтому correction не стирает
+аудит, но прекращает влияние ошибочного факта на следующие сцены.
 
-Каждая удачная версия записывается в `rp_story_memory_snapshots` с `revision`, диапазоном покрытых turn IDs, state version и model. Старые snapshots остаются для аудита; narrator получает только последний. При fork последний snapshot, полностью покрытый checkpoint, копируется в новую campaign identity как revision 1.
+Для RP revision 2+ Light GUI позволяет подготовить `retract` или `replace`
+конкретной активной записи из восьми list-полей и отправляет эту типизированную
+коррекцию вместе со следующим обычным ходом. Gateway валидирует `field/fact_id`
+до provider call, сам назначает `user_correction`, сохраняет payload в metadata
+того же committed turn и использует реальный turn ID как provenance. Клиент не
+может назначить authority, status или source IDs. `current_situation` является
+rolling single-object projection и этим list-entry API не редактируется.
+
+Gateway накладывает подтверждённую коррекцию уже на prompt текущего хода, затем
+на все следующие effective prompts до записи нового snapshot. Такая pending
+проекция не меняет SQLite сама по себе: correction форсирует обычную append-only
+сборку, а при задержке или retry service job прежний ошибочный факт всё равно не
+возвращается в narration. Повторная correction уже неактивного факта отклоняется
+до новой state version и turn.
+
+При достижении char budget или лимита записей Gateway сначала удаляет weak
+проекции. Tombstone и replacement с `user_correction` защищены; если полностью
+защищённое поле не имеет безопасного слота, `replace` отклоняется на preflight,
+а не превращается в частично применённую коррекцию.
+
+Каждая удачная версия записывается в `rp_story_memory_snapshots` с `revision`, диапазоном покрытых turn IDs, state version и model. Старые snapshots остаются для аудита. Rollback помечает snapshot, покрывающий исключённый ход, как invalidated; narrator, public memory API и updater получают newest valid snapshot вместе с pending typed corrections. Conditional insert проверяет contributing turns и base snapshot в той же SQLite-операции, поэтому фоновая job, завершившаяся после rollback, не возвращает отменённую ветку. При fork последний valid snapshot, полностью покрытый checkpoint, копируется в новую campaign identity как revision 1.
 
 Story memory существует **только при `scenario_type == "rp"`**:
 
@@ -71,7 +94,9 @@ Story memory существует **только при `scenario_type == "rp"`*
 - `novel` также продолжает использовать прежние chapters/raw/retrieval без story memory;
 - общая таблица SQLite сама по себе не активирует механизм для других режимов.
 
-Ошибка service model fail-open: сохранённый игровой ход не откатывается, предыдущий snapshot продолжает работать, а job повторяется по общей retry policy.
+Ошибка service model fail-open: сохранённый игровой ход не откатывается, job
+повторяется по общей retry policy, а effective prompt продолжает использовать
+последний snapshot вместе с уже committed typed corrections.
 
 ## Эпизодические главы
 
@@ -161,7 +186,7 @@ Embedding endpoint, vector store и cross-party semantic index не исполь
 
 ## Изоляция и UI
 
-Все memory-запросы используют `state_campaign_id`. Branch получает собственную campaign identity и копию допустимого snapshot на момент fork. Light GUI показывает RP story memory только у RP-партий: revision, покрытие, текущую ситуацию, канон, персонажей и сюжетные линии. Prompt Inspector отдельно показывает её фактическое присутствие и reserve.
+Все memory-запросы используют `state_campaign_id`. Branch получает собственную campaign identity и копию допустимого snapshot на момент fork. Light GUI показывает effective RP story memory только у RP-партий: revision, покрытие, текущую ситуацию, канон, персонажей и сюжетные линии; committed correction видна здесь и до завершения фоновой сборки. Prompt Inspector отдельно показывает её фактическое присутствие и reserve.
 
 ## Источники
 

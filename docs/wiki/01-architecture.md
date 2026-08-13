@@ -51,7 +51,7 @@ Gateway не публикует host port. Снаружи доступны то�
 
 | Компонент | Отвечает за | Не отвечает за |
 |---|---|---|
-| Light GUI | Чат, создание партии, GM-инструменты, Prompt Inspector, owner-scoped Turn Trace Workbench, админка, безопасный рендеринг training artifacts | Правила, state, ключи провайдеров, долговременную память |
+| Light GUI | Чат, создание партии, GM-инструменты, Prompt Inspector, admin-only Turn Trace Workbench, админка, безопасный рендеринг training artifacts | Правила, state, ключи провайдеров, долговременную память |
 | Showroom | Витрина, анонимный запуск, минимальный чат, portal, training artifacts, рейтинг | Прямой доступ к party ID, внутреннюю turn trace, скрытый scoring, администрирование без Gateway role |
 | Gateway | Auth, party scope, state, history, универсальные интерпретаторы правил, LLM routing, диагностическую trace read model, snapshots и события artifacts, branches, datasets | Предметную программу обучения, верстку интерфейсов и ручное хранение секретов в браузере |
 | WorldPack | Неизменяемый замысел мира, seed, prompts, executable training program/assessment/fallbacks, site/workspace blueprints и interaction policy | Выбор модели, party owner, runtime state конкретного прохождения |
@@ -109,7 +109,7 @@ flowchart LR
     M["turn_state_mutations"] --> V
     S["service_call_log"] --> V
     N["turn_phase_annotations"] --> V
-    V --> L["Light GUI\nowner или admin"]
+    V --> L["Light GUI\nтолько admin/operator"]
     X["Showroom"] -.->|"нет доступа"| V
 ```
 
@@ -118,6 +118,8 @@ flowchart LR
 изменить outcome, prompt, state patch, scoring или fallback. Workbench понимает
 фактическую `rp_contract_revision`, а для legacy-партий —
 `rp_contract_version`; незнакомые фазы остаются видимыми как generic nodes.
+Admin-only gate не позволяет обычному владельцу партии увидеть скрытые
+`AUTHORITATIVE_OUTCOME`, scoring или assessment-инструкции training runtime.
 
 ## Почему Gateway — authority
 

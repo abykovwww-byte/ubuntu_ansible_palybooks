@@ -33,7 +33,7 @@
 - Treat `roles/apps/files/rp-stack/evals/acceptance/manifest.yml` and `evals/acceptance/corpus/**` as an independent user-owned, read-only oracle. Never change labels or thresholds in the same change as mechanism code.
 - Report event precision, event recall, character attribution accuracy, empty-scene false-positive rate, positive-trust recall, and correction retention separately; do not replace them with one aggregate score.
 - Keep evidence layers separate: offline uses saved responses and no providers; provider-canary uses a real model through an isolated admin-autotest branch; production-endurance follows `causal_probe` through later scene consequences.
-- Before applying a revision that introduces `service_call_log` to live data, stop for the user's explicit retention and redaction decision.
+- Before applying a revision that introduces or materially expands exact diagnostic prompt/response capture (`service_call_log`, `turn_trace_events`), or changes its retention/redaction, stop for the user's explicit retention and redaction decision. An accepted ADR for that exact revision satisfies the gate; green CI or a configured default does not.
 
 ## Documentation and generated state
 

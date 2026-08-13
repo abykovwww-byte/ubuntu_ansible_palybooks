@@ -218,6 +218,28 @@ def markdown_command_fragments(text: str) -> list[str]:
 
 
 def validate_environment_contracts(errors: list[str]) -> None:
+    inventory = ROOT / "inventories" / "local" / "group_vars" / "server.yml"
+    env_templates = (
+        ROOT / "roles" / "apps" / "templates" / "rp-stack.env.j2",
+        ROOT / "roles" / "apps" / "templates" / "rp-stack.env.example.j2",
+    )
+    retention_variable = "rp_stack_gateway_service_call_log_retention_days: 0"
+    retention_mapping = (
+        "SERVICE_CALL_LOG_RETENTION_DAYS="
+        "{{ rp_stack_gateway_service_call_log_retention_days | default(0) }}"
+    )
+    if (
+        not inventory.is_file()
+        or retention_variable not in inventory.read_text(encoding="utf-8")
+    ):
+        fail(errors, "RP Stack inventory must default service-call log retention to unlimited (0)")
+    for path in env_templates:
+        if not path.is_file() or retention_mapping not in path.read_text(encoding="utf-8"):
+            fail(
+                errors,
+                f"RP Stack env template does not render service-call log retention: {path.relative_to(ROOT)}",
+            )
+
     marketplace = Path(".agents/plugins/marketplace.json")
     old_profile = b"C:" + b"\\Users\\" + b"albykov"
     old_plugin_path = b".agents/plugins/" + b"rp-stack-devkit/"

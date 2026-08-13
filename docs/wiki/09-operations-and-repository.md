@@ -171,10 +171,10 @@ Workbench не добавляет контейнер, порт или новый
 
 После apply проверяются отдельно:
 
-1. owner/admin list и detail для исходной party и выбранного `branch_id`;
+1. admin/operator list и detail для исходной party и выбранного `branch_id`;
 2. failed request без committed turn и фактические main/background phases;
 3. идемпотентная annotation и соответствующий audit event без state change;
-4. отказ чужому owner и отсутствие trace route/page в Showroom;
+4. отказ обычному owner и отсутствие trace route/page в Showroom;
 5. legacy `rp_contract_version`, новая `rp_contract_revision` и generic rendering
    незнакомой фазы;
 6. отсутствие секретов в exact diagnostic payload и рост SQLite/backup при
@@ -182,8 +182,11 @@ Workbench не добавляет контейнер, порт или новый
 
 Диагностический просмотр SQLite выполняется только через read-only `mode=ro`.
 `SERVICE_CALL_LOG_RETENTION_DAYS=0` — unlimited default; положительный срок
-включается осознанно и проверяется отдельным cutoff-тестом. Healthy container или
-HTTP `200` не заменяет authenticated browser canary и проверку сохранённых строк.
+задаётся через IaC-переменную
+`rp_stack_gateway_service_call_log_retention_days` в
+`/etc/ansible/local-overrides.yml` и проверяется отдельным cutoff-тестом. Healthy
+container или HTTP `200` не заменяет authenticated admin-browser canary и
+проверку сохранённых строк.
 
 ## Live verification интерактивных training artifacts
 

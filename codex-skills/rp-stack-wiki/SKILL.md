@@ -63,9 +63,11 @@ without mutating the source party; production-endurance uses a long live party
 and `causal_probe` through later scene consequences. Only production endurance
 can establish `держится`.
 
-When a change introduces `service_call_log`, record that deployment is paused
-until the user explicitly decides retention and redaction depth. A green PR or
-configured default does not authorize logging live data.
+When a change introduces or materially expands exact diagnostic prompt/response
+capture (`service_call_log`, `turn_trace_events`), or changes its retention or
+redaction, record that deployment is paused until the user explicitly decides
+retention and redaction depth. An accepted ADR for that exact revision satisfies
+the gate; a green PR or configured default does not.
 
 ## Documentation Impact Gate
 

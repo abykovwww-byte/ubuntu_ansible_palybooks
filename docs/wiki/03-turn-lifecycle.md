@@ -13,10 +13,13 @@
 - revision 6 удерживает raw history неизменной и собирает выборочный prompt.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
-завершает запрос контролируемой ошибкой без новой state version и turn. На revision
-4+ due `favour` получает `resolved/delivered`, а narrator получает служебное
-обязательство показать конкретную добровольную помощь в текущей сцене. Оба
-relationship-блока исключаются из публичного Prompt Inspector.
+завершает запрос контролируемой ошибкой без новой state version и turn; это же
+правило действует для admin autotest RP-веток. Только deterministic training runtime
+может заменить невалидный ответ authored fallback. На revision 4+ due `favour`
+создаёт служебное обязательство показать конкретную добровольную помощь, но остаётся
+active до evidence-checked relationship extraction. Статус `resolved/delivered`
+ставится лишь после положительной причины того же персонажа из реально записанной
+сцены. Оба relationship-блока исключаются из публичного Prompt Inspector.
 
 ## Обычный ход
 
@@ -232,6 +235,15 @@ evidence как точную нормализованную подстроку �
 обязательного boundary event. Для `training` модель отношений не загружается, job
 не ставится и новые таблицы не получают строк.
 
+Если `favour` достиг due turn, календарь сам по себе не доказывает исполнение.
+Обязательство продолжает входить в narrator prompt, пока extractor не подтвердит
+verbatim evidence положительного authored-события того же персонажа, которое
+WorldPack явно пометил `resolves: ["favour"]`. Только после этого Gateway закрывает
+событие как `delivered`; другое положительное событие, отрицательная или пустая
+сцена оставляют его active для следующего хода. Delivery хранит глобальный source
+turn ID: rollback этого хода возвращает событие в active, а запоздавшая extractor
+job не может закрыть его по уже исключённой сцене.
+
 Записанный ход содержит два номера с разной ответственностью. `turns.id` —
 глобальный идентификатор строки в общей SQLite-базе; он связывает причину с
 идемпотентностью и `excluded_from_memory` при rollback. `turns.party_turn` —
@@ -295,7 +307,7 @@ flowchart LR
     S --> R["Rollback создаёт следующую версию"]
 ```
 
-Draft может быть быстрым детерминированным или созданным служебной моделью. Он не становится state до явного `apply`. Rollback не удаляет raw turns, memory или journal; он создаёт новую авторитетную версию и помечает перекрытые ходы `excluded_from_memory=1`, поэтому следующие RP story-memory snapshots не возвращают отменённую ветку.
+Draft может быть быстрым детерминированным или созданным служебной моделью. Он не становится state до явного `apply`. Rollback не удаляет raw turns, memory или journal; он создаёт новую авторитетную версию, помечает перекрытые ходы `excluded_from_memory=1` и инвалидирует покрывающие их RP story-memory snapshots. Effective prompt и UI выбирают newest valid snapshot и перестраивают только non-excluded tail; поздний результат фоновой job атомарно отклоняется, если её turns или base snapshot уже отменены.
 
 Партию можно штатно завершить через `POST /api/parties/{party_id}/complete`:
 статус становится `completed`, а state, turns, audit и provider keys сохраняются.
@@ -324,7 +336,9 @@ Narrator-attempts, включая repair и ошибку до commit, пишут
 для реально изменившихся in-place проекций. Все trace-таблицы диагностические и
 не входят в canonical state/schema. По умолчанию
 `SERVICE_CALL_LOG_RETENTION_DAYS=0`, то есть записи не удаляются по времени;
-положительное число явно включает очистку старых service rows.
+IaC рендерит это из `rp_stack_gateway_service_call_log_retention_days`, а
+положительное host-specific значение из `/etc/ansible/local-overrides.yml`
+явно включает очистку старых service rows.
 
 ## Код
 
