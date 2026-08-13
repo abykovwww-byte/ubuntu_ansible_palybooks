@@ -175,14 +175,19 @@ in-place проекций, а `turn_phase_annotations` — идемпотент�
 и raw provider response служебной модели; второй журнал completions не создаётся.
 
 Все записи изолированы по `state_campaign_id` и `request_id`. Gateway разрешает
-`party_id` и опциональный `branch_id` через существующую owner/admin policy.
-Showroom visitor cookie и `run_id` не дают доступа к trace API. Аннотация
+`party_id` и опциональный `branch_id` только после admin-gate; обычный владелец
+партии, Showroom visitor cookie и `run_id` не дают доступа к trace API. Это не
+позволяет участнику training-сценария прочитать server-only
+`AUTHORITATIVE_OUTCOME`, scoring и assessment policy из exact prompt. Аннотация
 зеркалит безопасные метаданные в `audit_events`, но не меняет state, prompt,
 scoring или модельный маршрут.
 
 По умолчанию диагностические данные не истекают: новые trace-таблицы не имеют
 TTL, а `SERVICE_CALL_LOG_RETENTION_DAYS=0` означает unlimited. Положительное
-значение включает явную очистку старых service rows. Это увеличивает privacy и
+значение управляется IaC-переменной
+`rp_stack_gateway_service_call_log_retention_days` (host-specific override — в
+`/etc/ansible/local-overrides.yml`) и включает явную очистку старых service rows.
+Это увеличивает privacy и
 storage impact: exact prompt/response могут содержать нарратив пользователя,
 поэтому входят в Gateway backup scope, не экспортируются в dataset автоматически
 и должны редактировать вероятные ключи, bearer tokens, cookies и passwords на

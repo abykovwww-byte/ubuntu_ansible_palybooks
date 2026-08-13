@@ -91,10 +91,12 @@ additive добавлены `request_id`, `party_turn`, `provider`, `model`, `at
 копия редактирует секреты, не изменяя фактический payload, отправленный provider.
 
 Оба источника связывает request-centric read model Gateway. Он доступен только
-владельцу партии или admin через Light GUI, не отдаётся Showroom и никогда не
-участвует в выборе модели, fallback policy, prompt assembly или state commit.
-Retention по умолчанию unlimited: `SERVICE_CALL_LOG_RETENTION_DAYS=0`;
-положительное значение явно включает очистку service log.
+admin/operator через Light GUI, не отдаётся обычному владельцу партии или
+Showroom и никогда не участвует в выборе модели, fallback policy, prompt
+assembly или state commit. Retention по умолчанию unlimited:
+`SERVICE_CALL_LOG_RETENTION_DAYS=0`; IaC рендерит его из
+`rp_stack_gateway_service_call_log_retention_days`, а положительное значение из
+`/etc/ansible/local-overrides.yml` явно включает очистку service log.
 
 ## Локальная Gemma
 

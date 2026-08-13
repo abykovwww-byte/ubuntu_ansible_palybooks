@@ -23,9 +23,11 @@ Relationship pressure, deterministic attribution и упрощённый RP-ко
 live-проверка всегда фиксируются раздельно.
 Request-centric Turn Trace Workbench описан в
 [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md):
-это owner-scoped диагностика Light GUI без доступа из Showroom. Она читает
-фактическую revision/version и фазы RP core, но не является runtime authority,
-readiness oracle или зависимостью реализации Decision 026.
+это admin/operator-only диагностика Light GUI без доступа для обычного владельца
+партии или Showroom. Такая граница не раскрывает участнику server-only training
+policy из exact prompt. Workbench читает фактическую revision/version и фазы RP
+core, но не является runtime authority, readiness oracle или зависимостью
+реализации Decision 026.
 
 ## Главное за минуту
 

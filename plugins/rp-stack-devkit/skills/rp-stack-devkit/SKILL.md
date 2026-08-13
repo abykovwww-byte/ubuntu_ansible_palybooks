@@ -65,9 +65,12 @@ Keep the three evidence layers distinct:
 - production-endurance: a long live party and `causal_probe` through “scene
   accounts for the effect”; only this layer can establish `держится`.
 
-Before deploying `service_call_log` against live data, stop and obtain the
-user's decision on retention and redaction depth. Do not infer approval from a
-green PR, a configured default, or an earlier environment setting.
+Before deploying a revision that introduces or materially expands exact
+diagnostic prompt/response capture (`service_call_log`, `turn_trace_events`), or
+changes retention/redaction, stop and obtain the user's decision on retention
+and redaction depth. An accepted ADR for that exact revision satisfies the gate;
+do not infer approval from a green PR, a configured default, or an earlier
+environment setting.
 
 ## Safe operations
 

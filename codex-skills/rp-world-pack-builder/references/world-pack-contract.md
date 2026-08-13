@@ -107,6 +107,13 @@ must not expose axis values, band labels, or active events.
 Plot tells are invented by the narrator and must not be authored as model
 fields.
 
+At least one positive event must represent a concrete voluntary-help act and
+declare `"resolves": ["favour"]`. Gateway closes a due favour only when that
+marked event is extracted verbatim from the committed narrator scene for the
+same character and turn. Do not mark generic positive causes (`trust_gained`,
+`shared_risk`, an unrelated `kept_promise`): they may change relationship
+pressure but do not prove that the specific favour was delivered.
+
 The validator enforces these authoring constraints:
 
 - every `character_weights` key exists in `state-seed.json` `characters`;
@@ -118,6 +125,7 @@ The validator enforces these authoring constraints:
   `min`/`max`;
 - event `weight` is in `[-30, 15]`, and `decay_turns` is `null` or a positive
   integer;
+- at least one event with positive `weight` declares `resolves: ["favour"]`;
 - `plot.discovery_chance_per_turn` is in `[0, 1]`;
 - every boundary clock (`crack`, `ultimatum`, `plot`, `favour`, `strike`) is a
   positive integer;

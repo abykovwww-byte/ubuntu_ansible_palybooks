@@ -26,7 +26,7 @@ Light GUI — основной интерфейс владельца парти�
 - сценарно-зависимое редактирование персонажей вручную и генерация служебной моделью: в `rp` обычная форма показывает только имя, статус, локацию и текущую цель, не изменяя скрытые расширенные поля; в `training` сохраняется полный редактор;
 - выбор party-scoped BYOK-ключа;
 - GM preview/apply/discard, state и rollback; отдельной RP-формы проверки нет;
-- Prompt Inspector, реальный размер последнего prompt, память и lore cards; для `rp` панель памяти отдельно показывает living story snapshot, его revision и покрытие, а для `training` этого UI нет;
+- Prompt Inspector, реальный размер последнего prompt, память и lore cards; для `rp` панель памяти отдельно показывает living story snapshot, его revision и покрытие, а начиная с RP revision 2 позволяет подготовить типизированное исправление активной list-записи со следующим ходом; для `training` этого UI нет;
 - request-centric Turn Trace Workbench с main/background lanes, narrator/service attempts, state mutation diff и аннотациями;
 - checkpoints, branches и история LLM-autotest;
 - 👍/👎 для полной пары «реплика игрока → ответ модели»;
@@ -34,13 +34,20 @@ Light GUI — основной интерфейс владельца парти�
 
 Light GUI не вызывает provider API напрямую. Даже если ключ введён пользователем, он сохраняется Gateway для конкретной партии и не возвращается в браузер целиком.
 
+Обычный `POST /api/parties/{party_id}/messages` сохраняет прежний контракт и
+дополнительно принимает необязательный `story_memory_corrections[]` только для RP
+revision 2+: `{field, fact_id, action: retract|replace, replacement_text?}`.
+Gateway отклоняет неизвестную или уже неактивную цель до provider/state/turn;
+authority и provenance не являются полями публичного payload.
+
 При создании мира ручное поле ограничено 6000 символами. Для `.md` действует отдельный предел: 1 МиБ на клиенте и 200 000 символов в Gateway. Такой файл становится стабильным world system prompt, поэтому для очень крупного мира пользователь должен выбрать narrator model с достаточным context window.
 
 ### Turn Trace Workbench
 
-Workbench доступен в Light GUI владельцу партии и администратору через
-существующую Gateway session/party access policy. Ветка выбирается явным
-`branch_id`; Gateway сам разрешает его в изолированный `state_campaign_id`.
+Workbench доступен в Light GUI только пользователю с существующей ролью Gateway
+`admin` (оператору). Обычный владелец партии не получает trace API. Ветка
+выбирается явным `branch_id`; Gateway сам разрешает его в изолированный
+`state_campaign_id`.
 
 Замороженный API:
 
@@ -53,8 +60,8 @@ POST /api/parties/{party_id}/turn-traces/{request_id}/annotations?branch_id
      {"annotation_id":"...","phase_key":"...","body":"..."}
 ```
 
-Первые два endpoint возвращают разрешённые партии и ветки для автономной
-загрузки страницы, включая admin-доступ к чужим партиям. Список возвращает
+Первые два endpoint возвращают партии и ветки для административной загрузки
+страницы. Список возвращает
 bounded summaries и непрозрачный cursor; тяжёлые prompt, response и
 before/after загружаются detail-запросом. Экран показывает только реально
 исполненные фазы, отличает main/background работу, repair/fallback и request без
@@ -63,8 +70,9 @@ legacy `rp_contract_version`; неизвестная фаза отображае
 Единственная мутация из Workbench — идемпотентная аннотация существующей фазы;
 она попадает в audit, но не меняет игру.
 
-Showroom не получает страницу, ссылку или trace endpoint: visitor cookie и
-`run_id` не дают права на внутренние prompt, ответы моделей или state diff.
+Обычный владелец партии и Showroom не получают страницу, ссылку или trace
+endpoint: пользовательская session, visitor cookie и `run_id` не дают права на
+внутренние prompt, ответы моделей, state diff или server-only training policy.
 
 ## Showroom
 
@@ -168,7 +176,7 @@ Party-scoped `POST /api/parties/{party_id}/checks` также сохранён �
 | Админ-инструменты | Да, по роли | Нет | Нет |
 | Provider key | Server или party BYOK | Модель сценария | Заголовок/настройки совместимости |
 | Рекомендуемый путь | Да | Да | Только compatibility |
-| Внутренняя turn trace | Владелец/admin | Нет | Нет |
+| Внутренняя turn trace | Только admin/operator | Нет | Нет |
 
 ## Исходники
 

@@ -132,6 +132,11 @@ World-pack requirements:
   In v2, declare every state character in `characters.<id>.aliases`, keep
   normalized alias forms unique across characters, declare positive clocks for
   every boundary event, and include a monotonic linear `trust_mapping`.
+  Mark at least one concrete positive authored event that unambiguously depicts
+  voluntary help with `"resolves": ["favour"]`. Do not put this marker on a
+  generic positive event such as trust gain, shared risk, or an unrelated kept
+  promise: due time alone and positive weight are not proof that the favour was
+  delivered.
   Extraction returns `character_mention`, never `character_id`; evidence must
   be a verbatim normalized substring of the current player+narrative turn.
   Do not expose axis values, band labels, or active events in pack-authored
@@ -200,6 +205,7 @@ Pop-Location
   positive; `trust_mapping` is monotonic; bands do not
   overlap and each defines exactly one of `min`/`max`; event weights are in
   `[-30, 15]`; `decay_turns` is `null` or a positive integer;
+  at least one positive concrete-help event declares `resolves: ["favour"]`;
   `plot.discovery_chance_per_turn` is in `[0, 1]`; and the first slice declares
   only the `loyalty` axis.
 - Run relevant focused tests when Gateway/app code or IaC behavior changed.

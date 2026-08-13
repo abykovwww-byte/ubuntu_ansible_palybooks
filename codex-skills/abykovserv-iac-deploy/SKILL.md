@@ -87,9 +87,12 @@ Do not collapse the evidence layers:
 - production-endurance uses a long live party and `causal_probe` through later
   scene consequences; only it can establish `держится`.
 
-If the revision introduces `service_call_log`, stop after merge and before any
-apply that would record live data. Obtain the user's explicit decision on log
-retention and redaction depth even when CI is green or a default is configured.
+If the revision introduces or materially expands exact diagnostic
+prompt/response capture (`service_call_log`, `turn_trace_events`), or changes its
+retention or redaction, stop after merge and before any apply that would record
+live data. Obtain the user's explicit decision on retention and redaction depth.
+An accepted ADR for that exact revision satisfies the gate; green CI or a
+configured default does not.
 
 ## When More Detail Is Needed
 
@@ -113,8 +116,9 @@ published from `docs/wiki/README.md`.
    leave merge-ready work on the branch.
 8. Verify access with
    `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 hostname`.
-9. If the revision introduces `service_call_log`, obtain the user's explicit
-   retention and redaction decision before proceeding to apply.
+9. If the revision introduces or materially expands exact diagnostic
+   prompt/response capture, or changes retention/redaction, obtain the user's
+   explicit decision before proceeding to apply.
 10. Stop at `merged` and ask the user to run
    `sudo systemctl start ansible-local-apply.service` interactively.
 11. After the user confirms apply completion, inspect status/journal and verify
