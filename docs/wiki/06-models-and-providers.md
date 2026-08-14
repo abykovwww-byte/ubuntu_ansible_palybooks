@@ -70,6 +70,7 @@ Fallback не должен перескочить на другого provider �
 | Journal summary | Не вызывается текущим runtime; сохранён только legacy storage/no-op job |
 | Long-term memory chapter | Глобальная service model |
 | RP living story-memory update | Глобальная service model, только `scenario_type=rp` |
+| RP relationship extraction | Глобальная service model, только `scenario_type=rp` |
 | LLM world-state draft | Глобальная service model |
 | Генерация/дополнение NPC | Глобальная service model |
 | Intent parsing и context estimation | Без LLM |
@@ -89,6 +90,14 @@ additive добавлены `request_id`, `party_turn`, `provider`, `model`, `at
 `latency_ms`, `http_status`, `usage_json`, `error_json` и
 `trace_schema_version`; legacy-строки с `null` остаются читаемыми. Диагностическая
 копия редактирует секреты, не изменяя фактический payload, отправленный provider.
+Статус завершённого service-вызова подтверждает транспортный ответ модели, но не
+доменное применение результата: для relationship extraction его нужно сверять с
+соседним audit `relationship_extraction_applied` или
+`relationship_extraction_rejected` и последующими проекциями.
+Для локальной Gemma Gateway дополнительно передаёт provider-level JSON Schema с
+единственным корневым ключом `events` и точными полями события. Это предотвращает
+неподдерживаемые alias-поля на этапе генерации; семантические проверки evidence и
+атрибуции по-прежнему выполняет Gateway.
 
 Оба источника связывает request-centric read model Gateway. Он доступен только
 admin/operator через Light GUI, не отдаётся обычному владельцу партии или

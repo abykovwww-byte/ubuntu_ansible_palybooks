@@ -223,8 +223,13 @@ header/question/no-link marker сначала чинятся без LLM, soft fi
 
 После RP-хода очередь дополнительно получает `relationship_extraction`,
 привязанный к `request_id` сохранённого хода. Служебная модель возвращает
-только `character_mention`, authored `event_id` и evidence. Gateway проверяет
-evidence как точную нормализованную подстроку текущего player+narrative текста,
+ровно ключи `character_mention`, authored `event_id` и `evidence`; alias
+`evidence_quote` не принимается. Evidence должна быть одним самодостаточным
+verbatim-фрагментом, который явно показывает завершённое взаимодействие игрока с
+названным персонажем, а не только присутствие, обычное действие или опасность
+персонажа; `shared_risk` требует общего конкретного риска для обоих в этом же
+фрагменте. Gateway проверяет evidence как точную нормализованную подстроку текущего
+player+narrative текста,
 разрешает mention по alias-таблице WorldPack и только затем получает внутренний
 `character_id`. Неоднозначное, неразрешимое или не verbatim упоминание получает
 отдельный terminal audit code без retry. Веса, затухание, полосы, раны, роли,
