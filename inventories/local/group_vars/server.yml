@@ -146,7 +146,7 @@ tovar_ai_external_browser_timeout_seconds: 90
 
 use_framework_enabled: true
 use_framework_repo_url: https://github.com/abykovwww-byte/Unacceptable-security-event-USE-Framework.git
-use_framework_repo_version: 5e82b8389f2331e7b8383e8728cc7c215fb35b43
+use_framework_repo_version: 3830d1d9af28522a19e66eb9d6d675a3da1193ca
 # Required for this private repository; set only in /etc/ansible/local-overrides.yml.
 use_framework_github_token: ""
 use_framework_project_dir: "{{ app_deploy_base_dir }}/use-framework"
