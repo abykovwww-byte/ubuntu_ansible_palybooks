@@ -48,7 +48,7 @@ sequenceDiagram
     Runtime-->>Rules: WorldPack-authored patch operations
     Rules-->>API: Outcome + StatePatch
     API->>Runtime: active sanitized turn contract
-    API->>LLM: bounded prompt + outcome + active contract
+    API->>LLM: bounded prompt + outcome + active contract + narrator settings
     LLM-->>API: narration + optional artifact fields
     alt RP core v2
         API->>Val: absolute WorldPack rules + player agency
@@ -144,7 +144,7 @@ sequenceDiagram
 
 ### 2. Контекст партии
 
-Gateway проверяет owner, загружает `Party`, создаёт party-specific `StateStore` и строит runtime settings из выбранного model profile, scenario type и party BYOK.
+Gateway проверяет owner, загружает `Party`, создаёт party-specific `StateStore` и строит runtime settings из выбранного model profile, scenario type и party BYOK. Сохранённые `narrator_settings` валидируются по возможностям этого profile и добавляются только в narrator request; «Авто» не создаёт поле provider payload.
 
 В prompt попадают только разрешённые слои: универсальные правила режима, world
 prompts, memory chapters, budgeted raw history, lore cards, релевантные NPC,
@@ -184,6 +184,11 @@ Narrator получает уже рассчитанный результат. Е
 - управлять действиями, убеждениями или эмоциями персонажа игрока.
 
 Gateway пробует primary model и разрешённые fallback models выбранного provider.
+Ручные параметры привязаны к primary model: Gateway требует совместимый
+OpenRouter endpoint, исключает reasoning-текст из ответа и удаляет model-specific
+`reasoning`, `temperature`, `top_p` и `max_tokens` перед несовместимым fallback.
+Явные legacy-поля `temperature` и `max_tokens` конкретного start/message request
+имеют приоритет над сохранёнными значениями Party.
 
 ### 5. Валидация и repair
 

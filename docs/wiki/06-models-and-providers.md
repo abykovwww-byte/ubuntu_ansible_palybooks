@@ -34,20 +34,49 @@ Model profile хранит provider, base URL, model ID, параметры, con
 ```mermaid
 flowchart LR
     P["Party model profile"] --> R["Runtime settings"]
+    N["Party narrator settings"] --> R
     K1["Server-managed key"] --> R
     K2["Party-scoped BYOK"] --> R
-    R --> D{"OpenRouter DeepSeek V4 Flash?"}
-    D -->|"да"| O["provider.sort=throughput<br/>без форсирования reasoning"]
-    D -->|"нет"| A["Primary model"]
+    R --> D{"Поддерживаемая OpenRouter model?"}
+    D -->|"да, ручные поля"| O["require_parameters=true<br/>DeepSeek: sort=throughput"]
+    D -->|"нет или Auto"| A["Primary model defaults"]
     O --> A
-    A -->|"wall-clock timeout / HTTP"| F["Allowed fallback models"]
+    A -->|"wall-clock timeout / HTTP"| X["Удалить model-specific controls"]
+    X --> F["Allowed fallback models"]
 ```
 
 Fallback не должен перескочить на другого provider с другим ключом. Ошибка и выбранная попытка попадают в audit/turn metadata.
 
-Для `deepseek/deepseek-v4-flash` через OpenRouter Gateway не форсирует уровень reasoning: доступные уровни и defaults принадлежат текущему provider endpoint. Ограничение `max_tokens` автоматически не добавляется. Provider routing сортируется по `throughput`, поэтому выбор endpoint оптимизируется по скорости генерации, а не по стандартному price-first порядку OpenRouter. При `403` (включая model-specific moderation), `410` и временных provider-ошибках партия пробует настроенный fallback того же провайдера; IaC default для OpenRouter — `openrouter/auto`.
+### Ручные параметры narrator в Light GUI
 
-`MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory; на DeepSeek V4 Flash сохраняется та же throughput-маршрутизация без принудительного reasoning. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
+На 15 августа 2026 года Gateway разрешает ручные параметры только для трёх
+точных OpenRouter model ID. В интерфейсе «Авто» всегда означает отсутствие поля в
+provider payload.
+
+| Model ID | Глубина рассуждений | Temperature | Top P | Бюджет ответа |
+|---|---|---|---|---|
+| `openai/gpt-5.6-luna` | выкл., low, medium, high, xhigh, max; default medium | нет | нет | Auto, 1024–16384 из списка |
+| `openai/gpt-5.6-luna-pro` | выкл., low, medium, high, xhigh, max; default medium | нет | нет | Auto, 1024–16384 из списка |
+| `deepseek/deepseek-v4-flash` | выкл., high, xhigh; default high | `0..2` | `0..1` | Auto, 1024–16384 из списка |
+
+`max` здесь — уровень reasoning для Luna, а не отдельный суффикс model ID.
+Выбранный уровень передаётся как OpenRouter `reasoning`; при включённом reasoning
+Gateway добавляет `exclude=true`, поэтому внутренний reasoning не попадает в
+видимую реплику. `none` выключает reasoning. Бюджет — общий `max_tokens` для
+рассуждения и итогового текста. Для DeepSeek рекомендуется менять temperature или
+Top P по отдельности, хотя Gateway сознательно не запрещает их совместное
+использование.
+
+При любом непустом наборе ручных полей Gateway добавляет OpenRouter
+`provider.require_parameters=true`, чтобы endpoint поддерживал переданные
+параметры. Для `deepseek/deepseek-v4-flash` сохраняется
+`provider.sort=throughput`: endpoint выбирается по скорости, а не стандартному
+price-first порядку. При `403` (включая model-specific moderation), `410` и
+временных provider-ошибках партия пробует настроенный fallback того же провайдера;
+IaC default для OpenRouter — `openrouter/auto`. Перед fallback ручные параметры
+primary model удаляются, поэтому несовместимый маршрут не получает их случайно.
+
+`MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory; сохранённые параметры primary narrator и DeepSeek throughput policy остаются теми же. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
 
 ## Глобальная служебная модель
 
