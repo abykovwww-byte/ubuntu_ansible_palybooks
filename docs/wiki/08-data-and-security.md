@@ -29,7 +29,7 @@ SQLite используется несколькими service stores, но scop
 | Группа | Примеры |
 |---|---|
 | Identity | `users`, `sessions`, `global_settings` |
-| Party registry | `worldpacks`, `player_characters`, `model_profiles`, `parties` |
+| Party registry | `worldpacks`, `player_characters`, `model_profiles`, `parties` с `narrator_settings_json` |
 | State/history | `campaigns`, `state_versions`, `turns`, `checks`, `state_patches`, `audit_events` |
 | Memory | `rp_story_memory_snapshots`, `memory_chapters`, legacy `memory_summaries`, `journal_entries`, `lore_cards`, `service_jobs` |
 | Reliability | `turn_requests`, `memory_checkpoints`, `party_branches`, `autotest_runs` |
@@ -46,6 +46,7 @@ flowchart TB
     U["Gateway User"] --> PC["Player Characters"]
     U --> P["Parties"]
     P --> K["Party BYOK"]
+    P --> NS["Narrator settings"]
     P --> C["state_campaign_id"]
     C --> T["Turns / checks / chapters / legacy journal"]
     C --> RPS["RP-only story-memory snapshots"]
@@ -58,6 +59,12 @@ flowchart TB
 ```
 
 Обычный API получает owner из Gateway session. `PartyStore` фильтрует parties и characters по `owner_user_id`; `StateStore` — по `state_campaign_id`. Admin role даёт административные операции, но сама игра всё равно адресуется конкретной Party.
+
+`narrator_settings_json` — небольшой не-секретный JSON-объект в строке Party.
+Gateway хранит только разрешённые `reasoning_effort`, `temperature`, `top_p` и
+`max_tokens`, повторно валидирует их при сохранении и не копирует в глобальные
+service settings. Миграция существующей базы добавляет поле с `{}` без изменения
+выбранной модели или старых партий. API keys в этом JSON не хранятся.
 
 Showroom использует отдельный visitor token. Run доступен только cookie-владельцу; raw party ID не возвращается клиенту.
 
