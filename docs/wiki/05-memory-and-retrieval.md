@@ -18,10 +18,13 @@ recent turns, memory chapters, relevant characters, active state и выборо
 retrieval, сохраняя полный transcript в durable store.
 Для длинной RP-истории revision 6 дополнительно удаляет из provider prompt
 старейшие полные пары `user/assistant`, пока суммарный текст не уложится
-в 50% полного raw transcript. Обязательные system-блоки и текущий
-ввод игрока имеют приоритет и не режутся ради процента. Live-canary на 168-ходовой
-истории дал 129654 символа prompt при 260384 символах raw transcript — 49,79%,
-при этом source history не изменилась.
+в 50% полного raw transcript. Percentage-only trimming останавливается перед
+последней полной парой: обязательные system-блоки, эта пара и текущий ввод игрока
+не режутся только ради процента. Если такой минимальный continuity tail уже больше
+50%, процентная граница для этого хода недостижима, а жёстким остаётся реальный
+provider input token budget. Live-canary на 168-ходовой истории дал 129654 символа
+prompt при 260384 символах raw transcript — 49,79%, при этом source history не
+изменилась; это доказательство long-party compaction, а не данного edge case.
 
 ## Слои памяти
 
