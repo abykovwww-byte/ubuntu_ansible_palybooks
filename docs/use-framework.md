@@ -2,7 +2,7 @@
 
 ## Состояние доставки
 
-Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `4fe7e61eff11d2021f3b3000bc1a679d1ed67ba5`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
+Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `dd6750914f723a856473feee58124c97983657d9`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
 
 Данные хранятся отдельно от checkout:
 
@@ -13,11 +13,12 @@
 | `/srv/app-data/use-framework/import/ns1-assets.xlsx` | приватная серверная копия сохранённого реестра НС1; не хранится в Git |
 | `/srv/app-data/use-framework/import/ns1-ad-accounts.json` | приватный нормализованный AD-срез 4 учётных записей; не хранится в Git |
 | `/srv/app-data/use-framework/import/ns1-ad-computers.json` | приватный нормализованный AD-срез 14 компьютеров; не хранится в Git |
+| `/srv/app-data/use-framework/operational-registry` | immutable operational registry snapshots и атомарный current pointer; item-level данные не хранятся в Git |
 | `/srv/backups/use-framework` | архивы backup/restore |
 
 GitHub-репозиторий закрытый. До первого apply значение `use_framework_github_token` должно быть задано только в `/etc/ansible/local-overrides.yml`. Токен в Git и в этот документ не добавляется. Для этого app включён изолированный режим `repo_version_is_commit`: clone выполняется без checkout, затем роль делает fetch/reset на полный закреплённый SHA. Поведение остальных branch/tag-приложений не меняется.
 
-Ansible preflight требует приватный `ns1-assets.xlsx` до пересборки контейнера. Application entry point импортирует его через минимальный production mapping: сохраняет только нормализованные host/EDR-поля и переносит прежний `example.test` snapshot в quarantine. Если приватный источник отсутствует, ложная тестовая фикстура не обслуживается. AD JSON импортируются отдельно статическими production-профилями с `preserve_free_fields: false`; они остаются inventory-only до появления точного подтверждённого binding. Токен операций записи генерируется локально на сервере в `/etc/ansible/use-framework-api-token`, передаётся только через runtime `.env` и не хранится в Git.
+Ansible preflight требует приватный `ns1-assets.xlsx` до пересборки контейнера. Application entry point импортирует его через минимальный production mapping: сохраняет только нормализованные host/EDR-поля и переносит прежний `example.test` snapshot в quarantine. Если приватный источник отсутствует, ложная тестовая фикстура не обслуживается. AD JSON импортируются отдельно статическими production-профилями с `preserve_free_fields: false`; они остаются inventory-only до появления точного подтверждённого binding. Operational registry импортируется отдельно через authenticated preview/commit API, сохраняется только в private runtime и не меняет канонический граф. Токен операций записи генерируется локально на сервере в `/etc/ansible/use-framework-api-token`, передаётся только через runtime `.env` и не хранится в Git.
 
 ## Apply владельцем сервера
 
@@ -51,6 +52,8 @@ curl --fail 'http://192.168.1.88:8765/api/graph?event=ns1'
 curl --fail 'http://192.168.1.88:8765/api/graph?event=ns1&view=scenario'
 curl --fail 'http://192.168.1.88:8765/api/instances?type=host'
 curl --fail 'http://192.168.1.88:8765/api/snapshots'
+curl --fail 'http://192.168.1.88:8765/api/registry/entities'
+curl --fail 'http://192.168.1.88:8765/api/registry/snapshots'
 curl --fail 'http://192.168.1.88:8765/api/quality'
 docker exec use-framework nsgraph --root /data/canonical validate
 docker exec use-framework /app/docker/backup.sh
@@ -62,6 +65,6 @@ docker exec use-framework /app/docker/backup.sh
 
 ## Обновление и rollback
 
-Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. Revision `4fe7e61eff11d2021f3b3000bc1a679d1ed67ba5` сохраняет единый UI-реестр из `e7a1d1c5ee90d714ec6863aacc9206a4d7d679f7` и добавляет два обезличенных compatibility selector по точным парам `Контур + Роль` private runtime. Исходные synthetic selectors сохраняются; FQDN, IP, NetBox/EDR IDs и персональные данные в Git не переносятся. Fail-closed migration `private-host-role-bindings-v1` меняет только `model/landscape/nodes/hosts.yaml`, принимает точный predecessor digest, создаёт backup/manifest и отказывается перезаписывать неизвестный operator drift. При текущем private snapshot приёмка ожидает `46 bound / 36 unbound`, по одному экземпляру у `host_ts1c_bc` и `host_rdbc`, без изменений остальных привязок.
+Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. Revision `dd6750914f723a856473feee58124c97983657d9` сохраняет ранее принятые compatibility selectors и добавляет изолированный operational registry: immutable private snapshots, authenticated preview/commit API, матричный GUI для хостов, пользовательских ноутбуков и Identity, а также backup/restore этого private каталога. Реальные host/Identity observations и персональные данные в Git не переносятся. EDR health вычисляется как `authorized && connected=true && age(last_seen)<14d`; ровно 14 суток уже не OK. Successor preflight миграции запускается перед общим hygiene guard только для точного известного пятифайлового cohort и ожидаемого target SHA; partial, unknown и future drift остаются fail-closed. `model/**` этим revision не меняется.
 
 Fail-closed миграции принимают только известные SHA-256 persistent-модели, сначала валидируют временную канонику и сохраняют первоначальные originals в `/data/canonical-migrations/<migration-id>/`; последующие принятые upgrade сохраняют существующий backup неизменным, а неизвестное локальное расхождение останавливает запуск без перезаписи. Bootstrap вычисляет `captured_at` по серверному XLSX и сохраняет snapshot history, но current API выбирает только latest snapshot каждого source. Rollback кода — вернуть предыдущий SHA и повторить apply; rollback данных — остановить сервис, выполнить `/app/docker/restore.sh` для архива соответствующей revision и снова запустить apply. Производный SQLite при старте пересобирается из восстановленного YAML.
