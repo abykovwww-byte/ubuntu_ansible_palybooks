@@ -4,12 +4,13 @@
 
 ## RP contract revision
 
-`PartySummary` совместимо добавляет целое поле `rp_contract_revision` (`0..6`).
-Обычная новая RP-партия получает не больше наблюдённой runtime-ревизии. Запрос
-создания manual branch или autotest может передать candidate-ревизию; она хранится
-только у ветки и не меняет source party. Существующие поля и endpoint сохраняются.
-Админская форма LLM-vs-LLM автотеста принимает необязательную candidate revision
-`0..6`; пустое поле сохраняет revision исходной партии.
+`PartySummary` совместимо добавляет целое поле `rp_contract_revision` (`0..7`).
+Gateway поддерживает candidate `7`, но observed revision остаётся `6`: обычная
+новая RP-партия получает `min(WorldPack declared, observed)`. Запрос создания
+manual branch или autotest может явно передать candidate-ревизию в диапазоне
+`0..7`; она хранится только у ветки и не меняет source party. Существующие поля и
+endpoint сохраняются. Пустое поле в админской форме сохраняет revision исходной
+партии. Existing party не повышается автоматически при изменении observed.
 
 ## Light GUI
 

@@ -10,6 +10,18 @@
 candidate-ревизия применяется только при выполнении этой ветки. Raw turns source
 party и branch остаются раздельными и не переписываются при сборке prompt.
 
+Candidate revision `7` расширяет допустимый revision range, но не меняет
+изоляцию. Explicit observed остаётся `6`, existing party не получает новый
+revision автоматически, а candidate выполняется только в отдельной
+checkpoint/autotest branch.
+
+DC1 не добавляет таблиц и не переписывает raw turns. Bounded force-refresh может
+append-only сохранить новый `rp_story_memory_snapshots` как maintenance side
+effect, но конечный `PromptBudgetExceeded` не создаёт player turn/state version
+или relationship mutation. `audit_events` и `turn_requests` дают оператору
+sanitized status; Prompt Inspector при overflow возвращает пустые
+`messages/blocks` и не раскрывает world/player prompt text или secrets.
+
 ## Где находятся данные
 
 ```text
@@ -226,6 +238,7 @@ Backup содержит state, историю, диагностическую т
 - [TrainingArtifactService](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
+- [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Compose networks](../../roles/apps/templates/rp-stack.compose.yml.j2)
 
 ### Relationship projection repair
