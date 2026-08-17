@@ -26,6 +26,38 @@ provider input token budget. Live-canary на 168-ходовой истории 
 prompt при 260384 символах raw transcript — 49,79%, при этом source history не
 изменилась; это доказательство long-party compaction, а не данного edge case.
 
+## Candidate revision 7: полный uncovered tail
+
+DC1 из [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
+меняет continuity boundary только для RP candidate revision `7`:
+
+```text
+coverage = effective_rp_story_memory.to_turn_id or 0
+raw_tail = turns_for_memory(after_turn_id=coverage)
+```
+
+Каждая complete non-excluded raw-пара после coverage входит в narrator request
+дословно и не удаляется ради мягкой 50% character-цели. Chapters не двигают
+boundary, retrieval ограничен ходами `<= coverage`, а
+`UNCOMPACTED_ARCHIVE_FALLBACK` для этого tail не создаётся.
+
+```mermaid
+flowchart LR
+    S["Newest valid RP story snapshot\ncoverage=N"] --> T["All complete raw pairs\nafter N"]
+    T --> B{"Hard provider budget"}
+    B -->|"fits"| P["Narrator prompt"]
+    B -->|"overflow"| F["Bounded force refresh"]
+    F --> R["Re-read coverage and rebuild"]
+    R --> B
+    B -->|"still cannot fit"| X["Sanitized failure\nno player mutation"]
+```
+
+Prompt Inspector и context diagnostics показывают effective/prompt coverage,
+pending turns/tokens, configured threshold, hard-budget status и последний
+force-refresh result; Inspector дополнительно перечисляет included raw turn IDs.
+World/player prompt text в overflow payload не возвращается. Candidate support и
+уровень `каркас` не означают observed/deployed runtime: observed остаётся `6`.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.
@@ -199,3 +231,4 @@ Embedding endpoint, vector store и cross-party semantic index не исполь
 - [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
 - [RP living-memory ADR](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md)
 - [Long-context ADR](../../roles/apps/files/rp-stack/docs/decisions/009-long-context-memory-policy.md)
+- [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)

@@ -11,6 +11,8 @@
   наблюдаемое исполнение события;
 - revision 5 фиксирует consumer-or-retire для активных state paths;
 - revision 6 удерживает raw history неизменной и собирает выборочный prompt.
+- candidate revision 7 / DC1 защищает полный raw tail после effective
+  story-memory coverage и fail-closed обрабатывает hard overflow.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -20,6 +22,46 @@
 active до evidence-checked relationship extraction. Статус `resolved/delivered`
 ставится лишь после положительной причины того же персонажа из реально записанной
 сцены. Оба relationship-блока исключаются из публичного Prompt Inspector.
+
+## Candidate revision 7: DC1
+
+[Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
+применяется только к RP candidate revision `7`; observed runtime остаётся `6`.
+Gateway берёт newest valid effective story-memory snapshot и включает каждую
+non-excluded raw-пару новее его coverage. Перед narrator call snapshot читается
+повторно; advance, rollback или исчезновение snapshot требуют полной пересборки
+и новой сверки. После трёх нестабильных циклов запрос завершается до provider.
+
+```mermaid
+sequenceDiagram
+    participant API as Gateway
+    participant Store as StateStore
+    participant Mem as RP story memory
+    participant LLM as Narrator
+
+    API->>Store: effective snapshot + all turns after coverage
+    API->>API: assemble protected raw tail
+    alt required prompt exceeds hard input budget
+        API->>Mem: bounded catch_up(force=true)
+        Mem-->>API: conditional snapshot / no plan / failure
+        API->>Store: re-read coverage and rebuild full tail
+    end
+    alt rebuilt prompt fits
+        API->>LLM: first narrator call; existing repair policy unchanged
+    else still over budget
+        API-->>API: sanitized PromptBudgetExceeded before player mutation
+    end
+```
+
+Успешный maintenance snapshot может сохраниться даже при конечном overflow, но
+player turn, state version и relationship projections не меняются. Это local
+candidate contract уровня `каркас`; merge, apply и isolated live-store proof ещё
+не подтверждены.
+
+Чтобы сохранить эту границу, revision-7 relationship pressure до provider читает
+только уже сохранённые derived rows и не создаёт отсутствующий trust seed. После
+успешного commit штатный relationship advance материализует seed; revisions
+`0..6` сохраняют прежнее поведение.
 
 ## Обычный ход
 
@@ -364,6 +406,7 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
+- [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 
 ### Legacy relationship-event deadlines
 

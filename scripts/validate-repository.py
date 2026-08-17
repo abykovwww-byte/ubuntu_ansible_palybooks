@@ -219,8 +219,9 @@ def markdown_command_fragments(text: str) -> list[str]:
 
 def validate_environment_contracts(errors: list[str]) -> None:
     inventory = ROOT / "inventories" / "local" / "group_vars" / "server.yml"
+    production_env_template = ROOT / "roles" / "apps" / "templates" / "rp-stack.env.j2"
     env_templates = (
-        ROOT / "roles" / "apps" / "templates" / "rp-stack.env.j2",
+        production_env_template,
         ROOT / "roles" / "apps" / "templates" / "rp-stack.env.example.j2",
     )
     retention_variable = "rp_stack_gateway_service_call_log_retention_days: 0"
@@ -239,6 +240,22 @@ def validate_environment_contracts(errors: list[str]) -> None:
                 errors,
                 f"RP Stack env template does not render service-call log retention: {path.relative_to(ROOT)}",
             )
+
+    observed_revision_variable = "rp_stack_gateway_rp_contract_observed_revision: 6"
+    observed_revision_mapping = (
+        "RP_CONTRACT_OBSERVED_REVISION="
+        "{{ rp_stack_gateway_rp_contract_observed_revision }}"
+    )
+    if (
+        not inventory.is_file()
+        or observed_revision_variable not in inventory.read_text(encoding="utf-8")
+    ):
+        fail(errors, "RP Stack inventory must keep rp-core.v2 revision 6 observed")
+    if (
+        not production_env_template.is_file()
+        or observed_revision_mapping not in production_env_template.read_text(encoding="utf-8")
+    ):
+        fail(errors, "RP Stack production env must render the explicit observed RP revision")
 
     marketplace = Path(".agents/plugins/marketplace.json")
     old_profile = b"C:" + b"\\Users\\" + b"albykov"

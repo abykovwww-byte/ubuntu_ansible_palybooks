@@ -7,13 +7,19 @@
 Актуальный RP WorldPack объявляет максимальную поддержанную версию:
 
 ```json
-"rp_contract": {"schema_version": "rp-core.v2", "revision": 6}
+"rp_contract": {"schema_version": "rp-core.v2", "revision": 7}
 ```
 
 Это capability pack, а не автоматическая активация. Gateway ограничивает обычные
 партии значением `RP_CONTRACT_OBSERVED_REVISION`; candidate revision разрешена
 только изолированной checkpoint/autotest-ветке. `training` и `novel` этот маркер
 не используют.
+
+Candidate maximum `7` не означает observed activation. До отдельного rollout
+`RP_CONTRACT_OBSERVED_REVISION` остаётся `6`; новая обычная RP-партия получает
+`min(declared, observed)`, existing party остаётся pinned, а revision `7`
+исполняется только в явно выбранной checkpoint/autotest branch. PR1 не меняет
+WorldPack content/state contract и не создаёт автоматическую migration.
 
 ## Что такое WorldPack
 
@@ -264,3 +270,4 @@ Gateway сохраняет basename исходного файла и разме�
 - [Training builder skill](../../codex-skills/training-world-pack-builder/SKILL.md)
 - [Training capability ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
 - [WorldPack training runtime ADR](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
+- [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
