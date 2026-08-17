@@ -2,7 +2,7 @@
 
 ## Состояние доставки
 
-Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `e7a1d1c5ee90d714ec6863aacc9206a4d7d679f7`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
+Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `4fe7e61eff11d2021f3b3000bc1a679d1ed67ba5`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
 
 Данные хранятся отдельно от checkout:
 
@@ -62,6 +62,6 @@ docker exec use-framework /app/docker/backup.sh
 
 ## Обновление и rollback
 
-Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. Revision `e7a1d1c5ee90d714ec6863aacc9206a4d7d679f7` меняет только UI инвентаря: `host` и `ad_computer` отображаются одной логической карточкой при однозначном совпадении namespace и первого DNS-label; `bc.ptsecurity.com` остаётся отдельным namespace, коллизии не склеиваются, пустые поля скрыты, а непустой provenance раскрывается по запросу. AD, DNS, NetBox, EDR, collector и owner-поля показываются как отдельные source facets; исходные snapshots, API и каноническая модель не меняются, миграция не требуется. Revision сохраняет risk-based правила доставки из `e4e621903019af855cb0487191afad740470f375` и доказательный канон `caaa67346e456ff1bd042ff3e7cf80d9bf33f53b`: latest-per-source устраняет двойные current instances, production mappings сохраняют ограниченный набор EDR/AD-полей, а неподтверждённые связи остаются gaps.
+Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. Revision `4fe7e61eff11d2021f3b3000bc1a679d1ed67ba5` сохраняет единый UI-реестр из `e7a1d1c5ee90d714ec6863aacc9206a4d7d679f7` и добавляет два обезличенных compatibility selector по точным парам `Контур + Роль` private runtime. Исходные synthetic selectors сохраняются; FQDN, IP, NetBox/EDR IDs и персональные данные в Git не переносятся. Fail-closed migration `private-host-role-bindings-v1` меняет только `model/landscape/nodes/hosts.yaml`, принимает точный predecessor digest, создаёт backup/manifest и отказывается перезаписывать неизвестный operator drift. При текущем private snapshot приёмка ожидает `46 bound / 36 unbound`, по одному экземпляру у `host_ts1c_bc` и `host_rdbc`, без изменений остальных привязок.
 
 Fail-closed миграции принимают только известные SHA-256 persistent-модели, сначала валидируют временную канонику и сохраняют первоначальные originals в `/data/canonical-migrations/<migration-id>/`; последующие принятые upgrade сохраняют существующий backup неизменным, а неизвестное локальное расхождение останавливает запуск без перезаписи. Bootstrap вычисляет `captured_at` по серверному XLSX и сохраняет snapshot history, но current API выбирает только latest snapshot каждого source. Rollback кода — вернуть предыдущий SHA и повторить apply; rollback данных — остановить сервис, выполнить `/app/docker/restore.sh` для архива соответствующей revision и снова запустить apply. Производный SQLite при старте пересобирается из восстановленного YAML.
