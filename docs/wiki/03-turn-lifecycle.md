@@ -165,16 +165,27 @@ flowchart LR
 ```
 
 Для recorded turn значения metadata, trace, Prompt Inspector `source=last` и
-recorded context обязаны совпадать. Current dry-run использует ту же schema для
-собственной assembly и не сравнивается byte-for-byte с предыдущим ходом. Новая
-таблица, колонка, provider field или provider call не добавляются; существующие
-JSON metadata/trace stores остаются transport для diagnostic.
+recorded context обязаны совпадать, даже если ход позднее получил
+`excluded_from_memory=1`: narrative-memory filtering не скрывает content-free
+audit metadata. Current dry-run использует ту же schema для собственной assembly
+и не сравнивается byte-for-byte с предыдущим ходом. Новая таблица, колонка,
+provider field или provider call не добавляются; существующие JSON
+metadata/trace stores остаются transport для diagnostic.
+
+`prompt_assembly` и recorded `prompt_json` описывают initial full narrator
+assembly и transport retries с теми же messages. Compact validation-repair
+строит отдельный prompt и не заменяет эти recorded surfaces; exact repair input
+остаётся в private admin Turn Trace. Проекция доступна как JSON/API поля preview
+и context. Light GUI/shared UI/Showcase не получают отдельный renderer или
+branch selector в этом slice.
 
 Для штатной проверки isolated branch follow-up принимает optional `branch_id` на
 read-only context и prompt-preview endpoint. Он выбирает branch state/runtime
 revision, не меняя normal turn flow и не принимая raw `state_campaign_id`.
-Локальный wiring и четыре focused test готовы, но merge/apply/live proof ещё нет;
-сам wiring не доказывает parity.
+Wiring и четыре focused test merged в PR59 и applied; сам wiring без exact
+isolated-branch live proof не доказывает parity. Narrow regression, что excluded
+turn сохраняет diagnostic, а real emitters не расходятся со stable ID table,
+пока ожидает merge/apply.
 
 Decision 030 имеет смешанный статус. Applied canary
 `autotest_2eb4d5e1a53f` / `branch_ccf0d535a98c` подтвердил exact structural
