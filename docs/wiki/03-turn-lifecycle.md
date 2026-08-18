@@ -13,6 +13,8 @@
 - revision 6 удерживает raw history неизменной и собирает выборочный prompt.
 - candidate revision 7 / DC1 защищает полный raw tail после effective
   story-memory coverage и fail-closed обрабатывает hard overflow.
+- candidate revision 7 / DC2 ограничивает relationship pressure производным
+  pre-scene scope; observed runtime остаётся на revision `6`.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -54,14 +56,64 @@ sequenceDiagram
 ```
 
 Успешный maintenance snapshot может сохраниться даже при конечном overflow, но
-player turn, state version и relationship projections не меняются. Это local
-candidate contract уровня `каркас`; merge, apply и isolated live-store proof ещё
-не подтверждены.
+player turn, state version и relationship projections не меняются. Deployed
+Merchant canary подтвердил на уровне `подключено` полный uncovered tail и
+explicit branch revision `7`: recorded prompt содержал ровно eligible verbatim
+pair после effective coverage, source raw/state hashes не изменились. Canary не
+вошёл в hard-overflow, поэтому negative fail-before-provider requirement остаётся
+`каркас`.
+
+Narrator этого же canary сместил действие в другую локацию и не подтвердил
+устойчивость ролей. Это не опровергает точный DC1 prompt-presence proof, но не
+является доказательством исправленной continuity или уровня `наблюдается`.
 
 Чтобы сохранить эту границу, revision-7 relationship pressure до provider читает
 только уже сохранённые derived rows и не создаёт отсутствующий trust seed. После
 успешного commit штатный relationship advance материализует seed; revisions
 `0..6` сохраняют прежнее поведение.
+
+## Candidate revision 7: DC2
+
+[Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
+принимает отдельный derived pre-scene contract для relationship pressure. До
+рендеринга блока Gateway делает персонажа eligible только по трём authoritative
+сигналам одного запроса:
+
+- та же canonical location, что у игрока;
+- whole-alias персонажа в текущем действии;
+- whole-alias из `Outcome.target`.
+
+Action/target и location дают score `100` и `30`. Structured active thread даёт
+ещё `20`, но только уже eligible-кандидату и никогда самостоятельно не добавляет
+NPC. Совпавшие причины суммируются. После сортировки по score по убыванию и
+stable ID по возрастанию остаются первые шесть персонажей. Relationship cause,
+due event или edge сами по себе тоже не добавляют NPC.
+
+```mermaid
+flowchart LR
+    L["Canonical player/NPC location"] --> D["Derived candidates"]
+    A["Current-action aliases"] --> D
+    O["Outcome.target"] --> D
+    D --> R["Deterministic score + stable-ID tie-break"]
+    T["Structured active threads"] -->|"rank enrichment only"| R
+    R --> N["Top 6 relationship character IDs"]
+    N --> P["Pressure + due guidance allow-list"]
+```
+
+Absent due `favour` не рендерится, но остаётся durable и `active`; prompt
+omission не является delivery evidence и не переводит событие в
+`resolved`/`delivered`/`expired`. Guidance возвращается, когда персонаж снова
+eligible по одному из трёх сигналов, а закрывается только существующим
+evidence-checked правилом по committed сцене.
+
+Decision 029 остаётся на уровне `каркас`: source integration и offline regressions
+завершены локально; merge, deploy и live causal proof ещё не завершены. Live proof
+требует отдельной absent-NPC fixture и relationship warm-up/bootstrap: обычные
+Starosta/Merchant active threads охватывают почти всех modeled NPC, а checkpoint
+fork не переносит derived relationship rows. Decision не добавляет
+`scene_state`, persisted presence, schema migration, новую таблицу или отдельный
+LLM-вызов. Revisions `0..6`, `novel` и `training` не меняются; observed revision
+остаётся `6`.
 
 ## Обычный ход
 
@@ -199,6 +251,11 @@ seed-причина и обычная извлечённая причина вл
 добавляется только текущий `ACTIVE_TRAINING_TURN_CONTRACT`: имя и роль игрока,
 текущие `surfaces[]`, явно разрешённые state paths и включённые interaction
 contracts. Score, assessment, fallback и будущие ходы до debrief не передаются.
+
+Для candidate revision `7` DC2 применяет к обоим relationship-блокам allow-list
+из описанного выше derived scope. Durable cause и due `favour` отсутствующего
+персонажа остаются в relationship store, но не заставляют narrator переносить
+этого NPC в текущую сцену.
 
 ### 3. Детерминированное решение
 
@@ -407,6 +464,7 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
+- [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
 
 ### Legacy relationship-event deadlines
 
