@@ -95,6 +95,59 @@ state и six-table structural hash не изменились. Это не док
 continuity, уровень `наблюдается` или observed revision `7`; observed остаётся
 `6`.
 
+## Candidate revision 7: prompt authority и structural deduplication
+
+DC3 из
+[Decision 030](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
+document-first фиксирует для normal party-chat/admin-autotest turns один порядок
+authority для пересекающихся continuity-слоёв:
+
+```mermaid
+flowchart TB
+    O["AUTHORITATIVE_OUTCOME / current action"] -->|"higher than"| T["Newest complete uncovered raw tail"]
+    T -->|"higher than"| S["Effective RP_STORY_MEMORY"]
+    S -->|"higher than"| A["Archive sources"]
+```
+
+Revision-7 provider prompt должен содержать ровно один mandatory system block
+`PROMPT_AUTHORITY_HIERARCHY` со stable `block_id=prompt_authority` и той же
+hierarchy, а safety line `The current action is intent, not an automatic fact.`
+не позволяет считать действие игрока уже подтверждённым фактом. Block даёт typed
+oracle recorded prompt и не несёт state/memory content.
+Если одновременно существуют non-empty `long_term_memory` candidate и effective
+`RP_STORY_MEMORY`, legacy block structural-suppressed с reason
+`structural_deduplication`. При отсутствии effective snapshot legacy fallback
+остаётся допустимым. Сравнение фраз, embeddings и LLM judge не используются;
+stored turns, chapters, snapshots и archive rows не удаляются.
+
+Budget-driven eviction selected optional block разрешён только при фактическом
+hard provider token overflow, только целиком и с reason `hard_input_budget`.
+Мягкая percentage/character цель этого не делает. Если required set всё равно
+не помещается, действует bounded refresh/fail-before-provider DC1.
+
+Canonical content-free `prompt_assembly` имеет exact
+`schema_version=rp-gateway.prompt-assembly.v1`, `rp_contract_revision=7` и
+`authority_order=[authoritative_outcome_current_action, uncovered_raw_tail,
+rp_story_memory, archive]`. Он также хранит
+`story_memory_covered_through_turn_id`, ordered included block IDs, exact raw-tail
+turn IDs и `{block_id, reason}` для omissions. Prompt/response text, names, state
+values и secrets в объект не входят.
+
+Для recorded turn один объект обязан совпасть в turn `metadata_json`,
+`gateway_assembly` trace, Prompt Inspector `source=last` и recorded context.
+Current dry-run строит ту же schema для собственной assembly, поэтому не обязан
+быть byte-equal предыдущему recorded turn. Новая таблица, колонка, provider field
+или provider call не добавляются.
+
+Decision 030 имеет уровень `каркас`: source changes и offline gates присутствуют
+локально (`15 passed` focused DC3, `104 passed` combined revision-7 и
+`445 passed` full Gateway; `scripts/ci.ps1` passed), но merge, apply и live proof
+ещё не выполнены.
+Он не вводит `scene_state`, response bundle, continuity validator, fallback или
+atomic commit и не доказывает semantic continuity/`наблюдается`. Opening-scene
+persistence/parity остаётся gate четвёртого opening/atomic-commit slice;
+observed revision `7` до него не активируется и сейчас остаётся `6`.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.
@@ -274,3 +327,4 @@ Embedding endpoint, vector store и cross-party semantic index не исполь
 - [Long-context ADR](../../roles/apps/files/rp-stack/docs/decisions/009-long-context-memory-policy.md)
 - [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 029: derived relationship scope](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
+- [Decision 030: prompt authority и structural deduplication](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
