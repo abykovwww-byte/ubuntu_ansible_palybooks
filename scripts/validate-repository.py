@@ -257,6 +257,20 @@ def validate_environment_contracts(errors: list[str]) -> None:
     ):
         fail(errors, "RP Stack production env must render the explicit observed RP revision")
 
+    canary_wrapper = ROOT / "scripts" / "run-rp-stack-evals.ps1"
+    canary_markers = (
+        "[ValidateRange(0, 7)]",
+        "[Nullable[int]]$RpContractRevision = $null",
+        "if ($null -ne $RpContractRevision)",
+        '$arguments += @("--rp-contract-revision", [string]$RpContractRevision)',
+    )
+    if not canary_wrapper.is_file():
+        fail(errors, "missing RP Stack eval wrapper")
+    else:
+        canary_source = canary_wrapper.read_text(encoding="utf-8-sig")
+        if any(marker not in canary_source for marker in canary_markers):
+            fail(errors, "RP Stack provider canary must forward explicit candidate revision 0..7")
+
     marketplace = Path(".agents/plugins/marketplace.json")
     old_profile = b"C:" + b"\\Users\\" + b"albykov"
     old_plugin_path = b".agents/plugins/" + b"rp-stack-devkit/"

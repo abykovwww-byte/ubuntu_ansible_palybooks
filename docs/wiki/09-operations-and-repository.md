@@ -322,6 +322,10 @@ powershell.exe -File scripts/ci.ps1
 powershell.exe -File scripts/run-rp-stack-evals.ps1 -Mode SemanticAcceptance
 ```
 
+Candidate provider-canary запускается только с явным
+`-RpContractRevision <revision>`; для DC1 это `-RpContractRevision 7`. Отчёт
+должен подтвердить совпадение requested и effective revision созданной branch.
+
 Для статических UI:
 
 ```bash
