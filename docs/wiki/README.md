@@ -30,9 +30,12 @@ semantic continuity и уровень `наблюдается` не заявля
 Он ограничивает relationship pressure производным pre-scene набором из той же
 локации, explicit current-action aliases или `Outcome.target`; active threads
 только ранжируют уже eligible NPC. Absent due obligation остаётся active.
-Контракт пока `каркас`: source и offline regressions завершены локально; merge,
-deploy и live proof ещё не завершены. Остальные строки Plan
-028 остаются roadmap и не являются runtime-контрактом PR2.
+Контракт имеет уровень `подключено`: merge применён, а isolated revision-7
+canary записал один relationship system-block с Миленой; Бажена и Радогост
+отсутствовали, а due `favour` Бажены остался active после omission, хотя она
+оставалась remote active-thread member. Это не доказывает semantic continuity
+или уровень `наблюдается`; observed revision остаётся `6`. Остальные строки
+Plan 028 остаются roadmap и не являются runtime-контрактом PR2.
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно
@@ -69,7 +72,7 @@ flowchart LR
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
-- **Revision 7 пока candidate.** DC1 tail/stamp имеют уровень `подключено`, а DC1 hard-overflow и DC2 — `каркас`; semantic continuity, observed activation и миграция старых партий не заявляются.
+- **Revision 7 пока candidate.** DC1 tail/stamp и DC2 имеют уровень `подключено`, а DC1 hard-overflow остаётся `каркас`; semantic continuity, уровень `наблюдается`, observed activation и миграция старых партий не заявляются.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.

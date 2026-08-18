@@ -88,9 +88,12 @@ Relationship cause, edge, due clock или active thread без одного и�
 eligibility-сигналов не добавляют NPC. Absent due `favour` остаётся durable и
 `active`; его omission из prompt не является resolution evidence. Новая
 state-проекция сцены и scene-state fast path не входят в DC2. Контракт имеет
-уровень `каркас`; source и offline regressions завершены локально, а merge,
-deploy и live proof с отдельной absent-NPC fixture и relationship
-warm-up/bootstrap ещё не завершены.
+уровень `подключено`: deployed isolated canary после warm-up записал один
+relationship system-block с eligible Миленой, не включил remote active-thread
+Бажену или Радогоста и сохранил due `favour` Бажены active и unresolved. Source
+state и six-table structural hash не изменились. Это не доказывает semantic
+continuity, уровень `наблюдается` или observed revision `7`; observed остаётся
+`6`.
 
 ## Слои памяти
 
