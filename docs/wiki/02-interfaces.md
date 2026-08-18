@@ -60,6 +60,30 @@ authority и provenance не являются полями публичного 
 
 При создании мира ручное поле ограничено 6000 символами. Для `.md` действует отдельный предел: 1 МиБ на клиенте и 200 000 символов в Gateway. Такой файл становится стабильным world system prompt, поэтому для очень крупного мира пользователь должен выбрать narrator model с достаточным context window.
 
+### Read-only context и prompt diagnostics для branch
+
+Candidate revision-7 follow-up добавляет один необязательный query-параметр к
+существующим диагностическим endpoint:
+
+```text
+GET  /api/parties/{party_id}/context?branch_id={branch_id}
+POST /api/parties/{party_id}/prompt/preview?branch_id={branch_id}
+     {"content":"...", "source":"current|last"}
+```
+
+`branch_id` выбирает existing isolated branch только внутри той же party и owner
+scope. Gateway сам разрешает её state store, source-party runtime settings и
+persisted branch revision; raw `state_campaign_id` клиент не передаёт. При указанном
+параметре ответ также содержит `branch_id`. Без параметра прежние source-party
+path, preview body и response shape сохраняются без изменений. Неизвестная,
+чужая или принадлежащая другой партии ветка возвращает `404`.
+
+Оба endpoint остаются read-only: они не вызывают provider, не создают turn,
+snapshot или branch и не меняют source/branch state. Wiring реализован локально
+и подтверждён четырьмя focused test, но пока не merged/applied и не имеет live
+proof; cross-surface `prompt_assembly` parity из Decision 030 поэтому остаётся
+`каркас`. Отдельный UI-control этим контрактом не вводится.
+
 ### Turn Trace Workbench
 
 Workbench доступен в Light GUI только пользователю с существующей ролью Gateway
