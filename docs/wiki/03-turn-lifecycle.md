@@ -14,7 +14,10 @@
 - candidate revision 7 / DC1 защищает полный raw tail после effective
   story-memory coverage и fail-closed обрабатывает hard overflow.
 - candidate revision 7 / DC2 ограничивает relationship pressure производным
-  pre-scene scope; observed runtime остаётся на revision `6`.
+  pre-scene scope.
+- candidate revision 7 / DC3 принимает prompt authority, structural
+  deduplication и content-free assembly diagnostics; observed runtime остаётся
+  на revision `6`.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -119,6 +122,60 @@ Outputs не назвали отсутствующих NPC и proof output на�
 добавляет `scene_state`, persisted presence, schema migration, новую таблицу или
 отдельный LLM-вызов. Revisions `0..6`, `novel` и `training` не меняются;
 observed revision остаётся `6`.
+
+## Candidate revision 7: DC3
+
+[Decision 030](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
+document-first принимает третий slice для normal party-chat и admin-autotest
+narrator turns. Revision-7 narrator request должен содержать ровно один mandatory
+system block с prefix
+`PROMPT_AUTHORITY_HIERARCHY`, stable `block_id=prompt_authority` и hierarchy
+`AUTHORITATIVE_OUTCOME/current action > uncovered raw tail > RP_STORY_MEMORY >
+archive`. Safety line `The current action is intent, not an automatic fact.` не
+позволяет трактовать пользовательское намерение как уже committed canonical
+факт. Current action остаётся последним сообщением.
+
+Если одновременно присутствуют non-empty legacy `long_term_memory` candidate и
+effective `RP_STORY_MEMORY`, первый не попадает к provider и фиксируется с reason
+`structural_deduplication`. После этого selected optional blocks могут быть
+удалены только целиком, только при фактическом hard provider token overflow и с
+reason `hard_input_budget`. Soft percentage/character target не выполняет такую
+eviction; required-set overflow остаётся на recovery/fail-before-provider пути
+DC1.
+
+Та же фактическая assembly создаёт content-free `prompt_assembly` с exact
+`schema_version=rp-gateway.prompt-assembly.v1`, `rp_contract_revision=7`,
+`authority_order=[authoritative_outcome_current_action, uncovered_raw_tail,
+rp_story_memory, archive]`, `story_memory_covered_through_turn_id`, ordered block
+IDs, raw-tail turn IDs и omissions. Diagnostic не содержит prompt/response text,
+names, state values или secrets.
+
+```mermaid
+flowchart LR
+    A["Revision-7 assembly"] --> P["Recorded provider prompt"]
+    A --> D["Content-free prompt_assembly"]
+    D --> T["Turn metadata"]
+    D --> R["gateway_assembly trace"]
+    D --> I["Prompt Inspector source=last"]
+    D --> C["Recorded context"]
+    A -.-> X["Current dry-run: same schema, own assembly"]
+```
+
+Для recorded turn значения metadata, trace, Prompt Inspector `source=last` и
+recorded context обязаны совпадать. Current dry-run использует ту же schema для
+собственной assembly и не сравнивается byte-for-byte с предыдущим ходом. Новая
+таблица, колонка, provider field или provider call не добавляются; существующие
+JSON metadata/trace stores остаются transport для diagnostic.
+
+Decision 030 остаётся на уровне `каркас`: source changes и offline gates
+присутствуют локально (`15 passed` focused DC3, `104 passed` combined revision-7
+и `445 passed` full Gateway; `scripts/ci.ps1` passed), но merge, apply и isolated
+live proof ещё не выполнены. DC3 не включает `scene_state`, structured response bundle,
+continuity validator, fallback или atomic scene/turn commit, не мигрирует
+existing parties и не доказывает semantic continuity. Opening-scene
+`prompt_assembly` persistence/parity остаётся pending gate четвёртого
+opening/atomic-commit slice, поэтому observed revision `7` до его закрытия не
+активируется и сейчас остаётся `6`.
 
 ## Обычный ход
 
@@ -470,6 +527,7 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
+- [Decision 030](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
 
 ### Legacy relationship-event deadlines
 
