@@ -22,6 +22,35 @@ effect, но конечный `PromptBudgetExceeded` не создаёт player 
 sanitized status; Prompt Inspector при overflow возвращает пустые
 `messages/blocks` и не раскрывает world/player prompt text или secrets.
 
+DC4 из
+[Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+остаётся document-first candidate. Он не добавляет таблицу: `scene_state`
+планируется внутри authoritative `state_versions.state_json`, а private minimal
+narrator bundle, normalized applied/dropped delta с actual bounded evidence и
+before/after scene projection — в existing `turns.metadata_json` и private
+audit/trace boundary. Public party response получает только narrator text и
+безопасные fallback markers, не private bundle/evidence.
+
+Accepted normal/opening bundle должен одной SQLite transaction сохранить state
+version, scene projection, turn/private metadata и request completion. Ошибка
+любой authoritative write откатывает весь набор. `current.json` записывается
+best-effort только после SQLite commit; его failure не откатывает DB, а mirror
+восстанавливается из SQLite. Scene-affecting explicit world command atomically
+ставит stale/as-of marker, но не может напрямую патчить `scene_state`; rollback
+восстанавливает historical projection либо stale bootstrap.
+
+Pre-bundle transport fallback, напротив, планируется как committed
+noncanonical turn: `story_memory_canonical=false`, last-reliable as-of и stale
+scene marker сохраняются atomically. Gateway-authored fallback prose исключается
+из raw-story, RP story memory, chapters, archive/retrieval и relationship canon;
+player input и unresolved marker явно видны следующему prompt. Private evidence
+имеет ту же retention/backup/owner-admin boundary, что turn, не копируется в
+Prompt Inspector/public API и не экспортируется в dataset без обычного review.
+
+Все registry-строки Decision 031 пока `каркас`: local source/offline gates
+выполнены, но merge/apply/live отсутствуют; semantic continuity не доказана,
+observed revision остаётся `6`.
+
 ## Где находятся данные
 
 ```text
@@ -239,6 +268,7 @@ Backup содержит state, историю, диагностическую т
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
+- [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
 - [Compose networks](../../roles/apps/templates/rp-stack.compose.yml.j2)
 
 ### Relationship projection repair

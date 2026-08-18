@@ -18,6 +18,9 @@
 - candidate revision 7 / DC3 принимает prompt authority, structural
   deduplication и content-free assembly diagnostics; observed runtime остаётся
   на revision `6`.
+- candidate revision 7 / DC4 принимает document-first `scene_state`, minimal
+  narrator bundle, deterministic continuity gate и atomic state/turn commit;
+  все его gates пока `каркас`, observed runtime остаётся на revision `6`.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -190,6 +193,84 @@ fallback или atomic scene/turn commit, не мигрирует existing parti
 persistence/parity остаётся pending gate четвёртого opening/atomic-commit slice,
 поэтому observed revision `7` до его закрытия не активируется и сейчас остаётся
 `6`.
+
+## Candidate revision 7: DC4
+
+[Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+document-first принимает четвёртый slice. Provider private response остаётся
+минимальным:
+
+```text
+schema_version = rp-gateway.rp-narrator-bundle.v1
+narrative_text
+scene_claims { location_id, present_character_ids[] }
+scene_delta[]
+```
+
+`scene_claims` использует только existing known IDs. `scene_delta` допускает
+bounded typed `move_player`, `character_arrive` и `character_depart`; arbitrary
+JSON Patch и player belief/emotion/intent/goal fields запрещены. Explicit
+non-negated first-person movement с named destination разрешает narrator выбрать
+любой existing known location ID для player; этот allowance не переносится на
+NPC, `Outcome.target`, negation, correction, mention или third-person text.
+
+```mermaid
+sequenceDiagram
+    participant API as Gateway rev7 candidate
+    participant LLM as Narrator
+    participant Gate as Typed continuity gate
+    participant DB as SQLite authority
+    participant File as current.json mirror
+
+    API->>LLM: prompt + minimal private bundle contract
+    LLM-->>Gate: narrative + scene claims + typed delta
+    alt hard schema / unknown / forbidden / unauthorized / claims mismatch
+        Gate->>LLM: one concrete repair
+        alt hard violation remains
+            Gate-->>API: controlled error, no canonical commit
+        else repaired bundle valid
+            Gate->>DB: one atomic scene/state/turn/request commit
+        end
+    else authorized delta has unmatched evidence
+        Gate->>Gate: immediate drop; no repair/provider call
+        Gate->>DB: narration + anchored delta + audit + stale/as-of
+    else bundle valid and anchored
+        Gate->>DB: one atomic scene/state/turn/request commit
+    end
+    DB-->>File: best-effort mirror after commit
+```
+
+Unknown/unauthorized operation нельзя скрыть удалением delta: это hard violation
+с одной repair-попыткой. Но well-typed authorized operation, чей normalized
+evidence не найден, является soft сразу: Gateway не зовёт provider повторно,
+drops operation, durable сохраняет actual value/evidence и audit, а committed
+scene остаётся stale относительно последней reliable projection.
+
+Finite stable affiliations Gateway берёт только из authored canonical
+loyalty/faction и optional bounded WorldPack map. Узкий deterministic guard ищет
+в affirmative normalized sentence whole aliases known character и recognized
+affiliation; explicit чужое finite value — hard repairable conflict. Unknown
+free prose и mechanic relationship roles не становятся semantic judge.
+
+Safe fallback разрешён только после exhaustion transport attempts до parseable
+bundle. Он atomically записывает noncanonical turn и stale/as-of scene marker с
+`story_memory_canonical=false`. Gateway fallback prose исключается из
+raw/story-memory/chapter/archive/retrieval/relationship canon, но player input и
+unresolved marker явно передаются следующему prompt. Invalid received bundle
+получает одну repair-попытку и не маскируется fallback.
+
+Normal turn и opening используют одинаковые bundle/gate/fallback/atomic rules;
+opening также сохраняет Decision 030 `prompt_assembly`. Scene-affecting explicit
+world commands не пишут `scene_state` напрямую: их SQLite transaction помечает
+projection stale, rollback восстанавливает historical projection либо stale
+bootstrap. `current.json` записывается только после SQLite commit и остаётся
+best-effort mirror.
+
+Все четыре registry-строки Decision 031 остаются `каркас`: локальная source
+implementation и failure-injection/opening/fallback tests выполнены, но merge,
+apply и live proofs ещё нет. Это candidate implementation, а не описание
+текущего ordinary-turn runtime; semantic continuity и observed revision `7` не
+заявляются.
 
 ## Обычный ход
 
@@ -542,6 +623,7 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
 - [Decision 030](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
+- [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
 
 ### Legacy relationship-event deadlines
 

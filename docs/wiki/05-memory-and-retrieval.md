@@ -161,6 +161,51 @@ fallback или atomic commit и не доказывает semantic continuity/`
 Opening-scene persistence/parity остаётся gate четвёртого opening/atomic-commit
 slice; observed revision `7` до него не активируется и сейчас остаётся `6`.
 
+## Candidate revision 7: scene authority и noncanonical fallback
+
+DC4 из
+[Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+document-first добавляет canonical `scene_state` внутрь state version. Non-stale
+projection с known `location_id` и sorted `present_character_ids` становится
+exact scope для relevant-character и relationship rendering. Stale projection
+показывается только с exact as-of marker и временно возвращает conservative DC2
+derived scope; она не выдаёт прошлое presence за текущее.
+
+Minimal private bundle содержит один полный
+`scene_claims {location_id, present_character_ids}` snapshot и bounded typed
+`scene_delta`. Только normalized authorized and evidence-anchored delta меняет
+projection. Well-typed authorized operation с unmatched evidence immediately
+dropped без repair/provider call; metadata/audit сохраняет actual value/evidence,
+а scene остаётся stale. Unknown/unauthorized transition или hard scene-claim
+mismatch получает одну repair-попытку и затем no canonical commit.
+
+```mermaid
+flowchart LR
+    P["Previous reliable scene_state"] --> G["Typed claims + delta gate"]
+    G -->|"anchored"| N["New reliable scene_state"]
+    G -->|"authorized but unanchored"| D["Drop + durable audit + stale/as-of"]
+    G -->|"hard violation after one repair"| X["No canonical commit"]
+    D --> C["Conservative DC2 scope"]
+    N --> E["Exact scene scope"]
+```
+
+Finite stable affiliations берутся только из authored loyalty/faction и optional
+finite WorldPack map. Узкий known-character+recognized-affiliation sentence guard
+может repair explicit conflicting finite fact; unknown free prose и mechanic
+relationship roles не становятся memory authority.
+
+Pre-bundle transport fallback хранится как explicit noncanonical turn с
+`story_memory_canonical=false` и stale/as-of scene marker. Его Gateway-authored
+narrator prose исключается из raw-story, RP story memory, chapters,
+archive/retrieval и relationship consumers. Player input и unresolved marker не
+теряются: следующий narrator prompt явно показывает их и последнюю reliable
+as-of scene. Fallback поэтому durable для idempotency/audit, но не является
+новым фактом мира.
+
+Opening использует ту же boundary и сохраняет DC3 `prompt_assembly`. Все четыре
+registry-строки Decision 031 пока `каркас`: local source/offline gates выполнены,
+но merge/apply/live proof отсутствуют; observed revision остаётся `6`.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.
@@ -168,6 +213,7 @@ slice; observed revision `7` до него не активируется и се
 | Слой | Назначение | Для каких режимов | Authority |
 |---|---|---|---:|
 | Canonical state | Текущие подтверждённые факты и механика | Все | Да |
+| Candidate `scene_state` (DC4, пока `каркас`) | Exact location/presence и stale/as-of boundary внутри state version | Только RP revision 7 | Только после accepted atomic commit; пока не live |
 | Raw turns | Полный первичный диалог и metadata | Все | Нет, но это source history |
 | RP story memory | Живой кумулятивный реестр всей истории | Только `rp` | Нет |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
@@ -341,3 +387,4 @@ Embedding endpoint, vector store и cross-party semantic index не исполь
 - [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 029: derived relationship scope](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
 - [Decision 030: prompt authority и structural deduplication](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
+- [Decision 031: scene state и atomic continuity](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
