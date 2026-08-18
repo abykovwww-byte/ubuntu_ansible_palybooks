@@ -139,14 +139,27 @@ Current dry-run строит ту же schema для собственной asse
 быть byte-equal предыдущему recorded turn. Новая таблица, колонка, provider field
 или provider call не добавляются.
 
-Decision 030 имеет уровень `каркас`: source changes и offline gates присутствуют
-локально (`15 passed` focused DC3, `104 passed` combined revision-7 и
-`445 passed` full Gateway; `scripts/ci.ps1` passed), но merge, apply и live proof
-ещё не выполнены.
-Он не вводит `scene_state`, response bundle, continuity validator, fallback или
-atomic commit и не доказывает semantic continuity/`наблюдается`. Opening-scene
-persistence/parity остаётся gate четвёртого opening/atomic-commit slice;
-observed revision `7` до него не активируется и сейчас остаётся `6`.
+Optional `branch_id` на read-only context и prompt preview нужен, чтобы штатно
+прочитать assembly isolated candidate branch. Без него source-party response не
+меняется; с ним Gateway выбирает branch store, source-party runtime settings и
+persisted branch revision, не принимая raw `state_campaign_id` и не меняя
+memory/state. Wiring и четыре focused
+test готовы локально, но пока не applied/live-proven и сами не доказывают parity.
+
+Decision 030 имеет смешанный статус. Applied canary
+`autotest_2eb4d5e1a53f` / `branch_ccf0d535a98c` подтвердил exact structural
+deduplication. Primary attempt получил `403`, последующий transport
+model-fallback `openrouter/auto` — `200`; оба получили exact same prompt.
+Validation repair и Gateway safe-fallback text не использовались. Source revision `0`
+и exact state/projection/table hashes остались baseline. Первая registry-row
+имеет уровень `подключено`. Actual hard provider token overflow и deployed
+parity metadata ↔ trace ↔ Prompt Inspector `source=last` ↔ recorded context этим
+canary не доказаны, поэтому вторая и третья строки остаются `каркас`.
+
+Decision 030 не вводит `scene_state`, response bundle, continuity validator,
+fallback или atomic commit и не доказывает semantic continuity/`наблюдается`.
+Opening-scene persistence/parity остаётся gate четвёртого opening/atomic-commit
+slice; observed revision `7` до него не активируется и сейчас остаётся `6`.
 
 ## Слои памяти
 

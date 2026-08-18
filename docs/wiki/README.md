@@ -48,12 +48,17 @@ optional blocks удаляются целиком только при реаль
 Content-free `prompt_assembly` должен фиксировать exact coverage, raw-tail IDs,
 block identities и omission reasons с recorded parity между turn metadata,
 trace, Prompt Inspector `source=last` и recorded context; current dry-run
-использует ту же schema для собственной assembly. Контракт пока имеет уровень
-`каркас`: source и offline gates присутствуют локально (`15 passed` focused DC3,
-`104 passed` combined revision-7 и `445 passed` full Gateway;
-`scripts/ci.ps1` passed), но
-merge, apply и live proof не выполнены. Scope ограничен normal
-party-chat/admin-autotest turns. Opening-scene parity остаётся gate четвёртого
+использует ту же schema для собственной assembly. Isolated live canary
+`autotest_2eb4d5e1a53f` / `branch_ccf0d535a98c` подтвердил exact structural
+deduplication: primary attempt получил `403`, последующий transport
+model-fallback `openrouter/auto` — `200`; оба получили exact same prompt.
+Validation repair и Gateway safe-fallback text не использовались; source revision `0`
+и exact state/projection/table hashes не изменились. Поэтому первая registry-row
+Decision 030 имеет уровень `подключено`, а hard-budget eviction и cross-surface
+diagnostics parity остаются `каркас`. Optional branch-aware context/preview
+wiring реализован локально и прошёл четыре focused test, но ещё не applied или
+проверен live. Scope ограничен normal party-chat/admin-autotest turns; semantic
+output не доказан. Opening-scene parity остаётся gate четвёртого
 opening/atomic-commit slice. Observed revision остаётся `6` и не может быть
 поднята до закрытия этого gate; четвёртый slice Plan 028 остаётся roadmap без
 отдельного принятого ADR.
@@ -94,7 +99,7 @@ flowchart LR
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
-- **Revision 7 пока candidate.** DC1 tail/stamp и DC2 имеют уровень `подключено`, а DC1 hard-overflow и весь DC3 остаются `каркас`; semantic continuity, уровень `наблюдается`, observed activation и миграция старых партий не заявляются.
+- **Revision 7 пока candidate.** DC1 tail/stamp, DC2 и DC3 hierarchy/structural deduplication имеют уровень `подключено`; DC1 hard-overflow, DC3 hard-budget/parity и opening gate остаются `каркас`. Semantic continuity, уровень `наблюдается`, observed activation и миграция старых партий не заявляются.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.

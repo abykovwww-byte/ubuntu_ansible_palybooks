@@ -167,15 +167,29 @@ recorded context обязаны совпадать. Current dry-run исполь
 таблица, колонка, provider field или provider call не добавляются; существующие
 JSON metadata/trace stores остаются transport для diagnostic.
 
-Decision 030 остаётся на уровне `каркас`: source changes и offline gates
-присутствуют локально (`15 passed` focused DC3, `104 passed` combined revision-7
-и `445 passed` full Gateway; `scripts/ci.ps1` passed), но merge, apply и isolated
-live proof ещё не выполнены. DC3 не включает `scene_state`, structured response bundle,
-continuity validator, fallback или atomic scene/turn commit, не мигрирует
-existing parties и не доказывает semantic continuity. Opening-scene
-`prompt_assembly` persistence/parity остаётся pending gate четвёртого
-opening/atomic-commit slice, поэтому observed revision `7` до его закрытия не
-активируется и сейчас остаётся `6`.
+Для штатной проверки isolated branch follow-up принимает optional `branch_id` на
+read-only context и prompt-preview endpoint. Он выбирает branch state/runtime
+revision, не меняя normal turn flow и не принимая raw `state_campaign_id`.
+Локальный wiring и четыре focused test готовы, но merge/apply/live proof ещё нет;
+сам wiring не доказывает parity.
+
+Decision 030 имеет смешанный статус. Applied canary
+`autotest_2eb4d5e1a53f` / `branch_ccf0d535a98c` подтвердил exact structural
+deduplication: primary attempt получил `403`, последующий transport
+model-fallback `openrouter/auto` — `200`; оба получили exact same prompt.
+Validation repair и Gateway safe-fallback text не использовались. Source revision `0`,
+canonical state, combined projections и individual table hashes точно совпали с
+baseline. Первая registry-row поэтому имеет уровень `подключено`. Canary не
+входил в actual hard provider token overflow, а deployed parity metadata ↔ trace
+↔ Prompt Inspector `source=last` ↔ recorded context не проверена; вторая и
+третья строки остаются `каркас`.
+
+DC3 не включает `scene_state`, structured response bundle, continuity validator,
+fallback или atomic scene/turn commit, не мигрирует existing parties и не
+доказывает semantic continuity. Opening-scene `prompt_assembly`
+persistence/parity остаётся pending gate четвёртого opening/atomic-commit slice,
+поэтому observed revision `7` до его закрытия не активируется и сейчас остаётся
+`6`.
 
 ## Обычный ход
 
