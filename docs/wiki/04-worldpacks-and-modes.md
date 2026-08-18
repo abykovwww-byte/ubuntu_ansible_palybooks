@@ -103,6 +103,34 @@ authored-событий, ролями, ранами, конечными часа
 и не переиспользует строковое поле `characters.*.loyalty`, где мир уже хранит
 принадлежность или фракцию.
 
+## Candidate revision 7: DC4 authored scene facts
+
+[Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+не делает новый manifest field обязательным и не мигрирует existing WorldPacks.
+Candidate `scene_state` использует existing location/character IDs, canonical
+character loyalty и declared faction IDs из pack/state. Если миру нужны другие
+долгоживущие narrative roles, pack может опционально объявить bounded finite
+`rp_contract.stable_affiliations` map с known character IDs, finite values и
+whole aliases. Free-text profession/biography/goal/belief/emotion и mechanic
+relationship roles в этот map не выводятся автоматически.
+
+Gateway candidate guard рассматривает только affirmative normalized sentences с
+known character alias и recognized authored affiliation alias. Явное чужое
+finite value даёт hard repairable conflict; unknown free prose остаётся вне
+deterministic gate. Это не второй LLM judge.
+
+Location aliases тоже остаются optional refinement. Exact known ID или
+unambiguous authored alias сужает player destination, но alias manifest не
+является обязательным: explicit non-negated first-person movement с непустой
+named-destination phrase позволяет narrator выбрать typed existing known
+location ID. Такой all-known allowance существует только для player
+`move_player`; NPC arrival/departure, `Outcome.target`, third-person mention,
+correction и negation его не получают.
+
+Registry 031 целиком остаётся `каркас`: локальная implementation и tests
+выполнены, но merge, apply и live proof отсутствуют, observed revision остаётся
+`6`.
+
 ## Три режима
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
@@ -271,3 +299,4 @@ Gateway сохраняет basename исходного файла и разме�
 - [Training capability ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
 - [WorldPack training runtime ADR](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
 - [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
+- [Decision 031: scene state и atomic continuity](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)

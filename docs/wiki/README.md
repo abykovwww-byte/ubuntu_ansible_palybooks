@@ -60,8 +60,26 @@ wiring реализован локально и прошёл четыре focuse
 проверен live. Scope ограничен normal party-chat/admin-autotest turns; semantic
 output не доказан. Opening-scene parity остаётся gate четвёртого
 opening/atomic-commit slice. Observed revision остаётся `6` и не может быть
-поднята до закрытия этого gate; четвёртый slice Plan 028 остаётся roadmap без
-отдельного принятого ADR.
+поднята до закрытия этого gate.
+
+Четвёртый document-first slice принят в
+[Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md).
+Он задаёт candidate-only canonical `scene_state`, минимальный private narrator
+bundle с одним `{location_id, present_character_ids}` snapshot и bounded typed
+`scene_delta`, deterministic continuity gate и atomic SQLite state/turn commit.
+Authorized operation с unmatched evidence immediately dropped без repair с
+durable value/evidence, audit и stale/as-of marker; hard schema, unknown ID,
+forbidden field, unauthorized transition или scene-claim mismatch получает одну
+repair-попытку, затем no commit. Finite authored loyalty/faction/optional stable
+role защищает узкий alias-based narration guard; mechanic relationship roles и
+unknown free prose не становятся semantic oracle. Pre-bundle transport fallback
+сохраняется как noncanonical turn с `story_memory_canonical=false`, но его
+narrator prose исключается из raw/story-memory/chapter/retrieval canon; player
+input и unresolved as-of marker остаются явными для следующего prompt. Opening,
+world-command stale policy и post-commit best-effort `current.json` входят в тот
+же контракт. Все четыре registry-строки Decision 031 — `каркас`: локальная
+implementation, focused/full Gateway tests и repository CI выполнены, но merge,
+apply и live proof отсутствуют. Observed revision остаётся `6`.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
@@ -99,7 +117,7 @@ flowchart LR
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
-- **Revision 7 пока candidate.** DC1 tail/stamp, DC2 и DC3 hierarchy/structural deduplication имеют уровень `подключено`; DC1 hard-overflow, DC3 hard-budget/parity и opening gate остаются `каркас`. Semantic continuity, уровень `наблюдается`, observed activation и миграция старых партий не заявляются.
+- **Revision 7 пока candidate.** DC1 tail/stamp, DC2 и DC3 hierarchy/structural deduplication имеют уровень `подключено`; DC1 hard-overflow, DC3 hard-budget/parity и все DC4 scene/bundle/atomic/fallback gates остаются `каркас`. Semantic continuity, уровень `наблюдается`, observed activation и миграция старых партий не заявляются.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
