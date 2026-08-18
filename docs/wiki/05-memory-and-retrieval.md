@@ -55,8 +55,42 @@ flowchart LR
 Prompt Inspector и context diagnostics показывают effective/prompt coverage,
 pending turns/tokens, configured threshold, hard-budget status и последний
 force-refresh result; Inspector дополнительно перечисляет included raw turn IDs.
-World/player prompt text в overflow payload не возвращается. Candidate support и
-уровень `каркас` не означают observed/deployed runtime: observed остаётся `6`.
+World/player prompt text в overflow payload не возвращается. Deployed Merchant
+canary поднял точный tail и revision stamp до `подключено`: recorded prompt
+содержал только полную eligible verbatim-пару после effective coverage, а source
+raw/state hashes не изменились. Hard-overflow negative proof остаётся `каркас`,
+поскольку этот canary поместился без overflow. Его semantic output также сместил
+локацию, поэтому исправленная continuity и уровень `наблюдается` не заявляются;
+observed revision остаётся `6`.
+
+## Candidate revision 7: derived relationship scope
+
+DC2 из
+[Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
+не превращает relationship history в scene authority. Перед рендерингом pressure
+Gateway вычисляет одноразовый eligible allow-list только из canonical совпадения
+локации, whole-alias в текущем действии или `Outcome.target`. Structured active
+threads добавляют rank только уже eligible NPC и не расширяют allow-list.
+Кандидаты сортируются детерминированно и ограничиваются top-6.
+
+```mermaid
+flowchart LR
+    S["Location + action aliases + Outcome.target"] --> R["Deterministic ranking"]
+    T["Active threads"] -->|"rank enrichment only"| R
+    R --> A["Top-6 allow-list"]
+    C["Durable relationship causes/events"] --> F["Filter for this prompt"]
+    A --> F
+    F --> P["RELATIONSHIP_PRESSURE / due guidance"]
+    F -.->|"absent due remains active"| C
+```
+
+Relationship cause, edge, due clock или active thread без одного из трёх
+eligibility-сигналов не добавляют NPC. Absent due `favour` остаётся durable и
+`active`; его omission из prompt не является resolution evidence. Новая
+state-проекция сцены и scene-state fast path не входят в DC2. Контракт имеет
+уровень `каркас`; source и offline regressions завершены локально, а merge,
+deploy и live proof с отдельной absent-NPC fixture и relationship
+warm-up/bootstrap ещё не завершены.
 
 ## Слои памяти
 
@@ -206,6 +240,10 @@ flowchart TB
 идентификаторы сообщника и мишени и внутренний payload в prompt не попадают. Причины, связанные с ходом,
 исключённым rollback-механизмом, не участвуют в сумме.
 
+На candidate revision `7` DC2 дополнительно фильтрует этот narrator-visible блок
+по derived pre-scene allow-list. Фильтрация не удаляет causes/events и не меняет
+их clocks или status; revisions `0..6` сохраняют прежний relationship rendering.
+
 Начальный canonical `characters.*.trust` не переписывается и не превращается в
 вторую шкалу: WorldPack `trust_mapping` один раз создаёт derived cause с
 `source=seed` и `party_turn=0`. Текущее `trust` не включается в compact
@@ -232,3 +270,4 @@ Embedding endpoint, vector store и cross-party semantic index не исполь
 - [RP living-memory ADR](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md)
 - [Long-context ADR](../../roles/apps/files/rp-stack/docs/decisions/009-long-context-memory-policy.md)
 - [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
+- [Decision 029: derived relationship scope](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)

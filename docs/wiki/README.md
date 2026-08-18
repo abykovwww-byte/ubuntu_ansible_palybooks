@@ -2,7 +2,7 @@
 
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр, совместного романа и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki проверена 17 августа 2026 года и отделяет source revision от фактического
+Эта Wiki проверена 18 августа 2026 года и отделяет source revision от фактического
 runtime. RP-only living story memory реализована в исходном коде и описана в
 [Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
 но статус push, Ansible apply и live verification всегда сообщается отдельно.
@@ -18,10 +18,21 @@ PR1 следующего continuity cycle описан в
 [Plan 028](../../roles/apps/files/rp-stack/docs/plans/028-rp-continuity-project-design.md)
 и [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md):
 candidate revision `7` сохраняет полный raw tail после effective story-memory
-coverage и выполняет bounded recovery при hard overflow. Registry пока на уровне
-`каркас`; observed revision остаётся `6`, deploy/live proof не заявлены, existing
-parties не мигрируют автоматически. Следующие delivery slices перечислены только
-как последовательный roadmap и не считаются принятыми решениями этого PR.
+coverage и выполняет bounded recovery при hard overflow. После deployed Merchant
+canary требования tail и revision stamp имеют уровень `подключено`, а
+hard-overflow negative proof остаётся `каркас`. Canary доказал точную доставку
+raw tail, но его narration сместила действие в другую локацию; исправленная
+semantic continuity и уровень `наблюдается` не заявляются. Observed revision
+остаётся `6`, existing parties не мигрируют автоматически.
+
+Второй отдельный slice принят в
+[Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md).
+Он ограничивает relationship pressure производным pre-scene набором из той же
+локации, explicit current-action aliases или `Outcome.target`; active threads
+только ранжируют уже eligible NPC. Absent due obligation остаётся active.
+Контракт пока `каркас`: source и offline regressions завершены локально; merge,
+deploy и live proof ещё не завершены. Остальные строки Plan
+028 остаются roadmap и не являются runtime-контрактом PR2.
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно
@@ -58,7 +69,7 @@ flowchart LR
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
-- **Revision 7 пока candidate.** В PR1 полный хвост после story-memory coverage защищён от percentage trimming; observed activation и миграция старых партий не выполняются.
+- **Revision 7 пока candidate.** DC1 tail/stamp имеют уровень `подключено`, а DC1 hard-overflow и DC2 — `каркас`; semantic continuity, observed activation и миграция старых партий не заявляются.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
