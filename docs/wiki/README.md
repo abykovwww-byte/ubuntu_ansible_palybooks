@@ -48,7 +48,11 @@ optional blocks удаляются целиком только при реаль
 Content-free `prompt_assembly` должен фиксировать exact coverage, raw-tail IDs,
 block identities и omission reasons с recorded parity между turn metadata,
 trace, Prompt Inspector `source=last` и recorded context; current dry-run
-использует ту же schema для собственной assembly. Isolated live canary
+использует ту же schema для собственной assembly. Это JSON/API diagnostic
+initial full narrator assembly: compact validation-repair остаётся отдельной
+attempt в private admin Turn Trace, а отдельного GUI renderer нет. Исключение
+хода из narrative memory не должно скрывать его content-free projection.
+Isolated live canary
 `autotest_2eb4d5e1a53f` / `branch_ccf0d535a98c` подтвердил exact structural
 deduplication: primary attempt получил `403`, последующий transport
 model-fallback `openrouter/auto` — `200`; оба получили exact same prompt.
@@ -56,8 +60,9 @@ Validation repair и Gateway safe-fallback text не использовалис�
 и exact state/projection/table hashes не изменились. Поэтому первая registry-row
 Decision 030 имеет уровень `подключено`, а hard-budget eviction и cross-surface
 diagnostics parity остаются `каркас`. Optional branch-aware context/preview
-wiring реализован локально и прошёл четыре focused test, но ещё не applied или
-проверен live. Scope ограничен normal party-chat/admin-autotest turns; semantic
+wiring merged в PR59 и applied, но exact isolated-branch parity ещё не проверена
+live. Narrow excluded-turn/emitter-ID hardening пока local-only. Scope ограничен
+normal party-chat/admin-autotest turns; semantic
 output не доказан. Opening-scene parity остаётся gate четвёртого
 opening/atomic-commit slice. Observed revision остаётся `6` и не может быть
 поднята до закрытия этого gate.

@@ -139,12 +139,20 @@ Current dry-run строит ту же schema для собственной asse
 быть byte-equal предыдущему recorded turn. Новая таблица, колонка, provider field
 или provider call не добавляются.
 
+`excluded_from_memory` меняет eligibility хода для story memory/archive, но не
+видимость его content-free `prompt_assembly` в recorded JSON/API diagnostics.
+Проекция и committed `prompt_json` описывают initial full narrator assembly и
+transport retries с теми же messages. Compact validation-repair не заменяет эти
+surfaces; его exact input доступен отдельно в private admin Turn Trace. В Light
+GUI/shared UI/Showcase отдельного renderer этой проекции нет.
+
 Optional `branch_id` на read-only context и prompt preview нужен, чтобы штатно
 прочитать assembly isolated candidate branch. Без него source-party response не
 меняется; с ним Gateway выбирает branch store, source-party runtime settings и
 persisted branch revision, не принимая raw `state_campaign_id` и не меняя
-memory/state. Wiring и четыре focused
-test готовы локально, но пока не applied/live-proven и сами не доказывают parity.
+memory/state. Wiring и четыре focused test merged в PR59 и applied, но exact
+isolated-branch live parity ещё не доказана. Narrow excluded-turn/emitter-ID
+hardening пока ожидает merge/apply и сам по себе readiness не повышает.
 
 Decision 030 имеет смешанный статус. Applied canary
 `autotest_2eb4d5e1a53f` / `branch_ccf0d535a98c` подтвердил exact structural
