@@ -145,7 +145,9 @@ Provider canary использует существующий `POST /api/admin/a
 считает run неуспешным при любом изменении main-line. Session cookie или bearer
 берутся только из process environment, не попадают в аргументы, JSON report или
 Git. При poll timeout runner запрашивает stop, чтобы не оставлять бесконтрольный
-фоновой run.
+фоновой run. Candidate revision выше observed нужно передать явно; runner пишет
+в отчёт requested и effective revision созданной branch и не принимает proof,
+если Gateway создал ветку с другим значением.
 
 Оракул `evals/acceptance/manifest.yml` и `acceptance/corpus/**` размечен
 пользователем и read-only для исполнителя. Пороги читаются только из манифеста.

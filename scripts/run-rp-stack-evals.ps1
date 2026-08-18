@@ -13,7 +13,9 @@ param(
     [switch]$ConfirmProviderRun,
     [string[]]$SemanticResponsesFile = @(),
     [string]$EvidenceFile = "",
-    [string]$Output = ""
+    [string]$Output = "",
+    [ValidateRange(0, 7)]
+    [Nullable[int]]$RpContractRevision = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,6 +74,9 @@ switch ($Mode) {
             "--timeout-seconds", [string]$TimeoutSeconds,
             "--confirm-provider-run"
         )
+        if ($null -ne $RpContractRevision) {
+            $arguments += @("--rp-contract-revision", [string]$RpContractRevision)
+        }
         foreach ($semanticResponses in $SemanticResponsesFile) {
             if (-not (Test-Path -LiteralPath $semanticResponses -PathType Leaf)) {
                 throw "SemanticResponsesFile does not exist: $semanticResponses"
