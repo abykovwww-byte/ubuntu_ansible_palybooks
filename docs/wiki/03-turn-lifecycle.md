@@ -106,14 +106,19 @@ omission не является delivery evidence и не переводит со
 eligible по одному из трёх сигналов, а закрывается только существующим
 evidence-checked правилом по committed сцене.
 
-Decision 029 остаётся на уровне `каркас`: source integration и offline regressions
-завершены локально; merge, deploy и live causal proof ещё не завершены. Live proof
-требует отдельной absent-NPC fixture и relationship warm-up/bootstrap: обычные
-Starosta/Merchant active threads охватывают почти всех modeled NPC, а checkpoint
-fork не переносит derived relationship rows. Decision не добавляет
-`scene_state`, persisted presence, schema migration, новую таблицу или отдельный
-LLM-вызов. Revisions `0..6`, `novel` и `training` не меняются; observed revision
-остаётся `6`.
+Decision 029 имеет уровень `подключено`. Deployed canary
+`autotest_53d37c3afef0` после отдельного warm-up создал remote active-thread
+due `favour` Бажены, а clean proof turn записал один relationship system-block с
+eligible Миленой. Бажена и Радогост отсутствовали; event остался active и
+unresolved при наступившем due turn, source state и six-table structural hash не
+изменились. Warm-up потребовал один validation repair и использовался только для
+подготовки derived rows; proof turn выполнил один narrator call без repair.
+
+Outputs не назвали отсутствующих NPC и proof output назвал Милену, но это не
+доказательство полной semantic continuity или уровня `наблюдается`. Decision не
+добавляет `scene_state`, persisted presence, schema migration, новую таблицу или
+отдельный LLM-вызов. Revisions `0..6`, `novel` и `training` не меняются;
+observed revision остаётся `6`.
 
 ## Обычный ход
 
