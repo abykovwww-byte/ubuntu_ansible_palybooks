@@ -10,11 +10,11 @@
 candidate-ревизия применяется только при выполнении этой ветки. Raw turns source
 party и branch остаются раздельными и не переписываются при сборке prompt.
 
-Candidate revision `7` расширяет допустимый revision range, но не меняет
-изоляцию. Отдельный activation change задаёт explicit observed target `7`,
-effective только после pull-based apply; existing party не получает новый
-revision автоматически. До apply candidate по-прежнему доступна только в
-отдельной checkpoint/autotest branch.
+Revision `7` расширяет допустимый revision range, но не меняет изоляцию.
+Отдельный activation change с explicit observed target `7` прошёл pull-based
+apply и stamp proof; existing party не получает новый revision автоматически.
+Checkpoint/autotest branch по-прежнему может явно закреплять допустимую revision
+независимо от source party.
 
 DC1 не добавляет таблиц и не переписывает raw turns. Bounded force-refresh может
 append-only сохранить новый `rp_story_memory_snapshots` как maintenance side
@@ -25,7 +25,8 @@ sanitized status; Prompt Inspector при overflow возвращает пуст
 
 DC4 из
 [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
-остаётся candidate до observed rollout, но его delivery gates подключены. Он не
+теперь доступен новым ordinary parties на observed revision `7`, а его delivery
+gates остаются только `подключено`. Он не
 добавляет таблицу: `scene_state` хранится внутри authoritative
 `state_versions.state_json`, а private minimal
 narrator bundle, normalized applied/dropped delta с actual bounded evidence и
@@ -54,8 +55,8 @@ failure-boundary tests merged/applied, а isolated production-store proofs
 подтвердили accepted atomic paths, repeated mismatch без commit и noncanonical
 fallback без canonical leakage. Protected existing-party rows и state-file
 hashes не изменились; external provider calls не выполнялись. Semantic
-continuity не доказана; ordinary activation и её post-apply stamp proof остаются
-отдельной rollout boundary.
+continuity не доказана; последующая ordinary activation отдельно прошла
+post-apply stamp-proof boundary и не повышает readiness DC4.
 
 ## Где находятся данные
 

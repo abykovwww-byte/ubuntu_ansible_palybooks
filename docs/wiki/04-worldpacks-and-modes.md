@@ -16,9 +16,9 @@ observed разрешена только изолированной checkpoint/a
 `novel` этот маркер не используют.
 
 Candidate maximum `7` сам по себе не означает observed activation. Отдельный
-rollout change задаёт `RP_CONTRACT_OBSERVED_REVISION=7`, но effective production
-status подтверждается только после pull-based apply. Новая обычная RP-партия
-получает `min(declared, observed)`, existing party остаётся pinned. PR1 не меняет
+rollout с `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
+stamp proof 23 августа 2026 года. Новая обычная RP-партия получает
+`min(declared, observed)`, existing party остаётся pinned. PR1 не меняет
 WorldPack content/state contract и не создаёт автоматическую migration.
 
 ## Что такое WorldPack
@@ -103,7 +103,7 @@ authored-событий, ролями, ранами, конечными часа
 и не переиспользует строковое поле `characters.*.loyalty`, где мир уже хранит
 принадлежность или фракцию.
 
-## Candidate revision 7: DC4 authored scene facts
+## Revision 7: DC4 authored scene facts
 
 [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
 не делает новый manifest field обязательным и не мигрирует existing WorldPacks.
@@ -131,8 +131,9 @@ Registry 031 целиком имеет уровень `подключено`: im
 applied, а isolated production-store proofs подтвердили accepted scene paths,
 repeated mismatch без commit и noncanonical fallback. WorldPack schema не
 расширялась, external provider calls в canary не выполнялись; это не semantic
-continuity или уровень `наблюдается`. Ordinary activation выполняется отдельным
-inventory rollout с обязательным post-apply proof.
+continuity или уровень `наблюдается`. Последующая ordinary activation прошла
+отдельный inventory rollout и обязательный post-apply proof; это не повышает
+readiness DC4.
 
 ## Три режима
 

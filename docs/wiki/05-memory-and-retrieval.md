@@ -26,10 +26,10 @@ provider input token budget. Live-canary на 168-ходовой истории 
 prompt при 260384 символах raw transcript — 49,79%, при этом source history не
 изменилась; это доказательство long-party compaction, а не данного edge case.
 
-## Candidate revision 7: полный uncovered tail
+## Revision 7: полный uncovered tail
 
 DC1 из [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
-меняет continuity boundary только для RP candidate revision `7`:
+меняет continuity boundary только для RP revision `7`:
 
 ```text
 coverage = effective_rp_story_memory.to_turn_id or 0
@@ -64,9 +64,9 @@ committed, а `party_4a07c4ad0613` после refresh осталась `26917 > 
 завершилась до narrator без нового turn/state/relationship projection. Все
 строки Decision 028 имеют уровень `подключено`. Ранний semantic output со сменой
 локации не доказывает исправленную continuity или `наблюдается`; observed
-rollout выполняется отдельным inventory change.
+rollout позднее прошёл отдельным inventory change и stamp proof.
 
-## Candidate revision 7: derived relationship scope
+## Revision 7: derived relationship scope
 
 DC2 из
 [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
@@ -98,7 +98,7 @@ state и six-table structural hash не изменились. Это не док
 continuity или уровень `наблюдается` и сам по себе не активирует observed
 revision `7`.
 
-## Candidate revision 7: prompt authority и structural deduplication
+## Revision 7: prompt authority и structural deduplication
 
 DC3 из
 [Decision 030](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
@@ -171,9 +171,9 @@ recorded context. Все три registry-row имеют уровень `подк
 Decision 030 не вводит `scene_state`, response bundle, continuity validator,
 fallback или atomic commit и не доказывает semantic continuity/`наблюдается`.
 Opening-scene persistence/parity подтверждена четвёртым slice. Observed revision
-`7` включает только отдельный inventory rollout после всех readiness gates.
+`7` была включена отдельным inventory rollout после всех readiness gates.
 
-## Candidate revision 7: scene authority и noncanonical fallback
+## Revision 7: scene authority и noncanonical fallback
 
 DC4 из
 [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
@@ -218,8 +218,9 @@ Opening использует ту же boundary и сохраняет DC3 `promp
 registry-строки Decision 031 имеют уровень `подключено`: deployed isolated
 canaries подтвердили accepted opening/normal и anchored/drop-stale paths,
 repeated hard mismatch без commit и excluded noncanonical fallback без утечки
-prose/relationship canon. External provider calls не выполнялись; observed
-activation остаётся отдельной apply/live-proof boundary.
+prose/relationship canon. External provider calls не выполнялись; последующая
+observed activation отдельно прошла apply/stamp-proof boundary и не повышает
+readiness этих canaries.
 
 ## Слои памяти
 
@@ -228,7 +229,7 @@ activation остаётся отдельной apply/live-proof boundary.
 | Слой | Назначение | Для каких режимов | Authority |
 |---|---|---|---:|
 | Canonical state | Текущие подтверждённые факты и механика | Все | Да |
-| Candidate `scene_state` (DC4, `подключено`) | Exact location/presence и stale/as-of boundary внутри state version | Только RP revision 7 | Да после accepted atomic commit; ordinary rollout пока не активирован |
+| Revision-7 `scene_state` (DC4, `подключено`) | Exact location/presence и stale/as-of boundary внутри state version | Только RP revision 7 | Да после accepted atomic commit; ordinary rollout активирован |
 | Raw turns | Полный первичный диалог и metadata | Все | Нет, но это source history |
 | RP story memory | Живой кумулятивный реестр всей истории | Только `rp` | Нет |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
@@ -370,7 +371,7 @@ flowchart TB
 идентификаторы сообщника и мишени и внутренний payload в prompt не попадают. Причины, связанные с ходом,
 исключённым rollback-механизмом, не участвуют в сумме.
 
-На candidate revision `7` DC2 дополнительно фильтрует этот narrator-visible блок
+На revision `7` DC2 дополнительно фильтрует этот narrator-visible блок
 по derived pre-scene allow-list. Фильтрация не удаляет causes/events и не меняет
 их clocks или status; revisions `0..6` сохраняют прежний relationship rendering.
 

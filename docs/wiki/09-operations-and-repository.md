@@ -68,6 +68,18 @@ parties/branches, оставить `novel` на `0` и WorldPack с declared rev
 `6`. Rollback inventory к `6` ограничивает только будущие партии; уже созданная
 revision-7 party остаётся pinned, автоматического downgrade нет.
 
+Activation merge `a4076b0938f2b152f77e675e8545156ce783a8f3` применён 23 августа
+2026 года с `16:21:00` до `16:23:40 MSK`; recap завершился с `ok=68`,
+`changed=7`, `unreachable=0`, `failed=0`. Runtime env сообщил observed `7`.
+Ordinary «Староста» `party_b286ed285388` сохранила revision `7` в API, SQLite и
+runtime settings, control declared-6 party `party_7928b20be697` сохранила `6`,
+а novel-party `party_517a98233313` сохранила `0`. У stamp parties не было turns,
+turn requests или service/provider calls; rows/revisions прежних `63` parties и
+`18` branches и их state-tree hashes не изменились, а novel follow-up повторил
+equality для уже `65` parties. SQLite `quick_check` прошёл, четыре сервиса
+healthy с `restarts=0`, оба UI вернули `200`, а deployed Gateway suite
+завершилась `548 passed, 1 skipped`.
+
 ## Codex devkit, worktrees и CI
 
 Репозиторий содержит собственный Codex-контур:

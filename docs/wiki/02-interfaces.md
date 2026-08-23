@@ -5,9 +5,9 @@
 ## RP contract revision
 
 `PartySummary` совместимо добавляет целое поле `rp_contract_revision` (`0..7`).
-Gateway поддерживает candidate `7`, а отдельный activation change задаёт
-inventory target observed `7`; target становится effective только после
-pull-based apply и post-apply proof. Обычная новая RP-партия получает
+Gateway поддерживает revision `7`; pull-based apply и post-apply stamp proof от
+23 августа 2026 года подтвердили effective observed `7`. Обычная новая RP-партия
+получает
 `min(WorldPack declared, observed)`. Запрос создания
 manual branch или autotest может явно передать candidate-ревизию в диапазоне
 `0..7`; она хранится только у ветки и не меняет source party. Существующие поля и

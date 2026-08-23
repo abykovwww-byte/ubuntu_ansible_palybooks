@@ -11,18 +11,18 @@
   наблюдаемое исполнение события;
 - revision 5 фиксирует consumer-or-retire для активных state paths;
 - revision 6 удерживает raw history неизменной и собирает выборочный prompt.
-- candidate revision 7 / DC1 защищает полный raw tail после effective
+- revision 7 / DC1 защищает полный raw tail после effective
   story-memory coverage и fail-closed обрабатывает hard overflow.
-- candidate revision 7 / DC2 ограничивает relationship pressure производным
+- revision 7 / DC2 ограничивает relationship pressure производным
   pre-scene scope.
-- candidate revision 7 / DC3 принимает prompt authority, structural
+- revision 7 / DC3 принимает prompt authority, structural
   deduplication и content-free assembly diagnostics.
-- candidate revision 7 / DC4 подключает `scene_state`, minimal narrator bundle,
+- revision 7 / DC4 подключает `scene_state`, minimal narrator bundle,
   deterministic continuity gate и atomic state/turn commit.
 
-Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный activation
-change задаёт inventory target observed `7`, effective только после pull-based
-apply и post-apply stamp proof.
+Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный pull-based
+activation и post-apply stamp proof подтвердили effective observed `7` для новых
+ordinary RP-parties.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -33,12 +33,12 @@ active до evidence-checked relationship extraction. Статус `resolved/del
 ставится лишь после положительной причины того же персонажа из реально записанной
 сцены. Оба relationship-блока исключаются из публичного Prompt Inspector.
 
-## Candidate revision 7: DC1
+## Revision 7: DC1
 
 [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
-применяется только к RP revision `7`; до activation apply она исполняется в
-изолированной candidate branch, после apply — в новых ordinary parties с
-declared revision `7`.
+применяется только к RP revision `7`. До activation apply она проверялась в
+изолированной candidate branch; после apply исполняется в новых ordinary parties
+с declared revision `7`.
 Gateway берёт newest valid effective story-memory snapshot и включает каждую
 non-excluded raw-пару новее его coverage. Перед narrator call snapshot читается
 повторно; advance, rollback или исчезновение snapshot требуют полной пересборки
@@ -84,7 +84,7 @@ Narrator этого же canary сместил действие в другую 
 успешного commit штатный relationship advance материализует seed; revisions
 `0..6` сохраняют прежнее поведение.
 
-## Candidate revision 7: DC2
+## Revision 7: DC2
 
 [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
 принимает отдельный derived pre-scene contract для relationship pressure. До
@@ -132,7 +132,7 @@ Outputs не назвали отсутствующих NPC и proof output на�
 отдельный LLM-вызов. Revisions `0..6`, `novel` и `training` не меняются; DC2
 evidence сам по себе observed rollout не активирует.
 
-## Candidate revision 7: DC3
+## Revision 7: DC3
 
 [Decision 030](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
 document-first принимает третий slice для normal party-chat и admin-autotest
@@ -209,11 +209,10 @@ external provider calls в двух новых deterministic canary не вып�
 DC3 не включает `scene_state`, structured response bundle, continuity validator,
 fallback или atomic scene/turn commit, не мигрирует existing parties и не
 доказывает semantic continuity. Opening-scene `prompt_assembly`
-persistence/parity подтверждена DC4 canary. Observed revision `7` всё ещё не
-является следствием DC3: её включает только отдельный inventory rollout после
-всех readiness gates.
+persistence/parity подтверждена DC4 canary. Observed revision `7` была включена
+отдельным inventory rollout после всех readiness gates, а не самим DC3.
 
-## Candidate revision 7: DC4
+## Revision 7: DC4
 
 [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
 document-first принимает четвёртый slice. Provider private response остаётся
@@ -235,7 +234,7 @@ NPC, `Outcome.target`, negation, correction, mention или third-person text.
 
 ```mermaid
 sequenceDiagram
-    participant API as Gateway rev7 candidate
+    participant API as Gateway rev7
     participant LLM as Narrator
     participant Gate as Typed continuity gate
     participant DB as SQLite authority
@@ -292,7 +291,8 @@ accepted opening/normal, anchored apply и immediate unanchored drop+audit+stale
 turn/новую state version; `party_ad201794ce31` сохранила excluded noncanonical
 fallback без fallback prose в следующем prompt и без relationship canon rows.
 Это deterministic causal proof deployed paths, не semantic continuity или
-`наблюдается`; ordinary activation остаётся отдельной apply/live-proof boundary.
+`наблюдается`; последующая ordinary activation отдельно прошла apply/stamp-proof
+boundary и не повышает readiness DC4.
 
 ## Обычный ход
 
@@ -431,7 +431,7 @@ seed-причина и обычная извлечённая причина вл
 текущие `surfaces[]`, явно разрешённые state paths и включённые interaction
 contracts. Score, assessment, fallback и будущие ходы до debrief не передаются.
 
-Для candidate revision `7` DC2 применяет к обоим relationship-блокам allow-list
+Для revision `7` DC2 применяет к обоим relationship-блокам allow-list
 из описанного выше derived scope. Durable cause и due `favour` отсутствующего
 персонажа остаются в relationship store, но не заставляют narrator переносить
 этого NPC в текущую сцену.
