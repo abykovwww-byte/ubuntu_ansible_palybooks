@@ -5,8 +5,10 @@
 ## RP contract revision
 
 `PartySummary` совместимо добавляет целое поле `rp_contract_revision` (`0..7`).
-Gateway поддерживает candidate `7`, но observed revision остаётся `6`: обычная
-новая RP-партия получает `min(WorldPack declared, observed)`. Запрос создания
+Gateway поддерживает candidate `7`, а отдельный activation change задаёт
+inventory target observed `7`; target становится effective только после
+pull-based apply и post-apply proof. Обычная новая RP-партия получает
+`min(WorldPack declared, observed)`. Запрос создания
 manual branch или autotest может явно передать candidate-ревизию в диапазоне
 `0..7`; она хранится только у ветки и не меняет source party. Существующие поля и
 endpoint сохраняются. Пустое поле в админской форме сохраняет revision исходной

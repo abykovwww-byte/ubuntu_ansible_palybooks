@@ -11,14 +11,14 @@
 ```
 
 Это capability pack, а не автоматическая активация. Gateway ограничивает обычные
-партии значением `RP_CONTRACT_OBSERVED_REVISION`; candidate revision разрешена
-только изолированной checkpoint/autotest-ветке. `training` и `novel` этот маркер
-не используют.
+партии значением `RP_CONTRACT_OBSERVED_REVISION`; revision выше effective
+observed разрешена только изолированной checkpoint/autotest-ветке. `training` и
+`novel` этот маркер не используют.
 
-Candidate maximum `7` не означает observed activation. До отдельного rollout
-`RP_CONTRACT_OBSERVED_REVISION` остаётся `6`; новая обычная RP-партия получает
-`min(declared, observed)`, existing party остаётся pinned, а revision `7`
-исполняется только в явно выбранной checkpoint/autotest branch. PR1 не меняет
+Candidate maximum `7` сам по себе не означает observed activation. Отдельный
+rollout change задаёт `RP_CONTRACT_OBSERVED_REVISION=7`, но effective production
+status подтверждается только после pull-based apply. Новая обычная RP-партия
+получает `min(declared, observed)`, existing party остаётся pinned. PR1 не меняет
 WorldPack content/state contract и не создаёт автоматическую migration.
 
 ## Что такое WorldPack
@@ -131,8 +131,8 @@ Registry 031 целиком имеет уровень `подключено`: im
 applied, а isolated production-store proofs подтвердили accepted scene paths,
 repeated mismatch без commit и noncanonical fallback. WorldPack schema не
 расширялась, external provider calls в canary не выполнялись; это не semantic
-continuity или уровень `наблюдается`. Observed revision остаётся `6` до
-отдельного rollout.
+continuity или уровень `наблюдается`. Ordinary activation выполняется отдельным
+inventory rollout с обязательным post-apply proof.
 
 ## Три режима
 

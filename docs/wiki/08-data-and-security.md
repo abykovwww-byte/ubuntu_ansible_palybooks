@@ -11,9 +11,10 @@ candidate-ревизия применяется только при выполн
 party и branch остаются раздельными и не переписываются при сборке prompt.
 
 Candidate revision `7` расширяет допустимый revision range, но не меняет
-изоляцию. Explicit observed остаётся `6`, existing party не получает новый
-revision автоматически, а candidate выполняется только в отдельной
-checkpoint/autotest branch.
+изоляцию. Отдельный activation change задаёт explicit observed target `7`,
+effective только после pull-based apply; existing party не получает новый
+revision автоматически. До apply candidate по-прежнему доступна только в
+отдельной checkpoint/autotest branch.
 
 DC1 не добавляет таблиц и не переписывает raw turns. Bounded force-refresh может
 append-only сохранить новый `rp_story_memory_snapshots` как maintenance side
@@ -53,7 +54,8 @@ failure-boundary tests merged/applied, а isolated production-store proofs
 подтвердили accepted atomic paths, repeated mismatch без commit и noncanonical
 fallback без canonical leakage. Protected existing-party rows и state-file
 hashes не изменились; external provider calls не выполнялись. Semantic
-continuity не доказана, observed revision остаётся `6` до отдельного rollout.
+continuity не доказана; ordinary activation и её post-apply stamp proof остаются
+отдельной rollout boundary.
 
 ## Где находятся данные
 

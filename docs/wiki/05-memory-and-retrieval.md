@@ -64,7 +64,7 @@ committed, а `party_4a07c4ad0613` после refresh осталась `26917 > 
 завершилась до narrator без нового turn/state/relationship projection. Все
 строки Decision 028 имеют уровень `подключено`. Ранний semantic output со сменой
 локации не доказывает исправленную continuity или `наблюдается`; observed
-revision остаётся `6`.
+rollout выполняется отдельным inventory change.
 
 ## Candidate revision 7: derived relationship scope
 
@@ -95,8 +95,8 @@ state-проекция сцены и scene-state fast path не входят в 
 relationship system-block с eligible Миленой, не включил remote active-thread
 Бажену или Радогоста и сохранил due `favour` Бажены active и unresolved. Source
 state и six-table structural hash не изменились. Это не доказывает semantic
-continuity, уровень `наблюдается` или observed revision `7`; observed остаётся
-`6`.
+continuity или уровень `наблюдается` и сам по себе не активирует observed
+revision `7`.
 
 ## Candidate revision 7: prompt authority и structural deduplication
 
@@ -171,7 +171,7 @@ recorded context. Все три registry-row имеют уровень `подк
 Decision 030 не вводит `scene_state`, response bundle, continuity validator,
 fallback или atomic commit и не доказывает semantic continuity/`наблюдается`.
 Opening-scene persistence/parity подтверждена четвёртым slice. Observed revision
-`7` пока не активирована и остаётся `6` до отдельного explicit rollout.
+`7` включает только отдельный inventory rollout после всех readiness gates.
 
 ## Candidate revision 7: scene authority и noncanonical fallback
 
@@ -219,7 +219,7 @@ registry-строки Decision 031 имеют уровень `подключен
 canaries подтвердили accepted opening/normal и anchored/drop-stale paths,
 repeated hard mismatch без commit и excluded noncanonical fallback без утечки
 prose/relationship canon. External provider calls не выполнялись; observed
-revision остаётся `6` до отдельного rollout.
+activation остаётся отдельной apply/live-proof boundary.
 
 ## Слои памяти
 

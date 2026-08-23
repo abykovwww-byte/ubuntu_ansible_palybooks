@@ -241,16 +241,20 @@ def validate_environment_contracts(errors: list[str]) -> None:
                 f"RP Stack env template does not render service-call log retention: {path.relative_to(ROOT)}",
             )
 
-    observed_revision_variable = "rp_stack_gateway_rp_contract_observed_revision: 6"
+    observed_revision_assignments = (
+        re.findall(
+            r"(?m)^rp_stack_gateway_rp_contract_observed_revision:\s*([0-9]+)\s*(?:#.*)?$",
+            inventory.read_text(encoding="utf-8"),
+        )
+        if inventory.is_file()
+        else []
+    )
     observed_revision_mapping = (
         "RP_CONTRACT_OBSERVED_REVISION="
         "{{ rp_stack_gateway_rp_contract_observed_revision }}"
     )
-    if (
-        not inventory.is_file()
-        or observed_revision_variable not in inventory.read_text(encoding="utf-8")
-    ):
-        fail(errors, "RP Stack inventory must keep rp-core.v2 revision 6 observed")
+    if observed_revision_assignments != ["7"]:
+        fail(errors, "RP Stack inventory must set rp-core.v2 revision 7 observed exactly once")
     if (
         not production_env_template.is_file()
         or observed_revision_mapping not in production_env_template.read_text(encoding="utf-8")
