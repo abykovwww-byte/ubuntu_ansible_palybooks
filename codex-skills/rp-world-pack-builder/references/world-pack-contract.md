@@ -48,7 +48,7 @@ includes `rp` and optional otherwise.
   },
   "rp_contract": {
     "schema_version": "rp-core.v2",
-    "revision": 6
+    "revision": 7
   },
   "relationships": {
     "schema_version": "rp-relationships.v2",
@@ -84,8 +84,54 @@ list. Route `training` packs to `training-world-pack-builder`. The user still
 chooses the party type manually; this metadata does not auto-select it.
 Every pack supporting `rp` declares `rp_contract.schema_version=rp-core.v2` and
 the highest cumulative `rp_contract.revision` it supports. Current authored RP
-packs use revision `6`. Gateway still caps ordinary party creation by the
-observed runtime revision; the manifest does not activate unverified behavior.
+packs created by this builder use revision `7`. Gateway still caps ordinary
+party creation by the observed runtime revision; the manifest does not activate
+unverified behavior. Existing manifests remain pinned and are not blanket-
+migrated; raise their revision only as part of an explicit compatible update.
+
+## Revision 7 Authoring Boundary
+
+Revision 7 changes Gateway continuity behavior without requiring another
+WorldPack file or mandatory manifest field:
+
+- use stable existing location and character IDs from `state-seed.json` in all
+  pack-authored content;
+- keep location names and aliases unambiguous. Explicit non-negated first-person
+  movement to a named destination may let the narrator select an existing known
+  location even when the phrase is not bound to one alias; this never authorizes
+  an unknown location;
+- do not freeze the player in the opening location when their current action
+  explicitly names movement;
+- do not put `scene_claims`, `scene_delta`, or the private narrator bundle in
+  `gm-system.md` or `authors-note.md`. Gateway injects and validates that schema,
+  drops authorized but unanchored operations with a stale marker, repairs hard
+  violations once, and owns the atomic state/turn commit;
+- Gateway also owns `PROMPT_AUTHORITY_HIERARCHY`, the full uncovered raw tail,
+  hard-overflow force-refresh, and noncanonical fallback handling. World prompts
+  must not duplicate these blocks or treat fallback narrator prose as canon.
+
+If a world needs a stable narrative affiliation beyond canonical loyalty and
+faction, it may add the optional bounded map below. Keys must be known character
+IDs; values must be finite non-empty strings, preferably existing faction IDs
+with authored aliases. Do not use free-text professions, biography, goals,
+beliefs, emotions, or relationship-model roles.
+
+```json
+{
+  "rp_contract": {
+    "schema_version": "rp-core.v2",
+    "revision": 7,
+    "stable_affiliations": {
+      "character-id": "faction-id"
+    }
+  }
+}
+```
+
+On a revision-7 fallback turn, `story_memory_canonical=false`: Gateway-authored
+narrator prose stays outside story memory, chapters, retrieval, and relationship
+canon. The player input and stale/as-of scene boundary remain visible to the
+next prompt.
 
 ## RP Relationship Model
 
