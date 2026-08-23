@@ -51,7 +51,11 @@ When changing Light GUI/Gateway memory or prompt assembly, keep four distinct la
 - Make the episodic-history detail budget configurable. For long-context models, prefer rarer, richer compression over frequent terse summaries.
 - Retain every original party turn in durable storage. When a raw turn leaves `effective_party_history_token_budget`, create the next immutable chapter; until chapter creation succeeds, keep the overflow raw turns in the narrator prompt.
 - Bound the prompt by selecting detailed chapters and the newest complete raw turn pairs. Archived-turn retrieval is optional, query-specific, non-authoritative, and must never cross a party boundary.
-- Preserve RP runtime order: scenario contract -> world system -> author's note -> `RP_STORY_MEMORY` -> episodic chapters -> lore/fallback/raw/retrieval -> relevant characters -> dynamic state -> `AUTHORITATIVE_OUTCOME` -> current player action. For `novel` and `training`, omit the RP story layer and its reserve while preserving the existing path. Treat provider cache telemetry as an observed value, not a promise.
+- For RP revision 7, keep every complete non-excluded raw turn after effective `RP_STORY_MEMORY.to_turn_id` in the narrator prompt. This full uncovered raw tail is newer and more authoritative than story memory; do not trim it for a soft percentage target or duplicate it through chapters, retrieval, or fallback blocks.
+- Preserve the revision-7 authority order: `AUTHORITATIVE_OUTCOME` and current action -> full uncovered raw tail -> effective `RP_STORY_MEMORY` -> archive. Gateway owns the mandatory `PROMPT_AUTHORITY_HIERARCHY` block; WorldPack prompts must not duplicate or reorder it.
+- On revision-7 hard overflow, perform the bounded synchronous story-memory force-refresh, reload coverage, and rebuild before rejecting the turn. Reject before the narrator only if the mandatory prompt still does not fit after refresh.
+- Treat revision-7 safe-fallback narrator prose as noncanonical: it is excluded from story memory, chapters, retrieval, and relationship canon, while the player input and stale/as-of scene marker remain available to the next prompt. Do not make fallback prose canonical in WorldPack content.
+- For `novel` and `training`, omit the RP story layer and its reserve while preserving their existing paths. Treat provider cache telemetry as an observed value, not a promise.
 - Keep human-facing journal recaps separate from narrator memory.
 - Test RP activation, negative `training` and `novel` cases, covered-turn exclusion, chronological coverage, party/branch isolation, archive retrieval isolation, secret exclusion, context budget, and a manual memory rebuild before deployment.
 
@@ -113,7 +117,9 @@ World-pack requirements:
 
 - Put the starting player role in `manifest.player_role`; Light GUI uses it as the default player character description.
 - Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`. This metadata filters incompatible combinations but never auto-selects the party type.
-- For a pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 6}`. This is the maximum contract understood by the pack, not a global activation flag: ordinary parties are capped by Gateway's observed revision, while checkpoint/autotest branches may explicitly request a deployed candidate revision. Do not author a new RP pack against the legacy mechanical v1 contract.
+- For a new pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 7}`. This is the maximum contract understood by the pack, not a global activation flag: ordinary parties are capped by Gateway's observed revision, while checkpoint/autotest branches may explicitly request a deployed candidate revision. Existing packs remain pinned until an explicit compatible update; do not blanket-migrate them or author a new RP pack against the legacy mechanical v1 contract.
+- Reuse stable location and character IDs from `state-seed.json` throughout the pack. Revision 7 does not require a new scene manifest field. If the world needs an additional invariant narrative affiliation, `rp_contract.stable_affiliations` may map at most 64 known character IDs to bounded finite authored values; prefer existing faction IDs with authored aliases, and never infer professions, goals, beliefs, emotions, or relationship-model roles into this map.
+- Do not copy `scene_claims`, `scene_delta`, or the private narrator bundle schema into `gm-system.md` or `authors-note.md`. Gateway injects that revision-7 contract, validates normalized evidence anchors and commits accepted scene state atomically.
 - Include focused lorebook entries, not one giant encyclopedia entry.
 - Separate confirmed facts, rumors, and unresolved mysteries.
 - Give NPCs goals, constraints, secrets, and relationships rather than static descriptions.
@@ -148,6 +154,7 @@ World-pack requirements:
 Scenario prompt requirements:
 
 - `rp`: prohibit D20, skills, difficulty, score, success/failure labels, hidden checks, and mechanical `/check`; continue from WorldPack constraints, canonical state, information, resources, NPC goals, relationships, and prior consequences.
+- Do not freeze the player in the current location. An explicit non-negated first-person move to a named destination is valid intent; give locations stable IDs and useful authored names/aliases so Gateway and the narrator can resolve it to an existing location.
 - For RP relationship seeds, ensure a positive boundary can produce the declared
   `favour` event and a concrete voluntary help scene before its WorldPack clock;
   never expose numeric weights, internal IDs, or due turns in prompts.
