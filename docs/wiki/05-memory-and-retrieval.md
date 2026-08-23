@@ -58,10 +58,13 @@ force-refresh result; Inspector дополнительно перечисляе�
 World/player prompt text в overflow payload не возвращается. Deployed Merchant
 canary поднял точный tail и revision stamp до `подключено`: recorded prompt
 содержал только полную eligible verbatim-пару после effective coverage, а source
-raw/state hashes не изменились. Hard-overflow negative proof остаётся `каркас`,
-поскольку этот canary поместился без overflow. Его semantic output также сместил
-локацию, поэтому исправленная continuity и уровень `наблюдается` не заявляются;
-observed revision остаётся `6`.
+raw/state hashes не изменились. Paired production-store canary закрыла
+hard-overflow rule: `party_39f2d3cd6307` после force-refresh поместилась и
+committed, а `party_4a07c4ad0613` после refresh осталась `26917 > 4000` и
+завершилась до narrator без нового turn/state/relationship projection. Все
+строки Decision 028 имеют уровень `подключено`. Ранний semantic output со сменой
+локации не доказывает исправленную continuity или `наблюдается`; observed
+revision остаётся `6`.
 
 ## Candidate revision 7: derived relationship scope
 
@@ -150,24 +153,25 @@ Optional `branch_id` на read-only context и prompt preview нужен, что
 прочитать assembly isolated candidate branch. Без него source-party response не
 меняется; с ним Gateway выбирает branch store, source-party runtime settings и
 persisted branch revision, не принимая raw `state_campaign_id` и не меняя
-memory/state. Wiring и четыре focused test merged в PR59 и applied, но exact
-isolated-branch live parity ещё не доказана. Narrow excluded-turn/emitter-ID
-hardening пока ожидает merge/apply и сам по себе readiness не повышает.
+memory/state. Wiring merged в PR59, excluded-turn/emitter-ID hardening — в PR61;
+оба applied и проверены deployed live proof.
 
-Decision 030 имеет смешанный статус. Applied canary
+Applied canary
 `autotest_2eb4d5e1a53f` / `branch_ccf0d535a98c` подтвердил exact structural
 deduplication. Primary attempt получил `403`, последующий transport
 model-fallback `openrouter/auto` — `200`; оба получили exact same prompt.
 Validation repair и Gateway safe-fallback text не использовались. Source revision `0`
-и exact state/projection/table hashes остались baseline. Первая registry-row
-имеет уровень `подключено`. Actual hard provider token overflow и deployed
-parity metadata ↔ trace ↔ Prompt Inspector `source=last` ↔ recorded context этим
-canary не доказаны, поэтому вторая и третья строки остаются `каркас`.
+и exact state/projection/table hashes остались baseline. Отдельная canary
+`party_1bc1a1204dde` при full prompt `15360` и hard budget `15359` удалила
+`relevant_characters` целым message, записала `hard_input_budget` и committed
+после одного mock-narrator call. Excluded latest turn `party_ad201794ce31`
+подтвердил exact parity metadata ↔ trace ↔ Prompt Inspector `source=last` ↔
+recorded context. Все три registry-row имеют уровень `подключено`.
 
 Decision 030 не вводит `scene_state`, response bundle, continuity validator,
 fallback или atomic commit и не доказывает semantic continuity/`наблюдается`.
-Opening-scene persistence/parity остаётся gate четвёртого opening/atomic-commit
-slice; observed revision `7` до него не активируется и сейчас остаётся `6`.
+Opening-scene persistence/parity подтверждена четвёртым slice. Observed revision
+`7` пока не активирована и остаётся `6` до отдельного explicit rollout.
 
 ## Candidate revision 7: scene authority и noncanonical fallback
 
@@ -211,8 +215,11 @@ as-of scene. Fallback поэтому durable для idempotency/audit, но не
 новым фактом мира.
 
 Opening использует ту же boundary и сохраняет DC3 `prompt_assembly`. Все четыре
-registry-строки Decision 031 пока `каркас`: local source/offline gates выполнены,
-но merge/apply/live proof отсутствуют; observed revision остаётся `6`.
+registry-строки Decision 031 имеют уровень `подключено`: deployed isolated
+canaries подтвердили accepted opening/normal и anchored/drop-stale paths,
+repeated hard mismatch без commit и excluded noncanonical fallback без утечки
+prose/relationship canon. External provider calls не выполнялись; observed
+revision остаётся `6` до отдельного rollout.
 
 ## Слои памяти
 
@@ -221,7 +228,7 @@ registry-строки Decision 031 пока `каркас`: local source/offline
 | Слой | Назначение | Для каких режимов | Authority |
 |---|---|---|---:|
 | Canonical state | Текущие подтверждённые факты и механика | Все | Да |
-| Candidate `scene_state` (DC4, пока `каркас`) | Exact location/presence и stale/as-of boundary внутри state version | Только RP revision 7 | Только после accepted atomic commit; пока не live |
+| Candidate `scene_state` (DC4, `подключено`) | Exact location/presence и stale/as-of boundary внутри state version | Только RP revision 7 | Да после accepted atomic commit; ordinary rollout пока не активирован |
 | Raw turns | Полный первичный диалог и metadata | Все | Нет, но это source history |
 | RP story memory | Живой кумулятивный реестр всей истории | Только `rp` | Нет |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |

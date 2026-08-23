@@ -2,7 +2,7 @@
 
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр, совместного романа и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki проверена 18 августа 2026 года и отделяет source revision от фактического
+Эта Wiki проверена 23 августа 2026 года и отделяет source revision от фактического
 runtime. RP-only living story memory реализована в исходном коде и описана в
 [Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
 но статус push, Ansible apply и live verification всегда сообщается отдельно.
@@ -18,12 +18,13 @@ PR1 следующего continuity cycle описан в
 [Plan 028](../../roles/apps/files/rp-stack/docs/plans/028-rp-continuity-project-design.md)
 и [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md):
 candidate revision `7` сохраняет полный raw tail после effective story-memory
-coverage и выполняет bounded recovery при hard overflow. После deployed Merchant
-canary требования tail и revision stamp имеют уровень `подключено`, а
-hard-overflow negative proof остаётся `каркас`. Canary доказал точную доставку
-raw tail, но его narration сместила действие в другую локацию; исправленная
-semantic continuity и уровень `наблюдается` не заявляются. Observed revision
-остаётся `6`, existing parties не мигрируют автоматически.
+coverage и выполняет bounded recovery при hard overflow. Tail/stamp и paired
+fit/reject overflow proofs имеют уровень `подключено`: production-store canary
+после force-refresh либо вызвала narrator и committed ход, либо при оставшемся
+`26917 > 4000` завершилась до narrator без нового turn/state/relationship
+projection. Ранний Merchant narration, сместивший действие, не доказывает
+semantic continuity или уровень `наблюдается`. Observed revision остаётся `6`,
+existing parties не мигрируют автоматически.
 
 Второй отдельный slice принят в
 [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md).
@@ -34,8 +35,7 @@ semantic continuity и уровень `наблюдается` не заявля
 canary записал один relationship system-block с Миленой; Бажена и Радогост
 отсутствовали, а due `favour` Бажены остался active после omission, хотя она
 оставалась remote active-thread member. Это не доказывает semantic continuity
-или уровень `наблюдается`; observed revision остаётся `6`. Третий и четвёртый
-slice Plan 028 не являются runtime-контрактом PR2.
+или уровень `наблюдается`; observed revision остаётся `6`.
 
 Третий document-first slice принят в
 [Decision 030](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md).
@@ -57,15 +57,16 @@ Isolated live canary
 deduplication: primary attempt получил `403`, последующий transport
 model-fallback `openrouter/auto` — `200`; оба получили exact same prompt.
 Validation repair и Gateway safe-fallback text не использовались; source revision `0`
-и exact state/projection/table hashes не изменились. Поэтому первая registry-row
-Decision 030 имеет уровень `подключено`, а hard-budget eviction и cross-surface
-diagnostics parity остаются `каркас`. Optional branch-aware context/preview
-wiring merged в PR59 и applied, но exact isolated-branch parity ещё не проверена
-live. Narrow excluded-turn/emitter-ID hardening пока local-only. Scope ограничен
-normal party-chat/admin-autotest turns; semantic
-output не доказан. Opening-scene parity остаётся gate четвёртого
-opening/atomic-commit slice. Observed revision остаётся `6` и не может быть
-поднята до закрытия этого gate.
+и exact state/projection/table hashes не изменились. После PR61/apply excluded
+latest turn `party_ad201794ce31` вернул exact equal `prompt_assembly` из metadata,
+trace, Prompt Inspector `source=last` и recorded context. Отдельная canary
+`party_1bc1a1204dde` при full prompt `15360` и hard budget `15359` удалила целый
+`relevant_characters`, записала reason `hard_input_budget`, вызвала mock-narrator
+один раз и committed turn/state; protected existing-party hashes не изменились.
+Opening parity подтверждена четвёртым slice. Поэтому все три registry-row
+Decision 030 имеют уровень `подключено`. Scope остаётся normal
+party-chat/admin-autotest plus opening parity из DC4; semantic output не доказан,
+отдельного GUI renderer нет. Observed revision остаётся `6` до explicit rollout.
 
 Четвёртый document-first slice принят в
 [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md).
@@ -82,9 +83,13 @@ unknown free prose не становятся semantic oracle. Pre-bundle transpo
 narrator prose исключается из raw/story-memory/chapter/retrieval canon; player
 input и unresolved as-of marker остаются явными для следующего prompt. Opening,
 world-command stale policy и post-commit best-effort `current.json` входят в тот
-же контракт. Все четыре registry-строки Decision 031 — `каркас`: локальная
-implementation, focused/full Gateway tests и repository CI выполнены, но merge,
-apply и live proof отсутствуют. Observed revision остаётся `6`.
+же контракт. Все четыре registry-строки Decision 031 имеют уровень
+`подключено`: isolated production-store proofs подтвердили accepted
+opening/normal и anchored/drop-stale paths (`party_16f68f4f2ba3`), repeated hard
+mismatch без commit (`party_48fd541fdb8d`) и excluded noncanonical fallback без
+утечки prose/relationship canon (`party_ad201794ce31`). External provider calls
+не выполнялись; это не уровень `наблюдается`. Observed revision остаётся `6` до
+отдельного explicit rollout.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
@@ -122,7 +127,7 @@ flowchart LR
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
-- **Revision 7 пока candidate.** DC1 tail/stamp, DC2 и DC3 hierarchy/structural deduplication имеют уровень `подключено`; DC1 hard-overflow, DC3 hard-budget/parity и все DC4 scene/bundle/atomic/fallback gates остаются `каркас`. Semantic continuity, уровень `наблюдается`, observed activation и миграция старых партий не заявляются.
+- **Revision 7 пока candidate.** Все registry-строки DC1–DC4 имеют уровень `подключено` по deployed isolated live-store proofs. Semantic continuity, уровень `наблюдается`, observed activation и миграция старых партий не заявляются; observed остаётся `6` до отдельного explicit rollout.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
