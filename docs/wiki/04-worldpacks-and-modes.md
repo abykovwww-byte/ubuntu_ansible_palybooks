@@ -127,9 +127,12 @@ location ID. Такой all-known allowance существует только д
 `move_player`; NPC arrival/departure, `Outcome.target`, third-person mention,
 correction и negation его не получают.
 
-Registry 031 целиком остаётся `каркас`: локальная implementation и tests
-выполнены, но merge, apply и live proof отсутствуют, observed revision остаётся
-`6`.
+Registry 031 целиком имеет уровень `подключено`: implementation/tests merged и
+applied, а isolated production-store proofs подтвердили accepted scene paths,
+repeated mismatch без commit и noncanonical fallback. WorldPack schema не
+расширялась, external provider calls в canary не выполнялись; это не semantic
+continuity или уровень `наблюдается`. Observed revision остаётся `6` до
+отдельного rollout.
 
 ## Три режима
 

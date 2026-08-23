@@ -18,9 +18,9 @@
 - candidate revision 7 / DC3 принимает prompt authority, structural
   deduplication и content-free assembly diagnostics; observed runtime остаётся
   на revision `6`.
-- candidate revision 7 / DC4 принимает document-first `scene_state`, minimal
-  narrator bundle, deterministic continuity gate и atomic state/turn commit;
-  все его gates пока `каркас`, observed runtime остаётся на revision `6`.
+- candidate revision 7 / DC4 подключает `scene_state`, minimal narrator bundle,
+  deterministic continuity gate и atomic state/turn commit; observed runtime
+  остаётся на revision `6` до отдельного rollout.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -63,11 +63,13 @@ sequenceDiagram
 
 Успешный maintenance snapshot может сохраниться даже при конечном overflow, но
 player turn, state version и relationship projections не меняются. Deployed
-Merchant canary подтвердил на уровне `подключено` полный uncovered tail и
-explicit branch revision `7`: recorded prompt содержал ровно eligible verbatim
-pair после effective coverage, source raw/state hashes не изменились. Canary не
-вошёл в hard-overflow, поэтому negative fail-before-provider requirement остаётся
-`каркас`.
+Merchant canary подтвердил полный uncovered tail и explicit branch revision `7`.
+Финальная paired canary закрыла overflow rule: `party_39f2d3cd6307` после
+force-refresh coverage `1634 -> 1636` поместилась, вызвала narrator один раз и
+committed ход; `party_4a07c4ad0613` после coverage `1638 -> 1640` осталась
+`26917 > 4000` и завершилась failed до narrator без нового turn/state и без
+relationship projection rows. Все строки Decision 028 имеют уровень
+`подключено`; existing-party hashes не изменились.
 
 Narrator этого же canary сместил действие в другую локацию и не подтвердил
 устойчивость ролей. Это не опровергает точный DC1 prompt-presence proof, но не
@@ -182,28 +184,29 @@ branch selector в этом slice.
 Для штатной проверки isolated branch follow-up принимает optional `branch_id` на
 read-only context и prompt-preview endpoint. Он выбирает branch state/runtime
 revision, не меняя normal turn flow и не принимая raw `state_campaign_id`.
-Wiring и четыре focused test merged в PR59 и applied; сам wiring без exact
-isolated-branch live proof не доказывает parity. Narrow regression, что excluded
-turn сохраняет diagnostic, а real emitters не расходятся со stable ID table,
-пока ожидает merge/apply.
+Wiring и четыре focused test merged в PR59 и applied. Excluded-turn visibility и
+emitter-ID regression merged в PR61 и также applied; live parity ниже доказывает
+deployed recorded path.
 
-Decision 030 имеет смешанный статус. Applied canary
+Applied canary
 `autotest_2eb4d5e1a53f` / `branch_ccf0d535a98c` подтвердил exact structural
 deduplication: primary attempt получил `403`, последующий transport
 model-fallback `openrouter/auto` — `200`; оба получили exact same prompt.
 Validation repair и Gateway safe-fallback text не использовались. Source revision `0`,
 canonical state, combined projections и individual table hashes точно совпали с
-baseline. Первая registry-row поэтому имеет уровень `подключено`. Canary не
-входил в actual hard provider token overflow, а deployed parity metadata ↔ trace
-↔ Prompt Inspector `source=last` ↔ recorded context не проверена; вторая и
-третья строки остаются `каркас`.
+baseline. `party_1bc1a1204dde` отдельно доказала actual hard-budget path: full
+prompt `15360` при budget `15359` потерял целый optional
+`relevant_characters`, записал reason `hard_input_budget` и committed после
+одного mock-narrator call. Excluded latest turn `party_ad201794ce31` вернул
+equal `prompt_assembly` на metadata, trace, Prompt Inspector `source=last` и
+recorded context. Все три registry-row Decision 030 имеют уровень `подключено`;
+external provider calls в двух новых deterministic canary не выполнялись.
 
 DC3 не включает `scene_state`, structured response bundle, continuity validator,
 fallback или atomic scene/turn commit, не мигрирует existing parties и не
 доказывает semantic continuity. Opening-scene `prompt_assembly`
-persistence/parity остаётся pending gate четвёртого opening/atomic-commit slice,
-поэтому observed revision `7` до его закрытия не активируется и сейчас остаётся
-`6`.
+persistence/parity подтверждена DC4 canary. Observed revision `7` всё ещё не
+активирована и остаётся `6` до отдельного explicit rollout.
 
 ## Candidate revision 7: DC4
 
@@ -277,11 +280,14 @@ projection stale, rollback восстанавливает historical projection 
 bootstrap. `current.json` записывается только после SQLite commit и остаётся
 best-effort mirror.
 
-Все четыре registry-строки Decision 031 остаются `каркас`: локальная source
-implementation и failure-injection/opening/fallback tests выполнены, но merge,
-apply и live proofs ещё нет. Это candidate implementation, а не описание
-текущего ordinary-turn runtime; semantic continuity и observed revision `7` не
-заявляются.
+Все четыре registry-строки Decision 031 имеют уровень `подключено` после merge,
+apply и isolated production-store proof. `party_16f68f4f2ba3` подтвердила
+accepted opening/normal, anchored apply и immediate unanchored drop+audit+stale;
+`party_48fd541fdb8d` дважды получила exact hard location mismatch и не создала
+turn/новую state version; `party_ad201794ce31` сохранила excluded noncanonical
+fallback без fallback prose в следующем prompt и без relationship canon rows.
+Это deterministic causal proof deployed paths, не semantic continuity или
+`наблюдается`; observed revision остаётся `6` до отдельного rollout.
 
 ## Обычный ход
 

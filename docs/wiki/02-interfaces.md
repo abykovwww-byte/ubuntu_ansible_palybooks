@@ -79,10 +79,12 @@ path, preview body и response shape сохраняются без измене�
 чужая или принадлежащая другой партии ветка возвращает `404`.
 
 Оба endpoint остаются read-only: они не вызывают provider, не создают turn,
-snapshot или branch и не меняют source/branch state. Wiring реализован локально
-и подтверждён четырьмя focused test, но пока не merged/applied и не имеет live
-proof; cross-surface `prompt_assembly` parity из Decision 030 поэтому остаётся
-`каркас`. Отдельный UI-control этим контрактом не вводится.
+snapshot или branch и не меняют source/branch state. Wiring и excluded-turn
+hardening merged в PR59/PR61, applied и live-проверены: excluded latest turn
+`party_ad201794ce31` вернул один и тот же content-free `prompt_assembly` из turn
+metadata, gateway trace, Prompt Inspector `source=last` и recorded context.
+Registry-row Decision 030 имеет уровень `подключено`. Отдельный UI-control этим
+контрактом не вводится.
 
 ### Turn Trace Workbench
 
