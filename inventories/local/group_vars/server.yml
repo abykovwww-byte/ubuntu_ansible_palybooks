@@ -374,6 +374,10 @@ docker_apps:
         path: "{{ rp_stack_data_dir }}/default-user/worlds/merchant-sviatoslav.json"
         mode: "0640"
         force: false
+      - src: "rp-stack/worldpacks/day-watch-moscow/sillytavern/day-watch-moscow.json"
+        path: "{{ rp_stack_data_dir }}/default-user/worlds/day-watch-moscow.json"
+        mode: "0640"
+        force: false
     runtime_files:
       - path: "{{ rp_stack_state_dir }}/current.json"
         mode: "0640"

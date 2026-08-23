@@ -201,6 +201,7 @@ pack обязан объявить `training_runtime` и хранить расп
 |---|---|---|---|---|
 | `awareness` | Awareness | `training` | `training` | WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; предметной логики в Gateway нет |
 | `awareness-one-day` | Awareness. One day | `training` | `training` | WorldPack-owned runtime, 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
+| `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Книжный старт первой части, свободный персонаж, точка входа из PlayerCharacter и закрытые мотивации NPC |
 | `ellinoid` | Эллиноид | `novel` | `novel`, `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp`, `novel` | Долгая приключенческая партия |
