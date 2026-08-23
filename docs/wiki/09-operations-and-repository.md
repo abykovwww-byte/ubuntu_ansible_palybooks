@@ -55,6 +55,19 @@ Push не означает deploy, а healthy containers не доказываю
 `roles/apps/files/rp-stack/docs/decisions/registry/`, а Decision status не
 заменяет ни одну из этих ступеней.
 
+## Activation RP contract revision 7
+
+После закрытия всех registry-строк Plan 028 отдельный config-rollout задаёт
+`rp_stack_gateway_rp_contract_observed_revision: 7`. Merge этого значения не
+равен активации: effective production status появляется только после
+интерактивного `ansible-local-apply.service`, проверки container env и создания
+новой ordinary RP-party с persisted/runtime revision `7` без provider call.
+
+Post-apply proof обязан также сохранить revisions всех ранее существовавших
+parties/branches, оставить `novel` на `0` и WorldPack с declared revision `6` на
+`6`. Rollback inventory к `6` ограничивает только будущие партии; уже созданная
+revision-7 party остаётся pinned, автоматического downgrade нет.
+
 ## Codex devkit, worktrees и CI
 
 Репозиторий содержит собственный Codex-контур:

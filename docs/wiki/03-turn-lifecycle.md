@@ -16,11 +16,13 @@
 - candidate revision 7 / DC2 ограничивает relationship pressure производным
   pre-scene scope.
 - candidate revision 7 / DC3 принимает prompt authority, structural
-  deduplication и content-free assembly diagnostics; observed runtime остаётся
-  на revision `6`.
+  deduplication и content-free assembly diagnostics.
 - candidate revision 7 / DC4 подключает `scene_state`, minimal narrator bundle,
-  deterministic continuity gate и atomic state/turn commit; observed runtime
-  остаётся на revision `6` до отдельного rollout.
+  deterministic continuity gate и atomic state/turn commit.
+
+Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный activation
+change задаёт inventory target observed `7`, effective только после pull-based
+apply и post-apply stamp proof.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -34,7 +36,9 @@ active до evidence-checked relationship extraction. Статус `resolved/del
 ## Candidate revision 7: DC1
 
 [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
-применяется только к RP candidate revision `7`; observed runtime остаётся `6`.
+применяется только к RP revision `7`; до activation apply она исполняется в
+изолированной candidate branch, после apply — в новых ordinary parties с
+declared revision `7`.
 Gateway берёт newest valid effective story-memory snapshot и включает каждую
 non-excluded raw-пару новее его coverage. Перед narrator call snapshot читается
 повторно; advance, rollback или исчезновение snapshot требуют полной пересборки
@@ -125,8 +129,8 @@ unresolved при наступившем due turn, source state и six-table str
 Outputs не назвали отсутствующих NPC и proof output назвал Милену, но это не
 доказательство полной semantic continuity или уровня `наблюдается`. Decision не
 добавляет `scene_state`, persisted presence, schema migration, новую таблицу или
-отдельный LLM-вызов. Revisions `0..6`, `novel` и `training` не меняются;
-observed revision остаётся `6`.
+отдельный LLM-вызов. Revisions `0..6`, `novel` и `training` не меняются; DC2
+evidence сам по себе observed rollout не активирует.
 
 ## Candidate revision 7: DC3
 
@@ -206,7 +210,8 @@ DC3 не включает `scene_state`, structured response bundle, continuity 
 fallback или atomic scene/turn commit, не мигрирует existing parties и не
 доказывает semantic continuity. Opening-scene `prompt_assembly`
 persistence/parity подтверждена DC4 canary. Observed revision `7` всё ещё не
-активирована и остаётся `6` до отдельного explicit rollout.
+является следствием DC3: её включает только отдельный inventory rollout после
+всех readiness gates.
 
 ## Candidate revision 7: DC4
 
@@ -287,7 +292,7 @@ accepted opening/normal, anchored apply и immediate unanchored drop+audit+stale
 turn/новую state version; `party_ad201794ce31` сохранила excluded noncanonical
 fallback без fallback prose в следующем prompt и без relationship canon rows.
 Это deterministic causal proof deployed paths, не semantic continuity или
-`наблюдается`; observed revision остаётся `6` до отдельного rollout.
+`наблюдается`; ordinary activation остаётся отдельной apply/live-proof boundary.
 
 ## Обычный ход
 
