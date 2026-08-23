@@ -9,26 +9,25 @@ runtime. RP-only living story memory реализована в исходном 
 
 Кумулятивная поставка RP-ядра S1–S6 описана в
 [Decision 026](../../roles/apps/files/rp-stack/docs/decisions/026-rp-core-delivery.md).
-Candidate revision `6` применена на `abykovserv` и прошла изолированные
-provider-canary; это последний live-confirmed baseline перед новым activation.
-При effective observed revision `6` новые обычные RP-партии получают
-`rp-core.v2` S1–S6. Существующие партии остаются на своей закреплённой revision;
-50-turn endurance пока не заявлен. Отдельный activation change теперь задаёт
-inventory source target observed revision `7`; effective production value
-фиксируется только после pull-based apply и post-apply stamp proof.
+Observed revision `6` была последним live-confirmed baseline перед continuity
+activation. 23 августа 2026 года merge
+`a4076b0938f2b152f77e675e8545156ce783a8f3` применён на `abykovserv`; container
+env и ordinary-party stamp proof подтвердили effective observed revision `7`.
+Существующие партии остаются на своей закреплённой revision; 50-turn endurance
+пока не заявлен.
 
 PR1 следующего continuity cycle описан в
 [Plan 028](../../roles/apps/files/rp-stack/docs/plans/028-rp-continuity-project-design.md)
 и [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md):
-candidate revision `7` сохраняет полный raw tail после effective story-memory
+revision `7` сохраняет полный raw tail после effective story-memory
 coverage и выполняет bounded recovery при hard overflow. Tail/stamp и paired
 fit/reject overflow proofs имеют уровень `подключено`: production-store canary
 после force-refresh либо вызвала narrator и committed ход, либо при оставшемся
 `26917 > 4000` завершилась до narrator без нового turn/state/relationship
 projection. Ранний Merchant narration, сместивший действие, не доказывает
-semantic continuity или уровень `наблюдается`. Этот evidence run выполнялся при
-observed `6`; отдельный activation target — `7`, existing parties автоматически
-не мигрируют.
+semantic continuity или уровень `наблюдается`. Этот overflow evidence run
+выполнялся при observed `6`; последующий activation stamp подтвердил ordinary
+observed `7`, existing parties автоматически не мигрировали.
 
 Второй отдельный slice принят в
 [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md).
@@ -74,7 +73,7 @@ party-chat/admin-autotest plus opening parity из DC4; semantic output не д�
 
 Четвёртый document-first slice принят в
 [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md).
-Он задаёт candidate-only canonical `scene_state`, минимальный private narrator
+Он задаёт revision-7-only canonical `scene_state`, минимальный private narrator
 bundle с одним `{location_id, present_character_ids}` snapshot и bounded typed
 `scene_delta`, deterministic continuity gate и atomic SQLite state/turn commit.
 Authorized operation с unmatched evidence immediately dropped без repair с
@@ -92,8 +91,8 @@ world-command stale policy и post-commit best-effort `current.json` входя�
 opening/normal и anchored/drop-stale paths (`party_16f68f4f2ba3`), repeated hard
 mismatch без commit (`party_48fd541fdb8d`) и excluded noncanonical fallback без
 утечки prose/relationship canon (`party_ad201794ce31`). External provider calls
-не выполнялись; это не уровень `наблюдается`. Отдельный inventory rollout
-задаёт target observed `7`, effective только после apply/live proof.
+не выполнялись; это не уровень `наблюдается`. Отдельный inventory rollout теперь
+применён и post-apply stamp proof подтвердил effective observed `7`.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
@@ -131,7 +130,7 @@ flowchart LR
 - **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
-- **Revision 7 готовится к ordinary rollout.** Все registry-строки DC1–DC4 имеют уровень `подключено`; отдельный activation change задаёт inventory target `7`, который считается effective только после pull-based apply и stamp proof. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
+- **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
