@@ -86,7 +86,10 @@ the highest cumulative `rp_contract.revision` it supports. Current authored RP
 packs created by this builder use revision `7`. Gateway still caps ordinary
 party creation by the observed runtime revision; the manifest does not activate
 unverified behavior. Existing manifests remain pinned and are not blanket-
-migrated; raise their revision only as part of an explicit compatible update.
+migrated; raise their revision only after the target runtime revision is
+activated and as part of an explicit compatible update. The candidate revision-8
+authoring preview below does not authorize changing the literal revision `7`
+declaration.
 
 ## Revision 7 Authoring Boundary
 
@@ -131,6 +134,75 @@ On a revision-7 fallback turn, `story_memory_canonical=false`: Gateway-authored
 narrator prose stays outside story memory, chapters, retrieval, and relationship
 canon. The player input and stale/as-of scene boundary remain visible to the
 next prompt.
+
+## Candidate Revision 8 Authoring Preview
+
+This section constrains RP content so a pack can fit the candidate prompt shape.
+It is not an active manifest contract. Keep new and existing WorldPack manifests
+at literal `rp_contract.revision: 7` until Gateway revision 8 is activated and
+the pack is explicitly migrated; do not add speculative revision-8 manifest
+fields.
+
+### Authored Prompt Budgets
+
+Measure each limit on the complete runtime block, not only on the source file:
+
+- `WORLD_SYSTEM_PROMPT\n<gm-system.md>` is at most 5,000 characters, including
+  the literal block name, newline, and all authored content;
+- `WORLD_AUTHORS_NOTE\n<authors-note.md>` is at most 1,500 characters under the
+  same counting rule;
+- the serialized `PARTY_LORE_CARDS` block is at most 4,000 characters including
+  its runtime header, instructions, and selected cards.
+
+Gateway includes lore as whole cards. It may omit a card that would cross the
+4,000-character total, but it must not cut card content to fit. Author compact,
+independent cards and do not depend on a large card being partially injected.
+These are hard authoring limits; runtime truncation is not a content strategy.
+
+### Narrator Continuity Inputs
+
+The candidate revision-8 narrator context keeps the union of:
+
+- a recent raw window whose start is quantized to an eight-unit boundary and
+  therefore contains 50 to 57 eligible units; and
+- every eligible raw unit newer than safe story-memory coverage.
+
+The cache-stable order is narrator rules, world rules, absolute rules, then RAW
+history. Story memory, whole lore cards, corrections, relationship or world-event
+pressure, author note, and current player action follow as a volatile tail. Do
+not place changing IDs, turn numbers, revisions, timestamps, or counters in the
+three rule blocks before RAW, and do not author a pack that requires lore cards
+or the author note to precede the transcript.
+
+An `opening_scene` counts as one unit through the narrator response; the exact
+`[AUTO_START] Старт партии` player marker is suppressed. A legacy turn with
+`turn_kind = null` counts as `narrative`. `world_command`, `gm_correction`, and
+future non-game kinds do not count. Safe coverage is the minimum coverage of
+these five independently covered memory sections:
+
+1. `situation`
+2. `threads`
+3. `characters`
+4. `assets_and_rules`
+5. `chronology_and_hooks`
+
+A normal memory update requests all five sections in one OpenRouter call. The
+Gateway retries only a section that is absent, cannot be parsed, violates the
+section schema, changes an existing `fact_id`, or arrives with
+`finish_reason=length`. Validation is structural, not semantic: empty arrays and
+`current_situation=null` are valid and must not be retried merely to produce
+content.
+
+A stale or failed section therefore keeps the affected raw history uncovered;
+another section's newer coverage must not hide it.
+
+The candidate narrator prompt has no scene-state, scene-boundary, or reanchor
+layer; no state summary or retrieved character-state layer; no archive retrieval
+or uncompacted-archive fallback; and no `LONG_TERM_PARTY_MEMORY`, legacy
+episodic `memory_chapters`, or journal-recap layer. Durable state may still drive
+Gateway outcomes and absolute rules, and durable history remains stored, but
+WorldPack prompts must not reference those removed projections as if the
+narrator could see them.
 
 ## RP Relationship Model
 
@@ -328,9 +400,13 @@ Every `gm-system.md` should say:
 
 - preserve player agency;
 - do not decide player thoughts, feelings, choices, or consent;
-- obey `<AUTHORITATIVE_WORLD_STATE>` and gateway outcomes;
+- obey Gateway-authorized outcomes and injected absolute rules;
 - keep RP narration free of hidden checks and mechanical outcomes;
-- keep lore consistent with canonical state.
+- keep lore consistent with established facts and newer verbatim history.
+
+Existing revision-7 prompts may reference `<AUTHORITATIVE_WORLD_STATE>` because
+that is an observed runtime layer. Candidate-revision-8-compatible prompt text
+must not add or depend on that tag; use the Gateway-authority wording above.
 
 Add the applicable mode contract:
 

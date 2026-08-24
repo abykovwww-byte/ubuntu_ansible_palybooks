@@ -103,6 +103,22 @@ mismatch без commit (`party_48fd541fdb8d`) и excluded noncanonical fallback 
 не выполнялись; это не уровень `наблюдается`. Отдельный inventory rollout теперь
 применён и post-apply stamp proof подтвердил effective observed `7`.
 
+Следующий локальный candidate описан в
+[Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md).
+Для RP revision `8` S1 переносит prompt-бюджет на дословное квантованное окно
+50–57 игровых единиц плюс все ещё не покрытые единицы и на пять независимо
+покрываемых секций story memory. Штатно все пять возвращаются одним OpenRouter
+вызовом; отдельно повторяется только секция со структурно невалидным ответом,
+а пустая валидная секция не повторяется. Безопасное покрытие равно минимуму пяти
+section coverages. Rev8 narrator больше не получает legacy scene/state/archive
+blocks и возвращает plain text; relationship scope определяется текущей
+репликой и тремя предыдущими игровыми единицами. Rules и якорные первые 50 RAW
+units образуют повторяемый provider prefix; память/cards/pressure/note находятся
+в хвосте, а cache counters и hash основы сохраняются в turn metadata. Это только локальный candidate
+со ступенью `каркас`: inventory не активирует revision `8`, apply и live-gates
+25/60 ходов не выполнялись. Поэтому effective observed/live revision остаётся
+`7`, существующие партии автоматически не мигрируют.
+
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно
@@ -140,6 +156,7 @@ flowchart LR
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
+- **Revision 8 пока только локальный candidate S1.** Квантованный RAW `50–57 + uncovered`, пять независимо покрываемых секций с одним штатным call и точечным structural retry, а также history-first prompt описаны в Decision 032, но не активированы, не применены и не проверены live; observed/live остаётся `7`.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.

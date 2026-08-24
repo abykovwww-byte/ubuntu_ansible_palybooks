@@ -135,6 +135,32 @@ continuity или уровень `наблюдается`. Последующа�
 отдельный inventory rollout и обязательный post-apply proof; это не повышает
 readiness DC4.
 
+## Candidate revision 8: authoring boundary, не activation
+
+[Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
+меняет только то, как Gateway читает уже существующий RP WorldPack для narrator.
+Нового обязательного manifest field нет, а declared revision действующих packs
+остаётся `6/7`: поднимать pack до `8` до отдельной observed activation нельзя.
+
+Для будущего rev-8 pack авторские prompt-файлы должны укладываться целиком,
+включая заголовок Gateway: `gm-system.md` — не более 5 000 символов,
+`authors-note.md` — не более 1 500. Lore попадает в prompt только целыми
+карточками в суммарный блок не более 4 000 символов. Эти лимиты не разрешают
+дублировать `state-seed.json` в prose: общий state, scene contracts и character
+JSON больше не сериализуются narrator-у. Canonical `characters.*.name` остаётся
+единственной подписью NPC в relationship block.
+
+RAW-окно задаётся Gateway-настройкой `RP_RAW_HISTORY_WINDOW_TURNS` с default 50
+и hard minimum 20, а не полем WorldPack. Recent start квантуется по восемь,
+поэтому штатное окно содержит 50–57 units. Rules/world/absolute и RAW идут до
+изменчивых memory/lore/pressure/authors-note; WorldPack не должен требовать
+обратного порядка или помещать turn/revision/timestamp counters в rule prefix.
+Opening scene хранится как assistant
+unit; только точная техническая строка `[AUTO_START] Старт партии` подавляется.
+Narrator rev-8 возвращает plain text, поэтому pack не должен требовать scene
+bundle или поля `scene_claims`. Installed builder skill повторяет эти правила,
+но source candidate всё ещё не является deployed/live контрактом.
+
 ## Два активных режима
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
@@ -311,3 +337,4 @@ Gateway сохраняет basename исходного файла и разме�
 - [WorldPack training runtime ADR](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
 - [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 031: scene state и atomic continuity](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+- [Decision 032: history-first prompt и sectioned memory](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)

@@ -103,7 +103,7 @@ primary model удаляются, поэтому несовместимый ма
 | Repair невалидного narration | Narrator Party |
 | Journal summary | Не вызывается текущим runtime; сохранён только legacy storage/no-op job |
 | Long-term memory chapter | Глобальная service model |
-| RP living story-memory update | Глобальная service model, только `scenario_type=rp` |
+| RP living story-memory update | Revisions 0..7: глобальная service model; candidate rev8: один combined OpenRouter call и exact section retry только после structural failure |
 | RP relationship extraction | Глобальная service model, только `scenario_type=rp` |
 | LLM world-state draft | Глобальная service model |
 | Генерация/дополнение NPC | Глобальная service model |
@@ -111,6 +111,38 @@ primary model удаляются, поэтому несовместимый ма
 | RuleEngine и scoring | Без LLM |
 | OutputValidator | Без LLM |
 | Auto-player | Отдельно выбранный OpenRouter или Local Gemma profile |
+
+### Candidate revision 8: sectioned story memory
+
+[Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
+вводит для rev8 memory явный маршрут, который не наследует `LLM_PROVIDER`,
+глобальный `SERVICE_MODEL_CHOICE` или party BYOK:
+
+```mermaid
+flowchart LR
+    J["Rev8 rp_story_memory job"] --> C["Один combined call · 5 sections"]
+    C --> O["provider = openrouter"]
+    O --> D["model = deepseek/deepseek-v4-pro"]
+    C --> V["Structural validation per section"]
+    V -->|"invalid section only"| R["Один exact section retry"]
+    R --> O
+    D --> L["max_tokens = 4000 combined / 800 retry"]
+    D -.-> X["No Local LLM / NVIDIA / model fallback"]
+```
+
+Основной call возвращает все пять секций и пишет `section_key=all`. Gateway
+проверяет наличие/JSON/schema/fact IDs и отклоняет любой ответ с
+`finish_reason=length`. Только не прошедшая section получает отдельный call с
+exact `section_key`; валидные, включая пустые, не повторяются. Каждый call
+содержит не более 20 000 символов serialized messages и только complete playable
+units. `service_call_log` сохраняет exact `provider`, `model`, `section_key` и
+общий `update_id`. Partial failure не отменяет четыре удачные секции. Максимум
+durable attempts именно у rev8 `rp_story_memory` job равен `2`; общий
+`SERVICE_JOB_MAX_ATTEMPTS=5` сохраняется для relationship extraction и legacy
+jobs.
+
+Этот route пока имеет только локальный candidate-статус `каркас`. Revision `8`
+не активирована и не проверена live; observed/live revision остаётся `7`.
 
 ## Диагностика model attempts
 
@@ -165,7 +197,12 @@ party BYOK для него всё равно не используется. Вы
 сохранённая service choice показывается как недоступная и не подменяется другой
 моделью.
 
-Окна 32768 tokens достаточно для RP story-memory updater: предыдущий snapshot ограничен 24000 символов, state excerpt — 8000 символов, новый turn batch — примерно 6000 input tokens, output — 6000 tokens. Это отдельный служебный запрос; полный narrator prompt на 132k в Gemma не передаётся.
+Окна 32768 tokens достаточно для legacy RP story-memory updater revisions
+`0..7`: предыдущий snapshot ограничен 24000 символов, state excerpt — 8000
+символов, новый turn batch — примерно 6000 input tokens, output — 6000 tokens.
+Candidate rev8 memory calls этот local profile не используют: они закреплены
+за exact OpenRouter route выше. Полный narrator prompt на 132k в Gemma не
+передаётся ни в одном случае.
 
 Основной объём GGUF может отражаться как mmap/GPU/UMA memory, поэтому `docker stats` не показывает всю фактическую нагрузку в RSS контейнера.
 
@@ -180,7 +217,19 @@ Outbound policy не отправляет browser Authorization в локаль�
 
 ## Prompt caching
 
-Стабильный prefix начинается с scenario/world rules, затем растёт transcript. Для OpenRouter Gateway может передавать `session_id`; для Anthropic-моделей добавляется документированный ephemeral `cache_control`. Cache telemetry считается наблюдением provider, а не гарантией.
+Стабильный prefix начинается с scenario/world rules, затем растёт transcript. Для
+candidate rev8 начало RAW window квантуется по восемь units, а изменчивые
+`RP_STORY_MEMORY`, lore cards, corrections, relationship/world-event pressure,
+author note и current action идут после истории. Повторяемая основа — rules и
+первые 50 RAW units; окно между сдвигами растёт до 57.
+
+Для OpenRouter Gateway может передавать `session_id`; для Anthropic-моделей
+добавляется документированный ephemeral `cache_control`. S16 не добавляет новых
+cache calls, headers или settings: DeepSeek и OpenAI полагаются на неявное exact
+prefix matching. Rev8 копирует provider `usage.prompt_tokens` и
+`usage.prompt_tokens_details.cached_tokens` в turn metadata как `prompt_tokens`
+и `cached_prompt_tokens`, рядом сохраняется `stable_prompt_prefix_hash`. Cache
+telemetry считается наблюдением provider, а не гарантией.
 
 Gateway сохраняет из live-каталога OpenRouter цены обычного input/output, cache read и cache write. Light GUI показывает абсолютный ценовой уровень по опорному ходу: 95 000 входных и 650 выходных токенов. Для warm-оценки принимается 80% cached input, но только если каталог модели объявил цену cache read; рядом всегда показывается cold-оценка без скидки.
 
@@ -200,5 +249,6 @@ Gateway сохраняет из live-каталога OpenRouter цены обы
 - [Narrative client](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
 - [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
 - [Turn Trace Workbench](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
+- [Decision 032: explicit rev8 memory routing](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 - [Local LLM Compose](../../roles/apps/templates/rp-stack.compose.yml.j2)
 - [Runtime variables](../../inventories/local/group_vars/server.yml)

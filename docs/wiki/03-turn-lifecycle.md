@@ -19,10 +19,16 @@
   deduplication и content-free assembly diagnostics.
 - revision 7 / DC4 подключает `scene_state`, minimal narrator bundle,
   deterministic continuity gate и atomic state/turn commit.
+- candidate revision 8 / S1 возвращает narrator якорное окно 50–57 игровых единиц
+  плюс весь uncovered tail, хранит пять независимо покрываемых memory-секций,
+  обновляет их одним штатным call с точечным structural retry и удаляет legacy
+  scene/state/archive blocks только из rev8 prompt.
 
 Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный pull-based
 activation и post-apply stamp proof подтвердили effective observed `7` для новых
-ordinary RP-parties.
+ordinary RP-parties. Revision `8` существует только как локальный candidate со
+ступенью `каркас`: inventory её не активирует, apply/live verification не было,
+observed/live revision остаётся `7`.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -293,6 +299,53 @@ fallback без fallback prose в следующем prompt и без relationsh
 Это deterministic causal proof deployed paths, не semantic continuity или
 `наблюдается`; последующая ordinary activation отдельно прошла apply/stamp-proof
 boundary и не повышает readiness DC4.
+
+## Candidate revision 8: S1 history-first turn
+
+[Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
+принимает новый контракт только для RP `rp_contract_revision >= 8`. Это локальный
+candidate: он не меняет live revision `7`, не мигрирует существующие партии и не
+изменяет `training`.
+
+История собирается целыми игровыми единицами. Opening — одно assistant-message;
+только точная техническая реплика `[AUTO_START] Старт партии` подавляется.
+Обычный narrative turn — неделимая пара `user + assistant`; пустой или `null`
+`turn_kind` считается legacy narrative. `world_command`, `gm_correction` и
+будущие non-game kinds в narrator history не входят.
+
+```mermaid
+sequenceDiagram
+    participant Store as Turn store
+    participant Mem as Five memory sections
+    participant Prompt as Rev8 assembly
+    participant LLM as Narrator
+
+    Store->>Prompt: eligible playable units
+    Mem-->>Prompt: safe coverage = min(5 coverages)
+    Prompt->>Prompt: quantized 50–57 units + every uncovered unit
+    Prompt->>Prompt: current input + 3 previous units for relationship scope
+    alt hard input overflow
+        Prompt->>Prompt: drop whole lore block, then whole safely covered head units
+        Prompt->>Prompt: retain at least 20 units and never open a coverage gap
+    end
+    alt required set still does not fit
+        Prompt-->>Store: fail before provider and player mutation
+    else prompt fits
+        Prompt->>Prompt: stable rules + anchored RAW, then volatile memory/cards/pressure/note
+        Prompt->>LLM: ordered history-first messages
+        LLM-->>Prompt: plain narrator text
+        Prompt->>Store: cache counters + stable prefix hash in turn metadata
+    end
+```
+
+Rev8 не читает и не рендерит `Relevant state summary`,
+`RELEVANT_CHARACTERS`, `PROMPT_AUTHORITY_HIERARCHY`, scene boundary/reanchor/
+transition allowance, legacy `LONG_TERM_PARTY_MEMORY`,
+`UNCOMPACTED_ARCHIVE_FALLBACK` или `RETRIEVED_ARCHIVE_SCENES`. Scene bundle и
+`scene_state` остаются compatibility-path только для revision `7`; rev8 narrator
+возвращает plain text, а state/turn commit сохраняет общий atomic safety-контракт.
+Точный prompt order и секционные memory-правила приведены в
+[разделе о памяти](05-memory-and-retrieval.md#candidate-revision-8-history-first-prompt-и-пять-секций-памяти).
 
 ## Обычный ход
 
@@ -602,9 +655,31 @@ Draft может быть быстрым детерминированным ил
 
 ## Фоновые задачи
 
-После сохранения хода Gateway всегда планирует episodic `memory` как service job. Только для `scenario_type=rp` рядом ставится второй job `rp_story_memory`, который после четырёх новых ходов обновляет кумулятивный living snapshot. В `training` этот job не создаётся. Архивные агрегаты выведенного режима не исполняют новые ходы и не планируют новые service jobs.
+Для revisions `0..7` сохраняется прежний episodic `memory` job. Только для
+`scenario_type=rp` revisions `0..7` рядом ставится
+`rp_story_memory`, который после четырёх новых ходов обновляет прежний
+кумулятивный snapshot; в `training` этот второй job не создаётся. Архивные
+агрегаты выведенного режима не исполняют новые ходы и не планируют новые
+service jobs.
 
-Обе задачи выполняются вне latency path: пользователь получает уже сохранённый ответ, пока helper продолжает работу. Jobs имеют статус, retry policy и восстанавливаются после перезапуска. Ошибка story-memory updater не откатывает ход и не изменяет canonical state. Старый тип `journal` распознаётся только как terminal no-op, чтобы задачи от прежних версий не зацикливались.
+Candidate revision `8` — отдельное исключение: episodic `memory` job не
+создаётся, а pending legacy job завершается terminal no-op. До 51-й eligible
+игровой единицы отсутствуют и snapshot, и `rp_story_memory` job. После порога
+normal job берёт oldest-first batch не более восьми единиц и независимо
+покрывает пять секций. Один основной OpenRouter call возвращает все пять;
+Gateway проверяет только форму каждой секции и отдельно повторяет лишь
+отсутствующую, нераспарсившуюся, не соответствующую schema или потерявшую
+`fact_id` секцию. `finish_reason=length` считается отказом. Пустые массивы и
+`current_situation=null` валидны и retry не вызывают. Затем normal cadence равен
+четырём новым eligible units. Durable retry того же job повторяет только секции
+со статусом `stale` или `failed`, а максимальное число попыток именно этого rev8
+job равно двум. Safe coverage по-прежнему равен `min()` пяти coverages.
+
+Все задачи выполняются вне latency path: пользователь получает уже сохранённый
+ответ, пока helper продолжает работу. Jobs имеют статус, retry policy и
+восстанавливаются после перезапуска. Ошибка story-memory updater не откатывает
+ход и не изменяет canonical state. Старый тип `journal` распознаётся только как
+terminal no-op, чтобы задачи от прежних версий не зацикливались.
 
 Все вызовы глобальной служебной модели — episodic memory, RP story memory,
 relationship extraction, world instruction и генерация персонажа — проходят
@@ -634,6 +709,7 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [Validator](../../roles/apps/files/rp-stack/rp-gateway/app/services/validator.py)
 - [State store](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
 - [RP story memory](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
+- [Revision-8 history selection](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_history.py)
 - [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
 - [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
 - [Training runtime](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_runtime.py)
@@ -644,6 +720,7 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
 - [Decision 030](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
 - [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+- [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 
 ### Legacy relationship-event deadlines
 

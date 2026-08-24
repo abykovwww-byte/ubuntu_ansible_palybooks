@@ -58,6 +58,31 @@ hashes не изменились; external provider calls не выполнял�
 continuity не доказана; последующая ordinary activation отдельно прошла
 post-apply stamp-proof boundary и не повышает readiness DC4.
 
+### Candidate revision 8: sectioned-memory migration
+
+[Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
+имеет только локальный статус `каркас`; inventory и live parties остаются на
+observed revision `7`. Candidate migration сохраняет существующие snapshot rows,
+добавляет nullable `base_snapshot_id` и `update_id` и заменяет legacy uniqueness
+по `(campaign_id, to_turn_id)` на idempotency по `(campaign_id, update_id)`.
+Legacy caller без `update_id` по-прежнему дедуплицируется по coverage; только
+явный rev-8 same-coverage update требует `update_id` и актуальный base snapshot.
+
+`service_call_log` получает nullable `section_key` и `update_id`: штатный общий
+request пишет `section_key=all`, а структурно невалидная секция — свой exact key
+в отдельной строке. Это позволяет доказать один-call normal path и точечный retry
+без чтения prompt text. Политика retention и backup не меняется. Rev-8 corrections пишут
+зарезервированный authority `user`; при чтении sectioned snapshot legacy
+`user_correction` нормализуется в `user`. Revisions `0..7` продолжают хранить и
+возвращать `user_correction`. Поля absorption/overlay в S1 не добавляются — это
+отдельный будущий S3 contract.
+
+Rev8 turn `metadata_json` также получает три content-free поля наблюдаемости:
+`cached_prompt_tokens`, `prompt_tokens` и `stable_prompt_prefix_hash`. Первые два
+копируются из сохранённого provider response, hash — SHA-256 повторяемой основы
+rules + первых 50 RAW units. Prompt content в metadata не дублируется, схема
+SQLite и retention policy ради этих полей не меняются.
+
 ## Где находятся данные
 
 ```text
@@ -276,6 +301,7 @@ Backup содержит state, историю, диагностическую т
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+- [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 - [Compose networks](../../roles/apps/templates/rp-stack.compose.yml.j2)
 
 ### Relationship projection repair
