@@ -147,7 +147,7 @@ ssh_public_keys: []
 hardening_manage_ssh: false
 hardening_manage_ufw: false
 coolify_enabled: false
-rp_stack_nvidia_api_key: "..."
+rp_stack_openrouter_api_key: "..."
 ```
 
 Generated server secrets are also under `/etc/ansible/`, for example app
@@ -164,10 +164,11 @@ rp_stack_enabled: true
 rp_stack_bind_host: "192.168.1.88"
 rp_stack_light_gui_host_port: 8010
 rp_stack_gateway_port: 8088
-rp_stack_nvidia_api_base: "https://integrate.api.nvidia.com/v1"
-rp_stack_nvidia_model: "z-ai/glm-5.2"
-rp_stack_nvidia_model_catalog_live: true
-rp_stack_nvidia_model_catalog_url: "https://build.nvidia.com/models?q=llm"
+rp_stack_openrouter_api_base: "https://openrouter.ai/api/v1"
+rp_stack_openrouter_models:
+  - "openrouter/auto"
+  - "openrouter/free"
+rp_stack_service_model_choice: "local-gemma"
 ```
 
 Runtime paths:

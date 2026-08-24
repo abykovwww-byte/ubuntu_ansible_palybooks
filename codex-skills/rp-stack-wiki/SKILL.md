@@ -80,7 +80,7 @@ Treat a change as significant when it changes any of these contracts:
   branches, audit, or idempotency;
 - prompt composition, history, memory, lore, retrieval, context budgets, or model
   routing;
-- `rp`, `novel`, or `training` semantics and WorldPack contracts;
+- `rp` or `training` semantics, retired-mode boundaries, and WorldPack contracts;
 - deterministic scoring, debrief, autotests, dataset review, or export;
 - persistent data, migrations, backups, restore, privacy, or security risks;
 - Ansible delivery, Compose topology, server paths, verification, or rollback.

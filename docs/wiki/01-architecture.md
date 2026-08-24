@@ -87,7 +87,7 @@ flowchart LR
 - **State versions** — история версий для rollback и audit.
 - **Raw turns** — первичный журнал сообщений и фактических LLM-вызовов.
 - **Memory chapters** — сжатые эпизоды для narrator prompt, но не замена raw history.
-- **RP story memory** — кумулятивный реестр длинной RP-кампании; не создаётся для `novel` и `training` и не является authority.
+- **RP story memory** — кумулятивный реестр длинной RP-кампании; не создаётся для `training` и не является authority. Архивные агрегаты выведенного режима не исполняют новые memory jobs.
 - **Legacy journal** — сохранённые записи прежних версий; текущий runtime их не генерирует.
 - **Dataset labels** — отдельная кураторская разметка; она не переписывает игру.
 - **Training artifact snapshot** — валидированный экземпляр шаблона с публичным текстом narrator; произвольный HTML модели не исполняется.

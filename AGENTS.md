@@ -12,7 +12,7 @@
 - At the start of repository work, read `docs/repository-work-standard.md` for the current workstation, SSH, sudo, toolchain, plugin, Graphify, and skill-sync facts.
 - For RP Stack architecture or significant behavior changes, use `codex-skills/rp-stack-wiki/SKILL.md` and update the Wiki in the same change.
 - For `abykovserv` deployment, use `codex-skills/abykovserv-iac-deploy/SKILL.md`. Deployment is `commit -> push the working branch -> non-draft PR -> green CI -> merge into main -> ansible-local-apply.service -> runtime verification`.
-- For RP/novel WorldPacks, use `codex-skills/rp-world-pack-builder/SKILL.md`.
+- For RP WorldPacks, use `codex-skills/rp-world-pack-builder/SKILL.md`.
 - For deterministic training WorldPacks, use `codex-skills/training-world-pack-builder/SKILL.md`.
 - For architecture and relationship questions, query the repository Graphify graph first when `graphify-out/` is present, then confirm decisive claims against source.
 

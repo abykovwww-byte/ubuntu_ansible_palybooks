@@ -264,7 +264,7 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 - Assert that Training enqueues no `rp_story_memory` job, contains no `RP_STORY_MEMORY` prompt block, and retains the pre-RP-story context budget.
 - Test at least two materially different player profiles and prove the opening task and later work requests change accordingly. Exercise the validation-failure fallback too; it must use the same stored profile rather than reverting to generic corporate copy.
 - Assert the exact authored set of link-bearing turns. For every other turn, reject both a non-empty structured link field and any URL in free text; the presence of a site catalog must not make links ubiquitous.
-- Exercise the four capability combinations when both contracts are supported: neither, links only, workspace only, and both. Reject enabled capabilities unsupported by the manifest and reject both flags for `rp`/`novel`.
+- Exercise the four capability combinations when both contracts are supported: neither, links only, workspace only, and both. Reject enabled capabilities unsupported by the manifest and reject both flags for `rp`.
 - Verify capability-off paths remain playable, do not materialize disabled snapshots, reject disabled event endpoints, and do not leak an answer cue through missing UI affordances.
 - Test output templates and relevant validator rules. If generic Gateway validation cannot enforce a requested course contract, extend the versioned generic runtime schema/interpreter with tests; never add a world ID or subject-specific rule to Gateway. Declare the schema change before implementing it when it broadens the user's requested scope.
 - For bundle surfaces, test raw JSON, a single provider-added fenced JSON

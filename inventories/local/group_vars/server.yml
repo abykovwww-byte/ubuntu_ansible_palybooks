@@ -189,17 +189,6 @@ rp_stack_bind_hosts:
   - "{{ tailscale_node_ip }}"
 rp_stack_puid: 1000
 rp_stack_pgid: 1000
-rp_stack_nvidia_api_base: "https://integrate.api.nvidia.com/v1"
-rp_stack_nvidia_model: "z-ai/glm-5.2"
-rp_stack_nvidia_api_key: ""
-rp_stack_nvidia_fallback_models:
-  - "deepseek-ai/deepseek-v4-pro"
-  - "deepseek-ai/deepseek-v4-flash"
-  - "qwen/qwen3.5-397b-a17b"
-rp_stack_nvidia_disabled_models: []
-rp_stack_nvidia_model_catalog_live: true
-rp_stack_nvidia_model_catalog_url: "https://build.nvidia.com/models?q=llm"
-rp_stack_nvidia_model_catalog_ttl_seconds: 86400
 rp_stack_gemini_api_base: "https://generativelanguage.googleapis.com/v1beta/openai"
 rp_stack_gemini_api_key: ""
 rp_stack_gemini_models:

@@ -13,7 +13,7 @@ description: Develop, test, diagnose, publish, and verify the Tavern RP Stack th
 3. Read the relevant repository skill completely:
    - `codex-skills/abykovserv-iac-deploy/SKILL.md` for deployment or live verification;
    - `codex-skills/rp-stack-wiki/SKILL.md` for architecture or significant behavior;
-   - `codex-skills/rp-world-pack-builder/SKILL.md` for RP/novel worlds;
+   - `codex-skills/rp-world-pack-builder/SKILL.md` for RP worlds;
    - `codex-skills/training-world-pack-builder/SKILL.md` for deterministic training.
 4. Query Graphify first for architecture or relationship questions when `graphify-out/` exists, then confirm decisive claims in source.
 

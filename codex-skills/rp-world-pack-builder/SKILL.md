@@ -1,6 +1,6 @@
 ---
 name: rp-world-pack-builder
-description: Build or update SillyTavern/rp-gateway/Light GUI world packs for roleplay and collaborative-novel parties from natural-language requests. Use when Codex needs to create or modify campaign worlds, lorebooks/world info, character notes, player-role seeds, RP/novel prompts, narrative consequence rules, Quick Reply guidance, or canonical rp-gateway state seeds. Route deterministic scored learning scenarios to training-world-pack-builder. For live deployment to abykovserv / 192.168.1.88, also use the abykovserv-iac-deploy skill.
+description: Build or update SillyTavern/rp-gateway/Light GUI world packs for roleplay parties from natural-language requests. Use when Codex needs to create or modify campaign worlds, lorebooks/world info, character notes, player-role seeds, RP prompts, narrative consequence rules, Quick Reply guidance, or canonical rp-gateway state seeds. Route deterministic scored learning scenarios to training-world-pack-builder. For live deployment to abykovserv / 192.168.1.88, also use the abykovserv-iac-deploy skill.
 ---
 
 # RP World Pack Builder
@@ -8,7 +8,7 @@ description: Build or update SillyTavern/rp-gateway/Light GUI world packs for ro
 ## Scope
 
 Create or update reviewable world-pack source artifacts for the local
-SillyTavern + `rp-gateway` + Light GUI stack, for `rp` and `novel` parties.
+SillyTavern + `rp-gateway` + Light GUI stack, for `rp` parties.
 
 This skill owns:
 
@@ -32,7 +32,7 @@ semantics.
 - Windows is only for Git/IaC editing and local validation. Never install worldpacks, lorebooks, state, or `/srv/...` runtime files on Windows.
 - Do not manually copy generated files into `/opt` or `/srv` on the server as a permanent fix. Use the GitHub + Ansible route from `abykovserv-iac-deploy`.
 - Do not hard-code a model into a world pack. Model selection belongs to the party/model profile.
-- Do not infer or silently select the party scenario type. Light GUI users choose `rp`, `novel`, or `training` explicitly when creating a party.
+- Do not infer or silently select the party scenario type. Light GUI users choose `rp` or `training` explicitly when creating a party.
 - Keep world content separate from Gateway mechanics. World prompts may supplement the selected scenario contract but must not re-enable mechanics forbidden by it.
 - Route a deterministic, scored, or debrief-driven learning world to `training-world-pack-builder`. Do not create it as a decorative RP pack.
 - Keep secrets and provider keys out of all world-pack and IaC files.
@@ -42,7 +42,7 @@ semantics.
 When changing Light GUI/Gateway memory or prompt assembly, keep four distinct layers:
 
 1. Canonical state: compact current facts and mechanics; it is the only authority.
-2. RP living story memory: a bounded, cumulative, party-scoped ledger of canon, rules and abilities, inventory, characters, active/resolved threads, unresolved hooks, current situation, and chronology. It exists only when `scenario_type == "rp"`, never mutates state, and must not be enqueued, injected, exposed, or budgeted for `novel` or `training`.
+2. RP living story memory: a bounded, cumulative, party-scoped ledger of canon, rules and abilities, inventory, characters, active/resolved threads, unresolved hooks, current situation, and chronology. It exists only when `scenario_type == "rp"`, never mutates state, and must not be enqueued, injected, exposed, or budgeted for `training`.
 3. Episodic compressed history: immutable, chronological, party-scoped `memory_chapters` made from older raw ranges. Preserve player actions, meaningful NPC reactions/dialogue, discoveries, possessions, tone, locations, and unresolved leads. It must not collapse into a state-like list of facts.
 4. Recent raw turns: the newest verbatim dialogue needed for immediate continuity.
 
@@ -55,9 +55,9 @@ When changing Light GUI/Gateway memory or prompt assembly, keep four distinct la
 - Preserve the revision-7 authority order: `AUTHORITATIVE_OUTCOME` and current action -> full uncovered raw tail -> effective `RP_STORY_MEMORY` -> archive. Gateway owns the mandatory `PROMPT_AUTHORITY_HIERARCHY` block; WorldPack prompts must not duplicate or reorder it.
 - On revision-7 hard overflow, perform the bounded synchronous story-memory force-refresh, reload coverage, and rebuild before rejecting the turn. Reject before the narrator only if the mandatory prompt still does not fit after refresh.
 - Treat revision-7 safe-fallback narrator prose as noncanonical: it is excluded from story memory, chapters, retrieval, and relationship canon, while the player input and stale/as-of scene marker remain available to the next prompt. Do not make fallback prose canonical in WorldPack content.
-- For `novel` and `training`, omit the RP story layer and its reserve while preserving their existing paths. Treat provider cache telemetry as an observed value, not a promise.
+- For `training`, omit the RP story layer and its reserve while preserving its existing path. Treat provider cache telemetry as an observed value, not a promise.
 - Keep human-facing journal recaps separate from narrator memory.
-- Test RP activation, negative `training` and `novel` cases, covered-turn exclusion, chronological coverage, party/branch isolation, archive retrieval isolation, secret exclusion, context budget, and a manual memory rebuild before deployment.
+- Test RP activation, the negative `training` case, covered-turn exclusion, chronological coverage, party/branch isolation, archive retrieval isolation, secret exclusion, context budget, and a manual memory rebuild before deployment.
 
 ## Intake
 
@@ -67,7 +67,7 @@ questions at a time:
 1. World name.
 2. World premise/source: original, real-world/history, or existing IP/fandom.
 3. Starting player character role, status/power level, and constraints.
-4. Intended scenario compatibility: `rp`, `novel`, or their combination; identify one recommended type. For deterministic learning, use `training-world-pack-builder` instead.
+4. Intended scenario compatibility must be `rp`. For deterministic learning, use `training-world-pack-builder` instead.
 
 Skip answers already provided. For existing IP/fandom worlds, ask whether the
 user wants canon-faithful fan setup or an original inspired-by variant. If the
@@ -158,8 +158,6 @@ Scenario prompt requirements:
 - For RP relationship seeds, ensure a positive boundary can produce the declared
   `favour` event and a concrete voluntary help scene before its WorldPack clock;
   never expose numeric weights, internal IDs, or due turns in prompts.
-- `novel`: prohibit dice, skills, checks, difficulty, result labels, and game menus. Prioritize collaborative prose, character voice, relationships, pacing, continuity, and consent while preserving player agency.
-- For packs supporting both types, keep the shared prose contract free of mechanical checks.
 - Treat `prompts/gm-system.md` and `prompts/authors-note.md` as active Light GUI runtime inputs, not documentation-only files.
 
 RP-stack wiring for playable worlds:
@@ -183,7 +181,7 @@ RP-stack wiring for playable worlds:
 Before commit/deploy:
 
 - Validate every `.json` file parses.
-- Validate `scenario_types.recommended` is `rp` or `novel` and is included in `scenario_types.supported`.
+- Validate `scenario_types.recommended` is `rp` and `scenario_types.supported` contains only `rp`.
 - Use the bundled runtime, not `python` from `PATH`:
 
 ```powershell

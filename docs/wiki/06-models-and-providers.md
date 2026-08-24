@@ -16,7 +16,6 @@
 
 Gateway поддерживает OpenAI-compatible вызовы к:
 
-- NVIDIA API;
 - Gemini OpenAI compatibility API;
 - OpenRouter;
 - локальному llama.cpp endpoint.
@@ -24,6 +23,12 @@ Gateway поддерживает OpenAI-compatible вызовы к:
 Каталоги имеют статический fallback и могут обновляться live. UI сначала группирует provider, затем модели; OpenRouter дополнительно показывает curated RP top, free markers, цены из каталога и семейства вроде Claude, Gemini/Gemma, DeepSeek, Qwen, Llama и Mistral.
 
 OpenRouter-варианты с суффиксом `:batch` не включаются в narrator picker и список моделей auto-player: пакетный режим не подходит для интерактивного хода. Уже сохранённая ссылка Party на такой профиль не удаляется автоматически, чтобы не нарушать целостность существующих данных.
+
+Выведенные provider/model/log rows не переписываются. Поэтому историческая
+Party может по-прежнему показывать прежний provider и model ID, но такой профиль
+скрыт из активного каталога и блокирует activate/start/message до явного выбора
+поддерживаемой модели. Новый запрос никогда не использует его как endpoint,
+fallback или retry target.
 
 Для обычного narrator picker Gateway скрывает модели с известным context меньше `131072`. Локальная Gemma имеет рабочее окно `32768`, поэтому не предлагается как narrator длинной партии. Она остаётся доступна для bounded auto-player и служебных задач.
 
@@ -151,7 +156,14 @@ Parallel slots: 1
 Cloud fallback: none inside local profile
 ```
 
-Модель и runner доступны только Gateway. Пока local runner доступен, local profile не переключается на cloud fallback. Если сохранённый глобальный выбор указывает на local model, но runner затем отключён конфигурацией, service runtime имеет отдельный stack-managed NVIDIA fallback для сохранения работоспособности; party BYOK для него всё равно не используется.
+Модель и runner доступны только Gateway. Local profile никогда не переключается
+на cloud fallback. Если сохранённый глобальный выбор указывает на local model, но
+runner отключён конфигурацией или недоступен, служебная задача завершается на
+local route и следует обычной retry/error policy без смены provider. OpenRouter
+используется только когда администратор явно выбрал OpenRouter service profile;
+party BYOK для него всё равно не используется. Выведенная или неизвестная
+сохранённая service choice показывается как недоступная и не подменяется другой
+моделью.
 
 Окна 32768 tokens достаточно для RP story-memory updater: предыдущий snapshot ограничен 24000 символов, state excerpt — 8000 символов, новый turn batch — примерно 6000 input tokens, output — 6000 tokens. Это отдельный служебный запрос; полный narrator prompt на 132k в Gemma не передаётся.
 
@@ -183,7 +195,7 @@ Gateway сохраняет из live-каталога OpenRouter цены обы
 ## Источники
 
 - [Service models](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_models.py)
-- [Model catalog](../../roles/apps/files/rp-stack/rp-gateway/app/services/nvidia_catalog.py)
+- [Model catalog](../../roles/apps/files/rp-stack/rp-gateway/app/services/provider_catalog.py)
 - [Provider auth](../../roles/apps/files/rp-stack/rp-gateway/app/services/provider_auth.py)
 - [Narrative client](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
 - [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)

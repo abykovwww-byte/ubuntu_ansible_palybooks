@@ -57,6 +57,11 @@ Push не означает deploy, а healthy containers не доказываю
 
 ## Activation RP contract revision 7
 
+Этот раздел фиксирует исторический activation proof revision 7. Упоминание
+novel-party ниже сохранено только как evidence неизменности legacy-данных до
+Decision 036; оно не описывает текущую возможность создать или продолжить такую
+партию.
+
 После закрытия всех registry-строк Plan 028 отдельный config-rollout задаёт
 `rp_stack_gateway_rp_contract_observed_revision: 7`. Merge этого значения не
 равен активации: effective production status появляется только после
@@ -305,7 +310,7 @@ Gateway запускает восстановление через единый 
 | Изменить Turn Trace Workbench | `turn_trace.py`, `state_store.py`, `narrative.py`, `service_model_client.py`, `main.py`, Light GUI trace assets и tests |
 | Изменить Showroom | `rp-showcase-gui/` и `showroom.py` |
 | Изменить training artifacts | `training_artifacts.py`, `ui-shared/`, оба UI и WorldPack contract |
-| Новый RP/novel мир | `worldpacks/<slug>/` и `rp-world-pack-builder` |
+| Новый RP мир | `worldpacks/<slug>/` и `rp-world-pack-builder` |
 | Новый training мир | `worldpacks/<slug>/` и `training-world-pack-builder` |
 | Runtime/env/ports | `server.yml`, Compose/env templates |
 
@@ -386,8 +391,8 @@ Host-specific и secret values находятся в:
 
 Файл не коммитится. Не нужно переносить постоянные исправления напрямую в `/srv/apps/rp-stack`: следующий IaC apply может их заменить. Emergency hotfix должен быть немедленно отражён в Git.
 
-Repair-лимиты разделены: `MAX_REPAIR_ATTEMPTS` сохраняет прежнее поведение
-`rp`/`novel`, а `TRAINING_REPAIR_ATTEMPTS` (IaC:
+Repair-лимиты разделены: `MAX_REPAIR_ATTEMPTS` сохраняет RP-поведение, а
+`TRAINING_REPAIR_ATTEMPTS` (IaC:
 `rp_stack_gateway_training_repair_attempts`, default `1`) разрешает не более
 одной коррекции только для мягкого нарушения `training_runtime`. Значение `0`
 возвращает training к немедленному authored fallback; hard violations и
