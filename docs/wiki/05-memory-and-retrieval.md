@@ -291,7 +291,7 @@ Gateway накладывает подтверждённую коррекцию �
 Story memory существует **только при `scenario_type == "rp"`**:
 
 - `training` не получает job, snapshot, API-поля, UI-блок, prompt-блок или отдельный token reserve;
-- `novel` также продолжает использовать прежние chapters/raw/retrieval без story memory;
+- архивные агрегаты выведенного режима сохраняют чтение уже записанных chapters/raw/retrieval, но не запускают новые memory jobs;
 - общая таблица SQLite сама по себе не активирует механизм для других режимов.
 
 Ошибка service model fail-open: сохранённый игровой ход не откатывается, job
@@ -326,7 +326,7 @@ PARTY_MEMORY_PROMPT_MAX_CHARS              60000
 131072 - 16384 - 32768 - 10000 = 71920 tokens
 ```
 
-Для `training` и `novel` новый резерв равен нулю, поэтому прежний budget остаётся 81920 tokens. `RP_STORY_MEMORY_PROMPT_MAX_CHARS=24000` — это верхняя граница текста story block, а не постоянная гарантия использования 10k токенов. Фактический блок обычно меньше.
+Для `training` новый резерв равен нулю, поэтому прежний budget остаётся 81920 tokens. `RP_STORY_MEMORY_PROMPT_MAX_CHARS=24000` — это верхняя граница текста story block, а не постоянная гарантия использования 10k токенов. Фактический блок обычно меньше.
 
 Если полный prompt всё же не помещается, Gateway сначала удаляет/сокращает вторичные динамические слои. Canonical state, `AUTHORITATIVE_OUTCOME` и текущее действие имеют более высокий приоритет, чем story memory.
 

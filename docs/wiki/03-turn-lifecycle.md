@@ -129,7 +129,7 @@ unresolved при наступившем due turn, source state и six-table str
 Outputs не назвали отсутствующих NPC и proof output назвал Милену, но это не
 доказательство полной semantic continuity или уровня `наблюдается`. Decision не
 добавляет `scene_state`, persisted presence, schema migration, новую таблицу или
-отдельный LLM-вызов. Revisions `0..6`, `novel` и `training` не меняются; DC2
+отдельный LLM-вызов. Revisions `0..6` и `training` не меняются; DC2
 evidence сам по себе observed rollout не активирует.
 
 ## Revision 7: DC3
@@ -305,7 +305,7 @@ sequenceDiagram
     participant Runtime as TrainingRuntimeService
     participant Art as Site / Workspace services
     participant LLM as Narrator LLM
-    participant Val as RP v2 / Novel / Training validator
+    participant Val as RP v2 / Training validator
     participant Rel as RP relationships
     participant Jobs as Service jobs
 
@@ -332,13 +332,13 @@ sequenceDiagram
         end
     else Legacy RP v1
         API->>API: parse provider format + require nonempty text
-    else Novel / Training
+    else Training
         API->>Art: validate and materialize snapshot
         API->>Runtime: normalize canonical header/question/no-link marker
         API->>Val: validate narration + runtime surfaces
         alt Training runtime: hard violation или provider failure
             API->>Runtime: authored fallback текущего хода
-        else Novel или soft training violation: допустим один repair
+        else Soft training violation: допустим один repair
             API->>LLM: compact repair: failed text + outcome + violations
             LLM-->>API: repaired narration
             API->>Val: validate again
@@ -444,8 +444,7 @@ contracts. Score, assessment, fallback и будущие ходы до debrief �
 - JSON Patch — какие canonical fields должны измениться.
 
 В `rp-core.v2` это нейтральный `narrative_continuation`: без D20, skill,
-difficulty, score, success/failure и записи check. В `novel` случайных проверок
-также нет. В `training` универсальный RuleEngine передаёт
+difficulty, score, success/failure и записи check. В `training` универсальный RuleEngine передаёт
 текущую явную реплику и typed evidence в party snapshot
 `TrainingRuntimeService`. Детекторы, веса, evidence labels, aggregates и
 следующее окно берутся из WorldPack; Gateway не знает предмет курса и
@@ -476,8 +475,7 @@ OpenRouter endpoint, исключает reasoning-текст из ответа �
 до state/turn commit. Legacy-партии `rp-core.v1` сохраняют прежний однопроходный
 контракт до явной миграции.
 
-Для `novel` прежний `OutputValidator` и `MAX_REPAIR_ATTEMPTS` сохраняются.
-WorldPack runtime отдельно использует `TRAINING_REPAIR_ATTEMPTS`: canonical
+WorldPack runtime использует `TRAINING_REPAIR_ATTEMPTS`: canonical
 header/question/no-link marker сначала чинятся без LLM, soft field/profile
 нарушение может получить один repair с русским списком реально проваленных
 ограничений, а hard identity/shape/URL/attachment/score или provider failure
@@ -485,11 +483,10 @@ header/question/no-link marker сначала чинятся без LLM, soft fi
 
 Каждая попытка narrator ограничена настоящим wall-clock deadline через `asyncio.timeout`: лимит охватывает ожидание заголовков и чтение всего тела ответа, а не только паузу между сетевыми пакетами. Истечение deadline обрабатывается тем же безопасным timeout/fallback-контрактом, что и transport timeout.
 
-Если ответ снова невалиден в валидируемом режиме:
-
-- для `novel` ход завершается ошибкой до применения state;
-- для WorldPack-runtime training Gateway записывает authored fallback того же хода, сохраняя surfaces, профиль и включённые capabilities;
-- причина, число вызовов и validator status попадают в metadata и audit.
+Если ответ снова невалиден в валидируемом режиме, WorldPack-runtime training
+записывает authored fallback того же хода, сохраняя surfaces, профиль и
+включённые capabilities. Причина, число вызовов и validator status попадают в
+metadata и audit.
 
 ### 6. Commit хода
 
@@ -600,11 +597,12 @@ Draft может быть быстрым детерминированным ил
 Партию можно штатно завершить через `POST /api/parties/{party_id}/complete`:
 статус становится `completed`, а state, turns, audit и provider keys сохраняются.
 Повторный вызов идемпотентен; существующий `/activate` снова делает партию
-активной. Владелец завершает свою партию, администратор — любую.
+активной. Владелец завершает свою партию, администратор — любую. Статус
+`archived` терминален: activate/start/message не возвращают агрегат в runtime.
 
 ## Фоновые задачи
 
-После сохранения хода Gateway всегда планирует episodic `memory` как service job. Только для `scenario_type=rp` рядом ставится второй job `rp_story_memory`, который после четырёх новых ходов обновляет кумулятивный living snapshot. В `training` и `novel` этот job не создаётся.
+После сохранения хода Gateway всегда планирует episodic `memory` как service job. Только для `scenario_type=rp` рядом ставится второй job `rp_story_memory`, который после четырёх новых ходов обновляет кумулятивный living snapshot. В `training` этот job не создаётся. Архивные агрегаты выведенного режима не исполняют новые ходы и не планируют новые service jobs.
 
 Обе задачи выполняются вне latency path: пользователь получает уже сохранённый ответ, пока helper продолжает работу. Jobs имеют статус, retry policy и восстанавливаются после перезапуска. Ошибка story-memory updater не откатывает ход и не изменяет canonical state. Старый тип `journal` распознаётся только как terminal no-op, чтобы задачи от прежних версий не зацикливались.
 

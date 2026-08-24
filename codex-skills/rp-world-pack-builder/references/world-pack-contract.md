@@ -43,8 +43,8 @@ includes `rp` and optional otherwise.
   "player_role": "Starting player role used by Light GUI.",
   "created_for": "sillytavern-rp-gateway",
   "scenario_types": {
-    "recommended": "novel",
-    "supported": ["novel", "rp"]
+    "recommended": "rp",
+    "supported": ["rp"]
   },
   "rp_contract": {
     "schema_version": "rp-core.v2",
@@ -78,9 +78,8 @@ on Windows and do not use it for normal Light GUI party state.
 Light GUI reads `title`, `status`, `premise`, `player_role`, and
 `files.state_seed` through `GET /api/worldpacks`.
 
-`scenario_types.recommended` and every item in `scenario_types.supported` must
-be one of `rp` or `novel`. The recommended value must also be in the supported
-list. Route `training` packs to `training-world-pack-builder`. The user still
+`scenario_types.recommended` must be `rp`, and `scenario_types.supported` must
+contain only `rp`. Route `training` packs to `training-world-pack-builder`. The user still
 chooses the party type manually; this metadata does not auto-select it.
 Every pack supporting `rp` declares `rp_contract.schema_version=rp-core.v2` and
 the highest cumulative `rp_contract.revision` it supports. Current authored RP
@@ -330,13 +329,12 @@ Every `gm-system.md` should say:
 - preserve player agency;
 - do not decide player thoughts, feelings, choices, or consent;
 - obey `<AUTHORITATIVE_WORLD_STATE>` and gateway outcomes;
-- keep RP and novel narration free of hidden checks and mechanical outcomes;
+- keep RP narration free of hidden checks and mechanical outcomes;
 - keep lore consistent with canonical state.
 
 Add the applicable mode contract:
 
 - `rp`: no D20, skills, difficulty, score, success/failure labels, hidden checks, or mechanical `/check`; consequences follow from the world, state, resources, information, NPC goals, relationships, and prior events.
-- `novel`: no dice, skills, checks, difficulty, result labels, or action menus; prioritize prose, relationships, pacing, and consent.
 
 ## Quick Reply Notes
 

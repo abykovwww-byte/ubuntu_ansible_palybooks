@@ -4,8 +4,8 @@ Ansible foundation for a local Ubuntu server that will host application deployme
 
 ## RP Stack Wiki
 
-The repository includes a multi-page, human-readable description of the RP,
-collaborative-novel, and deterministic-training platform:
+The repository includes a multi-page, human-readable description of the RP and
+deterministic-training platform:
 
 - [RP Stack Wiki](docs/wiki/README.md)
 - [Architecture](docs/wiki/01-architecture.md)
@@ -343,7 +343,7 @@ Keep provider keys server-side by setting them only in
 `/etc/ansible/local-overrides.yml` on `192.168.1.88`:
 
 ```yaml
-rp_stack_nvidia_api_key: "..."
+rp_stack_openrouter_api_key: "..."
 ```
 
 State workflow:

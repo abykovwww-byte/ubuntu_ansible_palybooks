@@ -12,8 +12,8 @@
 
 Это capability pack, а не автоматическая активация. Gateway ограничивает обычные
 партии значением `RP_CONTRACT_OBSERVED_REVISION`; revision выше effective
-observed разрешена только изолированной checkpoint/autotest-ветке. `training` и
-`novel` этот маркер не используют.
+observed разрешена только изолированной checkpoint/autotest-ветке. `training`
+этот маркер не использует.
 
 Candidate maximum `7` сам по себе не означает observed activation. Отдельный
 rollout с `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
@@ -135,12 +135,11 @@ continuity или уровень `наблюдается`. Последующа�
 отдельный inventory rollout и обязательный post-apply proof; это не повышает
 readiness DC4.
 
-## Три режима
+## Два активных режима
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
 |---|---|---|---|
 | `rp` | Ролевая игра и совместная проза | Нейтральное продолжение сцены без скрытой механики, canonical state, absolute-rule validation/repair, relationship pressure и correction-aware living memory | D20, DC, skills, score, success/failure, механический `/check`, нарушение agency или абсолютного правила |
-| `novel` | Совместный роман | Непрерывная проза, directorial input, state boundary patch без броска; chapters/raw без RP story memory | Dice, DC, skills, игровые меню, захват agency |
 | `training` | Учебная симуляция и оценивание | Универсальный interpreter + WorldPack program/assessment/fallback, явные actions, deterministic score и debrief gate; прежний memory path без RP story memory | Случайность, `/check`, предметная логика в Gateway, подсказки и score до debrief |
 
 Пользователь выбирает режим явно при создании Party. WorldPack объявляет только:
@@ -148,13 +147,18 @@ readiness DC4.
 ```json
 {
   "scenario_types": {
-    "recommended": "novel",
-    "supported": ["novel", "rp"]
+    "recommended": "rp",
+    "supported": ["rp"]
   }
 }
 ```
 
 Gateway отклоняет несовместимую комбинацию, но не меняет режим автоматически. Prompt мира не может снова включить механику, запрещённую контрактом режима.
+
+Сохранённые Party и ShowroomScenario выведенного режима не конвертируются в
+`rp`: startup migration идемпотентно переводит их в `archived`. Они остаются
+читаемыми как исторические агрегаты, но их нельзя активировать, запускать,
+публиковать или продолжать сообщениями.
 
 ## Executable training runtime
 
@@ -202,10 +206,12 @@ pack обязан объявить `training_runtime` и хранить расп
 | `awareness` | Awareness | `training` | `training` | WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; предметной логики в Gateway нет |
 | `awareness-one-day` | Awareness. One day | `training` | `training` | WorldPack-owned runtime, 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
 | `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Книжный старт первой части, свободный персонаж, точка входа из PlayerCharacter и закрытые мотивации NPC |
-| `ellinoid` | Эллиноид | `novel` | `novel`, `rp` | Совместный литературный сценарий |
+| `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
-| `mechanist-new-world` | Механист Нового Мира | `rp` | `rp`, `novel` | Долгая приключенческая партия |
-| `smoke-gate-borderland` | Предел Дымных Врат | `rp` | `rp`, `novel` | Пограничное расследование; manifest не задаёт явный status |
+| `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |
+| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания |
+| `smoke-gate-borderland` | Предел Дымных Врат | `rp` | `rp` | Пограничное расследование; manifest не задаёт явный status |
+| `starosta` | Староста | `rp` | `rp` | Деревенская ролевая кампания |
 
 Таблица описывает source. Фактическая видимость может дополнительно меняться администратором в Gateway DB.
 
@@ -277,7 +283,7 @@ resource revision со стабильным `folder_id`, а run фиксируе
 
 В репозитории есть два специализированных skill-контракта:
 
-- `rp-world-pack-builder` — для `rp` и `novel`;
+- `rp-world-pack-builder` — для `rp`;
 - `training-world-pack-builder` — для детерминированных учебных миров.
 
 Оба требуют state schema validation, изоляцию party state и доставку через IaC. Training builder дополнительно требует authored decision surfaces, наблюдаемые score fields и отдельный debrief.
@@ -292,7 +298,7 @@ Light GUI может создать простой private WorldPack из тек
 - `markdown_file` — произвольный UTF-8 `.md` до 200 000 символов; полный текст сохраняется рядом с generated pack как `world.md` и подключается через `manifest.files.gm_system`;
 - для Markdown в manifest и canonical state остаётся только фрагмент до 6000 символов, а полный документ читается как стабильный `WORLD_SYSTEM_PROMPT`. Это не дублирует сотни килобайт в state/API и сохраняет prompt-prefix caching.
 
-Gateway сохраняет basename исходного файла и размер текста как метаданные, но не исполняет Markdown и не превращает его в HTML. Сценарный контракт `rp` / `novel` / `training` всё равно имеет приоритет над инструкциями импортированного мира.
+Gateway сохраняет basename исходного файла и размер текста как метаданные, но не исполняет Markdown и не превращает его в HTML. Сценарный контракт `rp` / `training` всё равно имеет приоритет над инструкциями импортированного мира.
 
 ## Источники
 

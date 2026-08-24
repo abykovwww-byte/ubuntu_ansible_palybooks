@@ -1,11 +1,20 @@
 # RP Stack Wiki
 
-RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр, совместного романа и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
+RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki проверена 23 августа 2026 года и отделяет source revision от фактического
+Эта Wiki проверена 24 августа 2026 года и отделяет source revision от фактического
 runtime. RP-only living story memory реализована в исходном коде и описана в
 [Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
 но статус push, Ansible apply и live verification всегда сообщается отдельно.
+
+[Decision 036](../../roles/apps/files/rp-stack/docs/decisions/036-retire-novel-and-nvidia.md)
+выводит из активного контракта режим совместного романа и NVIDIA provider.
+Новые Party и ShowroomScenario принимают только `rp` или `training`; старые
+записи выведенного режима архивируются и остаются доступны для list/read, Turn
+Trace и dataset export. Активные cloud providers — Gemini и OpenRouter, а
+служебные роли явно выбирают local или OpenRouter без смены provider при отказе
+local runner. Этот S0 slice пока имеет только source-уровень `каркас`: он не
+deployed и не live-verified.
 
 Кумулятивная поставка RP-ядра S1–S6 описана в
 [Decision 026](../../roles/apps/files/rp-stack/docs/decisions/026-rp-core-delivery.md).
@@ -120,14 +129,14 @@ flowchart LR
     S -->|"/api"| G
     G --> DB[("SQLite")]
     G --> FS["Party state и WorldPacks"]
-    G --> C["NVIDIA / Gemini / OpenRouter"]
+    G --> C["Gemini / OpenRouter"]
     G --> M["Локальная Gemma через Vulkan"]
 ```
 
 - **Gateway — сервер игры.** Это не тонкий LLM-прокси: он владеет партиями, canonical state, ходами, памятью, совместимыми legacy-проверками, ветками, пользователями, моделями, Showroom и датасетами.
 - **Party — единица изоляции.** `Party = WorldPack + PlayerCharacter + ModelProfile + NarratorSettings + ScenarioType + State + TurnHistory`.
 - **LLM не определяет факты мира.** В `rp-core.v2` Gateway передаёт нейтральное продолжение сцены, активный state, абсолютные правила и relationship pressure, а затем проверяет ответ до commit; `training` по-прежнему получает детерминированный `AUTHORITATIVE_OUTCOME`.
-- **Режим выбирается явно.** `rp`, `novel` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость.
+- **Режим выбирается явно.** `rp` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость. Выведенные записи старого режима доступны только как архивная история.
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
@@ -152,7 +161,7 @@ SillyTavern не входит в текущий Compose RP Stack. Lorebook JSON 
 1. [Архитектура и границы](01-architecture.md) — компоненты, authority и потоки данных.
 2. [Интерфейсы](02-interfaces.md) — Light GUI, Showroom, админка и compatibility API.
 3. [Жизненный цикл хода](03-turn-lifecycle.md) — от сообщения игрока до state, валидации и фоновых задач.
-4. [WorldPacks и режимы](04-worldpacks-and-modes.md) — структура миров, `rp` / `novel` / `training`, публичность.
+4. [WorldPacks и режимы](04-worldpacks-and-modes.md) — структура миров, `rp` / `training`, публичность и архивная граница.
 5. [Память, контекст и retrieval](05-memory-and-retrieval.md) — RP story memory, главы, raw history, бюджеты, lore, NPC и отсутствие embeddings.
 6. [Модели и провайдеры](06-models-and-providers.md) — narrator, служебная модель, BYOK и local Gemma.
 7. [Обучение, автотесты и датасеты](07-training-autotests-datasets.md) — детерминированный scoring, ветки и SFT JSONL.

@@ -163,7 +163,7 @@ Common examples:
 server_timezone: "Europe/Moscow"
 hardening_manage_ssh: false
 hardening_manage_ufw: false
-rp_stack_nvidia_api_key: "..."
+rp_stack_openrouter_api_key: "..."
 ```
 
 If the user asks "what line should I add to local-overrides", answer with the
