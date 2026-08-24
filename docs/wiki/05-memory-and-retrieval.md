@@ -222,6 +222,117 @@ prose/relationship canon. External provider calls не выполнялись; �
 observed activation отдельно прошла apply/stamp-proof boundary и не повышает
 readiness этих canaries.
 
+## Candidate revision 8: history-first prompt и пять секций памяти
+
+[Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
+задаёт S1 только для RP `rp_contract_revision >= 8`. В текущем source это
+локальный candidate со ступенью `каркас`: inventory не активирует revision `8`,
+apply и live-проверок 25/60 ходов не было, поэтому observed/live остаётся `7`.
+
+### RAW `50–57 + uncovered`
+
+Rev8 считает историю целыми playable units:
+
+- opening scene — одно assistant-message; точный технический user-text
+  `[AUTO_START] Старт партии` не передаётся narrator;
+- narrative turn — одна неделимая пара `user + assistant`;
+- `turn_kind = null` или пустое значение означает legacy narrative;
+- `world_command`, `gm_correction` и будущие non-game kinds исключаются.
+
+Для пяти секций вычисляется `safe_coverage = min(section.coverage)`. Recent start
+квантуется вниз по восемь eligible units, поэтому штатное RAW window плавает от
+50 до 57 units и сдвигает голову только один раз на восемь ходов. Фактическое
+начало берётся не позже первой uncovered unit. Поэтому отставшая или частично
+failed память расширяет дословное окно назад и не создаёт слепой участок между
+памятью и transcript.
+
+```mermaid
+flowchart LR
+    U["Eligible playable units"] --> R["Квантованный recent window · 50–57 units"]
+    S["Safe coverage = min(5 coverages)"] --> N["Все units новее safe coverage"]
+    R --> W["Rev8 RAW window"]
+    N --> W
+    W --> P["Narrator prompt"]
+```
+
+### Пять покрытий, один основной вызов
+
+| Section key | Содержимое | Собственный статус |
+|---|---|---|
+| `situation` | current situation + canon | `coverage`, `fresh/stale/failed` |
+| `threads` | active + resolved threads | `coverage`, `fresh/stale/failed` |
+| `characters` | персонажи | `coverage`, `fresh/stale/failed` |
+| `assets_and_rules` | inventory/assets + rules/abilities | `coverage`, `fresh/stale/failed` |
+| `chronology_and_hooks` | chronology + unresolved hooks | `coverage`, `fresh/stale/failed` |
+
+До появления 51-й eligible unit snapshot отсутствует и service job не
+создаётся. Затем normal job выполняет один oldest-first batch не более восьми
+целых units. Один основной OpenRouter request возвращает все пять секций.
+После первого snapshot normal cadence — четыре новые eligible units. Partial
+snapshot сразу доступен prompt с явными section status.
+
+Ответ проверяется только по форме: наличие и JSON-тип секции, exact поля и типы
+schema, корректные и сохранённые `fact_id`, а также
+`finish_reason != length`. Смысловой оценки и требования непустоты нет:
+пустые массивы и `current_situation=null` валидны, продвигают coverage и не
+вызывают retry. Это не заставляет модель выдумывать изменение инвентаря или
+событие там, где история его не подтверждает.
+
+Только секция, не прошедшая structural validation, получает один отдельный
+request; валидные секции общего ответа не повторяются. Durable retry того же job
+повторяет только оставшиеся `stale/failed` секции. Typed user correction
+применяется идемпотентно, а safe coverage после любой частичной пересборки
+остаётся `min()` пяти section coverages.
+
+Общий и точечный requests получают только complete units и не более 20 000
+символов serialized messages. Если восемь units не помещаются, batch уменьшается
+с хвоста; одна слишком большая unit не режется. Output limit равен `4000` tokens
+для общего ответа и `800` для одной секции. Exact provider/model и retry policy описаны в
+[разделе о моделях](06-models-and-providers.md#candidate-revision-8-sectioned-story-memory).
+
+### Точный порядок rev8 prompt
+
+```mermaid
+flowchart TB
+    A["1. Короткие русские правила narrator"] --> B["2. WORLD_SYSTEM_PROMPT · до 5000 chars"]
+    B --> C["3. WORLD_ABSOLUTE_RULES · один prose-list · до 3000 chars"]
+    C --> D["4. RAW 50–57 + uncovered · anchor 8"]
+    D --> E["5. RP_STORY_MEMORY · если есть · до 24000 chars"]
+    E --> F["6. PARTY_LORE_CARDS · только целые cards · до 4000 chars"]
+    F --> G["7. Только содержательный AUTHORITATIVE_OUTCOME"]
+    G --> H["8. RELATIONSHIP_PRESSURE + due resolution"]
+    H --> I["9. WORLD_AUTHORS_NOTE · до 1500 chars · последний system block"]
+    I --> J["10. Current player action · последнее message"]
+```
+
+Блоки 1–3 и первые 50 RAW units — повторяемая основа provider prefix. Память,
+cards, corrections, relationship pressure, world events, author note и current
+action находятся после неё и не обнуляют кэш длинной истории. В stable rules
+нет turn number, state/revision IDs, timestamps, campaign ID или счётчиков.
+`metadata_json` rev8-хода сохраняет `cached_prompt_tokens`, `prompt_tokens` и
+`stable_prompt_prefix_hash`; hash относится к якорной основе, поэтому внутри
+bucket остаётся тем же, хотя полный RAW растёт от 50 до 57 units.
+
+Generic no-check outcome не рендерится. Rev8 также не читает и не рендерит
+`Relevant state summary`, `RELEVANT_CHARACTERS`,
+`PROMPT_AUTHORITY_HIERARCHY`, scene state/boundary/reanchor/transition
+allowance, `LONG_TERM_PARTY_MEMORY`, `UNCOMPACTED_ARCHIVE_FALLBACK` или
+`RETRIEVED_ARCHIVE_SCENES`. Scene bundle не запрашивается: narrator возвращает
+plain text. Legacy storage и compatibility code revisions `0..7` не удаляются.
+
+При hard input overflow Gateway сначала удаляет весь `PARTY_LORE_CARDS`, затем
+может удалять с головы только целые safely covered RAW units. Он сохраняет не
+меньше 20 units и никогда не удаляет uncovered unit. Если required set всё ещё
+не помещается, запрос fail-closed завершается до provider и player mutation;
+отдельные blocks, messages и turns не обрезаются.
+
+Relationship scope для rev8 использует один deterministic scan: current player
+input плюс три предыдущих eligible RAW units целиком. Отбор идёт по whole aliases
+и optional `Outcome.target`; `scene_state`, seed location и active threads не
+являются сигналами присутствия. Этот scan фильтрует
+`RELATIONSHIP_PRESSURE`/due guidance и не создаёт отдельный
+`RELEVANT_CHARACTERS` prompt block.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.
@@ -231,17 +342,21 @@ readiness этих canaries.
 | Canonical state | Текущие подтверждённые факты и механика | Все | Да |
 | Revision-7 `scene_state` (DC4, `подключено`) | Exact location/presence и stale/as-of boundary внутри state version | Только RP revision 7 | Да после accepted atomic commit; ordinary rollout активирован |
 | Raw turns | Полный первичный диалог и metadata | Все | Нет, но это source history |
-| RP story memory | Живой кумулятивный реестр всей истории | Только `rp` | Нет |
+| Legacy RP story memory | Живой кумулятивный реестр всей истории | Только RP revisions 0..7 | Нет |
+| Sectioned RP story memory v3 (candidate) | Пять независимо покрываемых секций; safe coverage равен минимуму | Только RP revision 8+ | Нет |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
 | Memory chapters | Неизменяемые сжатые эпизоды старых сцен | Все | Нет |
-| Lore/retrieval | Выбранные карточки, NPC и архивные сцены | Все | Нет |
+| Lore/retrieval | Выбранные карточки, NPC и архивные сцены | Lore cards — все режимы; legacy NPC/archive retrieval — revisions 0..7 | Нет |
 | Legacy journal | Итоги прежних версий | Только совместимость | Нет |
 
 Canonical state и типизированные абсолютные правила WorldPack всегда выше любого текста памяти. Raw turns не удаляются после сжатия. Ни story memory, ни chapter не могут превратить попытку игрока или слух в подтверждённый факт.
 
-## RP story memory
+## RP story memory: legacy schema revisions 2..7
 
-`RPStoryMemoryUpdater` поддерживает отдельный bounded snapshot для каждой RP-партии. Это аналог постоянно обновляемого файла-сводки длинной кампании со следующей схемой:
+Для revisions `2..7` `RPStoryMemoryUpdater` поддерживает отдельный bounded
+snapshot для каждой RP-партии. Revision `8` использует описанную выше sectioned
+schema v3. Legacy v2 — аналог постоянно обновляемого файла-сводки длинной
+кампании со следующей схемой:
 
 ```text
 schema_version
@@ -306,6 +421,10 @@ Story memory существует **только при `scenario_type == "rp"`*
 
 Этот механизм не изменён для `training`.
 
+Для candidate revision `8` episodic `memory` job отключён полностью, а pending
+legacy job завершается terminal no-op. Raw rows и уже существующие chapters не
+удаляются; они просто не становятся rev8 narrator input.
+
 ## Бюджет 132k
 
 Общий stack limit остаётся 131072 токена:
@@ -328,20 +447,29 @@ PARTY_MEMORY_PROMPT_MAX_CHARS              60000
 
 Для `training` новый резерв равен нулю, поэтому прежний budget остаётся 81920 tokens. `RP_STORY_MEMORY_PROMPT_MAX_CHARS=24000` — это верхняя граница текста story block, а не постоянная гарантия использования 10k токенов. Фактический блок обычно меньше.
 
-Если полный prompt всё же не помещается, Gateway сначала удаляет/сокращает вторичные динамические слои. Canonical state, `AUTHORITATIVE_OUTCOME` и текущее действие имеют более высокий приоритет, чем story memory.
+Для revisions `0..7`, если полный prompt всё же не помещается, Gateway сначала
+удаляет/сокращает вторичные динамические слои. Canonical state,
+`AUTHORITATIVE_OUTCOME` и текущее действие имеют более высокий приоритет, чем
+story memory. Candidate rev8 не использует это legacy trimming: для него
+действует только fail-closed policy из раздела выше.
 
-## Размер контекста service model
+## Размер контекста legacy service model revisions 0..7
 
-Обновление story memory ограничено независимо от narrator:
+Legacy-обновление story memory ограничено независимо от narrator:
 
 - предыдущий snapshot — до 24000 символов;
 - state excerpt — до 8000 символов;
 - пакет новых turns — до 6000 приблизительных input tokens;
 - ответ — до 6000 tokens.
 
-Таким образом, настроенное окно локальной Gemma в 32768 tokens достаточно для штатного update. Service model не получает весь 132k prompt narrator и не должна перечитывать всю кампанию на каждом запуске: она сворачивает предыдущий snapshot плюс только новый пакет.
+Таким образом, настроенное окно локальной Gemma в 32768 tokens достаточно для
+legacy update revisions `0..7`. Service model не получает весь 132k prompt
+narrator и не должна перечитывать всю кампанию на каждом запуске: она сворачивает
+предыдущий snapshot плюс только новый пакет. Candidate rev8 использует один
+штатный OpenRouter request на пять секций и точечные structural retries с
+лимитами 20 000 input characters и 4000/800 output tokens, описанные выше.
 
-## Порядок RP prompt
+## Порядок RP prompt для revisions 0..7
 
 ```mermaid
 flowchart TB
@@ -362,6 +490,9 @@ flowchart TB
 ```
 
 Для `training` узел 4 отсутствует, а остальные блоки сохраняют прежний порядок. Текущее действие всегда последнее.
+
+Candidate revision `8` использует отдельный history-first order, зафиксированный
+выше; эта legacy-схема не является его fallback.
 
 `RELATIONSHIP_PRESSURE` не является памятью или canonical state. Он каждый ход
 вычисляется из party-scoped причин, сохранённой производной полосы и активных
@@ -386,6 +517,12 @@ character/relationship retrieval и не показывается Light GUI; д�
 
 `search_archived_turns()` использует точные слова, упрощённые stems, символьные 3-граммы и небольшой recency bonus. По умолчанию возвращается до трёх party-scoped сцен и не больше 9000 символов. Lore cards выбираются по keywords/stems или флагу `always_on`. Relevant characters выбираются по упоминанию, общей локации, активным нитям и `Outcome.target`; поле `secrets` в narrator block не передаётся.
 
+Для candidate revision `8` `search_archived_turns()` и
+`RETRIEVED_ARCHIVE_SCENES` в narrator path отключены. Lore cards сохраняются, но
+передаются только целыми карточками в общем лимите 4000 символов. Legacy
+`RELEVANT_CHARACTERS` block также отключён; relationship-механика использует
+current input + три предыдущих eligible units, как описано выше.
+
 Embedding endpoint, vector store и cross-party semantic index не используются. Если понадобится vector retrieval, он должен сохранить обязательный party filter и объяснимость результатов.
 
 ## Изоляция и UI
@@ -398,9 +535,11 @@ Embedding endpoint, vector store и cross-party semantic index не исполь
 - [Episodic memory service](../../roles/apps/files/rp-stack/rp-gateway/app/services/memory.py)
 - [Prompt assembly](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
 - [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
+- [Revision-8 history selection](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_history.py)
 - [RP living-memory ADR](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md)
 - [Long-context ADR](../../roles/apps/files/rp-stack/docs/decisions/009-long-context-memory-policy.md)
 - [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 029: derived relationship scope](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)
 - [Decision 030: prompt authority и structural deduplication](../../roles/apps/files/rp-stack/docs/decisions/030-rp-prompt-authority-and-deduplication.md)
 - [Decision 031: scene state и atomic continuity](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+- [Decision 032: history-first prompt и sectioned memory](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)

@@ -267,7 +267,7 @@ def validate_environment_contracts(errors: list[str]) -> None:
 
     canary_wrapper = ROOT / "scripts" / "run-rp-stack-evals.ps1"
     canary_markers = (
-        "[ValidateRange(0, 7)]",
+        "[ValidateRange(0, 8)]",
         "[Nullable[int]]$RpContractRevision = $null",
         "if ($null -ne $RpContractRevision)",
         '$arguments += @("--rp-contract-revision", [string]$RpContractRevision)',
@@ -277,7 +277,13 @@ def validate_environment_contracts(errors: list[str]) -> None:
     else:
         canary_source = canary_wrapper.read_text(encoding="utf-8-sig")
         if any(marker not in canary_source for marker in canary_markers):
-            fail(errors, "RP Stack provider canary must forward explicit candidate revision 0..7")
+            fail(errors, "RP Stack provider canary must forward explicit candidate revision 0..8")
+
+    canary_runner = ROOT / "roles" / "apps" / "files" / "rp-stack" / "evals" / "run_evals.py"
+    if not canary_runner.is_file():
+        fail(errors, "missing RP Stack eval runner")
+    elif 'choices=range(0, 9)' not in canary_runner.read_text(encoding="utf-8"):
+        fail(errors, "RP Stack provider canary evaluator must accept candidate revision 0..8")
 
     marketplace = Path(".agents/plugins/marketplace.json")
     old_profile = b"C:" + b"\\Users\\" + b"albykov"

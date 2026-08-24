@@ -85,6 +85,42 @@ equality для уже `65` parties. SQLite `quick_check` прошёл, четы
 healthy с `restarts=0`, оба UI вернули `200`, а deployed Gateway suite
 завершилась `548 passed, 1 skipped`.
 
+## Candidate RP contract revision 8: S1, не activation
+
+[Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
+и его registry row описывают локальный candidate со ступенью `каркас`. Это не
+config rollout: inventory по-прежнему активирует observed revision `7`, source
+candidate не применён через Ansible и не проверен в container/HTTP/real-party
+path. Existing parties не мигрируются. Следовательно, единственное честное
+runtime-утверждение сейчас — observed/live revision остаётся `7`.
+
+Отдельная будущая activation revision `8` допустима только после обычной
+delivery-цепочки и раздельных live gates:
+
+1. на 25-й игровой единице prompt содержит 24 предыдущие playable units
+   дословно, целевой порядок blocks и не использует fallback;
+2. на 60-й единице отсутствуют episodic `memory` jobs/rows, один update сохраняет
+   пять независимо покрываемых секций одним `section_key=all` call; forced
+   structural failure не теряет четыре успеха и вызывает только exact section
+   retry, а пустая валидная секция retry не получает;
+3. safe coverage равен минимуму пяти section coverages, а RAW содержит
+   квантованное окно 50–57 units плюс весь uncovered tail без gap; его начало и
+   `stable_prompt_prefix_hash` меняются только при сдвиге восьмиходового якоря;
+4. hard overflow удаляет целиком lore, затем только целые safely covered units,
+   сохраняет минимум 20 и иначе fail-closed завершается до provider;
+5. `service_call_log` показывает exact `provider=openrouter`,
+   `model=deepseek/deepseek-v4-pro`, section input не более 20 000 символов,
+   `max_tokens=4000` для combined и `800` для targeted retry, отказ при
+   `finish_reason=length`, не более двух durable job attempts и отсутствие
+   fallback route для этих calls;
+6. на 60-turn party `metadata_json` содержит `cached_prompt_tokens`,
+   `prompt_tokens`, `stable_prompt_prefix_hash`; cache share не меньше 70% как
+   минимум на пяти из каждых восьми последовательных ходов, а среднее по партии
+   выше 8.6%.
+
+Эти проверки являются будущими runtime gates, а не доказательством локальной
+candidate-реализации и её deterministic test suite.
+
 ## Codex devkit, worktrees и CI
 
 Репозиторий содержит собственный Codex-контур:
@@ -284,6 +320,7 @@ ubuntu_ansible_palybooks/
 | `services/validator.py` | Проверка narration и training debrief |
 | `services/memory.py` | Immutable episodic chapters |
 | `services/rp_story_memory.py` | RP-only cumulative living-memory snapshots и service-model update |
+| `services/rp_history.py` | Revision-8 playable-unit eligibility, quantized RAW `50–57 + uncovered`, safe coverage и scan window |
 | `services/character_retrieval.py` | Выбор релевантных NPC без embeddings |
 | `services/world_instructor.py` | Draft/preview/apply контракт изменения мира |
 | `services/auth_store.py` | Users, sessions, provider keys, global settings |
@@ -305,7 +342,7 @@ Gateway запускает восстановление через единый 
 |---|---|
 | Новый endpoint | `rp-gateway/app/main.py`, schemas и tests |
 | Изменить обработку хода | `adjudicator.py`, `rule_engine.py`, `validator.py` |
-| Изменить prompt/memory | `narrative.py`, `memory.py`, `rp_story_memory.py`, `context_budget.py`, `state_store.py` |
+| Изменить prompt/memory | `narrative.py`, `memory.py`, `rp_story_memory.py`, `rp_history.py`, `context_budget.py`, `state_store.py` |
 | Изменить Light GUI | `rp-light-gui/index.html`, `app.js`, `styles.css` |
 | Изменить Turn Trace Workbench | `turn_trace.py`, `state_store.py`, `narrative.py`, `service_model_client.py`, `main.py`, Light GUI trace assets и tests |
 | Изменить Showroom | `rp-showcase-gui/` и `showroom.py` |
@@ -355,6 +392,8 @@ powershell.exe -File scripts/run-rp-stack-evals.ps1 -Mode SemanticAcceptance
 Candidate provider-canary запускается только с явным
 `-RpContractRevision <revision>`; для DC1 это `-RpContractRevision 7`. Отчёт
 должен подтвердить совпадение requested и effective revision созданной branch.
+Revision-8 S1 до activation дополнительно требует отдельные 25/60-turn gates из
+Decision 032; локальный source test или revision stamp их не заменяет.
 
 Для статических UI:
 
@@ -409,3 +448,4 @@ provider failures repair не получают при любом значени�
 - [Operations](../../roles/apps/files/rp-stack/docs/operations.md)
 - [Gateway tests](../../roles/apps/files/rp-stack/rp-gateway/tests)
 - [Decision 027 — Turn Trace Workbench](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
+- [Decision 032 — history-first prompt и sectioned memory](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
