@@ -137,6 +137,16 @@ Light GUI показывает под ответом точные подняты
 явно подготовить draft из завершённого хода; запись появляется только после
 подтверждения игроком. Source/local readiness S2 пока остаётся `каркас`.
 
+S3 описан в
+[Decision 038](../../roles/apps/files/rp-stack/docs/decisions/038-rp-gm-corrections-and-player-overlay.md).
+Candidate RP revision `9` отделяет обращение к мастеру от сцены: local Gemma
+только классифицирует реплику и готовит bounded `before/after` draft, а канон
+меняется лишь после явного confirm. Подтверждённая правка не сдвигает party turn,
+сцену или игровое время, исключается из narrator RAW и временно защищает prompt
+через `ИСПРАВЛЕНИЯ ИГРОКА`, пока одна затронутая section story memory не сохранит
+её с authority `user`. Source/local readiness S3 — `каркас`; revision `9` не
+активирована и ни одна существующая party не мигрирована.
+
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно
@@ -159,7 +169,7 @@ core, но не является runtime authority, readiness oracle или за
 flowchart LR
     P["Игрок или автор"] --> L["Light GUI :8010"]
     V["Анонимный посетитель"] --> S["Showroom :8011"]
-    L -->|"/api"| G["RP Gateway :8088"]
+    L -->|"scene / GM correction API"| G["RP Gateway :8088"]
     S -->|"/api"| G
     G --> DB[("SQLite")]
     G --> FS["Party state и WorldPacks"]
@@ -176,6 +186,7 @@ flowchart LR
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
 - **Revision 8 активирована узко на «Купце».** Apply и stamp-party подтвердили effective `8` без model calls; старые партии и остальные WorldPacks не мигрируют, а длинные gates 25/60 отложены до полной реализации.
 - **S2 оставляет Lore Cards короткими и управляемыми.** WorldPack cards reviewed до commit, hidden content не является trigger, exact raised IDs видны рядом с ответом, а service draft не сохраняется без подтверждения игрока.
+- **S3 отделяет исправление от сцены.** Rev9 GM channel не вызывает narrator, показывает exact diff, сохраняет отдельный `gm_correction` и держит правку в защищённом overlay до one-section absorption; candidate ещё не активирован.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
