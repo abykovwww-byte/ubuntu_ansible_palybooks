@@ -13,8 +13,16 @@ runtime. RP-only living story memory реализована в исходном 
 записи выведенного режима архивируются и остаются доступны для list/read, Turn
 Trace и dataset export. Активные cloud providers — Gemini и OpenRouter, а
 служебные роли явно выбирают local или OpenRouter без смены provider при отказе
-local runner. Этот S0 slice пока имеет только source-уровень `каркас`: он не
-deployed и не live-verified.
+local runner. PR
+[#68](https://github.com/abykovwww-byte/ubuntu_ansible_palybooks/pull/68)
+слит merge-коммитом `0fb0ab0dd794e55eb9b2177c227c1591f97841c0` и применён на
+`abykovserv` 24 августа 2026 года. Ansible завершился с `failed=0`, четыре
+контейнера остались healthy, production-image Gateway suite дала `548 passed, 1 skipped`,
+а браузерная проверка обоих UI не нашла активных Novel/NVIDIA
+вариантов. Startup migration архивировала единственную legacy Novel-партию;
+исторические NVIDIA profiles/party references сохранены без переназначения.
+Поэтому S0 имеет уровень `подключено`; реальный outage local service model и
+provider turn для historical NVIDIA party на production намеренно не запускались.
 
 Кумулятивная поставка RP-ядра S1–S6 описана в
 [Decision 026](../../roles/apps/files/rp-stack/docs/decisions/026-rp-core-delivery.md).
