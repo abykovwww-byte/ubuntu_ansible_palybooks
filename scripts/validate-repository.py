@@ -36,6 +36,115 @@ def validate_json(errors: list[str]) -> None:
             fail(errors, f"invalid JSON: {path.relative_to(ROOT)}: {exc}")
 
 
+def validate_worldpack_lore_cards(errors: list[str]) -> None:
+    worldpacks_root = ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks"
+    for manifest_path in sorted(worldpacks_root.glob("*/manifest.json")):
+        pack_root = manifest_path.parent.resolve()
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        files = manifest.get("files") if isinstance(manifest, dict) else None
+        relative_dir = files.get("lore_cards") if isinstance(files, dict) else None
+        conventional_dir = pack_root / "lore-cards"
+        if relative_dir is None:
+            if conventional_dir.exists():
+                fail(errors, f"undeclared WorldPack lore-cards directory: {manifest_path.parent.relative_to(ROOT)}")
+            continue
+        if not isinstance(relative_dir, str) or not relative_dir.strip():
+            fail(errors, f"invalid WorldPack lore_cards path: {manifest_path.relative_to(ROOT)}")
+            continue
+        cards_dir = (pack_root / relative_dir).resolve()
+        if pack_root not in cards_dir.parents or not cards_dir.is_dir():
+            fail(errors, f"missing or unsafe WorldPack lore_cards directory: {manifest_path.relative_to(ROOT)}")
+            continue
+        card_paths = sorted(cards_dir.glob("*.json"))
+        if not card_paths:
+            fail(errors, f"WorldPack lore_cards directory contains no JSON: {cards_dir.relative_to(ROOT)}")
+            continue
+
+        cards_by_key: dict[str, dict[str, object]] = {}
+        for card_path in card_paths:
+            try:
+                payload = json.loads(card_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict) or payload.get("schema_version") != "rp-gateway.worldpack-lore-cards.v1":
+                fail(errors, f"invalid WorldPack lore-card schema: {card_path.relative_to(ROOT)}")
+                continue
+            raw_cards = payload.get("cards")
+            if not isinstance(raw_cards, list) or not raw_cards:
+                fail(errors, f"WorldPack lore-card file has no cards: {card_path.relative_to(ROOT)}")
+                continue
+            for index, card in enumerate(raw_cards, start=1):
+                label = f"{card_path.relative_to(ROOT)}:{index}"
+                if not isinstance(card, dict):
+                    fail(errors, f"WorldPack lore card is not an object: {label}")
+                    continue
+                key = str(card.get("key") or "").strip()
+                if not re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,127}", key):
+                    fail(errors, f"WorldPack lore card has invalid key: {label}")
+                    continue
+                if key in cards_by_key:
+                    fail(errors, f"duplicate WorldPack lore card key: {key}")
+                    continue
+                title = str(card.get("title") or "").strip()
+                content = str(card.get("content") or "").strip()
+                raw_keywords = card.get("keywords")
+                keywords = (
+                    [str(keyword).strip() for keyword in raw_keywords if str(keyword).strip()]
+                    if isinstance(raw_keywords, list)
+                    else []
+                )
+                if not title or len(title) > 160 or not content or len(content) > 12_000:
+                    fail(errors, f"WorldPack lore card has invalid title/content: {label}")
+                if not keywords or len(keywords) > 40:
+                    fail(errors, f"WorldPack lore card keywords must be non-empty: {label}")
+                if not isinstance(card.get("always_on", False), bool) or not isinstance(card.get("enabled", True), bool):
+                    fail(errors, f"WorldPack lore card has invalid flags: {label}")
+                if key.startswith("npc:") and card.get("always_on", False) is not False:
+                    fail(errors, f"WorldPack NPC lore card must use always_on=false: {label}")
+                cards_by_key[key] = card
+
+        pack_id = str(manifest.get("id") or manifest_path.parent.name)
+        if pack_id == "merchant-sviatoslav" and len(cards_by_key) < 15:
+            fail(errors, "merchant-sviatoslav must contain at least 15 authored Lore Cards")
+
+        relationship_decl = manifest.get("relationships") if isinstance(manifest, dict) else None
+        relationship_path = relationship_decl.get("model") if isinstance(relationship_decl, dict) else None
+        if not isinstance(relationship_path, str) or not relationship_path.strip():
+            continue
+        try:
+            relationship_model = json.loads((pack_root / relationship_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        characters = relationship_model.get("characters") if isinstance(relationship_model, dict) else None
+        if not isinstance(characters, dict):
+            continue
+        for character_id, declaration in characters.items():
+            key = f"npc:{character_id}"
+            card = cards_by_key.get(key)
+            if card is None:
+                fail(errors, f"WorldPack lore cards missing NPC card: {pack_id}:{key}")
+                continue
+            aliases = declaration.get("aliases") if isinstance(declaration, dict) else None
+            expected_aliases = {
+                str(alias).strip().casefold()
+                for alias in aliases or []
+                if str(alias).strip()
+            }
+            keywords = {
+                str(keyword).strip().casefold()
+                for keyword in card.get("keywords", [])
+                if str(keyword).strip()
+            }
+            if not expected_aliases or not expected_aliases.issubset(keywords):
+                fail(errors, f"WorldPack NPC lore card lacks declared aliases: {pack_id}:{key}")
+            canonical_name = str(next(iter(aliases), "")).strip() if isinstance(aliases, list) else ""
+            if canonical_name and str(card.get("title") or "").strip() != canonical_name:
+                fail(errors, f"WorldPack NPC lore card title is not the canonical name: {pack_id}:{key}")
+
+
 def validate_wiki(errors: list[str]) -> None:
     wiki_root = ROOT / "docs" / "wiki"
     readme = wiki_root / "README.md"
@@ -365,6 +474,7 @@ def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
         "scene_claims",
         "scene_delta",
         "story_memory_canonical=false",
+        "rp-gateway.worldpack-lore-cards.v1",
     )
     for marker in required_markers:
         if marker not in combined:
@@ -394,6 +504,7 @@ def validate_adr_registry(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     validate_json(errors)
+    validate_worldpack_lore_cards(errors)
     validate_wiki(errors)
     validate_agents(errors)
     validate_plugin(errors)
@@ -405,7 +516,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("Repository contracts valid: JSON, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
+    print("Repository contracts valid: JSON, WorldPack Lore Cards, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
     return 0
 
 

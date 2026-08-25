@@ -227,8 +227,9 @@ readiness этих canaries.
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 задаёт S1 только для RP `rp_contract_revision >= 8`. Код S1 уже применён;
 отдельный source-activation slice задаёт observed `8`, но declared `8` только у
-`merchant-sviatoslav`. До apply этого slice и live-проверок 25/60 runtime
-observed остаётся `7`, а registry — на ступени `каркас`.
+`merchant-sviatoslav`. Apply и stamp-party подтвердили effective `8` без model
+calls; live-проверки 25/60 отложены до полной реализации, поэтому registry
+остаётся на ступени `каркас`.
 
 ### RAW `50–57 + uncovered`
 
@@ -334,6 +335,26 @@ input плюс три предыдущих eligible RAW units целиком. О
 `RELATIONSHIP_PRESSURE`/due guidance и не создаёт отдельный
 `RELEVANT_CHARACTERS` prompt block.
 
+### S2: authored Lore Cards и тот же recent scan
+
+Rev8 Lore Cards используют тот же current-plus-three scan и optional
+`Outcome.target`, но проверяют только whole match `title` и `keywords`.
+`content` не является поисковым полем: закрытая мотивация или улика внутри card
+не может поднять карточку сама. Seed location, active threads и scene state не
+добавляют кандидатов. `always_on` остаётся явным свойством карточки, а для
+authored NPC cards запрещён.
+
+WorldPack cards копируются в party storage только при создании новой rev8 party
+и не требуют model call. `PARTY_LORE_CARDS` сериализует целые cards до 4 000
+символов; общий input overflow удаляет весь block раньше covered RAW.
+Финальный список ID сохраняется в `metadata.prompt_assembly.lore_card_ids`.
+History API добавляет titles, а UI сохраняет exact порядок metadata под ответом.
+
+Отдельный player action может попросить один service draft из выбранных complete
+turns. Его строгий JSON только заполняет форму; persistent Lore Card появляется
+после ручного confirm. Draft не становится canonical state и не запускается
+автоматически из обычной реплики.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.
@@ -347,7 +368,7 @@ input плюс три предыдущих eligible RAW units целиком. О
 | Sectioned RP story memory v3 | Пять независимо покрываемых секций; safe coverage равен минимуму | Только RP revision 8+ | Нет |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
 | Memory chapters | Неизменяемые сжатые эпизоды старых сцен | Все | Нет |
-| Lore/retrieval | Выбранные карточки, NPC и архивные сцены | Lore cards — все режимы; legacy NPC/archive retrieval — revisions 0..7 | Нет |
+| Lore/retrieval | Rev8 authored/player-confirmed whole cards по title/keywords; legacy NPC и архивные сцены | Lore cards — party storage; legacy NPC/archive retrieval — revisions 0..7 | Нет |
 | Legacy journal | Итоги прежних версий | Только совместимость | Нет |
 
 Canonical state и типизированные абсолютные правила WorldPack всегда выше любого текста памяти. Raw turns не удаляются после сжатия. Ни story memory, ни chapter не могут превратить попытку игрока или слух в подтверждённый факт.

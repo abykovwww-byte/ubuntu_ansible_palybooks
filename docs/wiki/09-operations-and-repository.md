@@ -91,12 +91,11 @@ healthy с `restarts=0`, оба UI вернули `200`, а deployed Gateway sui
 и его registry rows остаются на ступени `каркас` до живых gates. Source rollout
 задаёт `rp_stack_gateway_rp_contract_observed_revision: 8`, но declared revision
 `8` получает только `merchant-sviatoslav`; остальные WorldPacks остаются на
-`6/7`, existing parties не мигрируются. До интерактивного Ansible apply и
-container/party proof единственное честное runtime-утверждение — observed/live
-revision остаётся `7`.
+`6/7`, existing parties не мигрируются. Ansible apply, container env и новая
+stamp-party подтвердили effective revision `8` без narrator/service model calls.
 
-Source activation revision `8` становится подтверждённой только после обычной
-delivery-цепочки и раздельных live gates:
+Activation boundary revision `8` подтверждена. Более высокие readiness gates
+по решению пользователя отложены до полной реализации RP-ядра:
 
 1. на 25-й игровой единице prompt содержит 24 предыдущие playable units
    дословно, целевой порядок blocks и не использует fallback;
@@ -393,8 +392,8 @@ powershell.exe -File scripts/run-rp-stack-evals.ps1 -Mode SemanticAcceptance
 Candidate provider-canary запускается только с явным
 `-RpContractRevision <revision>`; для DC1 это `-RpContractRevision 7`. Отчёт
 должен подтвердить совпадение requested и effective revision созданной branch.
-Revision-8 S1 до activation дополнительно требует отдельные 25/60-turn gates из
-Decision 032; локальный source test или revision stamp их не заменяет.
+Revision-8 S1 до повышения readiness дополнительно требует отдельные 25/60-turn
+gates из Decision 032; локальный source test или revision stamp их не заменяет.
 
 Для статических UI:
 

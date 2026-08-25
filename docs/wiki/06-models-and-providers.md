@@ -104,6 +104,7 @@ primary model удаляются, поэтому несовместимый ма
 | Journal summary | Не вызывается текущим runtime; сохранён только legacy storage/no-op job |
 | Long-term memory chapter | Глобальная service model |
 | RP living story-memory update | Revisions 0..7: глобальная service model; rev8: один combined OpenRouter call и exact section retry только после structural failure |
+| RP rev8 Lore Card draft из выбранных ходов | Exact OpenRouter `deepseek/deepseek-v4-pro`; один call, без fallback и без auto-save |
 | RP relationship extraction | Глобальная service model, только `scenario_type=rp` |
 | LLM world-state draft | Глобальная service model |
 | Генерация/дополнение NPC | Глобальная service model |
@@ -141,9 +142,33 @@ durable attempts именно у rev8 `rp_story_memory` job равен `2`; об
 `SERVICE_JOB_MAX_ATTEMPTS=5` сохраняется для relationship extraction и legacy
 jobs.
 
-Route реализован и применён как код. Source activation выбирает новые партии
-`merchant-sviatoslav`, но до Ansible apply и live gates 25/60 runtime observed
-остаётся `7`, а registry status — `каркас`.
+Route реализован и применён как код. Activation и stamp-party подтвердили
+effective revision `8` у новой партии `merchant-sviatoslav`; model calls в stamp
+не выполнялись, а live gates 25/60 отложены до полной реализации, поэтому
+registry status — `каркас`.
+
+### Revision 8: Lore Card draft
+
+[Decision 037](../../roles/apps/files/rp-stack/docs/decisions/037-rp-authored-lore-cards-and-confirmed-drafts.md)
+задаёт отдельный exact route, не связанный с выбранной narrator или глобальной
+local service profile:
+
+```mermaid
+flowchart LR
+    U["Player нажал draft у complete turn"] --> G["Gateway validates eligible turn IDs"]
+    G --> O["OpenRouter · deepseek/deepseek-v4-pro"]
+    O --> J["Strict title/content/keywords JSON · max_tokens 400"]
+    J --> F["Видимая форма · ещё не storage"]
+    F -->|"явный confirm"| P["Party Lore Card"]
+    O -.-> X["No local / NVIDIA / party BYOK / fallback"]
+```
+
+Exact serialized messages ограничены 8 000 символами и содержат только
+выбранные complete playable units. Один attempt записывается в
+`service_call_log` с role `lore_card_draft`, provider `openrouter`, exact model,
+redacted prompt и raw response/error. Stack-managed OpenRouter key не заменяется
+party BYOK. `finish_reason=length`, transport error или schema failure возвращают
+видимую ошибку и не создают Lore Card.
 
 ## Диагностика model attempts
 

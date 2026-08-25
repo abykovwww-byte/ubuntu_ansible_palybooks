@@ -120,10 +120,13 @@ rules/checks.md
 quick-replies/notes.md
 setup-flow.md
 relationships/model.json
+lore-cards/<group>.json
 ```
 
 `relationships/model.json` is required when `scenario_types.supported`
-includes `rp` and optional otherwise.
+includes `rp` and optional otherwise. `lore-cards/` is optional, but when used
+it must be declared as `manifest.files.lore_cards` and follow
+`rp-gateway.worldpack-lore-cards.v1`.
 
 World-pack requirements:
 
@@ -133,6 +136,18 @@ World-pack requirements:
 - Reuse stable location and character IDs from `state-seed.json` throughout the pack. Revision 8 adds no scene manifest field and its narrator does not receive `scene_state`. When maintaining a revision-7 pack, an additional invariant narrative affiliation may use the existing bounded `rp_contract.stable_affiliations` compatibility field; never infer professions, goals, beliefs, emotions, or relationship-model roles into it.
 - Do not copy `scene_claims`, `scene_delta`, or the private narrator bundle schema into `gm-system.md` or `authors-note.md`. They belong only to Gateway's revision-7 compatibility path; revision 8 requests plain narrator text.
 - Include focused lorebook entries, not one giant encyclopedia entry.
+- For revision-8 Light GUI retrieval, prefer compact reviewed
+  `lore-cards/*.json` over repeating the whole world/state in prompts. Use a
+  stable ASCII key and non-empty exact keywords for every card. Each NPC card
+  uses `npc:<character-id>`, canonical title, every Russian relationship alias,
+  private goal, hard boundaries and hidden facts, with `always_on=false`.
+  Hidden content is not a trigger: only title/keywords are scanned as whole
+  matches over current input plus three complete prior units. Keep each card
+  independently useful inside the 4,000-character whole Lore block.
+- `scripts/author-worldpack-lore-cards.py` may prepare candidate cards through
+  exact OpenRouter `deepseek/deepseek-v4-pro`, but this is author-time only.
+  Review every fact against WorldPack source before commit. Never make runtime
+  party creation call a model or write generated content back into a WorldPack.
 - Separate confirmed facts, rumors, and unresolved mysteries.
 - Give NPCs goals, constraints, secrets, and relationships rather than static descriptions.
 - Type genuinely invariant `world_constraints` as `kind: absolute` with a

@@ -38,6 +38,8 @@ worldpacks/<slug>/
 ├── world-info/index.md
 ├── characters/index.md
 ├── relationships/model.json
+├── lore-cards/
+│   └── <group>.json
 ├── rules/checks.md
 ├── rules/site-interactions.json
 ├── training/
@@ -58,6 +60,7 @@ worldpacks/<slug>/
 - `state-seed.json` — исходный canonical state для новой партии;
 - `gm-system.md` и `authors-note.md` — активные runtime prompts;
 - `campaign-bible.md` — авторский замысел, а для training — точная карта ходов;
+- `lore-cards/*.json` — optional reviewed compact context для новых rev8 RP parties, объявленный через `manifest.files.lore_cards`;
 - `training/program.json` — executable schedule, текущие output contracts, debrief и полные fallback;
 - `training/assessment.json` — executable detectors, scoring/evidence effects и aggregates;
 - `rules/checks.md` — человекочитаемое описание resolution/scoring, не runtime authority;
@@ -139,8 +142,8 @@ readiness DC4.
 ## Revision 8: authoring boundary и activation canary
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
-меняет только то, как Gateway читает RP WorldPack для narrator. Нового
-обязательного manifest field нет. Source activation поднимает до `8` только
+меняет только то, как Gateway читает RP WorldPack для narrator. Source activation
+и stamp-party подтвердили effective `8` только для новых
 `merchant-sviatoslav`; остальные действующие packs остаются на `6/7`, а
 persisted parties не мигрируют.
 
@@ -161,8 +164,33 @@ Opening scene хранится как assistant
 unit; только точная техническая строка `[AUTO_START] Старт партии` подавляется.
 Narrator rev-8 возвращает plain text, поэтому pack не должен требовать scene
 bundle или поля `scene_claims`. Installed builder skill повторяет эти правила.
-Source activation становится runtime-фактом только после Ansible apply и
-отдельной проверки новой партии.
+Для этого canary Ansible apply и отдельный revision stamp новой партии уже
+пройдены; длинные narrative gates остаются отдельной более высокой ступенью.
+
+### Revision 8: authored Lore Cards
+
+[Decision 037](../../roles/apps/files/rp-stack/docs/decisions/037-rp-authored-lore-cards-and-confirmed-drafts.md)
+добавляет optional manifest path:
+
+```json
+"files": {
+  "lore_cards": "lore-cards"
+}
+```
+
+Каждый JSON использует schema `rp-gateway.worldpack-lore-cards.v1` и список
+cards со стабильными ASCII keys, title, непустыми exact keywords, content и
+boolean flags. Повторный key запрещён. NPC card имеет `key=npc:<character-id>`,
+canonical relationship name, все русские aliases, цель, жёсткие границы и
+скрытые факты; `always_on` для неё всегда `false`.
+
+Developer может получить candidate через
+`scripts/author-worldpack-lore-cards.py`, но модель вызывается только во время
+authoring. Человек сверяет результат с source и коммитит его. Runtime не
+генерирует библиотеку мира и не меняет WorldPack: при создании новой rev8 party
+Gateway лишь валидирует и копирует cards в её party storage. Empty keywords,
+duplicate key, missing NPC aliases и меньше 15 карточек у «Купца» останавливают
+repository validation.
 
 ## Два активных режима
 
@@ -238,7 +266,7 @@ pack обязан объявить `training_runtime` и хранить расп
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |
-| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания; единственный declared-revision-8 activation canary |
+| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания; единственный declared-revision-8 canary, 16 authored Lore Cards с полным NPC alias coverage |
 | `smoke-gate-borderland` | Предел Дымных Врат | `rp` | `rp` | Пограничное расследование; manifest не задаёт явный status |
 | `starosta` | Староста | `rp` | `rp` | Деревенская ролевая кампания |
 

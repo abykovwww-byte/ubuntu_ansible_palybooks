@@ -122,12 +122,20 @@ section coverages. Rev8 narrator больше не получает legacy scene
 blocks и возвращает plain text; relationship scope определяется текущей
 репликой и тремя предыдущими игровыми единицами. Rules и якорные первые 50 RAW
 units образуют повторяемый provider prefix; память/cards/pressure/note находятся
-в хвосте, а cache counters и hash основы сохраняются в turn metadata. Код S1
-слит и применён на сервере. Отдельный source-activation slice поднимает observed
-до `8` и declared revision только у `merchant-sviatoslav`; остальные packs
-остаются на `6/7`, существующие parties не мигрируют. До Ansible apply этого
-slice и live-gates 25/60 честный runtime status остаётся observed `7`, а registry
-032 — на ступени `каркас`.
+в хвосте, а cache counters и hash основы сохраняются в turn metadata. Код S1 и
+узкая activation применены на сервере: новая stamp-party «Купца» получила
+effective revision `8`, но model calls не выполняла. Live-gates 25/60 отложены
+до полной реализации RP-ядра, поэтому registry 032 остаётся на ступени
+`каркас`; остальные packs и existing parties не мигрируют.
+
+S2 описан в
+[Decision 037](../../roles/apps/files/rp-stack/docs/decisions/037-rp-authored-lore-cards-and-confirmed-drafts.md).
+Rev8 WorldPack может нести короткие reviewed Lore Cards: при создании новой
+party они копируются без model call, а в ходе выбираются одним current-plus-three
+scan только по whole title/keywords. Скрытый content не активирует сам себя.
+Light GUI показывает под ответом точные поднятые cards из turn metadata и даёт
+явно подготовить draft из завершённого хода; запись появляется только после
+подтверждения игроком. Source/local readiness S2 пока остаётся `каркас`.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
@@ -166,7 +174,8 @@ flowchart LR
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
-- **Revision 8 получает узкую source-активацию на «Купце».** Код S1 уже применён; inventory target становится `8`, но declared `8` получает только `merchant-sviatoslav`. До следующего Ansible apply и gates 25/60 runtime остаётся observed `7`; старые партии и остальные WorldPacks не мигрируют.
+- **Revision 8 активирована узко на «Купце».** Apply и stamp-party подтвердили effective `8` без model calls; старые партии и остальные WorldPacks не мигрируют, а длинные gates 25/60 отложены до полной реализации.
+- **S2 оставляет Lore Cards короткими и управляемыми.** WorldPack cards reviewed до commit, hidden content не является trigger, exact raised IDs видны рядом с ответом, а service draft не сохраняется без подтверждения игрока.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
