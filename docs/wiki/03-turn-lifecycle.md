@@ -626,6 +626,12 @@ OpenRouter endpoint, исключает reasoning-текст из ответа �
 Явные legacy-поля `temperature` и `max_tokens` конкретного start/message request
 имеют приоритет над сохранёнными значениями Party.
 
+`HTTP 200` без непустого финального `message.content` не считается успешной
+репликой narrator. Gateway один раз повторяет тот же model с тем же payload;
+только повторный пустой ответ переводит маршрут к разрешённой fallback model.
+Если модели исчерпаны, сохраняется прежний `empty_response` audit и запрос
+завершается без state/turn commit.
+
 ### 5. Валидация и repair
 
 Для `rp-core.v2` Gateway проверяет player agency и типизированные абсолютные

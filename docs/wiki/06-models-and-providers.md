@@ -46,7 +46,9 @@ flowchart LR
     D -->|"да, ручные поля"| O["require_parameters=true<br/>DeepSeek: sort=throughput"]
     D -->|"нет или Auto"| A["Primary model defaults"]
     O --> A
-    A -->|"wall-clock timeout / HTTP"| X["Удалить model-specific controls"]
+    A -->|"первый HTTP 200 без final content"| E["Один повтор той же model"]
+    E --> A
+    A -->|"повторно пусто / wall-clock timeout / HTTP"| X["Удалить model-specific controls"]
     X --> F["Allowed fallback models"]
 ```
 
@@ -82,6 +84,12 @@ IaC default для OpenRouter — `openrouter/auto`. Перед fallback руч�
 primary model удаляются, поэтому несовместимый маршрут не получает их случайно.
 
 `MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory; сохранённые параметры primary narrator и DeepSeek throughput policy остаются теми же. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
+
+OpenAI-compatible `HTTP 200` с отсутствующим или пустым финальным
+`message.content` (в том числе когда endpoint вернул только reasoning) получает
+один повтор той же model с тем же payload. После второго пустого ответа Gateway
+может перейти только к уже разрешённой fallback model того же provider; если
+маршрут исчерпан, downstream фиксирует `empty_response` и не коммитит ход.
 
 ## Глобальная служебная модель
 
