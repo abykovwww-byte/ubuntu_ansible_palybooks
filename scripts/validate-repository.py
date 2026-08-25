@@ -257,8 +257,8 @@ def validate_environment_contracts(errors: list[str]) -> None:
         "RP_CONTRACT_OBSERVED_REVISION="
         "{{ rp_stack_gateway_rp_contract_observed_revision }}"
     )
-    if observed_revision_assignments != ["7"]:
-        fail(errors, "RP Stack inventory must set rp-core.v2 revision 7 observed exactly once")
+    if observed_revision_assignments != ["8"]:
+        fail(errors, "RP Stack inventory must set rp-core.v2 revision 8 observed exactly once")
     if (
         not production_env_template.is_file()
         or observed_revision_mapping not in production_env_template.read_text(encoding="utf-8")
@@ -368,9 +368,9 @@ def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
     )
     for marker in required_markers:
         if marker not in combined:
-            fail(errors, f"RP WorldPack builder contract missing revision-7 marker: {marker}")
+            fail(errors, f"RP WorldPack builder contract missing compatibility marker: {marker}")
     if not re.search(r"(?i)force[- ]refresh", combined):
-        fail(errors, "RP WorldPack builder contract missing revision-7 force-refresh rule")
+        fail(errors, "RP WorldPack builder contract missing revision-7 compatibility force-refresh rule")
 
 
 def validate_adr_registry(errors: list[str]) -> None:

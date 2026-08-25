@@ -58,11 +58,12 @@ hashes не изменились; external provider calls не выполнял�
 continuity не доказана; последующая ordinary activation отдельно прошла
 post-apply stamp-proof boundary и не повышает readiness DC4.
 
-### Candidate revision 8: sectioned-memory migration
+### Revision 8: sectioned-memory migration
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
-имеет только локальный статус `каркас`; inventory и live parties остаются на
-observed revision `7`. Candidate migration сохраняет существующие snapshot rows,
+остаётся на уровне `каркас` до live gates. Source activation задаёт observed `8`
+и declared `8` только для `merchant-sviatoslav`; до apply live runtime остаётся
+на observed revision `7`. Миграция сохраняет существующие snapshot rows,
 добавляет nullable `base_snapshot_id` и `update_id` и заменяет legacy uniqueness
 по `(campaign_id, to_turn_id)` на idempotency по `(campaign_id, update_id)`.
 Legacy caller без `update_id` по-прежнему дедуплицируется по coverage; только

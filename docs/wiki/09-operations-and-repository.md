@@ -85,16 +85,17 @@ equality для уже `65` parties. SQLite `quick_check` прошёл, четы
 healthy с `restarts=0`, оба UI вернули `200`, а deployed Gateway suite
 завершилась `548 passed, 1 skipped`.
 
-## Candidate RP contract revision 8: S1, не activation
+## RP contract revision 8: узкая source activation
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
-и его registry row описывают локальный candidate со ступенью `каркас`. Это не
-config rollout: inventory по-прежнему активирует observed revision `7`, source
-candidate не применён через Ansible и не проверен в container/HTTP/real-party
-path. Existing parties не мигрируются. Следовательно, единственное честное
-runtime-утверждение сейчас — observed/live revision остаётся `7`.
+и его registry rows остаются на ступени `каркас` до живых gates. Source rollout
+задаёт `rp_stack_gateway_rp_contract_observed_revision: 8`, но declared revision
+`8` получает только `merchant-sviatoslav`; остальные WorldPacks остаются на
+`6/7`, existing parties не мигрируются. До интерактивного Ansible apply и
+container/party proof единственное честное runtime-утверждение — observed/live
+revision остаётся `7`.
 
-Отдельная будущая activation revision `8` допустима только после обычной
+Source activation revision `8` становится подтверждённой только после обычной
 delivery-цепочки и раздельных live gates:
 
 1. на 25-й игровой единице prompt содержит 24 предыдущие playable units
