@@ -28,6 +28,8 @@ relationships/model.json
 
 `relationships/model.json` is required when `scenario_types.supported`
 includes `rp` and optional otherwise.
+`lore-cards/` is optional for revision 8+. `world-clock.json` is optional and
+valid only for an explicit revision-10 candidate pack.
 
 ## manifest.json
 
@@ -245,6 +247,88 @@ episodic `memory_chapters`, or journal-recap layer. Durable state may still driv
 Gateway outcomes and absolute rules, and durable history remains stored, but
 WorldPack prompts must not reference those removed projections as if the
 narrator could see them.
+
+## Revision 10 Authored World Clock
+
+Revision 10 is a candidate above the observed revision 8. Do not use it as the
+default for a new pack and do not migrate an existing pack or party implicitly.
+For an explicit compatible candidate, raise the manifest maximum revision and
+declare only the file path:
+
+```json
+"files": {
+  "world_clock": "world-clock.json"
+}
+```
+
+The file uses a closed `rp-gateway.world-clock.v1` envelope:
+
+```json
+{
+  "schema_version": "rp-gateway.world-clock.v1",
+  "initial_date": "0964-04-18T09:00:00Z",
+  "step_unit": "iso8601_duration",
+  "max_step": "P2D",
+  "markers": [
+    {
+      "id": "world.deadline-resolved",
+      "label": "Игрок явно решил вопрос срока",
+      "predicate": {
+        "type": "state_equals",
+        "path": "/player/resources/deadline-resolved",
+        "value": true
+      }
+    }
+  ],
+  "events": [
+    {
+      "id": "world.deadline-closes",
+      "condition": {
+        "type": "date_gte",
+        "date": "0964-04-20T09:00:00Z"
+      },
+      "summary": "Срок истёк.",
+      "superseded_by": ["world.deadline-resolved"],
+      "consequences": [
+        {
+          "type": "world_fact",
+          "id": "world.fact.deadline-closed",
+          "text": "Прежний срок истёк и больше не считается открытым."
+        },
+        {
+          "type": "lore_card",
+          "key": "pressure:deadline",
+          "enabled": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+Allowed conditions are exactly:
+
+- `date_gte` with a timezone-aware authored date;
+- `after_event` with another event ID and no dependency cycle;
+- `after_confirmed` with a declared marker ID.
+
+Every event must have at least one `superseded_by` marker. A marker may have one
+typed `state_equals` predicate on an allowed canonical state path, or omit the
+predicate and require explicit owner-scoped confirmation. Never derive a marker
+from model free text.
+
+Consequences v1 are exactly `world_fact` and `lore_card`. Fact IDs are stable
+and unique, fact prose is short, and a Lore Card key must already exist in the
+pack's reviewed authored cards. Do not encode character movement, presence,
+arbitrary JSON Patch, generated events, or simulation state. If an NPC leaves,
+state that physical absence as a durable fact; their ordinary NPC card remains
+retrievable by name.
+
+Gateway caps model-reported elapsed by `max_step`, evaluates conditions and
+supersession deterministically, and commits date, fired/superseded status,
+facts, and Lore Card toggles atomically. The model receives only the last
+recorded player+narrator turn and returns elapsed; do not duplicate the calendar
+or future events in `gm-system.md`, author note, state seed, or Lore Cards.
 
 ## RP Relationship Model
 

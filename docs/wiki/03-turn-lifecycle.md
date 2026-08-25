@@ -23,6 +23,10 @@
   плюс весь uncovered tail, хранит пять независимо покрываемых memory-секций,
   обновляет их одним штатным call с точечным structural retry и удаляет legacy
   scene/state/archive blocks только из rev8 prompt.
+- revision 9 / S3 отделяет подтверждённое исправление игрока от действия в
+  сцене и поглощает его одной затронутой секцией памяти.
+- revision 10 / S4 добавляет optional authored world clock: local model оценивает
+  только elapsed, а Gateway детерминированно исполняет cancelable events.
 
 Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный pull-based
 activation и post-apply stamp proof подтвердили effective observed `7` для новых
@@ -413,6 +417,41 @@ GM patch может только заменить/отозвать сущест�
 или правила запрещено. Confirm не вызывает narrator. До absorption active
 artifact входит в защищённый `ИСПРАВЛЕНИЯ ИГРОКА`; `gm_correction` исключён из
 RAW, cadence, relationship extraction и игрового счётчика.
+
+### Revision 10: S4 authored world clock
+
+[Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md)
+добавляет candidate path только для RP-партии с declared `world-clock.json`.
+
+```mermaid
+sequenceDiagram
+    participant UI as Light GUI
+    participant API as Gateway
+    participant DB as SQLite authority
+    participant Local as Local Gemma
+    participant Pack as Authored events
+
+    UI->>API: normal narrative turn N
+    API->>DB: atomic turn commit + world_clock job N
+    API-->>UI: response does not wait for clock
+    DB->>Local: last recorded player+narrator only
+    Local-->>DB: strict elapsed JSON
+    DB->>Pack: deterministic conditions + supersession
+    Pack-->>DB: facts + Lore Card toggles + fired status
+    DB-->>API: pending one-shot announcement
+    API-->>UI: first available later response + horizon
+```
+
+Clock jobs применяются строго по `party_turn` и не владеют сценой. Если main
+turn уже начался, job откладывается без расхода attempt. Condition, fired status,
+durable world fact и authored Lore Card toggle записываются одной transaction;
+`meta.turn` не меняется. Event удаляется из pending только успешным narrator
+commit, который фактически получил его в bounded `СОБЫТИЯ МИРА` block.
+
+Модель не создаёт событие и не подтверждает отмену: она возвращает только
+elapsed. Marker берётся из typed state predicate либо owner-scoped explicit
+confirmation. После исчерпания local retries записывается видимый
+`PT0S/service_unavailable` без догоняющего скачка и без NVIDIA fallback.
 
 ## Обычный ход
 

@@ -147,6 +147,15 @@ Candidate RP revision `9` отделяет обращение к мастеру 
 её с authority `user`. Source/local readiness S3 — `каркас`; revision `9` не
 активирована и ни одна существующая party не мигрирована.
 
+S4 описан в
+[Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md).
+Candidate revision `10` даёт WorldPack authored часы и cancelable global events:
+local Gemma оценивает только elapsed последнего committed хода, а Gateway
+атомарно применяет заранее написанные facts/Lore Card toggles. Narrator и Light
+GUI получают короткое одноразовое событие с ближайшим horizon. Source/local
+readiness S4 — `каркас`; observed revision остаётся `8`, deploy и длинная партия
+отложены до отдельного этапа.
+
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно
@@ -187,6 +196,7 @@ flowchart LR
 - **Revision 8 активирована узко на «Купце».** Apply и stamp-party подтвердили effective `8` без model calls; старые партии и остальные WorldPacks не мигрируют, а длинные gates 25/60 отложены до полной реализации.
 - **S2 оставляет Lore Cards короткими и управляемыми.** WorldPack cards reviewed до commit, hidden content не является trigger, exact raised IDs видны рядом с ответом, а service draft не сохраняется без подтверждения игрока.
 - **S3 отделяет исправление от сцены.** Rev9 GM channel не вызывает narrator, показывает exact diff, сохраняет отдельный `gm_correction` и держит правку в защищённом overlay до one-section absorption; candidate ещё не активирован.
+- **S4 отделяет время от канона.** Rev10 local Gemma возвращает только bounded elapsed; cancelable события и два разрешённых consequence применяет Gateway, а observed revision пока остаётся `8`.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
