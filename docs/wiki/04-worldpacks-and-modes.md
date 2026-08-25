@@ -7,7 +7,7 @@
 Актуальный RP WorldPack объявляет максимальную поддержанную версию:
 
 ```json
-"rp_contract": {"schema_version": "rp-core.v2", "revision": 7}
+"rp_contract": {"schema_version": "rp-core.v2", "revision": 8}
 ```
 
 Это capability pack, а не автоматическая активация. Gateway ограничивает обычные
@@ -15,11 +15,12 @@
 observed разрешена только изолированной checkpoint/autotest-ветке. `training`
 этот маркер не использует.
 
-Candidate maximum `7` сам по себе не означает observed activation. Отдельный
-rollout с `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
-stamp proof 23 августа 2026 года. Новая обычная RP-партия получает
-`min(declared, observed)`, existing party остаётся pinned. PR1 не меняет
-WorldPack content/state contract и не создаёт автоматическую migration.
+Declared revision сама по себе не означает observed activation. Исторический
+rollout `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
+stamp proof 23 августа 2026 года. Следующий source slice задаёт observed `8`, но
+поднимает declared revision только у `merchant-sviatoslav`. Новая обычная
+RP-партия получает `min(declared, observed)`, existing party остаётся pinned;
+остальные WorldPacks сохраняют declarations `6/7`.
 
 ## Что такое WorldPack
 
@@ -135,14 +136,15 @@ continuity или уровень `наблюдается`. Последующа�
 отдельный inventory rollout и обязательный post-apply proof; это не повышает
 readiness DC4.
 
-## Candidate revision 8: authoring boundary, не activation
+## Revision 8: authoring boundary и activation canary
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
-меняет только то, как Gateway читает уже существующий RP WorldPack для narrator.
-Нового обязательного manifest field нет, а declared revision действующих packs
-остаётся `6/7`: поднимать pack до `8` до отдельной observed activation нельзя.
+меняет только то, как Gateway читает RP WorldPack для narrator. Нового
+обязательного manifest field нет. Source activation поднимает до `8` только
+`merchant-sviatoslav`; остальные действующие packs остаются на `6/7`, а
+persisted parties не мигрируют.
 
-Для будущего rev-8 pack авторские prompt-файлы должны укладываться целиком,
+Для rev-8 pack авторские prompt-файлы должны укладываться целиком,
 включая заголовок Gateway: `gm-system.md` — не более 5 000 символов,
 `authors-note.md` — не более 1 500. Lore попадает в prompt только целыми
 карточками в суммарный блок не более 4 000 символов. Эти лимиты не разрешают
@@ -158,8 +160,9 @@ RAW-окно задаётся Gateway-настройкой `RP_RAW_HISTORY_WINDO
 Opening scene хранится как assistant
 unit; только точная техническая строка `[AUTO_START] Старт партии` подавляется.
 Narrator rev-8 возвращает plain text, поэтому pack не должен требовать scene
-bundle или поля `scene_claims`. Installed builder skill повторяет эти правила,
-но source candidate всё ещё не является deployed/live контрактом.
+bundle или поля `scene_claims`. Installed builder skill повторяет эти правила.
+Source activation становится runtime-фактом только после Ansible apply и
+отдельной проверки новой партии.
 
 ## Два активных режима
 
@@ -235,7 +238,7 @@ pack обязан объявить `training_runtime` и хранить расп
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |
-| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания |
+| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания; единственный declared-revision-8 activation canary |
 | `smoke-gate-borderland` | Предел Дымных Врат | `rp` | `rp` | Пограничное расследование; manifest не задаёт явный status |
 | `starosta` | Староста | `rp` | `rp` | Деревенская ролевая кампания |
 

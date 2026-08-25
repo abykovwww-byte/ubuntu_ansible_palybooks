@@ -103,7 +103,7 @@ primary model удаляются, поэтому несовместимый ма
 | Repair невалидного narration | Narrator Party |
 | Journal summary | Не вызывается текущим runtime; сохранён только legacy storage/no-op job |
 | Long-term memory chapter | Глобальная service model |
-| RP living story-memory update | Revisions 0..7: глобальная service model; candidate rev8: один combined OpenRouter call и exact section retry только после structural failure |
+| RP living story-memory update | Revisions 0..7: глобальная service model; rev8: один combined OpenRouter call и exact section retry только после structural failure |
 | RP relationship extraction | Глобальная service model, только `scenario_type=rp` |
 | LLM world-state draft | Глобальная service model |
 | Генерация/дополнение NPC | Глобальная service model |
@@ -112,7 +112,7 @@ primary model удаляются, поэтому несовместимый ма
 | OutputValidator | Без LLM |
 | Auto-player | Отдельно выбранный OpenRouter или Local Gemma profile |
 
-### Candidate revision 8: sectioned story memory
+### Revision 8: sectioned story memory
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 вводит для rev8 memory явный маршрут, который не наследует `LLM_PROVIDER`,
@@ -141,8 +141,9 @@ durable attempts именно у rev8 `rp_story_memory` job равен `2`; об
 `SERVICE_JOB_MAX_ATTEMPTS=5` сохраняется для relationship extraction и legacy
 jobs.
 
-Этот route пока имеет только локальный candidate-статус `каркас`. Revision `8`
-не активирована и не проверена live; observed/live revision остаётся `7`.
+Route реализован и применён как код. Source activation выбирает новые партии
+`merchant-sviatoslav`, но до Ansible apply и live gates 25/60 runtime observed
+остаётся `7`, а registry status — `каркас`.
 
 ## Диагностика model attempts
 
@@ -218,7 +219,7 @@ Outbound policy не отправляет browser Authorization в локаль�
 ## Prompt caching
 
 Стабильный prefix начинается с scenario/world rules, затем растёт transcript. Для
-candidate rev8 начало RAW window квантуется по восемь units, а изменчивые
+rev8 начало RAW window квантуется по восемь units, а изменчивые
 `RP_STORY_MEMORY`, lore cards, corrections, relationship/world-event pressure,
 author note и current action идут после истории. Повторяемая основа — rules и
 первые 50 RAW units; окно между сдвигами растёт до 57.

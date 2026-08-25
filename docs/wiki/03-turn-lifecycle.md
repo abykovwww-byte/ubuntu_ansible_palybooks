@@ -19,16 +19,17 @@
   deduplication и content-free assembly diagnostics.
 - revision 7 / DC4 подключает `scene_state`, minimal narrator bundle,
   deterministic continuity gate и atomic state/turn commit.
-- candidate revision 8 / S1 возвращает narrator якорное окно 50–57 игровых единиц
+- revision 8 / S1 возвращает narrator якорное окно 50–57 игровых единиц
   плюс весь uncovered tail, хранит пять независимо покрываемых memory-секций,
   обновляет их одним штатным call с точечным structural retry и удаляет legacy
   scene/state/archive blocks только из rev8 prompt.
 
 Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный pull-based
 activation и post-apply stamp proof подтвердили effective observed `7` для новых
-ordinary RP-parties. Revision `8` существует только как локальный candidate со
-ступенью `каркас`: inventory её не активирует, apply/live verification не было,
-observed/live revision остаётся `7`.
+ordinary RP-parties. Код revision `8` / S1 слит и применён; отдельный
+source-activation slice задаёт observed `8`, но declared `8` только у
+`merchant-sviatoslav`. Пока этот slice не применён и не прошёл gates 25/60,
+runtime observed остаётся `7`, а registry 032 — на ступени `каркас`.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -300,12 +301,13 @@ fallback без fallback prose в следующем prompt и без relationsh
 `наблюдается`; последующая ordinary activation отдельно прошла apply/stamp-proof
 boundary и не повышает readiness DC4.
 
-## Candidate revision 8: S1 history-first turn
+## Revision 8: S1 history-first turn
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
-принимает новый контракт только для RP `rp_contract_revision >= 8`. Это локальный
-candidate: он не меняет live revision `7`, не мигрирует существующие партии и не
-изменяет `training`.
+принимает новый контракт только для RP `rp_contract_revision >= 8`. Source
+activation выбирает для первого canary только новые партии `merchant-sviatoslav`;
+существующие партии, остальные WorldPacks и `training` не меняются. До apply и
+live gates фактический runtime observed остаётся `7`.
 
 История собирается целыми игровыми единицами. Opening — одно assistant-message;
 только точная техническая реплика `[AUTO_START] Старт партии` подавляется.
@@ -345,7 +347,7 @@ transition allowance, legacy `LONG_TERM_PARTY_MEMORY`,
 `scene_state` остаются compatibility-path только для revision `7`; rev8 narrator
 возвращает plain text, а state/turn commit сохраняет общий atomic safety-контракт.
 Точный prompt order и секционные memory-правила приведены в
-[разделе о памяти](05-memory-and-retrieval.md#candidate-revision-8-history-first-prompt-и-пять-секций-памяти).
+[разделе о памяти](05-memory-and-retrieval.md#revision-8-history-first-prompt-и-пять-секций-памяти).
 
 ## Обычный ход
 
@@ -662,7 +664,7 @@ Draft может быть быстрым детерминированным ил
 агрегаты выведенного режима не исполняют новые ходы и не планируют новые
 service jobs.
 
-Candidate revision `8` — отдельное исключение: episodic `memory` job не
+Revision `8` — отдельное исключение: episodic `memory` job не
 создаётся, а pending legacy job завершается terminal no-op. До 51-й eligible
 игровой единицы отсутствуют и snapshot, и `rp_story_memory` job. После порога
 normal job берёт oldest-first batch не более восьми единиц и независимо

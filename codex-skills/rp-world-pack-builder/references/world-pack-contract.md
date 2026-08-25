@@ -48,7 +48,7 @@ includes `rp` and optional otherwise.
   },
   "rp_contract": {
     "schema_version": "rp-core.v2",
-    "revision": 7
+    "revision": 8
   },
   "relationships": {
     "schema_version": "rp-relationships.v2",
@@ -82,14 +82,12 @@ Light GUI reads `title`, `status`, `premise`, `player_role`, and
 contain only `rp`. Route `training` packs to `training-world-pack-builder`. The user still
 chooses the party type manually; this metadata does not auto-select it.
 Every pack supporting `rp` declares `rp_contract.schema_version=rp-core.v2` and
-the highest cumulative `rp_contract.revision` it supports. Current authored RP
-packs created by this builder use revision `7`. Gateway still caps ordinary
-party creation by the observed runtime revision; the manifest does not activate
-unverified behavior. Existing manifests remain pinned and are not blanket-
-migrated; raise their revision only after the target runtime revision is
-activated and as part of an explicit compatible update. The candidate revision-8
-authoring preview below does not authorize changing the literal revision `7`
-declaration.
+the highest cumulative `rp_contract.revision` it supports. New RP packs created
+by this builder use revision `8`. Gateway still caps ordinary party creation by
+the observed runtime revision. Existing manifests and parties remain pinned and
+are not blanket-migrated; raise an existing pack only as an explicit compatible
+update. `merchant-sviatoslav` is the first revision-8 activation canary, while
+the other existing packs retain their declared revisions.
 
 ## Revision 7 Authoring Boundary
 
@@ -118,14 +116,12 @@ IDs; values must be finite non-empty strings, preferably existing faction IDs
 with authored aliases. Do not use free-text professions, biography, goals,
 beliefs, emotions, or relationship-model roles.
 
+Legacy revision-7 field fragment:
+
 ```json
 {
-  "rp_contract": {
-    "schema_version": "rp-core.v2",
-    "revision": 7,
-    "stable_affiliations": {
-      "character-id": "faction-id"
-    }
+  "stable_affiliations": {
+    "character-id": "faction-id"
   }
 }
 ```
@@ -135,13 +131,11 @@ narrator prose stays outside story memory, chapters, retrieval, and relationship
 canon. The player input and stale/as-of scene boundary remain visible to the
 next prompt.
 
-## Candidate Revision 8 Authoring Preview
+## Revision 8 Authoring Contract
 
-This section constrains RP content so a pack can fit the candidate prompt shape.
-It is not an active manifest contract. Keep new and existing WorldPack manifests
-at literal `rp_contract.revision: 7` until Gateway revision 8 is activated and
-the pack is explicitly migrated; do not add speculative revision-8 manifest
-fields.
+This section constrains content for a pack that declares revision 8. New RP packs
+use this contract. Existing packs move to it only through an explicit compatible
+update; do not add speculative manifest fields or migrate parties.
 
 ### Authored Prompt Budgets
 
@@ -161,7 +155,7 @@ These are hard authoring limits; runtime truncation is not a content strategy.
 
 ### Narrator Continuity Inputs
 
-The candidate revision-8 narrator context keeps the union of:
+The revision-8 narrator context keeps the union of:
 
 - a recent raw window whose start is quantized to an eight-unit boundary and
   therefore contains 50 to 57 eligible units; and
@@ -196,7 +190,7 @@ content.
 A stale or failed section therefore keeps the affected raw history uncovered;
 another section's newer coverage must not hide it.
 
-The candidate narrator prompt has no scene-state, scene-boundary, or reanchor
+The revision-8 narrator prompt has no scene-state, scene-boundary, or reanchor
 layer; no state summary or retrieved character-state layer; no archive retrieval
 or uncompacted-archive fallback; and no `LONG_TERM_PARTY_MEMORY`, legacy
 episodic `memory_chapters`, or journal-recap layer. Durable state may still drive

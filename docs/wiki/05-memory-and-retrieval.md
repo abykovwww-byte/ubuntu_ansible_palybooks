@@ -222,12 +222,13 @@ prose/relationship canon. External provider calls не выполнялись; �
 observed activation отдельно прошла apply/stamp-proof boundary и не повышает
 readiness этих canaries.
 
-## Candidate revision 8: history-first prompt и пять секций памяти
+## Revision 8: history-first prompt и пять секций памяти
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
-задаёт S1 только для RP `rp_contract_revision >= 8`. В текущем source это
-локальный candidate со ступенью `каркас`: inventory не активирует revision `8`,
-apply и live-проверок 25/60 ходов не было, поэтому observed/live остаётся `7`.
+задаёт S1 только для RP `rp_contract_revision >= 8`. Код S1 уже применён;
+отдельный source-activation slice задаёт observed `8`, но declared `8` только у
+`merchant-sviatoslav`. До apply этого slice и live-проверок 25/60 runtime
+observed остаётся `7`, а registry — на ступени `каркас`.
 
 ### RAW `50–57 + uncovered`
 
@@ -288,7 +289,7 @@ request; валидные секции общего ответа не повто
 символов serialized messages. Если восемь units не помещаются, batch уменьшается
 с хвоста; одна слишком большая unit не режется. Output limit равен `4000` tokens
 для общего ответа и `800` для одной секции. Exact provider/model и retry policy описаны в
-[разделе о моделях](06-models-and-providers.md#candidate-revision-8-sectioned-story-memory).
+[разделе о моделях](06-models-and-providers.md#revision-8-sectioned-story-memory).
 
 ### Точный порядок rev8 prompt
 
@@ -343,7 +344,7 @@ input плюс три предыдущих eligible RAW units целиком. О
 | Revision-7 `scene_state` (DC4, `подключено`) | Exact location/presence и stale/as-of boundary внутри state version | Только RP revision 7 | Да после accepted atomic commit; ordinary rollout активирован |
 | Raw turns | Полный первичный диалог и metadata | Все | Нет, но это source history |
 | Legacy RP story memory | Живой кумулятивный реестр всей истории | Только RP revisions 0..7 | Нет |
-| Sectioned RP story memory v3 (candidate) | Пять независимо покрываемых секций; safe coverage равен минимуму | Только RP revision 8+ | Нет |
+| Sectioned RP story memory v3 | Пять независимо покрываемых секций; safe coverage равен минимуму | Только RP revision 8+ | Нет |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
 | Memory chapters | Неизменяемые сжатые эпизоды старых сцен | Все | Нет |
 | Lore/retrieval | Выбранные карточки, NPC и архивные сцены | Lore cards — все режимы; legacy NPC/archive retrieval — revisions 0..7 | Нет |
