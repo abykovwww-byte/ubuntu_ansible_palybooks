@@ -301,7 +301,8 @@ flowchart TB
     C --> D["4. RAW 50–57 + uncovered · anchor 8"]
     D --> E["5. RP_STORY_MEMORY · если есть · до 24000 chars"]
     E --> F["6. PARTY_LORE_CARDS · только целые cards · до 4000 chars"]
-    F --> G["7. Только содержательный AUTHORITATIVE_OUTCOME"]
+    F --> C9["6a. Rev9 ИСПРАВЛЕНИЯ ИГРОКА · если active"]
+    C9 --> G["7. Только содержательный AUTHORITATIVE_OUTCOME"]
     G --> H["8. RELATIONSHIP_PRESSURE + due resolution"]
     H --> I["9. WORLD_AUTHORS_NOTE · до 1500 chars · последний system block"]
     I --> J["10. Current player action · последнее message"]
@@ -355,6 +356,36 @@ turns. Его строгий JSON только заполняет форму; pe
 после ручного confirm. Draft не становится canonical state и не запускается
 автоматически из обычной реплики.
 
+### S3: player correction overlay и поглощение одной секцией
+
+Candidate rev9 хранит confirmed correction не в новом JSON мира, а как typed
+artifact `rp-gateway.player-correction.v1` в metadata исключённого
+`gm_correction` turn. Effective active versions образуют один bounded block
+`ИСПРАВЛЕНИЯ ИГРОКА` после RAW, story memory и Lore Cards. Он прямо объявляет
+старое RAW-утверждение исторической репликой, но не может менять absolute rules
+или current action. В отличие от Lore Cards, этот block не удаляется как
+optional context при overflow.
+
+Лимит — 20 latest effective target slots. Новый slot сверх лимита отклоняется до
+draft model; новая версия того же slot не занимает место. Когда последняя версия
+slot уже `absorbed`, более старая active запись не возвращается в overlay.
+
+Memory/RAW confirm запускает valve независимо от normal 50-turn threshold:
+
+1. Gateway определяет одну из пяти section по target field;
+2. один exact-section OpenRouter request пересобирает только её;
+3. existing typed correction детерминированно помечает прежний fact
+   `superseded/retracted` и создаёт replacement при `replace`;
+4. terminal target/replacement получает authority `user` и source GM turn;
+5. artifact становится `absorbed` только если exact результат сохранён и
+   section coverage достиг target RAW/fact turn.
+
+Остальные четыре section status/coverage не продвигаются, поэтому глобальный
+safe coverage всё ещё равен `min()` пяти значений. Пустая structurally valid
+section допустима; semantic retry ради содержимого запрещён. При двух неудачных
+attempts overlay остаётся active и продолжает защищать следующий narrator
+prompt.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.
@@ -366,6 +397,7 @@ turns. Его строгий JSON только заполняет форму; pe
 | Raw turns | Полный первичный диалог и metadata | Все | Нет, но это source history |
 | Legacy RP story memory | Живой кумулятивный реестр всей истории | Только RP revisions 0..7 | Нет |
 | Sectioned RP story memory v3 | Пять независимо покрываемых секций; safe coverage равен минимуму | Только RP revision 8+ | Нет |
+| Rev9 player correction overlay | Подтверждённый replacement/retraction поверх RAW и story memory до absorption | Только RP revision 9+ | Player authority; ниже canonical absolute rules/current action |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
 | Memory chapters | Неизменяемые сжатые эпизоды старых сцен | Все | Нет |
 | Lore/retrieval | Rev8 authored/player-confirmed whole cards по title/keywords; legacy NPC и архивные сцены | Lore cards — party storage; legacy NPC/archive retrieval — revisions 0..7 | Нет |

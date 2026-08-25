@@ -369,6 +369,51 @@ Draft является отдельным пользовательским де�
 Только последующий confirm вызывает существующий create endpoint. Поэтому draft
 failure не меняет turn, canonical state или Lore Cards партии.
 
+### Revision 9: S3 GM correction
+
+[Decision 038](../../roles/apps/files/rp-stack/docs/decisions/038-rp-gm-corrections-and-player-overlay.md)
+добавляет candidate path, который исполняется до обычного narrator lifecycle.
+
+```mermaid
+sequenceDiagram
+    participant UI as Light GUI
+    participant API as Gateway
+    participant Local as Local Gemma
+    participant Store as SQLite state/turns
+    participant Mem as One story-memory section
+
+    UI->>API: message · channel auto|scene|gm
+    alt auto
+        API->>Local: gm_intent · <=2000 chars / 100 tokens
+        alt uncertain or unavailable
+            API-->>UI: route_required · Мастеру / В сцену
+        end
+    end
+    alt scene
+        API->>API: existing narrator lifecycle
+    else gm
+        API->>Local: gm_patch_draft · <=4000 chars / 300 tokens
+        Local-->>UI: exact target + before/after · no mutation
+        alt reject
+            UI->>API: reject
+            API-->>UI: no mutation
+        else confirm
+            UI->>API: idempotent confirm
+            API->>Store: state version +1 + excluded gm_correction
+            Note over Store: party turn, scene and time unchanged
+            API->>Mem: request-scoped affected section only
+            Mem-->>Store: authority user + target coverage
+            Store-->>UI: correction active, then absorbed
+        end
+    end
+```
+
+GM patch может только заменить/отозвать существующий memory fact, заменить
+утверждение recent RAW либо существующее absolute rule. Добавление нового lore
+или правила запрещено. Confirm не вызывает narrator. До absorption active
+artifact входит в защищённый `ИСПРАВЛЕНИЯ ИГРОКА`; `gm_correction` исключён из
+RAW, cadence, relationship extraction и игрового счётчика.
+
 ## Обычный ход
 
 ```mermaid
@@ -684,7 +729,7 @@ Draft может быть быстрым детерминированным ил
 агрегаты выведенного режима не исполняют новые ходы и не планируют новые
 service jobs.
 
-Revision `8` — отдельное исключение: episodic `memory` job не
+Revisions `8+` — отдельное исключение: episodic `memory` job не
 создаётся, а pending legacy job завершается terminal no-op. До 51-й eligible
 игровой единицы отсутствуют и snapshot, и `rp_story_memory` job. После порога
 normal job берёт oldest-first batch не более восьми единиц и независимо
@@ -696,6 +741,14 @@ Gateway проверяет только форму каждой секции и 
 четырём новым eligible units. Durable retry того же job повторяет только секции
 со статусом `stale` или `failed`, а максимальное число попыток именно этого rev8
 job равно двум. Safe coverage по-прежнему равен `min()` пяти coverages.
+
+Rev9 confirm memory/RAW correction не ждёт normal threshold или cadence: он
+создаёт request-scoped job с максимумом две попытки и пересобирает ровно
+затронутую section. Остальные четыре coverage сохраняются. Artifact становится
+`absorbed` только после persisted authority `user` fact/tombstone и покрытия
+целевого turn; при отказе остаётся active в overlay. Rev9 relationship job
+сохраняет пять attempts, но после последней ошибки получает terminal `stale`, а
+уже committed игровой ход не откатывается.
 
 Все задачи выполняются вне latency path: пользователь получает уже сохранённый
 ответ, пока helper продолжает работу. Jobs имеют статус, retry policy и

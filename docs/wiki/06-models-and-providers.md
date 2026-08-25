@@ -103,9 +103,10 @@ primary model удаляются, поэтому несовместимый ма
 | Repair невалидного narration | Narrator Party |
 | Journal summary | Не вызывается текущим runtime; сохранён только legacy storage/no-op job |
 | Long-term memory chapter | Глобальная service model |
-| RP living story-memory update | Revisions 0..7: глобальная service model; rev8: один combined OpenRouter call и exact section retry только после structural failure |
+| RP living story-memory update | Revisions 0..7: глобальная service model; rev8+: один combined OpenRouter call и exact section retry только после structural failure; rev9 correction вызывает одну affected section |
 | RP rev8 Lore Card draft из выбранных ходов | Exact OpenRouter `deepseek/deepseek-v4-pro`; один call, без fallback и без auto-save |
-| RP relationship extraction | Глобальная service model, только `scenario_type=rp` |
+| RP rev9 GM intent / patch draft | Exact local Gemma; `2000/100` и `4000/300` input chars/output tokens, без fallback |
+| RP relationship extraction | Revisions 0..8: глобальная service model; rev9: exact local Gemma, только `scenario_type=rp` |
 | LLM world-state draft | Глобальная service model |
 | Генерация/дополнение NPC | Глобальная service model |
 | Intent parsing и context estimation | Без LLM |
@@ -169,6 +170,37 @@ Exact serialized messages ограничены 8 000 символами и со�
 redacted prompt и raw response/error. Stack-managed OpenRouter key не заменяется
 party BYOK. `finish_reason=length`, transport error или schema failure возвращают
 видимую ошибку и не создают Lore Card.
+
+### Revision 9: GM и relationship routes
+
+[Decision 038](../../roles/apps/files/rp-stack/docs/decisions/038-rp-gm-corrections-and-player-overlay.md)
+не использует глобальный `SERVICE_MODEL_CHOICE` для трёх узких rev9 roles:
+
+```mermaid
+flowchart LR
+    U["Player message"] --> I["gm_intent · local Gemma"]
+    I -->|"scene"| N["Party narrator"]
+    I -->|"correction"| D["gm_patch_draft · local Gemma"]
+    I -->|"uncertain / failure"| C["Visible Master / Scene choice"]
+    D -->|"explicit confirm"| S["Deterministic Gateway commit"]
+    S --> M["One affected memory section · OpenRouter DeepSeek"]
+    R["relationship_extraction"] --> L["local Gemma · max 5 attempts"]
+    L -->|"exhausted"| T["terminal stale"]
+    I -.-> X["No NVIDIA / party BYOK / provider fallback"]
+    D -.-> X
+    R -.-> X
+```
+
+`local_service_model_settings` явно фиксирует provider/base URL/model и пустой
+fallback list. `gm_intent` превращает любой transport/schema/length failure в
+read-only `uncertain`; он не пробует cloud provider. Draft failure виден игроку
+и не создаёт artifact. Relationship failure не блокирует игровой commit: durable
+job повторяется до пяти раз и затем остаётся `stale` для оператора.
+
+Memory absorption остаётся отдельным exact OpenRouter route с stack-managed key,
+двумя attempts и `section_key` затронутой секции. Обычный rev8+ path по-прежнему
+делает один combined call и повторяет только структурно невалидную секцию;
+валидная пустая секция не является поводом для retry.
 
 ## Диагностика model attempts
 

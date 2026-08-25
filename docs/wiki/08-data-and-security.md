@@ -72,17 +72,43 @@ Legacy caller без `update_id` по-прежнему дедуплицируе�
 `service_call_log` получает nullable `section_key` и `update_id`: штатный общий
 request пишет `section_key=all`, а структурно невалидная секция — свой exact key
 в отдельной строке. Это позволяет доказать один-call normal path и точечный retry
-без чтения prompt text. Политика retention и backup не меняется. Rev-8 corrections пишут
+без чтения prompt text. Политика retention и backup не меняется. Rev-8+ corrections пишут
 зарезервированный authority `user`; при чтении sectioned snapshot legacy
 `user_correction` нормализуется в `user`. Revisions `0..7` продолжают хранить и
-возвращать `user_correction`. Поля absorption/overlay в S1 не добавляются — это
-отдельный будущий S3 contract.
+возвращать `user_correction`. S1 сам не создаёт absorption/overlay; candidate S3
+добавляет их только для revision `9` ниже.
 
 Rev8 turn `metadata_json` также получает три content-free поля наблюдаемости:
 `cached_prompt_tokens`, `prompt_tokens` и `stable_prompt_prefix_hash`. Первые два
 копируются из сохранённого provider response, hash — SHA-256 повторяемой основы
 rules + первых 50 RAW units. Prompt content в metadata не дублируется, схема
 SQLite и retention policy ради этих полей не меняются.
+
+### Revision 9: GM correction artifacts
+
+[Decision 038](../../roles/apps/files/rp-stack/docs/decisions/038-rp-gm-corrections-and-player-overlay.md)
+расширяет source revision range до `9`, но не меняет observed revision,
+WorldPack declarations или existing party rows. Candidate не добавляет таблиц и
+не переписывает RAW:
+
+- typed `rp-gateway.player-correction.v1` хранится в
+  `turns.metadata_json.player_correction` у строки
+  `turn_kind=gm_correction`, `excluded_from_memory=1`;
+- confirm atomically пишет `state_versions +1`, correction turn, completed
+  `turn_requests` и audit, сохраняя party turn, scene и игровое время;
+- memory/RAW target использует request-scoped existing `service_jobs` и
+  `rp_story_memory_snapshots`; absorption меняет artifact status с `active` на
+  `absorbed` только после durable user-authority projection и coverage gate;
+- absolute rule replacement остаётся в canonical state version и сохраняет
+  существующий rule ID/scope/kind.
+
+Public owner-scoped History и memory API возвращают correction artifact для UI,
+но модель не может передать authority/provenance в confirm: Gateway назначает их
+сам. Proposal повторно сверяется с current state/snapshot и exact target, поэтому
+клиент не может использовать confirm как произвольный state patch. Input
+correction ограничен 600 символами и не усекается; GM drafts и prompt content
+имеют ту же redaction/retention boundary, что остальные строки
+`service_call_log`.
 
 ## Где находятся данные
 

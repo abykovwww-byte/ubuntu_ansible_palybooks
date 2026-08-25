@@ -4,13 +4,13 @@
 
 ## RP contract revision
 
-`PartySummary` совместимо добавляет целое поле `rp_contract_revision` (`0..7`).
-Gateway поддерживает revision `7`; pull-based apply и post-apply stamp proof от
-23 августа 2026 года подтвердили effective observed `7`. Обычная новая RP-партия
-получает
+`PartySummary` совместимо хранит целое поле `rp_contract_revision` (`0..9`).
+Gateway source поддерживает candidate revision `9`; фактический observed rollout
+остаётся отдельной настройкой, а revision `8` активирована только для узкого
+WorldPack canary. Обычная новая RP-партия получает
 `min(WorldPack declared, observed)`. Запрос создания
 manual branch или autotest может явно передать candidate-ревизию в диапазоне
-`0..7`; она хранится только у ветки и не меняет source party. Существующие поля и
+`0..9`; она хранится только у ветки и не меняет source party. Существующие поля и
 endpoint сохраняются. Пустое поле в админской форме сохраняет revision исходной
 партии. Existing party не повышается автоматически при изменении observed.
 
@@ -30,7 +30,7 @@ Light GUI — основной интерфейс владельца парти�
 - сценарно-зависимое редактирование персонажей вручную и генерация служебной моделью: в `rp` обычная форма показывает только имя, статус, локацию и текущую цель, не изменяя скрытые расширенные поля; в `training` сохраняется полный редактор;
 - выбор party-scoped BYOK-ключа;
 - GM preview/apply/discard, state и rollback; отдельной RP-формы проверки нет;
-- Prompt Inspector, реальный размер последнего prompt, память и lore cards; для `rp` панель памяти отдельно показывает living story snapshot, его revision и покрытие, а начиная с RP revision 2 позволяет подготовить типизированное исправление активной list-записи со следующим ходом; для rev8 под narrator response показываются Lore Cards, реально попавшие в его prompt, и явная кнопка draft из завершённого хода; для `training` этого UI нет;
+- Prompt Inspector, реальный размер последнего prompt, память и lore cards; для `rp` панель памяти отдельно показывает living story snapshot, его revision и покрытие, revisions 2..8 готовят legacy correction со следующим ходом, а rev9 открывает отдельный GM draft/confirm; для rev8+ под narrator response показываются Lore Cards, реально попавшие в его prompt, и явная кнопка draft из завершённого хода; для `training` этого UI нет;
 - request-centric Turn Trace Workbench с main/background lanes, narrator/service attempts, state mutation diff и аннотациями;
 - checkpoints, branches и история LLM-autotest;
 - 👍/👎 для полной пары «реплика игрока → ответ модели»;
@@ -51,6 +51,26 @@ Gateway возвращает только draft и заполняет им су�
 не вызывается и карточки в party storage нет. Свободный текст чата не запускает
 draft classifier. Provider key и request остаются на стороне Gateway.
 
+### Обращение к мастеру в revision 9
+
+Composer rev9 RP party показывает отдельную кнопку «Мастеру». Она отправляет
+`channel=gm` и обходит автоматический classifier. Обычная отправка использует
+`channel=auto`: если local `gm_intent` не уверен или недоступен, API возвращает
+`status=route_required`, UI показывает «Мастеру / В сцену», а turn/state не
+меняются.
+
+GM route возвращает `status=gm_draft` и strict `gm_patch_draft` с exact target,
+`before` и `after`. UI показывает diff; confirm/reject отправляется отдельно в
+`POST /api/parties/{party_id}/gm-corrections/decide`. Reject ничего не пишет.
+Confirm создаёт одну внеигровую запись в истории: она отображается центральной
+заметкой мастера, не получает 👍/👎, Lore Card draft или фиктивный narrator
+response. Сцена и игровое время остаются прежними.
+
+Кнопки «Исправить / Отозвать» в панели story memory для rev9 сразу открывают тот
+же GM draft с exact target slot. Revisions 2..8 сохраняют прежний pending payload
+со следующим игровым ходом. Rev9 legacy `story_memory_corrections[]` отклоняет,
+чтобы один и тот же correction не мог пройти двумя разными путями.
+
 ### Параметры наратора
 
 В «Управлении» параметры сохраняются вместе с выбранной моделью одной кнопкой и
@@ -69,7 +89,7 @@ auto-player или правила WorldPack. Gateway повторно прове
 
 Обычный `POST /api/parties/{party_id}/messages` сохраняет прежний контракт и
 дополнительно принимает необязательный `story_memory_corrections[]` только для RP
-revision 2+: `{field, fact_id, action: retract|replace, replacement_text?}`.
+revisions 2..8: `{field, fact_id, action: retract|replace, replacement_text?}`.
 Gateway отклоняет неизвестную или уже неактивную цель до provider/state/turn;
 authority и provenance не являются полями публичного payload.
 
