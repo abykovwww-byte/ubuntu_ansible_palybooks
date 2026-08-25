@@ -28,6 +28,9 @@ semantics.
 - `rp-gateway` canonical state is the source of truth. Lorebooks and prompts are memory/context, not authority.
 - Light GUI play uses isolated party state copied from the selected world pack's `state-seed.json`. Do not overwrite live `state/current.json` for normal Light GUI play.
 - Light GUI narration is party-scoped. Revision 8 uses the narrower history-first prompt contract below; parties pinned to revisions `0..7` keep their compatibility paths. Do not rely on the SillyTavern summarization extension for Light GUI; treat SillyTavern lorebooks as legacy/debug compatibility artifacts.
+- Candidate revision 10 may add authored world time and cancelable events, but
+  the model may estimate only elapsed time. Event conditions and consequences
+  remain reviewed WorldPack data applied by Gateway.
 - The runtime target is the Ubuntu server `192.168.1.88`, not Windows.
 - Windows is only for Git/IaC editing and local validation. Never install worldpacks, lorebooks, state, or `/srv/...` runtime files on Windows.
 - Do not manually copy generated files into `/opt` or `/srv` on the server as a permanent fix. Use the GitHub + Ansible route from `abykovserv-iac-deploy`.
@@ -64,6 +67,27 @@ For the revision-8 authoring contract:
 - Preserve the rev8 order: narrator rules, world rules, absolute rules, RAW history, then story memory, whole lore cards, corrections, relationship/world-event pressure, author note, and current player action. Do not move lore cards or author-note content ahead of RAW; they are intentionally volatile and would invalidate the provider prefix.
 - Use exactly five independently covered story-memory sections: `situation`, `threads`, `characters`, `assets_and_rules`, and `chronology_and_hooks`. A normal update returns all five in one call; only a section that fails structural validation gets a targeted retry. Empty arrays and `current_situation=null` are valid and must not be retried for being empty. Safe coverage is the minimum coverage across all five sections, so a stale or failed section keeps its uncovered raw tail in the prompt.
 - Do not make revision-8 WorldPack prompts depend on scene-state/boundary/reanchor blocks, state summaries or character-state retrieval, archive retrieval/fallback, `LONG_TERM_PARTY_MEMORY`, legacy episodic `memory_chapters`, or journal recaps. State may still drive Gateway outcomes and absolute rules, but these projections are not narrator prompt layers.
+
+For the candidate revision-10 world-clock contract:
+
+- Keep revision 8 as the default for new packs while the observed runtime
+  revision is 8. Raise a pack to 10 only in an explicit candidate update and
+  declare `manifest.files.world_clock`; do not blanket-migrate packs or parties.
+- Author `world-clock.json` with schema `rp-gateway.world-clock.v1`, an initial
+  timezone-aware date, ISO-8601 `max_step`, typed markers, and at least one
+  event. Conditions are only `date_gte`, `after_event`, or `after_confirmed`.
+- Give every event at least one authored `superseded_by` marker so a confirmed
+  player action can cancel or replace the scheduled outcome. Use only a bounded
+  `state_equals` predicate on an allowed canonical path or explicit player
+  confirmation; never ask the LLM to infer cancellation from free text.
+- Consequences v1 are only a durable `world_fact` or enable/disable of an
+  existing authored Lore Card by stable key. Do not author NPC movement,
+  presence registries, arbitrary state patches, generated lore, or new runtime
+  consequence types.
+- Keep event summaries and durable facts short enough for the single 800-char
+  `СОБЫТИЯ МИРА` projection. The nearest authored horizon follows relationship
+  pressure and precedes the author note/current action; do not duplicate the
+  schedule in world prompts.
 
 Across revisions:
 
@@ -121,6 +145,7 @@ quick-replies/notes.md
 setup-flow.md
 relationships/model.json
 lore-cards/<group>.json
+world-clock.json                 # optional, explicit revision-10 candidate only
 ```
 
 `relationships/model.json` is required when `scenario_types.supported`
@@ -133,6 +158,9 @@ World-pack requirements:
 - Put the starting player role in `manifest.player_role`; Light GUI uses it as the default player character description.
 - Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`. This metadata filters incompatible combinations but never auto-selects the party type.
 - For a new pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 8}`. This is the maximum contract understood by the pack, not a migration flag: ordinary parties are capped by Gateway's observed revision, and existing packs and parties remain pinned until an explicit compatible update. Do not blanket-migrate them or author a new RP pack against the legacy mechanical v1 contract.
+- Add `files.world_clock` only for an explicitly requested revision-10
+  candidate. Validate its authored events against the Lore Card library before
+  raising the manifest; ordinary parties remain capped by observed revision.
 - Reuse stable location and character IDs from `state-seed.json` throughout the pack. Revision 8 adds no scene manifest field and its narrator does not receive `scene_state`. When maintaining a revision-7 pack, an additional invariant narrative affiliation may use the existing bounded `rp_contract.stable_affiliations` compatibility field; never infer professions, goals, beliefs, emotions, or relationship-model roles into it.
 - Do not copy `scene_claims`, `scene_delta`, or the private narrator bundle schema into `gm-system.md` or `authors-note.md`. They belong only to Gateway's revision-7 compatibility path; revision 8 requests plain narrator text.
 - Include focused lorebook entries, not one giant encyclopedia entry.
@@ -240,6 +268,10 @@ Pop-Location
   at least one positive concrete-help event declares `resolves: ["favour"]`;
   `plot.discovery_chance_per_turn` is in `[0, 1]`; and the first slice declares
   only the `loyalty` axis.
+- For candidate revision-10 packs, validate the closed world-clock envelope,
+  timezone/date and duration, unique IDs, acyclic `after_event` references,
+  known markers, non-empty supersession for every event, allowed consequence
+  types, and referenced authored Lore Card keys.
 - Run relevant focused tests when Gateway/app code or IaC behavior changed.
 - Run a narrow scan for API-key-looking strings.
 - Do not treat Windows-side `/srv` or `\srv` paths as runtime validation.

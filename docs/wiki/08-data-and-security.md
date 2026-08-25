@@ -110,6 +110,25 @@ correction ограничен 600 символами и не усекается;
 имеют ту же redaction/retention boundary, что остальные строки
 `service_call_log`.
 
+### Revision 10: world clock state and jobs
+
+[Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md)
+добавляет optional `world_clock` только в canonical party state. Он хранит дату,
+processed party turn, confirmed markers, retained event statuses/IDs, durable
+facts, pending announcements и последний elapsed reason. Новый отдельный
+calendar/event store не создаётся.
+
+`service_jobs.party_turn` и partial unique index дают один clock job на игровой
+ход и строгий порядок применения. `lore_cards.authored_key` позволяет событию
+переключить только заранее скопированную WorldPack card. Clock tick одной
+`BEGIN IMMEDIATE` transaction пишет state version, statuses/facts, card flags и
+audit; при active main turn он откладывается без расхода model attempt.
+
+Turn `metadata_json.world_clock_events` хранит только безопасные occurred/horizon
+labels для History/UI. Exact local prompt/response остаётся в существующем
+`service_call_log` с прежней redaction/retention policy; новые TTL, backup scope
+или provider credentials не добавляются.
+
 ## Где находятся данные
 
 ```text

@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -143,6 +144,238 @@ def validate_worldpack_lore_cards(errors: list[str]) -> None:
             canonical_name = str(next(iter(aliases), "")).strip() if isinstance(aliases, list) else ""
             if canonical_name and str(card.get("title") or "").strip() != canonical_name:
                 fail(errors, f"WorldPack NPC lore card title is not the canonical name: {pack_id}:{key}")
+
+
+def validate_world_clocks(errors: list[str]) -> None:
+    worldpacks_root = ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks"
+    stable_id = re.compile(r"[a-z0-9][a-z0-9._:-]{0,127}")
+    duration = re.compile(
+        r"P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?)?"
+    )
+
+    def duration_seconds(value: object) -> int | None:
+        match = duration.fullmatch(str(value or ""))
+        if (
+            match is None
+            or not any(match.groupdict().values())
+            or (
+                "T" in str(value or "")
+                and not any(match.group(name) for name in ("hours", "minutes", "seconds"))
+            )
+        ):
+            return None
+        days = int(match.group("days") or 0)
+        hours = int(match.group("hours") or 0)
+        minutes = int(match.group("minutes") or 0)
+        seconds = int(match.group("seconds") or 0)
+        if hours >= 24 or minutes >= 60 or seconds >= 60:
+            return None
+        return (((days * 24) + hours) * 60 + minutes) * 60 + seconds
+
+    def valid_date(value: object) -> bool:
+        text = str(value or "")
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return parsed.tzinfo is not None
+
+    for manifest_path in sorted(worldpacks_root.glob("*/manifest.json")):
+        pack_root = manifest_path.parent.resolve()
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        files = manifest.get("files") if isinstance(manifest, dict) else None
+        relative_path = files.get("world_clock") if isinstance(files, dict) else None
+        conventional_path = pack_root / "world-clock.json"
+        rp_contract = manifest.get("rp_contract") if isinstance(manifest, dict) else None
+        raw_revision = rp_contract.get("revision") if isinstance(rp_contract, dict) else 0
+        revision = int(raw_revision) if isinstance(raw_revision, int) else 0
+        pack_id = str(manifest.get("id") or manifest_path.parent.name)
+        if relative_path is None:
+            if conventional_path.exists():
+                fail(errors, f"undeclared WorldPack world-clock.json: {manifest_path.parent.relative_to(ROOT)}")
+            if revision >= 10:
+                fail(errors, f"revision-10 WorldPack must declare world_clock: {manifest_path.relative_to(ROOT)}")
+            continue
+        label = str(manifest_path.relative_to(ROOT))
+        if not isinstance(relative_path, str) or not relative_path.strip():
+            fail(errors, f"invalid WorldPack world_clock path: {label}")
+            continue
+        clock_path = (pack_root / relative_path).resolve()
+        if (clock_path != pack_root and pack_root not in clock_path.parents) or not clock_path.is_file():
+            fail(errors, f"missing or unsafe WorldPack world_clock file: {label}")
+            continue
+        if revision < 10:
+            fail(errors, f"WorldPack world_clock requires rp_contract revision >= 10: {label}")
+        if pack_id != "merchant-sviatoslav":
+            fail(errors, f"only merchant-sviatoslav may declare candidate revision 10: {label}")
+        try:
+            clock = json.loads(clock_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        required_clock_keys = {"schema_version", "initial_date", "step_unit", "max_step", "markers", "events"}
+        if not isinstance(clock, dict) or set(clock) != required_clock_keys:
+            fail(errors, f"invalid WorldPack world clock envelope: {clock_path.relative_to(ROOT)}")
+            continue
+        max_step_seconds = duration_seconds(clock.get("max_step"))
+        if (
+            clock.get("schema_version") != "rp-gateway.world-clock.v1"
+            or clock.get("step_unit") != "iso8601_duration"
+            or not valid_date(clock.get("initial_date"))
+            or max_step_seconds is None
+            or not 0 < max_step_seconds <= 31 * 24 * 60 * 60
+        ):
+            fail(errors, f"invalid WorldPack world clock header: {clock_path.relative_to(ROOT)}")
+
+        raw_markers = clock.get("markers")
+        raw_events = clock.get("events")
+        if not isinstance(raw_markers, list) or len(raw_markers) > 64:
+            fail(errors, f"invalid WorldPack world clock markers: {clock_path.relative_to(ROOT)}")
+            raw_markers = []
+        if not isinstance(raw_events, list) or not raw_events or len(raw_events) > 128:
+            fail(errors, f"invalid WorldPack world clock events: {clock_path.relative_to(ROOT)}")
+            raw_events = []
+        marker_ids: set[str] = set()
+        for marker in raw_markers:
+            if not isinstance(marker, dict) or not {"id", "label"}.issubset(marker) or set(marker) - {"id", "label", "predicate"}:
+                fail(errors, f"invalid WorldPack world clock marker: {clock_path.relative_to(ROOT)}")
+                continue
+            marker_id = str(marker.get("id") or "")
+            marker_label = str(marker.get("label") or "").strip()
+            if (
+                not stable_id.fullmatch(marker_id)
+                or marker_id in marker_ids
+                or not marker_label
+                or len(marker_label) > 160
+            ):
+                fail(errors, f"invalid or duplicate WorldPack world clock marker id: {marker_id}")
+                continue
+            marker_ids.add(marker_id)
+            predicate = marker.get("predicate")
+            if predicate is not None and (
+                not isinstance(predicate, dict)
+                or set(predicate) != {"type", "path", "value"}
+                or predicate.get("type") != "state_equals"
+                or not str(predicate.get("path") or "").startswith(
+                    (
+                        "/player/resources/",
+                        "/characters/",
+                        "/factions/",
+                        "/resources/",
+                        "/active_threads/",
+                        "/completed_threads/",
+                        "/world_constraints/",
+                    )
+                )
+                or isinstance(predicate.get("value"), (dict, list))
+            ):
+                fail(errors, f"invalid WorldPack world clock marker predicate: {marker_id}")
+
+        lore_card_keys: set[str] = set()
+        lore_dir = files.get("lore_cards") if isinstance(files, dict) else None
+        if isinstance(lore_dir, str):
+            for card_path in sorted((pack_root / lore_dir).glob("*.json")):
+                try:
+                    card_payload = json.loads(card_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                for card in card_payload.get("cards", []) if isinstance(card_payload, dict) else []:
+                    if isinstance(card, dict) and stable_id.fullmatch(str(card.get("key") or "")):
+                        lore_card_keys.add(str(card["key"]))
+
+        event_ids: set[str] = set()
+        world_fact_ids: set[str] = set()
+        dependencies: dict[str, str] = {}
+        total_fact_chars = 0
+        for event in raw_events:
+            required_event_keys = {"id", "condition", "summary", "superseded_by", "consequences"}
+            if not isinstance(event, dict) or set(event) != required_event_keys:
+                fail(errors, f"invalid WorldPack world clock event shape: {clock_path.relative_to(ROOT)}")
+                continue
+            event_id = str(event.get("id") or "")
+            if not stable_id.fullmatch(event_id) or event_id in event_ids:
+                fail(errors, f"invalid or duplicate WorldPack world clock event id: {event_id}")
+                continue
+            event_ids.add(event_id)
+            summary = str(event.get("summary") or "").strip()
+            if not summary or len(summary) > 240:
+                fail(errors, f"invalid WorldPack world clock event summary: {event_id}")
+            superseded_by = event.get("superseded_by")
+            if (
+                not isinstance(superseded_by, list)
+                or not superseded_by
+                or len(superseded_by) > 8
+                or len(set(superseded_by)) != len(superseded_by)
+                or any(marker_id not in marker_ids for marker_id in superseded_by)
+            ):
+                fail(errors, f"WorldPack world clock event lacks a valid supersession path: {event_id}")
+            condition = event.get("condition")
+            condition_type = condition.get("type") if isinstance(condition, dict) else None
+            if condition_type == "date_gte":
+                if set(condition) != {"type", "date"} or not valid_date(condition.get("date")):
+                    fail(errors, f"invalid WorldPack date_gte condition: {event_id}")
+            elif condition_type == "after_event":
+                if set(condition) != {"type", "event_id"}:
+                    fail(errors, f"invalid WorldPack after_event condition: {event_id}")
+                else:
+                    dependencies[event_id] = str(condition.get("event_id") or "")
+            elif condition_type == "after_confirmed":
+                if set(condition) != {"type", "marker_id"} or condition.get("marker_id") not in marker_ids:
+                    fail(errors, f"invalid WorldPack after_confirmed condition: {event_id}")
+            else:
+                fail(errors, f"unsupported WorldPack world clock condition: {event_id}")
+            consequences = event.get("consequences")
+            if not isinstance(consequences, list) or not consequences or len(consequences) > 8:
+                fail(errors, f"invalid WorldPack world clock consequences: {event_id}")
+                continue
+            for consequence in consequences:
+                consequence_type = consequence.get("type") if isinstance(consequence, dict) else None
+                if consequence_type == "world_fact":
+                    if set(consequence) != {"type", "id", "text"}:
+                        fail(errors, f"invalid WorldPack world_fact consequence: {event_id}")
+                        continue
+                    fact_id = str(consequence.get("id") or "")
+                    text = str(consequence.get("text") or "").strip()
+                    if (
+                        not stable_id.fullmatch(fact_id)
+                        or fact_id in world_fact_ids
+                        or not text
+                        or len(text) > 180
+                    ):
+                        fail(errors, f"invalid WorldPack world_fact consequence: {event_id}")
+                    world_fact_ids.add(fact_id)
+                    total_fact_chars += len(text)
+                elif consequence_type == "lore_card":
+                    if (
+                        set(consequence) != {"type", "key", "enabled"}
+                        or consequence.get("key") not in lore_card_keys
+                        or not isinstance(consequence.get("enabled"), bool)
+                    ):
+                        fail(errors, f"invalid WorldPack lore_card consequence: {event_id}")
+                else:
+                    fail(errors, f"unsupported WorldPack world clock consequence: {event_id}")
+        if total_fact_chars > 400:
+            fail(errors, f"WorldPack world clock facts exceed 400 characters: {clock_path.relative_to(ROOT)}")
+        for event_id, dependency in dependencies.items():
+            if dependency not in event_ids or dependency == event_id:
+                fail(errors, f"invalid WorldPack after_event reference: {event_id} -> {dependency}")
+        for event_id in dependencies:
+            seen: set[str] = set()
+            current = event_id
+            while current in dependencies:
+                if current in seen:
+                    fail(errors, f"WorldPack world clock after_event cycle: {event_id}")
+                    break
+                seen.add(current)
+                current = dependencies[current]
+
+        if pack_id == "merchant-sviatoslav":
+            if len(event_ids) < 4:
+                fail(errors, "merchant-sviatoslav world clock must contain at least four events")
+            if not any("vyatichi" in event_id or "вятич" in str(event.get("summary") or "").casefold() for event_id, event in ((str(item.get("id") or ""), item) for item in raw_events if isinstance(item, dict))):
+                fail(errors, "merchant-sviatoslav world clock must include the Vyatichi campaign")
 
 
 def validate_wiki(errors: list[str]) -> None:
@@ -376,7 +609,7 @@ def validate_environment_contracts(errors: list[str]) -> None:
 
     canary_wrapper = ROOT / "scripts" / "run-rp-stack-evals.ps1"
     canary_markers = (
-        "[ValidateRange(0, 8)]",
+        "[ValidateRange(0, 10)]",
         "[Nullable[int]]$RpContractRevision = $null",
         "if ($null -ne $RpContractRevision)",
         '$arguments += @("--rp-contract-revision", [string]$RpContractRevision)',
@@ -386,13 +619,13 @@ def validate_environment_contracts(errors: list[str]) -> None:
     else:
         canary_source = canary_wrapper.read_text(encoding="utf-8-sig")
         if any(marker not in canary_source for marker in canary_markers):
-            fail(errors, "RP Stack provider canary must forward explicit candidate revision 0..8")
+            fail(errors, "RP Stack provider canary must forward explicit candidate revision 0..10")
 
     canary_runner = ROOT / "roles" / "apps" / "files" / "rp-stack" / "evals" / "run_evals.py"
     if not canary_runner.is_file():
         fail(errors, "missing RP Stack eval runner")
-    elif 'choices=range(0, 9)' not in canary_runner.read_text(encoding="utf-8"):
-        fail(errors, "RP Stack provider canary evaluator must accept candidate revision 0..8")
+    elif 'choices=range(0, 11)' not in canary_runner.read_text(encoding="utf-8"):
+        fail(errors, "RP Stack provider canary evaluator must accept candidate revision 0..10")
 
     marketplace = Path(".agents/plugins/marketplace.json")
     old_profile = b"C:" + b"\\Users\\" + b"albykov"
@@ -475,6 +708,7 @@ def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
         "scene_delta",
         "story_memory_canonical=false",
         "rp-gateway.worldpack-lore-cards.v1",
+        "rp-gateway.world-clock.v1",
     )
     for marker in required_markers:
         if marker not in combined:
@@ -505,6 +739,7 @@ def main() -> int:
     errors: list[str] = []
     validate_json(errors)
     validate_worldpack_lore_cards(errors)
+    validate_world_clocks(errors)
     validate_wiki(errors)
     validate_agents(errors)
     validate_plugin(errors)
@@ -516,7 +751,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("Repository contracts valid: JSON, WorldPack Lore Cards, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
+    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
     return 0
 
 

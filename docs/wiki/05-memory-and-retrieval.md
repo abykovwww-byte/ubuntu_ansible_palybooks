@@ -304,8 +304,9 @@ flowchart TB
     F --> C9["6a. Rev9 ИСПРАВЛЕНИЯ ИГРОКА · если active"]
     C9 --> G["7. Только содержательный AUTHORITATIVE_OUTCOME"]
     G --> H["8. RELATIONSHIP_PRESSURE + due resolution"]
-    H --> I["9. WORLD_AUTHORS_NOTE · до 1500 chars · последний system block"]
-    I --> J["10. Current player action · последнее message"]
+    H --> WC["9. Rev10 СОБЫТИЯ МИРА · до 800 chars"]
+    WC --> I["10. WORLD_AUTHORS_NOTE · до 1500 chars · последний system block"]
+    I --> J["11. Current player action · последнее message"]
 ```
 
 Блоки 1–3 и первые 50 RAW units — повторяемая основа provider prefix. Память,
@@ -386,6 +387,21 @@ section допустима; semantic retry ради содержимого за�
 attempts overlay остаётся active и продолжает защищать следующий narrator
 prompt.
 
+### S4: world events не являются новым слоем памяти
+
+Candidate rev10 хранит дату, fired statuses, durable facts и pending
+announcements в canonical `state.world_clock`, а authored schedule — в
+WorldPack `world-clock.json`. Local Gemma видит только последнюю записанную пару
+player+narrator и возвращает elapsed; RAW, story memory, Lore Cards и весь
+calendar ей не передаются.
+
+Narrator получает один производный `СОБЫТИЯ МИРА` block до 800 символов после
+relationship pressure и до author note/current action. Он содержит ещё не
+объявленные события, помещающиеся durable facts и ближайший horizon. Event IDs
+снимаются из pending только atomic commit успешного хода, поэтому failed
+narrator attempt не превращается в потерянное событие. Эта проекция не
+расширяет пять memory sections, не меняет их coverage и не создаёт archive.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.
@@ -398,6 +414,7 @@ prompt.
 | Legacy RP story memory | Живой кумулятивный реестр всей истории | Только RP revisions 0..7 | Нет |
 | Sectioned RP story memory v3 | Пять независимо покрываемых секций; safe coverage равен минимуму | Только RP revision 8+ | Нет |
 | Rev9 player correction overlay | Подтверждённый replacement/retraction поверх RAW и story memory до absorption | Только RP revision 9+ | Player authority; ниже canonical absolute rules/current action |
+| Rev10 world clock | Canonical date, authored event statuses/facts и одноразовая narrator/UI projection | Только RP revision 10+ с `world-clock.json` | Gateway authority; модель задаёт только elapsed |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
 | Memory chapters | Неизменяемые сжатые эпизоды старых сцен | Все | Нет |
 | Lore/retrieval | Rev8 authored/player-confirmed whole cards по title/keywords; legacy NPC и архивные сцены | Lore cards — party storage; legacy NPC/archive retrieval — revisions 0..7 | Нет |

@@ -107,6 +107,7 @@ primary model удаляются, поэтому несовместимый ма
 | RP rev8 Lore Card draft из выбранных ходов | Exact OpenRouter `deepseek/deepseek-v4-pro`; один call, без fallback и без auto-save |
 | RP rev9 GM intent / patch draft | Exact local Gemma; `2000/100` и `4000/300` input chars/output tokens, без fallback |
 | RP relationship extraction | Revisions 0..8: глобальная service model; rev9: exact local Gemma, только `scenario_type=rp` |
+| RP rev10 world-clock elapsed | Exact local Gemma; только последняя записанная пара, `4000/50`, strict elapsed JSON, без fallback |
 | LLM world-state draft | Глобальная service model |
 | Генерация/дополнение NPC | Глобальная service model |
 | Intent parsing и context estimation | Без LLM |
@@ -201,6 +202,24 @@ Memory absorption остаётся отдельным exact OpenRouter route с 
 двумя attempts и `section_key` затронутой секции. Обычный rev8+ path по-прежнему
 делает один combined call и повторяет только структурно невалидную секцию;
 валидная пустая секция не является поводом для retry.
+
+### Revision 10: world-clock route
+
+[Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md)
+фиксирует role `world_clock_elapsed` на отдельных local settings из
+`LOCAL_LLM_BASE_URL` и local model alias. Она не читает global service choice,
+`LLM_PROVIDER`, party narrator/BYOK или fallback list и всегда пишет
+`provider=local` в `service_call_log`.
+
+Serialized messages ограничены 4 000 символов и содержат только instruction и
+player+narrator text одного уже committed turn. Output limit — 50 tokens;
+strict JSON допускает только ISO-8601 `elapsed`. События, условия, markers и
+последствия модель не видит и не создаёт: после ответа их применяет Gateway из
+WorldPack.
+
+Jobs идут строго по party turn, но gameplay не ждёт их. После terminal retry
+Gateway применяет `PT0S` с `reason=service_unavailable`; пропущенное время не
+догоняется, provider не меняется и NVIDIA не является retry-целью.
 
 ## Диагностика model attempts
 

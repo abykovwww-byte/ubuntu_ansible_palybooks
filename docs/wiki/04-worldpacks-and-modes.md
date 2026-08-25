@@ -40,6 +40,7 @@ worldpacks/<slug>/
 ├── relationships/model.json
 ├── lore-cards/
 │   └── <group>.json
+├── world-clock.json
 ├── rules/checks.md
 ├── rules/site-interactions.json
 ├── training/
@@ -61,6 +62,8 @@ worldpacks/<slug>/
 - `gm-system.md` и `authors-note.md` — активные runtime prompts;
 - `campaign-bible.md` — авторский замысел, а для training — точная карта ходов;
 - `lore-cards/*.json` — optional reviewed compact context для новых rev8 RP parties, объявленный через `manifest.files.lore_cards`;
+- `world-clock.json` — optional rev10 authored date/events contract; Gateway,
+  а не модель, применяет его условия и последствия;
 - `training/program.json` — executable schedule, текущие output contracts, debrief и полные fallback;
 - `training/assessment.json` — executable detectors, scoring/evidence effects и aggregates;
 - `rules/checks.md` — человекочитаемое описание resolution/scoring, не runtime authority;
@@ -191,6 +194,34 @@ authoring. Человек сверяет результат с source и ком�
 Gateway лишь валидирует и копирует cards в её party storage. Empty keywords,
 duplicate key, missing NPC aliases и меньше 15 карточек у «Купца» останавливают
 repository validation.
+
+### Revision 10: authored world clock
+
+[Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md)
+добавляет optional manifest path только для explicit candidate update:
+
+```json
+"files": {
+  "world_clock": "world-clock.json"
+}
+```
+
+Файл имеет закрытую схему `rp-gateway.world-clock.v1`: `initial_date`,
+ISO-8601 `max_step`, typed `markers` и authored `events`. Event condition может
+быть только `date_gte`, `after_event` или `after_confirmed`; каждое событие
+обязано перечислить хотя бы один `superseded_by` marker. Marker либо имеет
+bounded `state_equals` predicate по разрешённому canonical path, либо требует
+явного подтверждения игрока через Gateway.
+
+В v1 разрешены только два consequence: durable `world_fact` и enable/disable
+существующей authored Lore Card по stable key. Свободный state patch,
+перемещение NPC или текстовое решение модели не проходят validation. Если
+персонаж уехал, authored fact говорит narrator об отсутствии; отдельный
+presence registry не создаётся, а NPC card всё ещё может подняться по имени.
+
+`merchant-sviatoslav` — единственный rev10 source candidate и содержит четыре
+cancelable события, включая Вятичский поход. Observed revision остаётся `8`,
+поэтому обычная новая партия не получит S4 до отдельной activation-фазы.
 
 ## Два активных режима
 
