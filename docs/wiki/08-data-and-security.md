@@ -62,8 +62,8 @@ post-apply stamp-proof boundary и не повышает readiness DC4.
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 остаётся на уровне `каркас` до live gates. Source activation задаёт observed `8`
-и declared `8` только для `merchant-sviatoslav`; до apply live runtime остаётся
-на observed revision `7`. Миграция сохраняет существующие snapshot rows,
+и declared `8` только для `merchant-sviatoslav`; apply и новая stamp-party уже
+подтвердили effective `8` без model calls. Миграция сохраняет существующие snapshot rows,
 добавляет nullable `base_snapshot_id` и `update_id` и заменяет legacy uniqueness
 по `(campaign_id, to_turn_id)` на idempotency по `(campaign_id, update_id)`.
 Legacy caller без `update_id` по-прежнему дедуплицируется по coverage; только

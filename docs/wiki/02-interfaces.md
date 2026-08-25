@@ -30,13 +30,26 @@ Light GUI — основной интерфейс владельца парти�
 - сценарно-зависимое редактирование персонажей вручную и генерация служебной моделью: в `rp` обычная форма показывает только имя, статус, локацию и текущую цель, не изменяя скрытые расширенные поля; в `training` сохраняется полный редактор;
 - выбор party-scoped BYOK-ключа;
 - GM preview/apply/discard, state и rollback; отдельной RP-формы проверки нет;
-- Prompt Inspector, реальный размер последнего prompt, память и lore cards; для `rp` панель памяти отдельно показывает living story snapshot, его revision и покрытие, а начиная с RP revision 2 позволяет подготовить типизированное исправление активной list-записи со следующим ходом; для `training` этого UI нет;
+- Prompt Inspector, реальный размер последнего prompt, память и lore cards; для `rp` панель памяти отдельно показывает living story snapshot, его revision и покрытие, а начиная с RP revision 2 позволяет подготовить типизированное исправление активной list-записи со следующим ходом; для rev8 под narrator response показываются Lore Cards, реально попавшие в его prompt, и явная кнопка draft из завершённого хода; для `training` этого UI нет;
 - request-centric Turn Trace Workbench с main/background lanes, narrator/service attempts, state mutation diff и аннотациями;
 - checkpoints, branches и история LLM-autotest;
 - 👍/👎 для полной пары «реплика игрока → ответ модели»;
 - admin-раздел: пользователи, глобальная служебная модель, видимость миров, Showroom, автотесты и dataset review.
 
 Light GUI не вызывает provider API напрямую. Даже если ключ введён пользователем, он сохраняется Gateway для конкретной партии и не возвращается в браузер целиком.
+
+### Lore Cards в revision 8
+
+History API возвращает для хода `metadata.prompt_assembly.lore_card_ids` и
+читаемые `activated_lore_cards`. UI строит chips строго в порядке ID из metadata,
+поэтому не показывает карточку, которую Gateway отбросил из финального prompt.
+
+Кнопка «Сделать Lore Card из хода» вызывает party-scoped
+`POST /api/parties/{party_id}/lore-cards/draft` с ID сохранённого complete turn.
+Gateway возвращает только draft и заполняет им существующую видимую форму.
+Пока игрок не проверил текст и не нажал «Подтвердить Lore Card», create endpoint
+не вызывается и карточки в party storage нет. Свободный текст чата не запускает
+draft classifier. Provider key и request остаются на стороне Gateway.
 
 ### Параметры наратора
 

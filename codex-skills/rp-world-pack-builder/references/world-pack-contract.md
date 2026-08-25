@@ -153,6 +153,54 @@ Gateway includes lore as whole cards. It may omit a card that would cross the
 independent cards and do not depend on a large card being partially injected.
 These are hard authoring limits; runtime truncation is not a content strategy.
 
+### Authored Lore Card Files
+
+A revision-8 RP WorldPack may declare reviewed runtime cards:
+
+```json
+"files": {
+  "lore_cards": "lore-cards"
+}
+```
+
+Every `lore-cards/*.json` file uses this envelope:
+
+```json
+{
+  "schema_version": "rp-gateway.worldpack-lore-cards.v1",
+  "cards": [
+    {
+      "key": "npc:character-id",
+      "title": "Ждан",
+      "keywords": ["Ждан", "Ждана", "Ждану", "Жданом"],
+      "content": "Цель, жесткие границы и скрытые до причинного раскрытия факты.",
+      "always_on": false,
+      "enabled": true
+    }
+  ]
+}
+```
+
+Keys are lowercase ASCII and unique across the pack. Keywords are non-empty
+exact triggers. For each `relationships/model.json` character, author one
+`npc:<character-id>` card whose title is the first canonical alias and whose
+keywords include every declared Russian inflection; NPC cards always use
+`always_on=false`.
+
+Gateway copies these reviewed cards into a new revision-8 party without calling
+a model and never writes back into the WorldPack. Runtime selection scans the
+current player input plus three complete previous eligible units and optional
+`Outcome.target`. It matches only whole card titles and keywords. Card content,
+seed location, active threads and scene state are not activation signals, so a
+hidden fact cannot retrieve itself.
+
+Use `scripts/author-worldpack-lore-cards.py <slug>` only to produce a candidate
+file at authoring time. It uses stack-managed OpenRouter
+`deepseek/deepseek-v4-pro`; there is no local, NVIDIA or fallback route. A human
+must compare every candidate with campaign bible, world info and characters
+before committing it. Do not run this script during party creation or turn
+processing.
+
 ### Narrator Continuity Inputs
 
 The revision-8 narrator context keeps the union of:

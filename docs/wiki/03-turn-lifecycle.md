@@ -28,8 +28,9 @@
 activation и post-apply stamp proof подтвердили effective observed `7` для новых
 ordinary RP-parties. Код revision `8` / S1 слит и применён; отдельный
 source-activation slice задаёт observed `8`, но declared `8` только у
-`merchant-sviatoslav`. Пока этот slice не применён и не прошёл gates 25/60,
-runtime observed остаётся `7`, а registry 032 — на ступени `каркас`.
+`merchant-sviatoslav`. Apply и новая stamp-party подтвердили effective `8` без
+model calls. Gates 25/60 отложены до полной реализации, поэтому registry 032
+остаётся на ступени `каркас`.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -306,8 +307,9 @@ boundary и не повышает readiness DC4.
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 принимает новый контракт только для RP `rp_contract_revision >= 8`. Source
 activation выбирает для первого canary только новые партии `merchant-sviatoslav`;
-существующие партии, остальные WorldPacks и `training` не меняются. До apply и
-live gates фактический runtime observed остаётся `7`.
+существующие партии, остальные WorldPacks и `training` не меняются. Apply и
+stamp-party подтвердили effective revision `8`; длинные live gates отложены до
+полной реализации, поэтому readiness остаётся `каркас`.
 
 История собирается целыми игровыми единицами. Opening — одно assistant-message;
 только точная техническая реплика `[AUTO_START] Старт партии` подавляется.
@@ -348,6 +350,24 @@ transition allowance, legacy `LONG_TERM_PARTY_MEMORY`,
 возвращает plain text, а state/turn commit сохраняет общий atomic safety-контракт.
 Точный prompt order и секционные memory-правила приведены в
 [разделе о памяти](05-memory-and-retrieval.md#revision-8-history-first-prompt-и-пять-секций-памяти).
+
+### Revision 8: S2 Lore Cards
+
+При создании новой party Gateway до первого хода валидирует declared
+`lore-cards/*.json` и копирует их в существующее party-scoped storage. В этом
+пути нет provider request и нет записи обратно в WorldPack.
+
+Перед narrator call тот же deterministic scan, что используется для
+relationship presence, объединяет current player input, три предыдущих complete
+eligible units и optional `Outcome.target`. Lore retrieval проверяет только
+whole title/keywords; content не участвует в активации. После финального budget
+точные card IDs записываются в `prompt_assembly`, а History API и Light GUI
+проецируют их под соответствующим narrator response.
+
+Draft является отдельным пользовательским действием после завершённого хода:
+один bounded service call возвращает строгий JSON в форму, но не меняет memory.
+Только последующий confirm вызывает существующий create endpoint. Поэтому draft
+failure не меняет turn, canonical state или Lore Cards партии.
 
 ## Обычный ход
 
