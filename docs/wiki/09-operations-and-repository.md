@@ -109,10 +109,10 @@ Activation boundary revision `8` подтверждена. Более высок
 4. hard overflow удаляет целиком lore, затем только целые safely covered units,
    сохраняет минимум 20 и иначе fail-closed завершается до provider;
 5. `service_call_log` показывает exact `provider=openrouter`,
-   `model=deepseek/deepseek-v4-pro`, section input не более 20 000 символов,
-   `max_tokens=4000` для combined и `800` для targeted retry, отказ при
-   `finish_reason=length`, не более двух durable job attempts и отсутствие
-   fallback route для этих calls;
+    `model=deepseek/deepseek-v4-pro`, section input не более 20 000 символов,
+    strict section JSON Schema без искусственного output `max_tokens`, отказ при
+    фактическом `finish_reason=length`, не более двух durable job attempts и
+    отсутствие fallback route для этих calls;
 6. на 60-turn party `metadata_json` содержит `cached_prompt_tokens`,
    `prompt_tokens`, `stable_prompt_prefix_hash`; cache share не меньше 70% как
    минимум на пяти из каждых восьми последовательных ходов, а среднее по партии

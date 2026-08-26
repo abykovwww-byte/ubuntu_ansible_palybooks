@@ -137,7 +137,7 @@ flowchart LR
     C --> V["Structural validation per section"]
     V -->|"invalid section only"| R["Один exact section retry"]
     R --> O
-    D --> L["max_tokens = 4000 combined / 800 retry"]
+    D --> L["Strict section JSON Schema · без искусственного output cap"]
     D -.-> X["No Local LLM / NVIDIA / model fallback"]
 ```
 
@@ -146,7 +146,10 @@ flowchart LR
 `finish_reason=length`. Только не прошедшая section получает отдельный call с
 exact `section_key`; валидные, включая пустые, не повторяются. Каждый call
 содержит не более 20 000 символов serialized messages и только complete playable
-units. `service_call_log` сохраняет exact `provider`, `model`, `section_key` и
+units. Combined и targeted calls передают strict JSON Schema действующего
+section/fact contract и не задают искусственный `max_tokens`; фактический
+`finish_reason=length` остаётся отказом. `service_call_log` сохраняет exact
+`provider`, `model`, `section_key` и
 общий `update_id`. Partial failure не отменяет четыре удачные секции. Максимум
 durable attempts именно у rev8 `rp_story_memory` job равен `2`; общий
 `SERVICE_JOB_MAX_ATTEMPTS=5` сохраняется для relationship extraction и legacy
@@ -214,7 +217,8 @@ Parseable relationship output ещё не является доменным ус
 rejection без retry и без записи cause/badge/event.
 
 Memory absorption остаётся отдельным exact OpenRouter route с stack-managed key,
-двумя attempts и `section_key` затронутой секции. Обычный rev8+ path по-прежнему
+двумя attempts, strict section JSON Schema без искусственного output cap и
+`section_key` затронутой секции. Обычный rev8+ path по-прежнему
 делает один combined call и повторяет только структурно невалидную секцию;
 валидная пустая секция не является поводом для retry.
 

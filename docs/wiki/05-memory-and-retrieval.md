@@ -288,9 +288,11 @@ request; валидные секции общего ответа не повто
 
 Общий и точечный requests получают только complete units и не более 20 000
 символов serialized messages. Если восемь units не помещаются, batch уменьшается
-с хвоста; одна слишком большая unit не режется. Output limit равен `4000` tokens
-для общего ответа и `800` для одной секции. Exact provider/model и retry policy описаны в
-[разделе о моделях](06-models-and-providers.md#revision-8-sectioned-story-memory).
+с хвоста; одна слишком большая unit не режется. Оба вида request передают strict
+JSON Schema существующих section/fact contracts и не задают искусственный
+`max_tokens`: полный структурный ответ не обрывается из-за заранее угаданного
+потолка, а фактический `finish_reason=length` по-прежнему считается отказом.
+Exact provider/model и retry policy описаны в [разделе о моделях](06-models-and-providers.md#revision-8-sectioned-story-memory).
 
 ### Точный порядок rev8 prompt
 
@@ -542,7 +544,8 @@ legacy update revisions `0..7`. Service model не получает весь 132
 narrator и не должна перечитывать всю кампанию на каждом запуске: она сворачивает
 предыдущий snapshot плюс только новый пакет. Candidate rev8 использует один
 штатный OpenRouter request на пять секций и точечные structural retries с
-лимитами 20 000 input characters и 4000/800 output tokens, описанные выше.
+лимитом 20 000 input characters и strict section JSON Schema без искусственного
+output cap, описанные выше.
 
 ## Порядок RP prompt для revisions 0..7
 
