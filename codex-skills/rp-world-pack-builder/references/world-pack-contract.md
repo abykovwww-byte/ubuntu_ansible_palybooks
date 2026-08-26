@@ -29,7 +29,10 @@ relationships/model.json
 `relationships/model.json` is required when `scenario_types.supported`
 includes `rp` and optional otherwise.
 `lore-cards/` is optional for revision 8+. `world-clock.json` is optional and
-valid only for a revision-10 pack with an authored calendar.
+valid for a revision-10+ pack with an authored calendar.
+`presets/<id>/` and `prompts/openings/<id>/` are required only for the explicit
+revision-11 multi-variant contract; every nested seed keeps the exact filename
+`state-seed.json`.
 
 ## manifest.json
 
@@ -328,6 +331,90 @@ supersession deterministically, and commits date, fired/superseded status,
 facts, and Lore Card toggles atomically. The model receives only the last
 recorded player+narrator turn and returns elapsed; do not duplicate the calendar
 or future events in `gm-system.md`, author note, state seed, or Lore Cards.
+
+## Revision 11 Narrative Presets and Opening Seeds
+
+Revision 11 is available in source, while the current default for new packs and
+the observed runtime remain revision 10 until a separate pack-and-activation
+delivery. Do not add a revision-11 declaration merely because the loader knows
+the shape. An explicitly approved pack uses:
+
+```json
+{
+  "rp_contract": {"schema_version": "rp-core.v2", "revision": 11},
+  "presets": [
+    {
+      "id": "action",
+      "title": "Действие",
+      "world_system_prompt": "presets/action/gm-system.md",
+      "world_authors_note": "presets/action/authors-note.md"
+    }
+  ],
+  "presets_default": "action",
+  "openings": [
+    {
+      "id": "independent",
+      "title": "Независимый старт",
+      "player_role": "Независимый зарегистрированный Иной",
+      "prompt": "prompts/openings/independent/opening-scene.md",
+      "state_seed": "prompts/openings/independent/state-seed.json"
+    }
+  ],
+  "openings_default": "independent"
+}
+```
+
+Both catalogs are non-empty and closed: a preset has exactly `id`, `title`,
+`world_system_prompt`, `world_authors_note`; an opening has exactly `id`,
+`title`, `player_role`, `prompt`, `state_seed`. IDs are unique ASCII values
+matching `^[a-z0-9][a-z0-9_-]{0,63}$`. Defaults name existing entries and are
+never inferred from array order. Every path is a safe existing file inside the
+pack, and each opening seed path is exactly
+`prompts/openings/<id>/state-seed.json`.
+
+The default remains accessible through the canonical legacy aliases:
+
+```text
+files.gm_system     = prompts/gm-system.md
+files.authors_note  = prompts/authors-note.md
+files.opening_scene = prompts/opening-scene.md
+files.state_seed    = state-seed.json
+```
+
+Each root file is byte-identical to its selected default file, and root
+`manifest.player_role` equals the default opening role. Each preset is a full
+replacement pair. Count the existing headings when checking the hard budgets:
+`WORLD_SYSTEM_PROMPT\n<text>` is at most 5,000 characters and
+`WORLD_AUTHORS_NOTE\n<text>` at most 1,500.
+
+Each opening `player_role` is at most 4,000 characters after the same
+line-ending/BOM/outer-whitespace normalization used for materialization. This
+limit is inherited from `PlayerCharacterCreate.description`, because the normal
+draft/create flow puts the selected role there.
+
+State initialization keeps this exact overlay order: selected full seed →
+Gateway metadata/world clock → PlayerCharacter (including role and known fact)
+→ explicit starting patch → final state-schema validation. Supplying a full
+opening seed removes fragment-merge semantics, but does not skip or reorder the
+later overlays.
+
+Authors preserve complete world/narrator rules in the system prompt. The
+authors note carries the preset-specific scene forms/elements and explicit
+conflict-resolution prohibitions. This is reviewed prose, not a semantic
+classifier contract; repository checks enforce shape, paths, non-empty text,
+aliases and budgets only. Do not generate, compose, or truncate these files at
+runtime.
+
+Every revision-11 Lore Card with an `npc:` key has two separate, non-empty
+lines in `content`: `Примета: <visible detail>` and `Манера речи: <speech
+manner>`. Repository validation checks these exact line prefixes mechanically;
+it does not infer whether the prose is artistically sufficient.
+
+Clients send optional `preset_id` and `opening_id`, never paths. Omission uses
+the two declared defaults; unknown or path-like IDs fail. Gateway materializes
+the selected IDs, exact texts, role and full seed once into the party snapshot;
+SHA-256 values are audit checksums. Existing parties and descendants use the
+snapshot without a source-mismatch status, telemetry or historical backfill.
 
 ## RP Relationship Model
 

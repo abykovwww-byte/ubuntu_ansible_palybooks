@@ -162,6 +162,29 @@ output в существующий `retry -> stale`, запрещает pressure
 проецирует часы в opening. До повторной post-apply ручной партии весь этот набор
 остаётся на уровне `каркас`.
 
+## RP contract revision 11: mechanism before activation
+
+[Decision 041](../../roles/apps/files/rp-stack/docs/decisions/041-rp-narrative-presets-and-opening-seeds.md)
+поставляется двумя раздельными изменениями. Первый, текущий, поднимает Gateway
+source ceiling и provider-canary argument до `0..11`, добавляет API/storage/UI
+mechanism, repository guards и docs. В нём нет revision-11 WorldPack, поэтому
+inventory обязан остаться
+`rp_stack_gateway_rp_contract_observed_revision: 10`. Existing packs/parties и
+их revisions не меняются; source test не доказывает applied/runtime состояние.
+
+Repository gate уже готов к следующей границе: без committed rev11 pack он
+требует observed `10`, а при появлении такого pack требует observed `11` в той
+же activation-поставке. Это не позволяет ordinary party молча запустить
+revision-11 manifest как effective revision `10`.
+
+Вторая поставка добавляет отдельный `day-watch-moscow-v2`, не меняя v1, и
+переключает observed на `11`. После merge пользователь отдельно запускает
+pull-based Ansible apply. Live proof требует как минимум реальный выбор разных
+preset/opening в Light GUI, сохранённые IDs/audit hashes, разные стартовые state
+из полных seeds и exact выбранные `WORLD_SYSTEM_PROMPT`/
+`WORLD_AUTHORS_NOTE` в recorded first-turn prompt. Зелёный CI, наличие файлов и
+совпадение SHA-256 сами по себе этим доказательством не являются.
+
 ## Codex devkit, worktrees и CI
 
 Репозиторий содержит собственный Codex-контур:

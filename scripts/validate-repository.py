@@ -21,6 +21,8 @@ RP_CONTRACT_DECLARATION_RE = re.compile(
     r'"rp_contract"\s*:\s*\{\s*"schema_version"\s*:\s*"rp-core\.v2"\s*,'
     r'\s*"revision"\s*:\s*([0-9]+)'
 )
+RP_CONTRACT_SOURCE_MAX_REVISION = 11
+RP_VARIANT_ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -45,6 +47,14 @@ def validate_worldpack_lore_cards(errors: list[str]) -> None:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        rp_contract = manifest.get("rp_contract") if isinstance(manifest, dict) else None
+        pack_revision = (
+            rp_contract.get("revision")
+            if isinstance(rp_contract, dict)
+            and isinstance(rp_contract.get("revision"), int)
+            and not isinstance(rp_contract.get("revision"), bool)
+            else 0
+        )
         files = manifest.get("files") if isinstance(manifest, dict) else None
         relative_dir = files.get("lore_cards") if isinstance(files, dict) else None
         conventional_dir = pack_root / "lore-cards"
@@ -105,6 +115,17 @@ def validate_worldpack_lore_cards(errors: list[str]) -> None:
                     fail(errors, f"WorldPack lore card has invalid flags: {label}")
                 if key.startswith("npc:") and card.get("always_on", False) is not False:
                     fail(errors, f"WorldPack NPC lore card must use always_on=false: {label}")
+                if key.startswith("npc:") and pack_revision >= 11:
+                    content_lines = content.splitlines()
+                    for marker in ("Примета:", "Манера речи:"):
+                        if not any(
+                            line.startswith(marker) and line.removeprefix(marker).strip()
+                            for line in content_lines
+                        ):
+                            fail(
+                                errors,
+                                f"WorldPack revision-11 NPC lore card lacks non-empty {marker} line: {label}",
+                            )
                 cards_by_key[key] = card
 
         pack_id = str(manifest.get("id") or manifest_path.parent.name)
@@ -374,6 +395,210 @@ def validate_world_clocks(errors: list[str]) -> None:
                 fail(errors, "merchant-sviatoslav world clock must include the Vyatichi campaign")
 
 
+def validate_worldpack_narrative_variants(errors: list[str]) -> None:
+    worldpacks_root = ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks"
+
+    def normalize_text(value: str) -> str:
+        return value.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff").strip()
+
+    def resolve_file(pack_root: Path, value: object, label: str) -> Path | None:
+        if not isinstance(value, str):
+            fail(errors, f"invalid or unsafe WorldPack variant path: {label}")
+            return None
+        relative = value
+        components = relative.split("/")
+        if (
+            not relative
+            or relative != relative.strip()
+            or "\\" in relative
+            or relative.startswith("/")
+            or ":" in relative
+            or any(part in {"", ".", ".."} for part in components)
+        ):
+            fail(errors, f"invalid or unsafe WorldPack variant path: {label}")
+            return None
+        candidate = (pack_root / Path(*components)).resolve()
+        if pack_root not in candidate.parents or not candidate.is_file():
+            fail(errors, f"missing or unsafe WorldPack variant file: {label}")
+            return None
+        return candidate
+
+    def text_block_fits(path: Path, heading: str, limit: int, label: str) -> None:
+        try:
+            text = normalize_text(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            fail(errors, f"unreadable WorldPack variant prompt: {label}")
+            return
+        if not text:
+            fail(errors, f"empty WorldPack variant prompt: {label}")
+        if len(f"{heading}\n{text}") > limit:
+            fail(errors, f"WorldPack {heading} block exceeds {limit} characters: {label}")
+
+    for manifest_path in sorted(worldpacks_root.glob("*/manifest.json")):
+        pack_root = manifest_path.parent.resolve()
+        relative_manifest = manifest_path.relative_to(ROOT)
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        rp_contract = manifest.get("rp_contract")
+        if not isinstance(rp_contract, dict):
+            continue
+        raw_revision = rp_contract.get("revision")
+        if rp_contract.get("schema_version") != "rp-core.v2":
+            if isinstance(raw_revision, int) and not isinstance(raw_revision, bool) and raw_revision >= 11:
+                fail(errors, f"WorldPack revision 11 requires rp-core.v2: {relative_manifest}")
+            continue
+        if not isinstance(raw_revision, int) or isinstance(raw_revision, bool):
+            fail(errors, f"invalid WorldPack RP contract revision: {relative_manifest}")
+            continue
+        revision = raw_revision
+        if not 0 <= revision <= RP_CONTRACT_SOURCE_MAX_REVISION:
+            fail(errors, f"unsupported WorldPack RP contract revision: {relative_manifest}")
+            continue
+
+        variant_fields = {"presets", "presets_default", "openings", "openings_default"}
+        if revision < 11:
+            unexpected = sorted(variant_fields.intersection(manifest))
+            if unexpected:
+                fail(
+                    errors,
+                    f"WorldPack revision {revision} must not declare revision-11 variants "
+                    f"{unexpected}: {relative_manifest}",
+                )
+            continue
+
+        raw_presets = manifest.get("presets")
+        raw_openings = manifest.get("openings")
+        if not isinstance(raw_presets, list) or not raw_presets:
+            fail(errors, f"WorldPack revision 11 requires non-empty presets: {relative_manifest}")
+            raw_presets = []
+        if not isinstance(raw_openings, list) or not raw_openings:
+            fail(errors, f"WorldPack revision 11 requires non-empty openings: {relative_manifest}")
+            raw_openings = []
+
+        presets: dict[str, dict[str, object]] = {}
+        for index, preset in enumerate(raw_presets):
+            label = f"{relative_manifest}:presets[{index}]"
+            if not isinstance(preset, dict) or set(preset) != {
+                "id",
+                "title",
+                "world_system_prompt",
+                "world_authors_note",
+            }:
+                fail(errors, f"invalid WorldPack preset shape: {label}")
+                continue
+            preset_id = preset.get("id")
+            if (
+                not isinstance(preset_id, str)
+                or not RP_VARIANT_ID_RE.fullmatch(preset_id)
+                or preset_id in presets
+            ):
+                fail(errors, f"invalid or duplicate WorldPack preset id: {label}")
+                continue
+            if not isinstance(preset.get("title"), str) or not preset["title"].strip():
+                fail(errors, f"empty WorldPack preset title: {label}")
+            system_path = resolve_file(pack_root, preset.get("world_system_prompt"), f"{label}:world_system_prompt")
+            authors_path = resolve_file(pack_root, preset.get("world_authors_note"), f"{label}:world_authors_note")
+            if system_path is not None:
+                text_block_fits(system_path, "WORLD_SYSTEM_PROMPT", 5000, label)
+            if authors_path is not None:
+                text_block_fits(authors_path, "WORLD_AUTHORS_NOTE", 1500, label)
+            presets[preset_id] = preset
+
+        openings: dict[str, dict[str, object]] = {}
+        for index, opening in enumerate(raw_openings):
+            label = f"{relative_manifest}:openings[{index}]"
+            if not isinstance(opening, dict) or set(opening) != {
+                "id",
+                "title",
+                "player_role",
+                "prompt",
+                "state_seed",
+            }:
+                fail(errors, f"invalid WorldPack opening shape: {label}")
+                continue
+            opening_id = opening.get("id")
+            if (
+                not isinstance(opening_id, str)
+                or not RP_VARIANT_ID_RE.fullmatch(opening_id)
+                or opening_id in openings
+            ):
+                fail(errors, f"invalid or duplicate WorldPack opening id: {label}")
+                continue
+            normalized_player_role = (
+                normalize_text(opening["player_role"])
+                if isinstance(opening.get("player_role"), str)
+                else ""
+            )
+            if (
+                not isinstance(opening.get("title"), str)
+                or not opening["title"].strip()
+                or not normalized_player_role
+            ):
+                fail(errors, f"empty WorldPack opening title/player_role: {label}")
+            if len(normalized_player_role) > 4000:
+                fail(errors, f"WorldPack opening player_role exceeds 4000 characters: {label}")
+            prompt_path = resolve_file(pack_root, opening.get("prompt"), f"{label}:prompt")
+            seed_relative = opening.get("state_seed") if isinstance(opening.get("state_seed"), str) else ""
+            expected_seed = f"prompts/openings/{opening_id}/state-seed.json"
+            if seed_relative != expected_seed:
+                fail(errors, f"WorldPack opening seed must be {expected_seed}: {label}")
+            seed_path = resolve_file(pack_root, seed_relative, f"{label}:state_seed")
+            if prompt_path is not None:
+                try:
+                    if not normalize_text(prompt_path.read_text(encoding="utf-8")):
+                        fail(errors, f"empty WorldPack opening prompt: {label}")
+                except (OSError, UnicodeDecodeError):
+                    fail(errors, f"unreadable WorldPack opening prompt: {label}")
+            if seed_path is not None:
+                try:
+                    seed_payload = json.loads(seed_path.read_text(encoding="utf-8"))
+                    if not isinstance(seed_payload, dict):
+                        fail(errors, f"WorldPack opening seed must be a JSON object: {label}")
+                except (OSError, json.JSONDecodeError):
+                    pass
+            openings[opening_id] = opening
+
+        preset_default_id = manifest.get("presets_default")
+        opening_default_id = manifest.get("openings_default")
+        if not isinstance(preset_default_id, str) or preset_default_id not in presets:
+            fail(errors, f"WorldPack presets_default must name a declared preset: {relative_manifest}")
+            continue
+        if not isinstance(opening_default_id, str) or opening_default_id not in openings:
+            fail(errors, f"WorldPack openings_default must name a declared opening: {relative_manifest}")
+            continue
+
+        default_preset = presets[preset_default_id]
+        default_opening = openings[opening_default_id]
+        files = manifest.get("files")
+        exact_root_aliases = {
+            "gm_system": "prompts/gm-system.md",
+            "authors_note": "prompts/authors-note.md",
+            "opening_scene": "prompts/opening-scene.md",
+            "state_seed": "state-seed.json",
+        }
+        if not isinstance(files, dict) or any(files.get(key) != value for key, value in exact_root_aliases.items()):
+            fail(errors, f"WorldPack revision 11 root file aliases are not canonical: {relative_manifest}")
+            continue
+
+        alias_targets = (
+            ("gm_system", default_preset["world_system_prompt"]),
+            ("authors_note", default_preset["world_authors_note"]),
+            ("opening_scene", default_opening["prompt"]),
+            ("state_seed", default_opening["state_seed"]),
+        )
+        for alias_key, default_value in alias_targets:
+            alias_path = resolve_file(pack_root, files[alias_key], f"{relative_manifest}:files.{alias_key}")
+            default_path = resolve_file(pack_root, default_value, f"{relative_manifest}:default.{alias_key}")
+            if alias_path is not None and default_path is not None and alias_path.read_bytes() != default_path.read_bytes():
+                fail(errors, f"WorldPack root alias content differs from selected default: {relative_manifest}:files.{alias_key}")
+        if manifest.get("player_role") != default_opening.get("player_role"):
+            fail(errors, f"WorldPack player_role must equal the default opening role: {relative_manifest}")
+
+
 def validate_wiki(errors: list[str]) -> None:
     wiki_root = ROOT / "docs" / "wiki"
     readme = wiki_root / "README.md"
@@ -595,17 +820,47 @@ def validate_environment_contracts(errors: list[str]) -> None:
         "RP_CONTRACT_OBSERVED_REVISION="
         "{{ rp_stack_gateway_rp_contract_observed_revision }}"
     )
-    if observed_revision_assignments != ["10"]:
-        fail(errors, "RP Stack inventory must set rp-core.v2 revision 10 observed exactly once")
+    has_revision_11_pack = False
+    worldpacks_root = ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks"
+    for manifest_path in worldpacks_root.glob("*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            rp_contract = manifest.get("rp_contract") if isinstance(manifest, dict) else None
+            if (
+                isinstance(rp_contract, dict)
+                and rp_contract.get("schema_version") == "rp-core.v2"
+                and int(rp_contract.get("revision", -1)) == 11
+            ):
+                has_revision_11_pack = True
+                break
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
+    expected_observed_revision = "11" if has_revision_11_pack else "10"
+    if observed_revision_assignments != [expected_observed_revision]:
+        fail(
+            errors,
+            "RP Stack inventory must observe revision 10 until a revision-11 pack is "
+            "committed, then observe revision 11, exactly once",
+        )
     if (
         not production_env_template.is_file()
         or observed_revision_mapping not in production_env_template.read_text(encoding="utf-8")
     ):
         fail(errors, "RP Stack production env must render the explicit observed RP revision")
 
+    gateway_config = (
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "rp-gateway" / "app" / "core" / "config.py"
+    )
+    if (
+        not gateway_config.is_file()
+        or f"RP_CONTRACT_MAX_REVISION = {RP_CONTRACT_SOURCE_MAX_REVISION}"
+        not in gateway_config.read_text(encoding="utf-8")
+    ):
+        fail(errors, "RP Gateway source must accept candidate rp-core.v2 revision 11")
+
     canary_wrapper = ROOT / "scripts" / "run-rp-stack-evals.ps1"
     canary_markers = (
-        "[ValidateRange(0, 10)]",
+        "[ValidateRange(0, 11)]",
         "[Nullable[int]]$RpContractRevision = $null",
         "if ($null -ne $RpContractRevision)",
         '$arguments += @("--rp-contract-revision", [string]$RpContractRevision)',
@@ -615,13 +870,13 @@ def validate_environment_contracts(errors: list[str]) -> None:
     else:
         canary_source = canary_wrapper.read_text(encoding="utf-8-sig")
         if any(marker not in canary_source for marker in canary_markers):
-            fail(errors, "RP Stack provider canary must forward explicit candidate revision 0..10")
+            fail(errors, "RP Stack provider canary must forward explicit candidate revision 0..11")
 
     canary_runner = ROOT / "roles" / "apps" / "files" / "rp-stack" / "evals" / "run_evals.py"
     if not canary_runner.is_file():
         fail(errors, "missing RP Stack eval runner")
-    elif 'choices=range(0, 11)' not in canary_runner.read_text(encoding="utf-8"):
-        fail(errors, "RP Stack provider canary evaluator must accept candidate revision 0..10")
+    elif 'choices=range(0, 12)' not in canary_runner.read_text(encoding="utf-8"):
+        fail(errors, "RP Stack provider canary evaluator must accept candidate revision 0..11")
 
     marketplace = Path(".agents/plugins/marketplace.json")
     old_profile = b"C:" + b"\\Users\\" + b"albykov"
@@ -673,7 +928,7 @@ def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
     )
     if len(observed_revisions) != 1:
         return
-    expected_revision = int(observed_revisions[0])
+    expected_revisions = {10, RP_CONTRACT_SOURCE_MAX_REVISION}
     contract_files = (
         ROOT / "codex-skills" / "rp-world-pack-builder" / "SKILL.md",
         ROOT / "codex-skills" / "rp-world-pack-builder" / "references" / "world-pack-contract.md",
@@ -688,13 +943,11 @@ def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
         declared_revisions = [
             int(value) for value in RP_CONTRACT_DECLARATION_RE.findall(text)
         ]
-        if not declared_revisions or any(
-            revision != expected_revision for revision in declared_revisions
-        ):
+        if set(declared_revisions) != expected_revisions:
             fail(
                 errors,
-                "RP WorldPack builder contract revision does not match observed "
-                f"revision {expected_revision}: {path.relative_to(ROOT)}",
+                "RP WorldPack builder contract must document the observed default and "
+                f"candidate revisions {sorted(expected_revisions)}: {path.relative_to(ROOT)}",
             )
 
     required_markers = (
@@ -705,6 +958,11 @@ def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
         "story_memory_canonical=false",
         "rp-gateway.worldpack-lore-cards.v1",
         "rp-gateway.world-clock.v1",
+        '"presets_default"',
+        '"openings_default"',
+        "prompts/openings/<id>/state-seed.json",
+        "Примета:",
+        "Манера речи:",
     )
     for marker in required_markers:
         if marker not in combined:
@@ -736,6 +994,7 @@ def main() -> int:
     validate_json(errors)
     validate_worldpack_lore_cards(errors)
     validate_world_clocks(errors)
+    validate_worldpack_narrative_variants(errors)
     validate_wiki(errors)
     validate_agents(errors)
     validate_plugin(errors)
@@ -747,7 +1006,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
+    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks/narrative variants, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
     return 0
 
 

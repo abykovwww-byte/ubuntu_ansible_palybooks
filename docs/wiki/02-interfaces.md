@@ -4,13 +4,14 @@
 
 ## RP contract revision
 
-`PartySummary` совместимо хранит целое поле `rp_contract_revision` (`0..9`).
-Gateway source поддерживает candidate revision `9`; фактический observed rollout
-остаётся отдельной настройкой, а revision `8` активирована только для узкого
-WorldPack canary. Обычная новая RP-партия получает
-`min(WorldPack declared, observed)`. Запрос создания
+`PartySummary` совместимо хранит целое поле `rp_contract_revision` (`0..11`).
+Gateway source поддерживает candidate revision `11`, а inventory остаётся
+observed `10`, пока в репозитории нет revision-11 WorldPack. Для declarations
+`0..10` обычная новая RP-партия получает `min(WorldPack declared, observed)`.
+Declared revision `11` требует observed `>=11` и иначе fail-closed, без
+downgrade до `10`. Запрос создания
 manual branch или autotest может явно передать candidate-ревизию в диапазоне
-`0..9`; она хранится только у ветки и не меняет source party. Существующие поля и
+`0..11`; она хранится только у ветки и не меняет source party. Существующие поля и
 endpoint сохраняются. Пустое поле в админской форме сохраняет revision исходной
 партии. Existing party не повышается автоматически при изменении observed.
 
@@ -37,6 +38,29 @@ Light GUI — основной интерфейс владельца парти�
 - admin-раздел: пользователи, глобальная служебная модель, видимость миров, Showroom, автотесты и dataset review.
 
 Light GUI не вызывает provider API напрямую. Даже если ключ введён пользователем, он сохраняется Gateway для конкретной партии и не возвращается в браузер целиком.
+
+### Authored presets и opening seeds в revision 11
+
+Для revision-11 WorldPack в режиме `rp` `GET /api/worldpacks` возвращает отдельные top-level
+списки `presets[]` (`id`, `title`) и `openings[]` (`id`, `title`,
+`player_role`) вместе с `presets_default` и `openings_default`. Light GUI
+показывает два selector до создания партии и отправляет только выбранные IDs:
+
+```text
+POST /api/player-characters/draft   {worldpack_id, ..., opening_id?}
+POST /api/player-characters         {..., opening_id?}
+POST /api/parties                   {..., preset_id?, opening_id?}
+```
+
+Omitted ID означает объявленный default, а не первый элемент массива.
+Неизвестное или похожее на путь значение отклоняется; браузер не передаёт пути
+WorldPack. `PlayerCharacterSummary` возвращает resolved `opening_id`.
+`PartySummary` может вернуть выбранные `preset_id`, `opening_id` и audit-only
+SHA-256, но не полные materialized prompt texts или state seed.
+
+Для паков revisions `0..10` новые поля отсутствуют из ответа и форма сохраняет
+прежний UX. Наличие selector в source не означает activation: inventory всё ещё
+observed `10`, а revision-11 pack поставляется отдельно.
 
 ### Lore Cards в revision 8
 

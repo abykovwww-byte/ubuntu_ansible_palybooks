@@ -138,6 +138,10 @@ campaign-bible.md
 prompts/gm-system.md
 prompts/authors-note.md
 prompts/opening-scene.md
+presets/<id>/gm-system.md          # revision 11 only
+presets/<id>/authors-note.md       # revision 11 only
+prompts/openings/<id>/opening-scene.md  # revision 11 only
+prompts/openings/<id>/state-seed.json   # revision 11 only; exact filename
 world-info/index.md
 sillytavern/<slug-or-title>.json
 characters/index.md
@@ -146,7 +150,7 @@ quick-replies/notes.md
 setup-flow.md
 relationships/model.json
 lore-cards/<group>.json
-world-clock.json                 # optional for a revision-10 authored calendar
+world-clock.json                 # optional for a revision-10+ authored calendar
 ```
 
 `relationships/model.json` is required when `scenario_types.supported`
@@ -159,7 +163,41 @@ World-pack requirements:
 - Put the starting player role in `manifest.player_role`; Light GUI uses it as the default player character description.
 - Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`. This metadata filters incompatible combinations but never auto-selects the party type.
 - For a new pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 10}`. This is the maximum contract understood by the pack, not a migration flag: ordinary parties are capped by Gateway's observed revision, and existing packs and parties remain pinned until an explicit compatible update. Do not blanket-migrate them or author a new RP pack against the legacy mechanical v1 contract.
-- Add `files.world_clock` only when the revision-10 pack needs an authored
+- Revision 11 is an explicit multi-variant contract, not the default for a new
+  pack while the repository has no activated revision-11 WorldPack. Use
+  `"rp_contract": {"schema_version": "rp-core.v2", "revision": 11}` only in a
+  separately approved compatible pack-and-activation delivery. The mechanism
+  source alone remains observed at revision 10.
+- A revision-11 manifest declares non-empty top-level `presets` and `openings`
+  plus explicit `"presets_default"` and `"openings_default"`. Preset entries are
+  exactly `id`, `title`, `world_system_prompt`, `world_authors_note`; opening
+  entries are exactly `id`, `title`, `player_role`, `prompt`, `state_seed`. IDs
+  match `^[a-z0-9][a-z0-9_-]{0,63}$`, are unique within their catalog, and are
+  the only selection values accepted from clients.
+- Every revision-11 opening seed path is exactly
+  `prompts/openings/<id>/state-seed.json`. Keep the four legacy root files and
+  declarations as byte-equal aliases of the explicit defaults:
+  `prompts/gm-system.md`, `prompts/authors-note.md`,
+  `prompts/opening-scene.md`, and `state-seed.json`. Root
+  `manifest.player_role` equals the default opening role; never infer a default
+  from array order.
+- Keep every revision-11 opening `player_role` at or below 4,000 normalized
+  characters. The draft becomes `PlayerCharacterCreate.description`, whose
+  existing 4,000-character limit also governs this authored role.
+- Preserve the state overlay order: selected full seed → Gateway metadata/world
+  clock → PlayerCharacter (including role and known fact) → explicit starting
+  patch → final state-schema validation. A full opening seed removes fragment
+  merging; it does not bypass or reorder these overlays.
+- In every revision-11 Lore Card whose key starts with `npc:`, `content` has two
+  separate non-empty authored lines beginning exactly `Примета:` and
+  `Манера речи:`. They are visible character guidance, not hidden storage.
+- Treat each preset as a complete prompt pair, not fragments. Including the
+  existing headings, `WORLD_SYSTEM_PROMPT` stays within 5,000 characters and
+  `WORLD_AUTHORS_NOTE` within 1,500. The authors note must be a usable
+  preset-specific brief with required scene forms/elements and explicit
+  conflict-resolution prohibitions. Review that meaning as authored prose; do
+  not expect a semantic validator, generated content, or silent truncation.
+- Add `files.world_clock` only when the revision-10+ pack needs an authored
   calendar and cancelable events. Validate those events against the Lore Card
   library; the file remains optional and existing packs stay pinned.
 - Reuse stable location and character IDs from `state-seed.json` throughout the pack. Revision 8 adds no scene manifest field and its narrator does not receive `scene_state`. When maintaining a revision-7 pack, an additional invariant narrative affiliation may use the existing bounded `rp_contract.stable_affiliations` compatibility field; never infer professions, goals, beliefs, emotions, or relationship-model roles into it.
@@ -269,10 +307,15 @@ Pop-Location
   at least one positive concrete-help event declares `resolves: ["favour"]`;
   `plot.discovery_chance_per_turn` is in `[0, 1]`; and the first slice declares
   only the `loyalty` axis.
-- For revision-10 packs with `files.world_clock`, validate the closed envelope,
+- For revision-10+ packs with `files.world_clock`, validate the closed envelope,
   timezone/date and duration, unique IDs, acyclic `after_event` references,
   known markers, non-empty supersession for every event, allowed consequence
   types, and referenced authored Lore Card keys.
+- For every revision-11 pack, validate both closed catalogs, explicit defaults,
+  stable unique IDs, safe existing paths, exact opening seed convention,
+  canonical byte-equal root aliases, root/default `player_role` equality, and
+  both complete prompt-block budgets. Run state-schema validation for every
+  nested file named `state-seed.json`, not only the root alias.
 - Run relevant focused tests when Gateway/app code or IaC behavior changed.
 - Run a narrow scan for API-key-looking strings.
 - Do not treat Windows-side `/srv` or `\srv` paths as runtime validation.

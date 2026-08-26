@@ -129,6 +129,28 @@ labels для History/UI. Exact local prompt/response остаётся в сущ
 `service_call_log` с прежней redaction/retention policy; новые TTL, backup scope
 или provider credentials не добавляются.
 
+### Revision 11: immutable WorldPack materialization
+
+Для новой revision-11 party существующая строка `parties` хранит выбранные
+`preset_id`, `opening_id` и internal JSON snapshot: точные system/authors/opening
+тексты, выбранный `player_role`, полный state seed и SHA-256 каждого payload.
+Новая content table не создаётся. Public party summary может вернуть IDs и
+audit hashes, но исключает полные prompt texts и seed.
+
+Выбор разрешается только по bounded ASCII ID внутри manifest, поэтому клиент не
+задаёт filesystem path. Pack paths проходят repository/runtime containment
+checks. Omitted ID означает explicit default; неизвестное или path-like значение
+не даёт fallback. Player-character draft/create сохраняют resolved `opening_id`,
+чтобы роль и opening будущей партии совпадали.
+
+Branch/autotest descendant использует и наследует тот же source-party snapshot. Существующие партии не
+backfill-ятся и не мигрируются; поздний WorldPack edit не переписывает их state
+или prompt. Checksums служат аудитной сверкой и не создают телеметрию или новый
+readiness signal.
+
+Source mechanism пока имеет ceiling `11`, observed `10` и не содержит
+revision-11 pack; storage migration в source не является runtime activation.
+
 ## Где находятся данные
 
 ```text
