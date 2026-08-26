@@ -439,7 +439,8 @@ sequenceDiagram
     DB->>Pack: deterministic conditions + supersession
     Pack-->>DB: facts + Lore Card toggles + fired status
     DB-->>API: pending one-shot announcement
-    API-->>UI: first available later response + horizon
+    API->>API: validate direct date/fired-fact reversals; at most one repair
+    API-->>UI: committed later response + horizon
 ```
 
 Clock jobs применяются строго по `party_turn` и не владеют сценой. Если main
@@ -452,6 +453,15 @@ commit, который фактически получил его в bounded `С
 elapsed. Marker берётся из typed state predicate либо owner-scoped explicit
 confirmation. После исчерпания local retries записывается видимый
 `PT0S/service_unavailable` без догоняющего скачка и без NVIDIA fallback.
+
+Блок начинается с короткого указания, что текущая дата, произошедшие события и
+durable facts — текущий канон. `OutputValidator` без дополнительного model call
+ловит только прямые проверяемые откаты: например, после 12:00 нельзя снова
+утверждать, что до сегодняшнего полудня осталось время, а при active fact об
+истёкшем сроке — что этот срок ещё открыт. Первый такой ответ получает обычный
+bounded narrator repair; повторное нарушение не коммитит ход. Это намеренно не
+общий NLP-оракул времени: косвенные намёки и новые способы формулировки требуют
+provider canary и при необходимости узкого расширения gate.
 
 ## Обычный ход
 
@@ -506,7 +516,7 @@ sequenceDiagram
     API->>Store: atomically apply patch + record turn/artifact + consume events
     API-->>UI: assistant message + state version + public artifact
     API-->>Jobs: memory + relationship extraction jobs in background
-    Jobs->>Rel: qualitative events -> deterministic causes and boundary events
+    Jobs->>Rel: narrator-only verbatim + event cue -> deterministic causes and boundary events
 ```
 
 Для training prompt-контракт v2 явно содержит точные `header`, `question` и
@@ -670,14 +680,23 @@ metadata и audit.
 привязанный к `request_id` сохранённого хода. Служебная модель возвращает
 ровно ключи `character_mention`, authored `event_id` и `evidence`; alias
 `evidence_quote` не принимается. Evidence должна быть одним самодостаточным
-verbatim-фрагментом, который явно показывает завершённое взаимодействие игрока с
-названным персонажем, а не только присутствие, обычное действие или опасность
-персонажа; `shared_risk` требует общего конкретного риска для обоих в этом же
-фрагменте. Gateway проверяет evidence как точную нормализованную подстроку текущего
-player+narrative текста,
+verbatim-фрагментом именно из записанного `narrative_response`: player message
+остаётся намерением и сам по себе больше не может породить relationship artifact.
+Фрагмент должен явно показывать завершённое взаимодействие игрока с названным
+персонажем, а не только присутствие, приближение, вопрос, обычное действие или
+опасность персонажа; `shared_risk` требует общего конкретного риска для обоих в
+этом же фрагменте. Для текущего bounded набора authored event IDs Gateway также
+требует event-specific словесный признак самого события. Поэтому «подошёл и сел
+рядом» не является `abandoned_in_need`, а вопрос о передаче вещи не является
+`fair_deal`. Новые custom event IDs сохраняют прежний verbatim/alias контракт,
+пока для них не определён отдельный deterministic cue.
+
+Gateway проверяет evidence как точную нормализованную подстроку narrator text,
 разрешает mention по alias-таблице WorldPack и только затем получает внутренний
 `character_id`. Неоднозначное, неразрешимое или не verbatim упоминание получает
-отдельный terminal audit code без retry. Веса, затухание, полосы, раны, роли,
+отдельный terminal audit code без retry; player-only цитата получает
+`evidence_not_narrated`, а несоответствие типа события —
+`event_evidence_mismatch`. Веса, затухание, полосы, раны, роли,
 пограничные события, конечные часы и каскад вычисляются Gateway. Повтор задания
 не создаёт вторую причину. В WorldPack `starosta` authored-событие
 `trust_gained` создаёт положительную причину с тем же сроком, что

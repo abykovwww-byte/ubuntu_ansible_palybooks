@@ -194,7 +194,9 @@ flowchart LR
     D -->|"explicit confirm"| S["Deterministic Gateway commit"]
     S --> M["One affected memory section · OpenRouter DeepSeek"]
     R["relationship_extraction"] --> L["local Gemma · max 5 attempts"]
-    L -->|"exhausted"| T["terminal stale"]
+    L --> G["Narrator-only verbatim + event-specific cue gate"]
+    G -->|"semantic reject"| J["terminal rejected · no artifact"]
+    L -->|"technical retries exhausted"| T["terminal stale"]
     I -.-> X["No NVIDIA / party BYOK / provider fallback"]
     D -.-> X
     R -.-> X
@@ -205,6 +207,11 @@ fallback list. `gm_intent` превращает любой transport/schema/leng
 read-only `uncertain`; он не пробует cloud provider. Draft failure виден игроку
 и не создаёт artifact. Relationship failure не блокирует игровой commit: durable
 job повторяется до пяти раз и затем остаётся `stale` для оператора.
+Parseable relationship output ещё не является доменным успехом: evidence должна
+быть verbatim-цитатой из `narrative_response`, а не из player intent, и для
+текущих authored event IDs пройти conservative event-specific cue gate.
+`evidence_not_narrated` и `event_evidence_mismatch` завершаются как semantic
+rejection без retry и без записи cause/badge/event.
 
 Memory absorption остаётся отдельным exact OpenRouter route с stack-managed key,
 двумя attempts и `section_key` затронутой секции. Обычный rev8+ path по-прежнему
@@ -229,6 +236,11 @@ Jobs идут строго по party turn, но gameplay не ждёт их. П
 Gateway применяет `PT0S` с `reason=service_unavailable`; пропущенное время не
 догоняется, provider не меняется и NVIDIA не является retry-целью.
 
+Отдельно от elapsed job обычный `OutputValidator` сверяет narrator prose с уже
+авторитетной датой и durable deadline facts. Прямой откат времени получает одну
+обычную narrator repair-попытку, затем fail-before-commit. Эта проверка
+детерминированна и не создаёт служебный model call.
+
 ## Диагностика model attempts
 
 Turn Trace Workbench сохраняет фактическую, а не реконструированную историю
@@ -248,7 +260,9 @@ additive добавлены `request_id`, `party_turn`, `provider`, `model`, `at
 Для локальной Gemma Gateway дополнительно передаёт provider-level JSON Schema с
 единственным корневым ключом `events` и точными полями события. Это предотвращает
 неподдерживаемые alias-поля на этапе генерации; семантические проверки evidence и
-атрибуции по-прежнему выполняет Gateway.
+атрибуции по-прежнему выполняет Gateway. В service prompt также передаются
+короткие требования к разрешённым event IDs и явные отрицательные примеры:
+приближение, соседство, вопрос или простое упоминание не считаются событием.
 
 Оба источника связывает request-centric read model Gateway. Он доступен только
 admin/operator через Light GUI, не отдаётся обычному владельцу партии или
