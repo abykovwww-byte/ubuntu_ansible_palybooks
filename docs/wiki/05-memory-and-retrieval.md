@@ -335,7 +335,11 @@ input плюс три предыдущих eligible RAW units целиком. О
 и optional `Outcome.target`; `scene_state`, seed location и active threads не
 являются сигналами присутствия. Этот scan фильтрует
 `RELATIONSHIP_PRESSURE`/due guidance и не создаёт отдельный
-`RELEVANT_CHARACTERS` prompt block.
+`RELEVANT_CHARACTERS` prompt block. Имя для narrator pressure берётся из
+`characters[id].name/display_name`, при его отсутствии — из первого declared
+alias relationship model, и только затем из humanized ID. Текущие RP state seeds
+могут не иметь `name`: это не отключает relationship consumer, если WorldPack
+объявил aliases.
 
 ### S2: authored Lore Cards и тот же recent scan
 
