@@ -595,7 +595,12 @@ sanitized state summary, outcome, RP-only `RELATIONSHIP_PRESSURE` и текущ�
 качественное давление активных причин и пограничных событий; числа, сроки,
 внутренние event ID, сообщник, мишень и payload остаются в Gateway. Ненулевая
 seed-причина и обычная извлечённая причина влияют уже на следующий RP prompt и
-не ждут пересечения границы полосы. Для нового training runtime
+не ждут пересечения границы полосы. В rev7+ narrator-visible имя разрешается как
+explicit `name/display_name` из state, затем первый declared alias relationship
+model, затем humanized character ID. End-to-end regression для rev8 использует
+state без `name` и требует реальный `RELATIONSHIP_PRESSURE` в recorded
+`prompt_json` и `relationship_pressure` в `prompt_assembly.included_block_ids`.
+Для нового training runtime
 добавляется только текущий `ACTIVE_TRAINING_TURN_CONTRACT`: имя и роль игрока,
 текущие `surfaces[]`, явно разрешённые state paths и включённые interaction
 contracts. Score, assessment, fallback и будущие ходы до debrief не передаются.

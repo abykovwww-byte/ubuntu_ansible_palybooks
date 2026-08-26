@@ -157,10 +157,15 @@ GUI получают короткое одноразовое событие с �
 завершил все ходы без narrator fallback и подтвердил local clock jobs, authored
 event/fact и отсутствие NVIDIA. Он одновременно обнаружил два semantic разрыва:
 narrator смог вернуть время до уже прошедшего полудня, а relationship extractor
-записал события по цитатам, которые лишь упоминали NPC. Текущая source revision
-добавляет bounded clock-validation repair и narrator-only event-specific evidence
-gate без новых model calls. До её apply и отдельной canary эти два gate имеют
-уровень `каркас`; 50-turn endurance по-прежнему не заявлен.
+записал события по цитатам, которые лишь упоминали NPC. Отдельная проверка всей
+цепочки обнаружила третий разрыв: накопленные relationship causes не попадали ни
+в один из 26 narrator prompts, потому что rev8 искал имя только в state, тогда
+как текущие RP WorldPacks хранят display aliases в relationship model. Текущая
+source revision добавляет bounded clock-validation repair, narrator-only
+event-specific evidence gate и восстанавливает порядок имени
+`state name -> relationship alias -> humanized ID` без новых model calls. До её
+apply и отдельной canary эти gate имеют уровень `каркас`; 50/60-turn endurance
+по-прежнему не заявлен.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
