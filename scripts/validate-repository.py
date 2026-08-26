@@ -196,8 +196,6 @@ def validate_world_clocks(errors: list[str]) -> None:
         if relative_path is None:
             if conventional_path.exists():
                 fail(errors, f"undeclared WorldPack world-clock.json: {manifest_path.parent.relative_to(ROOT)}")
-            if revision >= 10:
-                fail(errors, f"revision-10 WorldPack must declare world_clock: {manifest_path.relative_to(ROOT)}")
             continue
         label = str(manifest_path.relative_to(ROOT))
         if not isinstance(relative_path, str) or not relative_path.strip():
@@ -209,8 +207,6 @@ def validate_world_clocks(errors: list[str]) -> None:
             continue
         if revision < 10:
             fail(errors, f"WorldPack world_clock requires rp_contract revision >= 10: {label}")
-        if pack_id != "merchant-sviatoslav":
-            fail(errors, f"only merchant-sviatoslav may declare candidate revision 10: {label}")
         try:
             clock = json.loads(clock_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):

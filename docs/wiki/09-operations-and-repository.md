@@ -124,9 +124,12 @@ candidate-реализации и её deterministic test suite.
 ## RP contract revision 10: source activation
 
 После поставки S2–S4 отдельный минимальный rollout задаёт
-`rp_stack_gateway_rp_contract_observed_revision: 10`. Только
-`merchant-sviatoslav` объявляет revision `10`, поэтому остальные WorldPacks
-остаются на своих `6/7`, а существующие партии сохраняют закреплённую revision.
+`rp_stack_gateway_rp_contract_observed_revision: 10`. `merchant-sviatoslav` и
+`day-watch-moscow` объявляют revision `10`, но только первый содержит authored
+world clock. Repository validation допускает revision `10` без
+`files.world_clock`; объявленный календарь по-прежнему проверяется целиком.
+Остальные WorldPacks остаются на своих `6/7`, а существующие партии сохраняют
+закреплённую revision.
 
 Merge этого значения не является runtime-активацией. После интерактивного
 Ansible apply новая ordinary party «Купца» должна сохранить revision `10` в API,
@@ -135,6 +138,11 @@ GM-коррекцией должна отдельно доказать секц�
 кэш после сдвига якоря, world clock, `RELATIONSHIP_PRESSURE` в следующем prompt
 и отсутствие NVIDIA во всех provider/service routes. До этих проверок S1–S4 не
 получают ступень выше `каркас` только из-за source activation.
+
+Новая ordinary party `day-watch-moscow` после apply также должна сохранить
+revision `10`, но не создавать `state.world_clock` и clock service jobs. Это
+проверяет optional boundary, не является S4 clock canary и не мигрирует прежние
+партии мира.
 
 ## Codex devkit, worktrees и CI
 
