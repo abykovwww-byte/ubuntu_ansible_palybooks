@@ -299,19 +299,20 @@ Exact provider/model и retry policy описаны в [разделе о мод
 ```mermaid
 flowchart TB
     A["1. Короткие русские правила narrator"] --> B["2. WORLD_SYSTEM_PROMPT · до 5000 chars"]
-    B --> C["3. WORLD_ABSOLUTE_RULES · один prose-list · до 3000 chars"]
-    C --> D["4. RAW 50–57 + uncovered · anchor 8"]
-    D --> E["5. RP_STORY_MEMORY · если есть · до 24000 chars"]
-    E --> F["6. PARTY_LORE_CARDS · только целые cards · до 4000 chars"]
-    F --> C9["6a. Rev9 ИСПРАВЛЕНИЯ ИГРОКА · если active"]
-    C9 --> G["7. Только содержательный AUTHORITATIVE_OUTCOME"]
-    G --> H["8. RELATIONSHIP_PRESSURE + due resolution"]
-    H --> WC["9. Rev10 СОБЫТИЯ МИРА · до 800 chars"]
-    WC --> I["10. WORLD_AUTHORS_NOTE · до 1500 chars · последний system block"]
-    I --> J["11. Current player action · последнее message"]
+    B --> PC["3. PLAYER_CHARACTER · только name + description"]
+    PC --> C["4. WORLD_ABSOLUTE_RULES · один prose-list · до 3000 chars"]
+    C --> D["5. RAW 50–57 + uncovered · anchor 8"]
+    D --> E["6. RP_STORY_MEMORY · если есть · до 24000 chars"]
+    E --> F["7. PARTY_LORE_CARDS · только целые cards · до 4000 chars"]
+    F --> C9["7a. Rev9 ИСПРАВЛЕНИЯ ИГРОКА · если active"]
+    C9 --> G["8. Только содержательный AUTHORITATIVE_OUTCOME"]
+    G --> H["9. RELATIONSHIP_PRESSURE + due resolution"]
+    H --> WC["10. Rev10 СОБЫТИЯ МИРА · до 800 chars"]
+    WC --> I["11. WORLD_AUTHORS_NOTE · до 1500 chars · последний system block"]
+    I --> J["12. Current player action · последнее message"]
 ```
 
-Блоки 1–3 и первые 50 RAW units — повторяемая основа provider prefix. Память,
+Блоки 1–4 и первые 50 RAW units — повторяемая основа provider prefix. Память,
 cards, corrections, relationship pressure, world events, author note и current
 action находятся после неё и не обнуляют кэш длинной истории. В stable rules
 нет turn number, state/revision IDs, timestamps, campaign ID или счётчиков.
@@ -325,6 +326,8 @@ Generic no-check outcome не рендерится. Rev8 также не чит�
 allowance, `LONG_TERM_PARTY_MEMORY`, `UNCOMPACTED_ARCHIVE_FALLBACK` или
 `RETRIEVED_ARCHIVE_SCENES`. Scene bundle не запрашивается: narrator возвращает
 plain text. Legacy storage и compatibility code revisions `0..7` не удаляются.
+`PLAYER_CHARACTER` заменяет только потерянную идентичность игрока, а не полный
+state JSON; тот же компактный блок сохраняется в narrator repair.
 
 При hard input overflow Gateway сначала удаляет весь `PARTY_LORE_CARDS`, затем
 может удалять с головы только целые safely covered RAW units. Он сохраняет не
@@ -382,7 +385,9 @@ Memory/RAW confirm запускает valve независимо от normal 50-
 1. Gateway определяет одну из пяти section по target field;
 2. один exact-section OpenRouter request пересобирает только её;
 3. existing typed correction детерминированно помечает прежний fact
-   `superseded/retracted` и создаёт replacement при `replace`;
+   `superseded/retracted`; при `replace` Gateway создаёт replacement либо, если
+   service response уже вернул его с тем же `fact_id`, повышает этот единственный
+   объект с `inference` до `user`;
 4. terminal target/replacement получает authority `user` и source GM turn;
 5. artifact становится `absorbed` только если exact результат сохранён и
    section coverage достиг target RAW/fact turn.
@@ -392,6 +397,13 @@ safe coverage всё ещё равен `min()` пяти значений. Пус
 section допустима; semantic retry ради содержимого запрещён. При двух неудачных
 attempts overlay остаётся active и продолжает защищать следующий narrator
 prompt.
+
+Compact narrator repair получает тот же `PLAYER_CHARACTER` и effective
+`ИСПРАВЛЕНИЯ ИГРОКА`. Если snapshot уже сохранил exact user-authority correction
+до сбоя при смене artifact status, retry завершает absorption без второго
+OpenRouter call; absorbed retry — no-op. Более старый in-flight ответ одного
+target slot отбрасывается, если за время model call игрок подтвердил новую
+версию этого slot.
 
 ### S4: world events не являются новым слоем памяти
 
@@ -412,6 +424,11 @@ relationship pressure и до author note/current action. Он содержит 
 снимаются из pending только atomic commit успешного хода, поэтому failed
 narrator attempt не превращается в потерянное событие. Эта проекция не
 расширяет пять memory sections, не меняет их coverage и не создаёт archive.
+Opening и его repair получают ту же дату/проекцию; successful opening commit
+снимает показанные pending IDs, но elapsed job до первого player action не
+создаётся. Неканоничный safe fallback также не снимает event ID, не получает
+world-clock metadata и не создаёт elapsed job: дата остаётся прежней, а событие
+переходит в следующий доступный narrator prompt.
 
 ## Слои памяти
 
@@ -588,6 +605,9 @@ Candidate revision `8` использует отдельный history-first ord
 На revision `7` DC2 дополнительно фильтрует этот narrator-visible блок
 по derived pre-scene allow-list. Фильтрация не удаляет causes/events и не меняет
 их clocks или status; revisions `0..6` сохраняют прежний relationship rendering.
+На rev8+ current-plus-three scan выбирает кандидатов, но не разрешает переносить
+или вводить отсутствующего NPC: pressure откладывается до присутствия либо
+установленного недавней историей канала, а durable event остаётся active.
 
 Начальный canonical `characters.*.trust` не переписывается и не превращается в
 вторую шкалу: WorldPack `trust_mapping` один раз создаёт derived cause с

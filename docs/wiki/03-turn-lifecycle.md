@@ -32,10 +32,11 @@
 activation и post-apply stamp proof подтвердили effective observed `7` для новых
 ordinary RP-parties. Код revision `8` / S1 слит и применён; отдельный
 source-activation slice ранее подтвердил observed `8` для
-`merchant-sviatoslav`. Следующий source rollout поднимает gate до `10`, но
-effective runtime revision `10` появится только после отдельного Ansible apply
-и создания новой ordinary party; existing parties не мигрируются. До живой
-60-turn проверки registry 032 остаётся на ступени `каркас`.
+`merchant-sviatoslav`. Последующий revision-10 rollout также применён: новая
+production party прошла opening и 60 обычных ходов, исполнив memory, sliding
+cache anchor и clock path. Этот прогон выявил перечисленные ниже разрывы;
+текущий closure-source ещё ждёт повторного Ansible apply и ручной партии.
+Existing parties не мигрируются, registry 032 остаётся на ступени `каркас`.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -311,10 +312,12 @@ boundary и не повышает readiness DC4.
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 принимает новый контракт только для RP `rp_contract_revision >= 8`. Source
-activation выбирает для первого canary только новые партии `merchant-sviatoslav`;
-существующие партии, остальные WorldPacks и `training` не меняются. Apply и
-stamp-party подтвердили effective revision `8`; длинные live gates отложены до
-полной реализации, поэтому readiness остаётся `каркас`.
+activation сначала выбрала `merchant-sviatoslav`, затем мир дошёл до revision
+`10`; существующие партии и `training` автоматически не мигрируют. Первый
+60-turn production endurance исполнил sliding window, cache anchor и normal
+five-section memory, но выявил описанные ниже разрывы карточки игрока,
+отношений, correction recovery и opening. До повторной post-apply партии
+readiness остаётся `каркас`.
 
 История собирается целыми игровыми единицами. Opening — одно assistant-message;
 только точная техническая реплика `[AUTO_START] Старт партии` подавляется.
@@ -340,7 +343,7 @@ sequenceDiagram
     alt required set still does not fit
         Prompt-->>Store: fail before provider and player mutation
     else prompt fits
-        Prompt->>Prompt: stable rules + anchored RAW, then volatile memory/cards/pressure/note
+        Prompt->>Prompt: stable rules + PLAYER_CHARACTER + anchored RAW, then volatile memory/cards/pressure/note
         Prompt->>LLM: ordered history-first messages
         LLM-->>Prompt: plain narrator text
         Prompt->>Store: cache counters + stable prefix hash in turn metadata
@@ -353,6 +356,9 @@ transition allowance, legacy `LONG_TERM_PARTY_MEMORY`,
 `UNCOMPACTED_ARCHIVE_FALLBACK` или `RETRIEVED_ARCHIVE_SCENES`. Scene bundle и
 `scene_state` остаются compatibility-path только для revision `7`; rev8 narrator
 возвращает plain text, а state/turn commit сохраняет общий atomic safety-контракт.
+Вместо полного state dump каждый ordinary/repair prompt сохраняет только
+стабильные `player.name` и `player.description` в `PLAYER_CHARACTER`, чтобы
+narrator не терял пол, роль и исходные факты персонажа после opening.
 Точный prompt order и секционные memory-правила приведены в
 [разделе о памяти](05-memory-and-retrieval.md#revision-8-history-first-prompt-и-пять-секций-памяти).
 
@@ -418,6 +424,11 @@ GM patch может только заменить/отозвать сущест�
 или правила запрещено. Confirm не вызывает narrator. До absorption active
 artifact входит в защищённый `ИСПРАВЛЕНИЯ ИГРОКА`; `gm_correction` исключён из
 RAW, cadence, relationship extraction и игрового счётчика.
+Тот же overlay и `PLAYER_CHARACTER` входят в compact narrator repair. Durable
+retry поглощения сначала узнаёт уже сохранённый user-authority результат и
+завершает artifact без второго OpenRouter call; retry absorbed request — no-op.
+Если во время section call подтверждена более новая версия того же slot, старый
+ответ не записывает snapshot и job завершается terminal no-op.
 
 ### Revision 10: S4 authored world clock
 
@@ -449,6 +460,14 @@ turn уже начался, job откладывается без расхода
 durable world fact и authored Lore Card toggle записываются одной transaction;
 `meta.turn` не меняется. Event удаляется из pending только успешным narrator
 commit, который фактически получил его в bounded `СОБЫТИЯ МИРА` block.
+Opening получает текущую дату, pending events и horizon в том же block; его
+успешный commit сохраняет metadata и снимает показанные IDs, но elapsed job не
+создаёт, потому что до первого действия игрока время оценивать не из чего.
+Неканоничный safe fallback ни на opening, ни на ordinary turn не снимает pending
+ID и не получает `world_clock_events` metadata: событие остаётся для следующей
+сцены, UI не показывает его под техническим ответом, elapsed job не создаётся и
+игровая дата не сдвигается. Оставшийся от прежней версии queued job для такого
+turn завершается без model call и без изменения state.
 
 Модель не создаёт событие и не подтверждает отмену: она возвращает только
 elapsed. Marker берётся из typed state predicate либо owner-scoped explicit
@@ -592,6 +611,8 @@ Gateway проверяет owner, загружает `Party`, создаёт par
 В prompt попадают только разрешённые слои: универсальные правила режима, world
 prompts, memory chapters, budgeted raw history, lore cards, релевантные NPC,
 sanitized state summary, outcome, RP-only `RELATIONSHIP_PRESSURE` и текущее действие.
+Для rev8+ полный state summary отсутствует, но компактный `PLAYER_CHARACTER`
+всегда несёт стабильные имя и описание персонажа игрока.
 Блок отношений содержит только имя персонажа, словесную метку полосы и
 качественное давление активных причин и пограничных событий; числа, сроки,
 внутренние event ID, сообщник, мишень и payload остаются в Gateway. Ненулевая
@@ -601,6 +622,10 @@ explicit `name/display_name` из state, затем первый declared alias 
 model, затем humanized character ID. End-to-end regression для rev8 использует
 state без `name` и требует реальный `RELATIONSHIP_PRESSURE` в recorded
 `prompt_json` и `relationship_pressure` в `prompt_assembly.included_block_ids`.
+Для rev8+ current-plus-three scan остаётся только поиском кандидатов:
+обязательная инструкция запрещает вводить или переносить NPC ради pressure и
+откладывает проявление до реального присутствия либо установленного недавней
+историей канала.
 Для нового training runtime
 добавляется только текущий `ACTIVE_TRAINING_TURN_CONTRACT`: имя и роль игрока,
 текущие `surfaces[]`, явно разрешённые state paths и включённые interaction
@@ -652,11 +677,14 @@ OpenRouter endpoint, исключает reasoning-текст из ответа �
 ### 5. Валидация и repair
 
 Для `rp-core.v2` Gateway проверяет player agency и типизированные абсолютные
-правила WorldPack после ответа модели. Устойчивое переключение prose в русское
-первое лицо персонажа игрока также отправляется в один существующий repair;
-повторное нарушение или ошибка provider завершает запрос контролируемой ошибкой
-до state/turn commit. Legacy-партии `rp-core.v1` сохраняют прежний однопроходный
-контракт до явной миграции.
+правила WorldPack после ответа модели. Явное `я` в narrator prose вне прямой
+речи, один однозначный start вида `Киваю...`, first-person attribution вида
+`— ..., — отвечаю ...` / `— ... . — шепчу я ...` или повторяющиеся starts отправляют
+ответ в один существующий repair. Реплики NPC вида `— Я ..., — говорит
+Ратибор` и цитаты от первого лица допустимы. Повторное нарушение или ошибка
+provider завершает запрос контролируемой ошибкой до state/turn commit.
+Legacy-партии `rp-core.v1` сохраняют прежний однопроходный контракт до явной
+миграции.
 
 WorldPack runtime использует `TRAINING_REPAIR_ATTEMPTS`: canonical
 header/question/no-link marker сначала чинятся без LLM, soft field/profile
@@ -701,8 +729,11 @@ verbatim-фрагментом именно из записанного `narrativ
 
 Gateway проверяет evidence как точную нормализованную подстроку narrator text,
 разрешает mention по alias-таблице WorldPack и только затем получает внутренний
-`character_id`. Неоднозначное, неразрешимое или не verbatim упоминание получает
-отдельный terminal audit code без retry; player-only цитата получает
+`character_id`. Модель обязана копировать один fragment без изменения слов и
+пунктуации, с literal alias и завершённым событием; иначе должна вернуть
+`events=[]`. Любой невалидный payload получает durable rejection audit и
+повторяется существующей job до пяти attempts, затем становится `stale`;
+валидный `events=[]` завершается с первой попытки. Player-only цитата получает
 `evidence_not_narrated`, а несоответствие типа события —
 `event_evidence_mismatch`. Веса, затухание, полосы, раны, роли,
 пограничные события, конечные часы и каскад вычисляются Gateway. Повтор задания
@@ -819,8 +850,9 @@ Rev9 confirm memory/RAW correction не ждёт normal threshold или cadence
 затронутую section. Остальные четыре coverage сохраняются. Artifact становится
 `absorbed` только после persisted authority `user` fact/tombstone и покрытия
 целевого turn; при отказе остаётся active в overlay. Rev9 relationship job
-сохраняет пять attempts, но после последней ошибки получает terminal `stale`, а
-уже committed игровой ход не откатывается.
+сохраняет пять attempts для transport и любого invalid model output, но после
+последней ошибки получает terminal `stale`; валидный пустой результат не
+повторяется, а уже committed игровой ход не откатывается.
 
 Все задачи выполняются вне latency path: пользователь получает уже сохранённый
 ответ, пока helper продолжает работу. Jobs имеют статус, retry policy и

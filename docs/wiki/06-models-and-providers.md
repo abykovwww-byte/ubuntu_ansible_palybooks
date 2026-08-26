@@ -83,7 +83,7 @@ price-first порядку. При `403` (включая model-specific moderati
 IaC default для OpenRouter — `openrouter/auto`. Перед fallback ручные параметры
 primary model удаляются, поэтому несовместимый маршрут не получает их случайно.
 
-`MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory; сохранённые параметры primary narrator и DeepSeek throughput policy остаются теми же. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
+`MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory, но с обязательными `PLAYER_CHARACTER`, active `ИСПРАВЛЕНИЯ ИГРОКА`, absolute rules, relationship pressure и world events; сохранённые параметры primary narrator и DeepSeek throughput policy остаются теми же. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
 
 OpenAI-compatible `HTTP 200` с отсутствующим или пустым финальным
 `message.content` (в том числе когда endpoint вернул только reasoning) получает
@@ -198,8 +198,9 @@ flowchart LR
     S --> M["One affected memory section · OpenRouter DeepSeek"]
     R["relationship_extraction"] --> L["local Gemma · max 5 attempts"]
     L --> G["Narrator-only verbatim + event-specific cue gate"]
-    G -->|"semantic reject"| J["terminal rejected · no artifact"]
-    L -->|"technical retries exhausted"| T["terminal stale"]
+    G -->|"invalid output"| J["durable rejection audit + retry"]
+    J -->|"5 attempts exhausted"| T["terminal stale"]
+    G -->|"valid events=[]"| V["success · no retry"]
     I -.-> X["No NVIDIA / party BYOK / provider fallback"]
     D -.-> X
     R -.-> X
@@ -213,8 +214,11 @@ job повторяется до пяти раз и затем остаётся `
 Parseable relationship output ещё не является доменным успехом: evidence должна
 быть verbatim-цитатой из `narrative_response`, а не из player intent, и для
 текущих authored event IDs пройти conservative event-specific cue gate.
-`evidence_not_narrated` и `event_evidence_mismatch` завершаются как semantic
-rejection без retry и без записи cause/badge/event.
+Модель обязана дословно скопировать fragment с literal alias и завершённым
+событием; любой shape/evidence/mention/cue reject сначала пишет audit, затем
+использует тот же job retry. После пятой неудачи job становится `stale` без
+cause/badge/event. Валидный `events=[]` является законным успехом с первой
+попытки и не повторяется ради непустоты.
 
 Memory absorption остаётся отдельным exact OpenRouter route с stack-managed key,
 двумя attempts, strict section JSON Schema без искусственного output cap и
@@ -236,9 +240,12 @@ strict JSON допускает только ISO-8601 `elapsed`. События, 
 последствия модель не видит и не создаёт: после ответа их применяет Gateway из
 WorldPack.
 
-Jobs идут строго по party turn, но gameplay не ждёт их. После terminal retry
-Gateway применяет `PT0S` с `reason=service_unavailable`; пропущенное время не
-догоняется, provider не меняется и NVIDIA не является retry-целью.
+Jobs создаются только для canonical ordinary narrative turns и идут строго по
+party turn, но gameplay не ждёт их. Opening и noncanonical safe fallback elapsed
+job не создают; legacy queued job для excluded fallback завершается без model
+call и clock tick. После terminal retry Gateway применяет `PT0S` с
+`reason=service_unavailable`; пропущенное время не догоняется, provider не
+меняется и NVIDIA не является retry-целью.
 
 Отдельно от elapsed job обычный `OutputValidator` сверяет narrator prose с уже
 авторитетной датой и durable deadline facts. Прямой откат времени получает одну

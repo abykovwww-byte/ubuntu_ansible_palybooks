@@ -11,10 +11,14 @@
 зафиксирует его с authority `user`.
 
 **Delivery status:** `каркас` для строк
-[`registry/038.yml`](registry/038.yml). Source implementation и локальные
-детерминированные проверки не означают activation, Ansible apply или live
-нарративную проверку. Existing parties и WorldPacks автоматически не мигрируют;
-длинная партия проверяется после завершения всего RP-core по решению пользователя.
+[`registry/038.yml`](registry/038.yml). Revision 10 активирован, и первый
+60-turn production endurance выполнил реальный one-section OpenRouter call, но
+обнаружил collision одинакового replacement `fact_id`: coverage продвинулась,
+а replacement сохранился как `inference`, поэтому overlay правильно остался
+active. Текущий source closure устраняет collision, восстанавливает absorption
+после сбоя между snapshot и artifact status и защищает latest same-slot волю
+игрока; повторное live absorption evidence ещё требуется. Existing parties
+автоматически не мигрируют и не переписываются.
 
 ## Context
 
@@ -104,6 +108,8 @@ Active memory/RAW corrections образуют один system block
 но не может менять `WORLD_ABSOLUTE_RULES` или подменять current player action.
 Block не является optional overflow-кандидатом: старая противоречащая фраза в
 RAW остаётся исторической репликой, но не текущим каноном.
+Compact narrator repair повторно получает тот же active overlay и компактный
+`PLAYER_CHARACTER`; исправление не теряет authority из-за повторного ответа.
 
 Одновременно допускается не более 20 effective active target slots. Новый 21-й
 slot отклоняется до patch model. Новая версия того же slot допустима и не
@@ -123,12 +129,26 @@ Gateway применяет existing typed replace/retract детерминиро
 response и назначает terminal target/replacement authority `user` с GM turn как
 provenance. Overlay снимается только когда одновременно выполнены оба условия:
 
+Если service response уже содержит тот же replacement как новый `inference`,
+Gateway не добавляет второй объект с одинаковым `fact_id`, а повышает найденный
+объект до `authority=user` и заменяет provenance на GM turn. Это сохраняет один
+факт и делает absorption idempotent независимо от того, успела ли модель сама
+сформулировать исправленный текст.
+
 1. exact user-authority fact либо tombstone сохранён в effective snapshot;
 2. coverage затронутой section не меньше `target_turn_id`.
 
 Safe coverage всего snapshot по-прежнему равен `min()` пяти section coverages.
 Ошибка memory job не откатывает confirm: artifact остаётся active в overlay и
 повторяется только эта section.
+
+Durable retry сначала проверяет уже сохранённый результат. Если snapshot успел
+записаться до сбоя при смене artifact status, Gateway без нового model call
+завершает absorption по этому snapshot. Retry уже absorbed request также
+завершается no-op. Для нескольких исправлений одного target slot только
+последнее effective исправление может писать memory: проверка выполняется до
+service call и сразу после него, поэтому более старый in-flight ответ не
+перезаписывает новую волю игрока.
 
 ### Explicit service routing and failures
 
@@ -139,7 +159,9 @@ Safe coverage всего snapshot по-прежнему равен `min()` пя�
   DeepSeek route; один normal call по-прежнему возвращает пять секций, отдельный
   request выполняется только для структурно невалидной секции.
 - Relationship extraction сохраняет `SERVICE_JOB_MAX_ATTEMPTS=5`; после
-  исчерпания job получает terminal `stale`, а gameplay turn остаётся committed.
+  любого невалидного model output сохраняется rejection audit и job повторяется;
+  после исчерпания job получает terminal `stale`, а gameplay turn остаётся
+  committed. Структурно валидный `events=[]` является успехом и не повторяется.
 - Story-memory jobs имеют максимум две попытки. Provider/role/model/result
   видны в `service_call_log`; новый вызов никогда не получает
   `provider=nvidia`.

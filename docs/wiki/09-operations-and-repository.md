@@ -144,6 +144,24 @@ revision `10`, но не создавать `state.world_clock` и clock service
 проверяет optional boundary, не является S4 clock canary и не мигрирует прежние
 партии мира.
 
+Первый production endurance от 2026-08-26 на
+`party_c82153b0c2da` прошёл opening и 60 scene turns на DeepSeek Flash без
+narrator fallback. `RELATIONSHIP_PRESSURE` дошёл до 57 prompt, normal memory
+дважды обновила все пять секций одним OpenRouter-запросом, RAW anchor реально
+сдвинулся с cold cache и снова прогрелся, world clock совпал с canonical state,
+а NVIDIA не появилась ни в одном party/service route.
+
+Тот же прогон честно выявил пять разрывов: карточка игрока исчезала после
+opening и при repair; односекционная GM-коррекция застряла active из-за
+collision replacement `fact_id`, а retry имел crash/race gaps; 42 valid-empty и
+18 ошибочно terminal relationship responses дали ноль новых causes; due pressure
+перенёс отсутствующую Милаву в текущую сцену; opening не видел canonical date.
+Source closure сохраняет компактную карточку и active correction в repair,
+делает absorption idempotent/latest-slot-safe, отправляет invalid relationship
+output в существующий `retry -> stale`, запрещает pressure телепортировать NPC и
+проецирует часы в opening. До повторной post-apply ручной партии весь этот набор
+остаётся на уровне `каркас`.
+
 ## Codex devkit, worktrees и CI
 
 Репозиторий содержит собственный Codex-контур:

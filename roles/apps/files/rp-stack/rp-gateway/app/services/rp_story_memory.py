@@ -675,6 +675,31 @@ class RPStoryMemoryUpdater:
 
         player_correction = self.player_correction_for_request(request_id)
         if player_correction is not None:
+            if player_correction.get("status") == "absorbed":
+                return {
+                    "generated": False,
+                    "reason": "player_correction_already_absorbed",
+                    "story_memory": self.store.effective_rp_story_memory(),
+                    "stats": self.stats(),
+                    "retry_required": False,
+                }
+            if not self.player_correction_is_latest(player_correction):
+                self.store.audit(
+                    "rp_story_memory_player_correction_noop",
+                    {
+                        "correction_id": player_correction.get("correction_id"),
+                        "target_slot": player_correction.get("target_slot"),
+                        "reason": "superseded_by_newer_slot_correction",
+                    },
+                    request_id,
+                )
+                return {
+                    "generated": False,
+                    "reason": "player_correction_superseded",
+                    "story_memory": self.store.effective_rp_story_memory(),
+                    "stats": self.stats(),
+                    "retry_required": False,
+                }
             return await self.update_player_correction(
                 player_correction,
                 fail_open=fail_open,
@@ -892,10 +917,31 @@ class RPStoryMemoryUpdater:
             item
             for item in self.store.player_correction_records()
             if item.get("request_id") == request_id
-            and item.get("status") == "active"
+            and item.get("status") in {"active", "absorbed"}
             and item.get("target_kind") in {"memory", "raw"}
         ]
         return matches[-1] if matches else None
+
+    def player_correction_is_latest(self, artifact: dict[str, Any]) -> bool:
+        """Only the newest correction for one target slot may alter memory."""
+
+        target_slot = str(artifact.get("target_slot") or "")
+        if not target_slot:
+            return True
+        matches = [
+            item
+            for item in self.store.player_correction_records()
+            if str(item.get("target_slot") or "") == target_slot
+        ]
+        if not matches:
+            return False
+        latest = matches[-1]
+        return (
+            str(latest.get("correction_id") or "")
+            == str(artifact.get("correction_id") or "")
+            and int(latest.get("source_turn_id") or 0)
+            == int(artifact.get("source_turn_id") or 0)
+        )
 
     async def update_player_correction(
         self,
@@ -922,6 +968,53 @@ class RPStoryMemoryUpdater:
         target_turn_id = int(artifact.get("target_turn_id") or 0)
         if source_turn_id <= 0:
             raise ValueError("player correction is missing its GM turn provenance")
+
+        statuses = normalize_section_status(memory)
+        if (
+            story_memory_correction_already_applied(
+                memory,
+                correction,
+                source_turn_id,
+                "user",
+            )
+            and int(statuses[section_key]["coverage"]) >= target_turn_id
+            and previous is not None
+        ):
+            self.store.mark_player_correction_absorbed(
+                str(artifact.get("correction_id") or ""),
+                snapshot_id=int(previous["id"]),
+                section_key=section_key,
+                coverage=int(statuses[section_key]["coverage"]),
+                request_id=request_id,
+            )
+            self.store.audit(
+                "rp_story_memory_player_correction_recovered",
+                {
+                    "snapshot_id": previous["id"],
+                    "correction_id": artifact.get("correction_id"),
+                    "section_key": section_key,
+                    "section_coverage": statuses[section_key]["coverage"],
+                },
+                request_id,
+            )
+            return {
+                "generated": False,
+                "reason": "player_correction_recovered",
+                "story_memory": previous,
+                "stats": self.stats(),
+                "failed_sections": [],
+                "retry_required": False,
+            }
+
+        if not self.player_correction_is_latest(artifact):
+            return {
+                "generated": False,
+                "reason": "player_correction_superseded",
+                "story_memory": previous,
+                "stats": self.stats(),
+                "failed_sections": [],
+                "retry_required": False,
+            }
 
         if artifact.get("target_kind") == "raw":
             synthetic = artifact.get("synthetic_before_fact")
@@ -967,6 +1060,24 @@ class RPStoryMemoryUpdater:
                 request_id=request_id,
                 update_id=update_id,
             )
+            if not self.player_correction_is_latest(artifact):
+                self.store.audit(
+                    "rp_story_memory_player_correction_noop",
+                    {
+                        "correction_id": artifact.get("correction_id"),
+                        "target_slot": artifact.get("target_slot"),
+                        "reason": "superseded_during_section_generation",
+                    },
+                    request_id,
+                )
+                return {
+                    "generated": False,
+                    "reason": "player_correction_superseded",
+                    "story_memory": self.store.effective_rp_story_memory(),
+                    "stats": self.stats(),
+                    "failed_sections": [],
+                    "retry_required": False,
+                }
             target_turn = self.store.turn_record(target_turn_id) if target_turn_id > 0 else None
             contributing = (
                 [target_turn_id]
@@ -2284,7 +2395,22 @@ def apply_validated_story_memory_corrections(
     for correction in corrections:
         field = correction["field"]
         fact_id = correction["fact_id"]
-        if correction["action"] == "replace" and len(memory[field]) >= STORY_FIELD_LIMITS[field]:
+        replacement_text = str(correction.get("replacement_text") or "")
+        replacement_id = story_fact_id(None, replacement_text) if replacement_text else ""
+        replacement_index = next(
+            (
+                index
+                for index, item in enumerate(memory[field])
+                if str(item.get("fact_id") or "") == replacement_id
+                and str(item.get("fact_id") or "") != fact_id
+            ),
+            None,
+        )
+        if (
+            correction["action"] == "replace"
+            and replacement_index is None
+            and len(memory[field]) >= STORY_FIELD_LIMITS[field]
+        ):
             removable_index = next(
                 (
                     index
@@ -2313,16 +2439,17 @@ def apply_validated_story_memory_corrections(
             "source_turn_ids": source_turn_ids,
         }
         if correction["action"] == "replace":
-            replacement_text = correction["replacement_text"]
-            memory[field].append(
-                {
-                    "fact_id": story_fact_id(None, replacement_text),
-                    "text": replacement_text,
-                    "status": "active",
-                    "authority": authority,
-                    "source_turn_ids": source_turn_ids,
-                }
-            )
+            replacement = {
+                "fact_id": replacement_id,
+                "text": replacement_text,
+                "status": "active",
+                "authority": authority,
+                "source_turn_ids": source_turn_ids,
+            }
+            if replacement_index is None:
+                memory[field].append(replacement)
+            else:
+                memory[field][replacement_index] = replacement
     return fit_story_memory(memory, max(max_chars, 1))
 
 
