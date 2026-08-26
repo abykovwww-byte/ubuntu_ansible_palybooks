@@ -29,7 +29,7 @@ relationships/model.json
 `relationships/model.json` is required when `scenario_types.supported`
 includes `rp` and optional otherwise.
 `lore-cards/` is optional for revision 8+. `world-clock.json` is optional and
-valid only for an explicit revision-10 candidate pack.
+valid only for a revision-10 pack with an authored calendar.
 
 ## manifest.json
 
@@ -50,7 +50,7 @@ valid only for an explicit revision-10 candidate pack.
   },
   "rp_contract": {
     "schema_version": "rp-core.v2",
-    "revision": 8
+    "revision": 10
   },
   "relationships": {
     "schema_version": "rp-relationships.v2",
@@ -85,10 +85,10 @@ contain only `rp`. Route `training` packs to `training-world-pack-builder`. The 
 chooses the party type manually; this metadata does not auto-select it.
 Every pack supporting `rp` declares `rp_contract.schema_version=rp-core.v2` and
 the highest cumulative `rp_contract.revision` it supports. New RP packs created
-by this builder use revision `8`. Gateway still caps ordinary party creation by
+by this builder use revision `10`. Gateway still caps ordinary party creation by
 the observed runtime revision. Existing manifests and parties remain pinned and
 are not blanket-migrated; raise an existing pack only as an explicit compatible
-update. `merchant-sviatoslav` is the first revision-8 activation canary, while
+update. `merchant-sviatoslav` is the first revision-10 activation target, while
 the other existing packs retain their declared revisions.
 
 ## Revision 7 Authoring Boundary
@@ -135,9 +135,9 @@ next prompt.
 
 ## Revision 8 Authoring Contract
 
-This section constrains content for a pack that declares revision 8. New RP packs
-use this contract. Existing packs move to it only through an explicit compatible
-update; do not add speculative manifest fields or migrate parties.
+This section constrains the history-first content shared by revisions 8+. New RP
+packs use this contract. Existing packs move to it only through an explicit
+compatible update; do not add speculative manifest fields or migrate parties.
 
 ### Authored Prompt Budgets
 
@@ -250,10 +250,9 @@ narrator could see them.
 
 ## Revision 10 Authored World Clock
 
-Revision 10 is a candidate above the observed revision 8. Do not use it as the
-default for a new pack and do not migrate an existing pack or party implicitly.
-For an explicit compatible candidate, raise the manifest maximum revision and
-declare only the file path:
+Revision 10 matches the source observed gate. New packs use it, while an
+existing pack or party is never migrated implicitly. When a pack needs an
+authored calendar and cancelable events, declare the optional file path:
 
 ```json
 "files": {
@@ -531,8 +530,8 @@ Every `gm-system.md` should say:
 - keep lore consistent with established facts and newer verbatim history.
 
 Existing revision-7 prompts may reference `<AUTHORITATIVE_WORLD_STATE>` because
-that is an observed runtime layer. Candidate-revision-8-compatible prompt text
-must not add or depend on that tag; use the Gateway-authority wording above.
+that is an observed runtime layer. Revision-8+-compatible prompt text must not
+add or depend on that tag; use the Gateway-authority wording above.
 
 Add the applicable mode contract:
 

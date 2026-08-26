@@ -31,10 +31,11 @@
 Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный pull-based
 activation и post-apply stamp proof подтвердили effective observed `7` для новых
 ordinary RP-parties. Код revision `8` / S1 слит и применён; отдельный
-source-activation slice задаёт observed `8`, но declared `8` только у
-`merchant-sviatoslav`. Apply и новая stamp-party подтвердили effective `8` без
-model calls. Gates 25/60 отложены до полной реализации, поэтому registry 032
-остаётся на ступени `каркас`.
+source-activation slice ранее подтвердил observed `8` для
+`merchant-sviatoslav`. Следующий source rollout поднимает gate до `10`, но
+effective runtime revision `10` появится только после отдельного Ansible apply
+и создания новой ordinary party; existing parties не мигрируются. До живой
+60-turn проверки registry 032 остаётся на ступени `каркас`.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же

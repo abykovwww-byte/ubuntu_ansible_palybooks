@@ -28,7 +28,7 @@ semantics.
 - `rp-gateway` canonical state is the source of truth. Lorebooks and prompts are memory/context, not authority.
 - Light GUI play uses isolated party state copied from the selected world pack's `state-seed.json`. Do not overwrite live `state/current.json` for normal Light GUI play.
 - Light GUI narration is party-scoped. Revision 8 uses the narrower history-first prompt contract below; parties pinned to revisions `0..7` keep their compatibility paths. Do not rely on the SillyTavern summarization extension for Light GUI; treat SillyTavern lorebooks as legacy/debug compatibility artifacts.
-- Candidate revision 10 may add authored world time and cancelable events, but
+- Revision 10 may add authored world time and cancelable events, but
   the model may estimate only elapsed time. Event conditions and consequences
   remain reviewed WorldPack data applied by Gateway.
 - The runtime target is the Ubuntu server `192.168.1.88`, not Windows.
@@ -58,9 +58,9 @@ The revision-7 and older compatibility paths keep four distinct layers:
 - Preserve the revision-7 authority order: `AUTHORITATIVE_OUTCOME` and current action -> full uncovered raw tail -> effective `RP_STORY_MEMORY` -> archive. Gateway owns the mandatory `PROMPT_AUTHORITY_HIERARCHY` block; WorldPack prompts must not duplicate or reorder it.
 - On revision-7 hard overflow, perform the bounded synchronous story-memory force-refresh, reload coverage, and rebuild before rejecting the turn. Reject before the narrator only if the mandatory prompt still does not fit after refresh.
 - Treat revision-7 safe-fallback narrator prose as noncanonical: it is excluded from story memory, chapters, retrieval, and relationship canon, while the player input and stale/as-of scene marker remain available to the next prompt. Do not make fallback prose canonical in WorldPack content.
-For the revision-8 authoring contract:
+For the revision-8+ history-first authoring contract:
 
-- Declare `rp_contract.revision: 8` for new RP packs. Raise an existing pack only in an explicit compatible update; do not blanket-migrate existing manifests or parties. The first activation canary is `merchant-sviatoslav`; other existing packs remain on their declared revisions.
+- Declare `rp_contract.revision: 10` for new RP packs. Raise an existing pack only in an explicit compatible update; do not blanket-migrate existing manifests or parties. `merchant-sviatoslav` is the first revision-10 activation target; other existing packs remain on their declared revisions.
 - Keep the complete runtime `WORLD_SYSTEM_PROMPT\n<gm-system.md>` block at or below 5,000 characters and the complete `WORLD_AUTHORS_NOTE\n<authors-note.md>` block at or below 1,500 characters. The literal block name, newline, and authored content all count; do not rely on truncation.
 - Keep the complete serialized `PARTY_LORE_CARDS` block at or below 4,000 characters, including its runtime header and instructions. Author compact independent cards because Gateway includes or omits whole cards and never cuts a card to make it fit.
 - Preserve the union of a cache-anchored 50-to-57-unit recent window and every eligible unit newer than the safe story-memory coverage. Quantize the recent-window start down to an eight-unit boundary; do not put changing counters, IDs, revisions, or timestamps in narrator/world/absolute rules before RAW. An opening scene counts as its narrator response with the exact `[AUTO_START] Старт партии` player marker suppressed; legacy `turn_kind = null` counts as `narrative`; commands, corrections, and other non-game kinds do not count.
@@ -68,11 +68,12 @@ For the revision-8 authoring contract:
 - Use exactly five independently covered story-memory sections: `situation`, `threads`, `characters`, `assets_and_rules`, and `chronology_and_hooks`. A normal update returns all five in one call; only a section that fails structural validation gets a targeted retry. Empty arrays and `current_situation=null` are valid and must not be retried for being empty. Safe coverage is the minimum coverage across all five sections, so a stale or failed section keeps its uncovered raw tail in the prompt.
 - Do not make revision-8 WorldPack prompts depend on scene-state/boundary/reanchor blocks, state summaries or character-state retrieval, archive retrieval/fallback, `LONG_TERM_PARTY_MEMORY`, legacy episodic `memory_chapters`, or journal recaps. State may still drive Gateway outcomes and absolute rules, but these projections are not narrator prompt layers.
 
-For the candidate revision-10 world-clock contract:
+For the revision-10 world-clock contract:
 
-- Keep revision 8 as the default for new packs while the observed runtime
-  revision is 8. Raise a pack to 10 only in an explicit candidate update and
-  declare `manifest.files.world_clock`; do not blanket-migrate packs or parties.
+- Use revision 10 for new packs while the source observed gate is 10. Raise an
+  existing pack only in an explicit compatible update; do not blanket-migrate
+  packs or parties. Declare `manifest.files.world_clock` only when the pack
+  authors a calendar and cancelable events.
 - Author `world-clock.json` with schema `rp-gateway.world-clock.v1`, an initial
   timezone-aware date, ISO-8601 `max_step`, typed markers, and at least one
   event. Conditions are only `date_gte`, `after_event`, or `after_confirmed`.
@@ -145,7 +146,7 @@ quick-replies/notes.md
 setup-flow.md
 relationships/model.json
 lore-cards/<group>.json
-world-clock.json                 # optional, explicit revision-10 candidate only
+world-clock.json                 # optional for a revision-10 authored calendar
 ```
 
 `relationships/model.json` is required when `scenario_types.supported`
@@ -157,12 +158,12 @@ World-pack requirements:
 
 - Put the starting player role in `manifest.player_role`; Light GUI uses it as the default player character description.
 - Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`. This metadata filters incompatible combinations but never auto-selects the party type.
-- For a new pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 8}`. This is the maximum contract understood by the pack, not a migration flag: ordinary parties are capped by Gateway's observed revision, and existing packs and parties remain pinned until an explicit compatible update. Do not blanket-migrate them or author a new RP pack against the legacy mechanical v1 contract.
-- Add `files.world_clock` only for an explicitly requested revision-10
-  candidate. Validate its authored events against the Lore Card library before
-  raising the manifest; ordinary parties remain capped by observed revision.
+- For a new pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 10}`. This is the maximum contract understood by the pack, not a migration flag: ordinary parties are capped by Gateway's observed revision, and existing packs and parties remain pinned until an explicit compatible update. Do not blanket-migrate them or author a new RP pack against the legacy mechanical v1 contract.
+- Add `files.world_clock` only when the revision-10 pack needs an authored
+  calendar and cancelable events. Validate those events against the Lore Card
+  library; the file remains optional and existing packs stay pinned.
 - Reuse stable location and character IDs from `state-seed.json` throughout the pack. Revision 8 adds no scene manifest field and its narrator does not receive `scene_state`. When maintaining a revision-7 pack, an additional invariant narrative affiliation may use the existing bounded `rp_contract.stable_affiliations` compatibility field; never infer professions, goals, beliefs, emotions, or relationship-model roles into it.
-- Do not copy `scene_claims`, `scene_delta`, or the private narrator bundle schema into `gm-system.md` or `authors-note.md`. They belong only to Gateway's revision-7 compatibility path; revision 8 requests plain narrator text.
+- Do not copy `scene_claims`, `scene_delta`, or the private narrator bundle schema into `gm-system.md` or `authors-note.md`. They belong only to Gateway's revision-7 compatibility path; revisions 8+ request plain narrator text.
 - Include focused lorebook entries, not one giant encyclopedia entry.
 - For revision-8 Light GUI retrieval, prefer compact reviewed
   `lore-cards/*.json` over repeating the whole world/state in prompts. Use a
@@ -268,7 +269,7 @@ Pop-Location
   at least one positive concrete-help event declares `resolves: ["favour"]`;
   `plot.discovery_chance_per_turn` is in `[0, 1]`; and the first slice declares
   only the `loyalty` axis.
-- For candidate revision-10 packs, validate the closed world-clock envelope,
+- For revision-10 packs with `files.world_clock`, validate the closed envelope,
   timezone/date and duration, unique IDs, acyclic `after_event` references,
   known markers, non-empty supersession for every event, allowed consequence
   types, and referenced authored Lore Card keys.
