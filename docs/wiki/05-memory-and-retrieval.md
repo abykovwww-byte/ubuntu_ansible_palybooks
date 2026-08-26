@@ -226,7 +226,7 @@ readiness этих canaries.
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 задаёт S1 только для RP `rp_contract_revision >= 8`. Код S1 уже применён;
-отдельный source-activation slice задаёт observed `8`; revision `8+` объявлена у
+отдельный source-activation slice задаёт observed `8`; revision `10` объявлена у
 `merchant-sviatoslav` и `day-watch-moscow`. Apply и stamp-party подтвердили effective `8` без model
 calls; live-проверки 25/60 отложены до полной реализации, поэтому registry
 остаётся на ступени `каркас`.
@@ -398,6 +398,11 @@ announcements в canonical `state.world_clock`, а authored schedule — в
 WorldPack `world-clock.json`. Local Gemma видит только последнюю записанную пару
 player+narrator и возвращает elapsed; RAW, story memory, Lore Cards и весь
 calendar ей не передаются.
+
+Revision `10` без `manifest.files.world_clock` остаётся валидной capability:
+Gateway не создаёт `state.world_clock`, elapsed job или event projection. Так
+играется `day-watch-moscow`; все history-first, Lore Card и GM-correction слои
+сохраняются, но authored календарь не включается.
 
 Narrator получает один производный `СОБЫТИЯ МИРА` block до 800 символов после
 relationship pressure и до author note/current action. Он содержит ещё не

@@ -18,9 +18,9 @@ observed разрешена только изолированной checkpoint/a
 Declared revision сама по себе не означает observed activation. Исторический
 rollout `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
 stamp proof 23 августа 2026 года; отдельный rollout затем подтвердил revision
-`8`. Текущий source rollout поднимает observed gate до `10`, но declared
-revision `10` есть только у `merchant-sviatoslav`; `day-watch-moscow` объявляет
-revision `9` без календаря. Новая обычная RP-партия
+`8`. Текущий source rollout поднимает observed gate до `10`; declared revision
+`10` есть у `merchant-sviatoslav` и `day-watch-moscow`, но календарь объявляет
+только первый из них. Новая обычная RP-партия
 получает `min(declared, observed)`, existing party остаётся pinned; остальные
 WorldPacks сохраняют declarations `6/7`. Source merge сам по себе не доказывает
 runtime activation: нужны Ansible apply и новая party.
@@ -151,7 +151,7 @@ readiness DC4.
 меняет только то, как Gateway читает RP WorldPack для narrator. Source activation
 и stamp-party подтвердили effective `8` только для новых
 `merchant-sviatoslav`. `day-watch-moscow` теперь также объявляет совместимость
-до revision `9`, но получит её на сервере только после отдельного apply и только
+до revision `10`, но получит её на сервере только после отдельного apply и только
 в новых партиях; persisted parties не мигрируют.
 
 Для rev-8 pack авторские prompt-файлы должны укладываться целиком,
@@ -224,10 +224,11 @@ bounded `state_equals` predicate по разрешённому canonical path, �
 персонаж уехал, authored fact говорит narrator об отсутствии; отдельный
 presence registry не создаётся, а NPC card всё ещё может подняться по имени.
 
-`merchant-sviatoslav` — единственный rev10 source candidate и содержит четыре
-cancelable события, включая Вятичский поход. `day-watch-moscow` остаётся на
-revision `9` и намеренно не объявляет календарь из-за произвольной точки старта.
-Source gate поднят до `10`, но
+`merchant-sviatoslav` остаётся первым authored-clock canary и содержит четыре
+cancelable события, включая Вятичский поход. `day-watch-moscow` также объявляет
+revision `10`, но не `files.world_clock`: произвольная стартовая точка сохраняется,
+а clock state, elapsed jobs и scheduled events для такой партии не создаются.
+Revision `10` сама по себе не требует календаря. Source gate поднят до `10`, но
 обычная новая партия получит S4 только после отдельного Ansible apply; прежние
 партии останутся на закреплённой revision.
 
@@ -301,11 +302,11 @@ pack обязан объявить `training_runtime` и хранить расп
 |---|---|---|---|---|
 | `awareness` | Awareness | `training` | `training` | WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; предметной логики в Gateway нет |
 | `awareness-one-day` | Awareness. One day | `training` | `training` | WorldPack-owned runtime, 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
-| `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Revision 9 без фиксированного календаря: свободный персонаж, точка входа из PlayerCharacter, authored Lore Cards и закрытые мотивации NPC |
+| `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Revision 10 без authored-календаря: свободный персонаж, точка входа из PlayerCharacter, authored Lore Cards и закрытые мотивации NPC |
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |
-| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания; единственный declared-revision-10 candidate, 16 authored Lore Cards, GM corrections и authored world clock |
+| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания; первый authored-clock canary, 16 authored Lore Cards, GM corrections и authored world clock |
 | `smoke-gate-borderland` | Предел Дымных Врат | `rp` | `rp` | Пограничное расследование; manifest не задаёт явный status |
 | `starosta` | Староста | `rp` | `rp` | Деревенская ролевая кампания |
 
