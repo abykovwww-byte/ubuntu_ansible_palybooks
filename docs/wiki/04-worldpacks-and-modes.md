@@ -19,7 +19,8 @@ Declared revision сама по себе не означает observed activati
 rollout `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
 stamp proof 23 августа 2026 года; отдельный rollout затем подтвердил revision
 `8`. Текущий source rollout поднимает observed gate до `10`, но declared
-revision `10` есть только у `merchant-sviatoslav`. Новая обычная RP-партия
+revision `10` есть только у `merchant-sviatoslav`; `day-watch-moscow` объявляет
+revision `9` без календаря. Новая обычная RP-партия
 получает `min(declared, observed)`, existing party остаётся pinned; остальные
 WorldPacks сохраняют declarations `6/7`. Source merge сам по себе не доказывает
 runtime activation: нужны Ansible apply и новая party.
@@ -149,8 +150,9 @@ readiness DC4.
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 меняет только то, как Gateway читает RP WorldPack для narrator. Source activation
 и stamp-party подтвердили effective `8` только для новых
-`merchant-sviatoslav`; остальные действующие packs остаются на `6/7`, а
-persisted parties не мигрируют.
+`merchant-sviatoslav`. `day-watch-moscow` теперь также объявляет совместимость
+до revision `9`, но получит её на сервере только после отдельного apply и только
+в новых партиях; persisted parties не мигрируют.
 
 Для rev-8 pack авторские prompt-файлы должны укладываться целиком,
 включая заголовок Gateway: `gm-system.md` — не более 5 000 символов,
@@ -223,7 +225,9 @@ bounded `state_equals` predicate по разрешённому canonical path, �
 presence registry не создаётся, а NPC card всё ещё может подняться по имени.
 
 `merchant-sviatoslav` — единственный rev10 source candidate и содержит четыре
-cancelable события, включая Вятичский поход. Source gate поднят до `10`, но
+cancelable события, включая Вятичский поход. `day-watch-moscow` остаётся на
+revision `9` и намеренно не объявляет календарь из-за произвольной точки старта.
+Source gate поднят до `10`, но
 обычная новая партия получит S4 только после отдельного Ansible apply; прежние
 партии останутся на закреплённой revision.
 
@@ -297,7 +301,7 @@ pack обязан объявить `training_runtime` и хранить расп
 |---|---|---|---|---|
 | `awareness` | Awareness | `training` | `training` | WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; предметной логики в Gateway нет |
 | `awareness-one-day` | Awareness. One day | `training` | `training` | WorldPack-owned runtime, 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
-| `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Книжный старт первой части, свободный персонаж, точка входа из PlayerCharacter и закрытые мотивации NPC |
+| `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Revision 9 без фиксированного календаря: свободный персонаж, точка входа из PlayerCharacter, authored Lore Cards и закрытые мотивации NPC |
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |
