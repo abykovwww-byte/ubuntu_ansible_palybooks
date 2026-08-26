@@ -599,8 +599,8 @@ def validate_environment_contracts(errors: list[str]) -> None:
         "RP_CONTRACT_OBSERVED_REVISION="
         "{{ rp_stack_gateway_rp_contract_observed_revision }}"
     )
-    if observed_revision_assignments != ["8"]:
-        fail(errors, "RP Stack inventory must set rp-core.v2 revision 8 observed exactly once")
+    if observed_revision_assignments != ["10"]:
+        fail(errors, "RP Stack inventory must set rp-core.v2 revision 10 observed exactly once")
     if (
         not production_env_template.is_file()
         or observed_revision_mapping not in production_env_template.read_text(encoding="utf-8")

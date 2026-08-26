@@ -7,7 +7,7 @@
 Актуальный RP WorldPack объявляет максимальную поддержанную версию:
 
 ```json
-"rp_contract": {"schema_version": "rp-core.v2", "revision": 8}
+"rp_contract": {"schema_version": "rp-core.v2", "revision": 10}
 ```
 
 Это capability pack, а не автоматическая активация. Gateway ограничивает обычные
@@ -17,10 +17,12 @@ observed разрешена только изолированной checkpoint/a
 
 Declared revision сама по себе не означает observed activation. Исторический
 rollout `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
-stamp proof 23 августа 2026 года. Следующий source slice задаёт observed `8`, но
-поднимает declared revision только у `merchant-sviatoslav`. Новая обычная
-RP-партия получает `min(declared, observed)`, existing party остаётся pinned;
-остальные WorldPacks сохраняют declarations `6/7`.
+stamp proof 23 августа 2026 года; отдельный rollout затем подтвердил revision
+`8`. Текущий source rollout поднимает observed gate до `10`, но declared
+revision `10` есть только у `merchant-sviatoslav`. Новая обычная RP-партия
+получает `min(declared, observed)`, existing party остаётся pinned; остальные
+WorldPacks сохраняют declarations `6/7`. Source merge сам по себе не доказывает
+runtime activation: нужны Ansible apply и новая party.
 
 ## Что такое WorldPack
 
@@ -155,8 +157,9 @@ persisted parties не мигрируют.
 `authors-note.md` — не более 1 500. Lore попадает в prompt только целыми
 карточками в суммарный блок не более 4 000 символов. Эти лимиты не разрешают
 дублировать `state-seed.json` в prose: общий state, scene contracts и character
-JSON больше не сериализуются narrator-у. Canonical `characters.*.name` остаётся
-единственной подписью NPC в relationship block.
+JSON больше не сериализуются narrator-у. Подпись NPC в relationship block
+берётся из `characters.*.name`, затем из первого alias relationship model, а при
+их отсутствии — из humanized character ID.
 
 RAW-окно задаётся Gateway-настройкой `RP_RAW_HISTORY_WINDOW_TURNS` с default 50
 и hard minimum 20, а не полем WorldPack. Recent start квантуется по восемь,
@@ -220,8 +223,9 @@ bounded `state_equals` predicate по разрешённому canonical path, �
 presence registry не создаётся, а NPC card всё ещё может подняться по имени.
 
 `merchant-sviatoslav` — единственный rev10 source candidate и содержит четыре
-cancelable события, включая Вятичский поход. Observed revision остаётся `8`,
-поэтому обычная новая партия не получит S4 до отдельной activation-фазы.
+cancelable события, включая Вятичский поход. Source gate поднят до `10`, но
+обычная новая партия получит S4 только после отдельного Ansible apply; прежние
+партии останутся на закреплённой revision.
 
 ## Два активных режима
 
@@ -297,7 +301,7 @@ pack обязан объявить `training_runtime` и хранить расп
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |
-| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания; единственный declared-revision-8 canary, 16 authored Lore Cards с полным NPC alias coverage |
+| `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания; единственный declared-revision-10 candidate, 16 authored Lore Cards, GM corrections и authored world clock |
 | `smoke-gate-borderland` | Предел Дымных Врат | `rp` | `rp` | Пограничное расследование; manifest не задаёт явный status |
 | `starosta` | Староста | `rp` | `rp` | Деревенская ролевая кампания |
 

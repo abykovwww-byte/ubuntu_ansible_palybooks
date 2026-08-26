@@ -121,6 +121,21 @@ Activation boundary revision `8` подтверждена. Более высок
 Эти проверки являются будущими runtime gates, а не доказательством локальной
 candidate-реализации и её deterministic test suite.
 
+## RP contract revision 10: source activation
+
+После поставки S2–S4 отдельный минимальный rollout задаёт
+`rp_stack_gateway_rp_contract_observed_revision: 10`. Только
+`merchant-sviatoslav` объявляет revision `10`, поэтому остальные WorldPacks
+остаются на своих `6/7`, а существующие партии сохраняют закреплённую revision.
+
+Merge этого значения не является runtime-активацией. После интерактивного
+Ansible apply новая ordinary party «Купца» должна сохранить revision `10` в API,
+SQLite и runtime settings. Затем 60-turn DeepSeek Flash party с подтверждённой
+GM-коррекцией должна отдельно доказать секционную память, скользящее RAW-окно,
+кэш после сдвига якоря, world clock, `RELATIONSHIP_PRESSURE` в следующем prompt
+и отсутствие NVIDIA во всех provider/service routes. До этих проверок S1–S4 не
+получают ступень выше `каркас` только из-за source activation.
+
 ## Codex devkit, worktrees и CI
 
 Репозиторий содержит собственный Codex-контур:
