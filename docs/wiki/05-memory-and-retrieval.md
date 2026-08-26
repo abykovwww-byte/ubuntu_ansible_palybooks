@@ -382,7 +382,9 @@ Memory/RAW confirm запускает valve независимо от normal 50-
 1. Gateway определяет одну из пяти section по target field;
 2. один exact-section OpenRouter request пересобирает только её;
 3. existing typed correction детерминированно помечает прежний fact
-   `superseded/retracted` и создаёт replacement при `replace`;
+   `superseded/retracted`; при `replace` Gateway создаёт replacement либо, если
+   service response уже вернул его с тем же `fact_id`, повышает этот единственный
+   объект с `inference` до `user`;
 4. terminal target/replacement получает authority `user` и source GM turn;
 5. artifact становится `absorbed` только если exact результат сохранён и
    section coverage достиг target RAW/fact turn.

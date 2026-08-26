@@ -144,6 +144,18 @@ revision `10`, но не создавать `state.world_clock` и clock service
 проверяет optional boundary, не является S4 clock canary и не мигрирует прежние
 партии мира.
 
+Первый production endurance от 2026-08-26 на
+`party_c82153b0c2da` прошёл opening и 60 scene turns на DeepSeek Flash без
+narrator fallback. `RELATIONSHIP_PRESSURE` дошёл до 57 prompt, normal memory
+дважды обновила все пять секций одним OpenRouter-запросом, RAW anchor реально
+сдвинулся с cold cache и снова прогрелся, а NVIDIA не появилась ни в одном
+party/service route. Односекционная GM-коррекция также выполнилась до turn 50,
+но выявила collision replacement `fact_id`, из-за которого overlay безопасно
+остался active. В нескольких ответах narrator играл за персонажа от первого
+лица, а прежний узкий validator это пропустил. Source closure исправляет оба
+разрыва; до повторного post-apply canary эти две цепочки остаются на уровне
+`каркас`, несмотря на успешно наблюдавшиеся memory, cache и relationship части.
+
 ## Codex devkit, worktrees и CI
 
 Репозиторий содержит собственный Codex-контур:
