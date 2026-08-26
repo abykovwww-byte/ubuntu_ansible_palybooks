@@ -31,7 +31,8 @@ activation. 23 августа 2026 года merge
 `a4076b0938f2b152f77e675e8545156ce783a8f3` применён на `abykovserv`; container
 env и ordinary-party stamp proof подтвердили effective observed revision `7`.
 Существующие партии остаются на своей закреплённой revision; 50-turn endurance
-пока не заявлен.
+для той rev7 activation не заявлялся. Более поздний rev10 60-turn прогон описан
+ниже и не мигрировал старые партии.
 
 PR1 следующего continuity cycle описан в
 [Plan 028](../../roles/apps/files/rp-stack/docs/plans/028-rp-continuity-project-design.md)
@@ -144,9 +145,10 @@ Candidate RP revision `9` отделяет обращение к мастеру 
 меняется лишь после явного confirm. Подтверждённая правка не сдвигает party turn,
 сцену или игровое время, исключается из narrator RAW и временно защищает prompt
 через `ИСПРАВЛЕНИЯ ИГРОКА`, пока одна затронутая section story memory не сохранит
-её с authority `user`. Source/local readiness S3 — `каркас`. Source rollout-gate
-поднят до revision `10`, но до отдельного Ansible apply и живой проверки это не
-является runtime-активацией; ни одна существующая party не мигрируется.
+её с authority `user`. Source/local readiness S3 — `каркас`. Первый применённый
+revision-10 endurance подтвердил отдельный GM turn и реальный one-section call,
+но выявил collision authority; текущий closure ещё ждёт повторного apply и
+absorption-проверки. Ни одна существующая party не мигрируется.
 
 S4 описан в
 [Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md).
@@ -154,19 +156,16 @@ Revision `10` даёт WorldPack authored часы и cancelable global events:
 local Gemma оценивает только elapsed последнего committed хода, а Gateway
 атомарно применяет заранее написанные facts/Lore Card toggles. Narrator и Light
 GUI получают короткое одноразовое событие с ближайшим horizon. Source/local
-контур применён на `merchant-sviatoslav`; 25-ходовый DeepSeek Flash canary
-завершил все ходы без narrator fallback и подтвердил local clock jobs, authored
-event/fact и отсутствие NVIDIA. Он одновременно обнаружил два semantic разрыва:
-narrator смог вернуть время до уже прошедшего полудня, а relationship extractor
-записал события по цитатам, которые лишь упоминали NPC. Отдельная проверка всей
-цепочки обнаружила третий разрыв: накопленные relationship causes не попадали ни
-в один из 26 narrator prompts, потому что rev8 искал имя только в state, тогда
-как текущие RP WorldPacks хранят display aliases в relationship model. Текущая
-source revision добавляет bounded clock-validation repair, narrator-only
-event-specific evidence gate и восстанавливает порядок имени
-`state name -> relationship alias -> humanized ID` без новых model calls. Source
-rollout-gate для новой партии «Купца» поднят до `10`; до его apply и отдельной
-canary эти gate имеют уровень `каркас`, а 60-turn endurance не заявлен.
+контур применён на `merchant-sviatoslav`; первый 25-ходовый DeepSeek Flash
+canary подтвердил local clock jobs, authored event/fact и отсутствие NVIDIA, а
+также выявил откат даты, ложное relationship evidence и потерянный alias. После
+их исправления production party `party_c82153b0c2da` прошла opening и 60 обычных
+ходов без narrator fallback: clock, sliding cache anchor и five-section memory
+исполнились. Прогон одновременно выявил следующую группу разрывов: player card
+исчезала после opening, invalid relationship outputs ошибочно завершались как
+успех, due pressure переносил отсутствующего NPC, GM replacement не поглощался,
+а opening не видел canonical date. Текущий closure-source закрывает именно эти
+границы; до повторного apply и ручной партии readiness остаётся `каркас`.
 `day-watch-moscow` отдельным compatible update также объявляет revision `10`,
 но не содержит `world-clock.json`: новые партии получают cumulative rev8/rev9
 контракты, а clock jobs, дата и `СОБЫТИЯ МИРА` для них не создаются.
@@ -208,10 +207,10 @@ flowchart LR
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
-- **Revision 10 активируется на уровне capability WorldPack.** «Купец» остаётся первым authored-clock canary; `day-watch-moscow` объявляет revision `10` без календаря. Фактическая версия требует отдельного Ansible apply и новой ordinary party; старые партии автоматически не мигрируют.
+- **Revision 10 активирована на уровне capability WorldPack.** «Купец» прошёл первый 60-turn production endurance как authored-clock canary; `day-watch-moscow` объявляет revision `10` без календаря. Текущий closure ещё не применён, а старые партии автоматически не мигрируют.
 - **S2 оставляет Lore Cards короткими и управляемыми.** WorldPack cards reviewed до commit, hidden content не является trigger, exact raised IDs видны рядом с ответом, а service draft не сохраняется без подтверждения игрока.
-- **S3 отделяет исправление от сцены.** Rev9 GM channel не вызывает narrator, показывает exact diff, сохраняет отдельный `gm_correction` и держит правку в защищённом overlay до one-section absorption; live-проверка после activation apply ещё впереди.
-- **S4 отделяет время от канона.** Rev10 local Gemma возвращает только bounded elapsed; cancelable события и два разрешённых consequence применяет Gateway. Новый source gate требует repair при прямом откате текущей даты/сработавшего deadline, но его live-проверка ещё впереди.
+- **S3 отделяет исправление от сцены.** Rev9 GM channel не вызывает narrator, показывает exact diff, сохраняет отдельный `gm_correction` и держит правку в защищённом overlay до one-section absorption; первый live-call выявил collision, исправленный повтор ещё впереди.
+- **S4 отделяет время от канона.** Rev10 local Gemma возвращает только bounded elapsed; cancelable события и два разрешённых consequence применяет Gateway. Ordinary clock path уже исполнялся в 60-turn партии; исправленная opening-проекция и fallback retention ждут повторного live-proof.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
