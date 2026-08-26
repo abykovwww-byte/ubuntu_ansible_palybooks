@@ -226,8 +226,8 @@ readiness этих canaries.
 
 [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 задаёт S1 только для RP `rp_contract_revision >= 8`. Код S1 уже применён;
-отдельный source-activation slice задаёт observed `8`, но declared `8` только у
-`merchant-sviatoslav`. Apply и stamp-party подтвердили effective `8` без model
+отдельный source-activation slice задаёт observed `8`; revision `8+` объявлена у
+`merchant-sviatoslav` и `day-watch-moscow`. Apply и stamp-party подтвердили effective `8` без model
 calls; live-проверки 25/60 отложены до полной реализации, поэтому registry
 остаётся на ступени `каркас`.
 
