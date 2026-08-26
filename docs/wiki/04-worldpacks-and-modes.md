@@ -4,13 +4,14 @@
 
 ## RP contract в manifest
 
-Актуальный RP WorldPack объявляет максимальную поддержанную версию:
+Текущие committed RP WorldPacks объявляют не выше revision `10`:
 
 ```json
 "rp_contract": {"schema_version": "rp-core.v2", "revision": 10}
 ```
 
-Это capability pack, а не автоматическая активация. Gateway ограничивает обычные
+Source уже понимает candidate revision `11`, но это capability, а не
+автоматическая активация. Gateway ограничивает обычные
 партии значением `RP_CONTRACT_OBSERVED_REVISION`; revision выше effective
 observed разрешена только изолированной checkpoint/autotest-ветке. `training`
 этот маркер не использует.
@@ -18,12 +19,16 @@ observed разрешена только изолированной checkpoint/a
 Declared revision сама по себе не означает observed activation. Исторический
 rollout `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
 stamp proof 23 августа 2026 года; отдельный rollout затем подтвердил revision
-`8`. Текущий source rollout поднимает observed gate до `10`; declared revision
+`8`. Текущий inventory держит observed gate `10`; declared revision
 `10` есть у `merchant-sviatoslav` и `day-watch-moscow`, но календарь объявляет
 только первый из них. Новая обычная RP-партия
 получает `min(declared, observed)`, existing party остаётся pinned; остальные
 WorldPacks сохраняют declarations `6/7`. Source merge сам по себе не доказывает
 runtime activation: нужны Ansible apply и новая party.
+
+Revision-11 pack в этой mechanism-поставке отсутствует. Когда он будет добавлен,
+inventory должен одновременно перейти на observed `11`: ordinary party не
+получает молчаливую effective revision `10` для manifest revision `11`.
 
 ## Что такое WorldPack
 
@@ -37,7 +42,13 @@ worldpacks/<slug>/
 ├── prompts/
 │   ├── gm-system.md
 │   ├── authors-note.md
-│   └── opening-scene.md
+│   ├── opening-scene.md
+│   └── openings/<id>/
+│       ├── opening-scene.md
+│       └── state-seed.json
+├── presets/<id>/
+│   ├── gm-system.md
+│   └── authors-note.md
 ├── world-info/index.md
 ├── characters/index.md
 ├── relationships/model.json
@@ -112,6 +123,52 @@ authored-событий, ролями, ранами, конечными часа
 весом. Это отдельный runtime-слой: он не меняет `state/schema.json`
 и не переиспользует строковое поле `characters.*.loyalty`, где мир уже хранит
 принадлежность или фракцию.
+
+## Revision 11: narrative presets и opening seeds
+
+[Decision 041](../../roles/apps/files/rp-stack/docs/decisions/041-rp-narrative-presets-and-opening-seeds.md)
+задаёт два обязательных непустых top-level каталога для revision-11 pack:
+
+```json
+{
+  "presets": [
+    {"id": "action", "title": "Действие",
+     "world_system_prompt": "presets/action/gm-system.md",
+     "world_authors_note": "presets/action/authors-note.md"}
+  ],
+  "presets_default": "action",
+  "openings": [
+    {"id": "independent", "title": "Независимый старт",
+     "player_role": "Независимый зарегистрированный Иной",
+     "prompt": "prompts/openings/independent/opening-scene.md",
+     "state_seed": "prompts/openings/independent/state-seed.json"}
+  ],
+  "openings_default": "independent"
+}
+```
+
+ID уникален внутри каталога и соответствует
+`^[a-z0-9][a-z0-9_-]{0,63}$`. Defaults всегда explicit. Все пути существуют
+внутри pack; seed имеет строгое имя и путь
+`prompts/openings/<id>/state-seed.json`, чтобы рекурсивная state-schema проверка
+не пропустила его.
+
+Legacy root declarations остаются точными default aliases:
+`files.gm_system=prompts/gm-system.md`,
+`files.authors_note=prompts/authors-note.md`,
+`files.opening_scene=prompts/opening-scene.md`,
+`files.state_seed=state-seed.json`. Каждый root payload byte-equal выбранному
+default, а root `player_role` равен роли default opening.
+
+Preset — полная пара prompt, не набор фрагментов. С заголовками Gateway
+`WORLD_SYSTEM_PROMPT` ограничен 5000, `WORLD_AUTHORS_NOTE` — 1500 символами.
+System rules не сокращаются автоматически; preset-specific scene forms и
+conflict prohibitions автор помещает в authors note и проверяет как prose.
+Repository gate проверяет структуру, пути, непустой текст, aliases и размеры,
+но не делает вид, что понимает семантику текста.
+
+Source mechanism имеет уровень `каркас`: committed rev11 pack, observed `11`,
+Ansible apply и live party относятся к отдельной activation-поставке.
 
 ## Revision 7: DC4 authored scene facts
 

@@ -430,6 +430,26 @@ Opening и его repair получают ту же дату/проекцию; s
 world-clock metadata и не создаёт elapsed job: дата остаётся прежней, а событие
 переходит в следующий доступный narrator prompt.
 
+## Revision 11: materialized prompts, не новый слой памяти
+
+Revision 11 не добавляет retrieval, summary, provider call или новый prompt
+block. При создании партии выбранные `world_system_prompt` и
+`world_authors_note` из authored preset один раз копируются в internal party
+snapshot и далее занимают существующие `WORLD_SYSTEM_PROMPT` и
+`WORLD_AUTHORS_NOTE` позиции. Их лимиты с заголовками остаются 5000 и 1500
+символов, а порядок относительно RAW, story memory, Lore Cards, corrections,
+relationship pressure и current action не меняется.
+
+Opening prompt, роль и полный `state_seed` материализуются тем же снимком.
+Branches и autotest descendants наследуют snapshot, поэтому поздняя правка
+WorldPack не переписывает историю, state или prompts существующей партии.
+SHA-256 в summary — только audit checksums: они не меняют authority, retrieval
+или commit и не запускают отдельную фоновую работу.
+
+Source ceiling уже равен `11`, но observed остаётся `10` и committed
+revision-11 pack отсутствует. Поэтому этот раздел описывает mechanism contract,
+а не применённый runtime или live evidence.
+
 ## Слои памяти
 
 В RP Stack слово «память» обозначает несколько независимых механизмов.

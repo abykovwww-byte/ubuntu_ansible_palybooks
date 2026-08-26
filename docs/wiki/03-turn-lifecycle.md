@@ -27,6 +27,8 @@
   сцене и поглощает его одной затронутой секцией памяти.
 - revision 10 / S4 добавляет optional authored world clock: local model оценивает
   только elapsed, а Gateway детерминированно исполняет cancelable events.
+- revision 11 выбирает authored full-prompt preset и полный opening seed до
+  создания партии и закрепляет их в immutable party snapshot.
 
 Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный pull-based
 activation и post-apply stamp proof подтвердили effective observed `7` для новых
@@ -37,6 +39,11 @@ production party прошла opening и 60 обычных ходов, испо�
 cache anchor и clock path. Этот прогон выявил перечисленные ниже разрывы;
 текущий closure-source ещё ждёт повторного Ansible apply и ручной партии.
 Existing parties не мигрируются, registry 032 остаётся на ступени `каркас`.
+
+Source ceiling revision `11` уже допускает mechanism/canary tests, но inventory
+остаётся observed `10`, revision-11 WorldPack не закоммичен и ordinary runtime
+path не активирован. Activation потребует отдельной pack+inventory поставки,
+apply и новой реальной партии.
 
 На revision 3+ повторное нарушение абсолютного правила после одного repair
 завершает запрос контролируемой ошибкой без новой state version и turn; это же
@@ -784,6 +791,15 @@ narrator completion или из fallback. Открытие файла остан
 только по текущему surface turn сайта.
 
 ## Старт партии
+
+Для revision 11 выбор происходит ещё до старта. При создании партии Gateway
+разрешает optional `preset_id`/`opening_id` только внутри manifest-каталогов;
+при отсутствии использует explicit defaults, а неизвестный ID отвергает. Затем
+он сохраняет выбранные IDs, точные system/authors/opening тексты, роль и полный
+state seed в materialized snapshot. SHA-256 служат аудитными checksums. Branch и
+autotest descendant наследуют тот же snapshot, поэтому последующая правка
+WorldPack не меняет их opening или prompt. Полные materialized payload не
+возвращаются в public summary.
 
 `POST /api/parties/{party_id}/start` создаёт opening scene один раз. Для мира с
 `training_runtime` Gateway валидирует и сохраняет immutable contract hash,

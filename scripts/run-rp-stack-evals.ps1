@@ -14,7 +14,7 @@ param(
     [string[]]$SemanticResponsesFile = @(),
     [string]$EvidenceFile = "",
     [string]$Output = "",
-    [ValidateRange(0, 10)]
+    [ValidateRange(0, 11)]
     [Nullable[int]]$RpContractRevision = $null
 )
 
