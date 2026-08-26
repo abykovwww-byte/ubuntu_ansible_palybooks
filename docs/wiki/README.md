@@ -2,7 +2,7 @@
 
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki проверена 25 августа 2026 года и отделяет source revision от фактического
+Эта Wiki проверена 26 августа 2026 года и отделяет source revision от фактического
 runtime. RP-only living story memory реализована в исходном коде и описана в
 [Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
 но статус push, Ansible apply и live verification всегда сообщается отдельно.
@@ -149,12 +149,18 @@ Candidate RP revision `9` отделяет обращение к мастеру 
 
 S4 описан в
 [Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md).
-Candidate revision `10` даёт WorldPack authored часы и cancelable global events:
+Revision `10` даёт WorldPack authored часы и cancelable global events:
 local Gemma оценивает только elapsed последнего committed хода, а Gateway
 атомарно применяет заранее написанные facts/Lore Card toggles. Narrator и Light
 GUI получают короткое одноразовое событие с ближайшим horizon. Source/local
-readiness S4 — `каркас`; observed revision остаётся `8`, deploy и длинная партия
-отложены до отдельного этапа.
+контур применён на `merchant-sviatoslav`; 25-ходовый DeepSeek Flash canary
+завершил все ходы без narrator fallback и подтвердил local clock jobs, authored
+event/fact и отсутствие NVIDIA. Он одновременно обнаружил два semantic разрыва:
+narrator смог вернуть время до уже прошедшего полудня, а relationship extractor
+записал события по цитатам, которые лишь упоминали NPC. Текущая source revision
+добавляет bounded clock-validation repair и narrator-only event-specific evidence
+gate без новых model calls. До её apply и отдельной canary эти два gate имеют
+уровень `каркас`; 50-turn endurance по-прежнему не заявлен.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
@@ -193,10 +199,10 @@ flowchart LR
 - **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
-- **Revision 8 активирована узко на «Купце».** Apply и stamp-party подтвердили effective `8` без model calls; старые партии и остальные WorldPacks не мигрируют, а длинные gates 25/60 отложены до полной реализации.
+- **Revision 10 активирована узко на «Купце».** 25-ходовый DeepSeek Flash canary завершился без narrator fallback и не менял source party; старые партии и остальные WorldPacks автоматически не мигрируют.
 - **S2 оставляет Lore Cards короткими и управляемыми.** WorldPack cards reviewed до commit, hidden content не является trigger, exact raised IDs видны рядом с ответом, а service draft не сохраняется без подтверждения игрока.
 - **S3 отделяет исправление от сцены.** Rev9 GM channel не вызывает narrator, показывает exact diff, сохраняет отдельный `gm_correction` и держит правку в защищённом overlay до one-section absorption; candidate ещё не активирован.
-- **S4 отделяет время от канона.** Rev10 local Gemma возвращает только bounded elapsed; cancelable события и два разрешённых consequence применяет Gateway, а observed revision пока остаётся `8`.
+- **S4 отделяет время от канона.** Rev10 local Gemma возвращает только bounded elapsed; cancelable события и два разрешённых consequence применяет Gateway. Новый source gate требует repair при прямом откате текущей даты/сработавшего deadline, но его live-проверка ещё впереди.
 - **Трасса начинается с request.** Workbench связывает запрос, фактические фазы и provider attempts даже без committed turn, а state и история остаются в существующих авторитетных хранилищах.
 - **Параметры narrator принадлежат Party.** Light GUI позволяет настроить reasoning и бюджет ответа для Luna/Luna Pro, а для DeepSeek V4 Flash — также temperature и Top P; Gateway валидирует возможности модели и применяет их только к narrator-вызовам.
 - **Развёртывание pull-based.** Изменения проходят `commit -> push рабочей ветки -> non-draft PR -> зелёный CI -> merge в main -> ansible-local-apply.service -> Docker Compose` на `abykovserv`.
