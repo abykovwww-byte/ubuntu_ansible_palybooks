@@ -30,6 +30,8 @@ relationships/model.json
 includes `rp` and optional otherwise.
 `lore-cards/` is optional for revision 8+. `world-clock.json` is optional and
 valid for a revision-10+ pack with an authored calendar.
+`rp-supervisor.json` is optional for an RP pack that explicitly opts into
+narrator-drift observation or authored low-authority enforcement.
 `presets/<id>/` and `prompts/openings/<id>/` are required only for the explicit
 revision-11 multi-variant contract; every nested seed keeps the exact filename
 `state-seed.json`.
@@ -331,6 +333,39 @@ supersession deterministically, and commits date, fired/superseded status,
 facts, and Lore Card toggles atomically. The model receives only the last
 recorded player+narrator turn and returns elapsed; do not duplicate the calendar
 or future events in `gm-system.md`, author note, state seed, or Lore Cards.
+
+## Optional RP Supervisor
+
+This feature is independent of RP contract revision. Declare it explicitly:
+
+```json
+"files": {
+  "rp_supervisor": "rp-supervisor.json"
+}
+```
+
+The file uses the closed `rp-gateway.rp-supervisor.v1` envelope. Its fixed
+runtime values are `window_turns: 50`, `cadence_turns: 8`,
+`max_advisories: 2`, `max_consecutive: 3`, and `retention_days: 30`. Rules are
+exactly, in order: `world_resistance`, `turn_return_variety`,
+`consequence_pressure`, `conflict_continuity`, `world_agency`, and
+`scene_mobility`.
+
+Start a new baseline with `mode: observe`. Each rule then has exactly `id`,
+`title`, and `rubric`; Gateway evaluates and stores typed scores but never adds
+an advisory to the narrator prompt. `mode: enforce` adds an authored
+`corridor: {min,max}`, `advisory_below`, and `advisory_above` to every rule.
+Gateway chooses at most two qualified advisories and stops repeating one after
+three consecutive evaluations. Never invent corridors from observation data
+without explicit review.
+
+The service model always follows the existing global service-model route; the
+WorldPack must not name a provider or model. The exact 50-turn canonical window
+is either sent whole or recorded as `unchecked`; it is never truncated and does
+not include story memory. Stored evaluations expire after 30 days and contain
+no raw supervisor prompt or response. `scene_mobility` measures behavioral
+scene progression only: it does not infer, store, or correct the action
+location, which remains the narrator's job.
 
 ## Revision 11 Narrative Presets and Opening Seeds
 

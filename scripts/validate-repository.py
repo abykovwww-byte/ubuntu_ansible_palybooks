@@ -395,6 +395,123 @@ def validate_world_clocks(errors: list[str]) -> None:
                 fail(errors, "merchant-sviatoslav world clock must include the Vyatichi campaign")
 
 
+def validate_rp_supervisors(errors: list[str]) -> None:
+    worldpacks_root = ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks"
+    rule_ids = (
+        "world_resistance",
+        "turn_return_variety",
+        "consequence_pressure",
+        "conflict_continuity",
+        "world_agency",
+        "scene_mobility",
+    )
+    required = {
+        "schema_version",
+        "mode",
+        "window_turns",
+        "cadence_turns",
+        "max_advisories",
+        "max_consecutive",
+        "confidence_threshold",
+        "retention_days",
+        "rules",
+    }
+    fixed = {
+        "window_turns": 50,
+        "cadence_turns": 8,
+        "max_advisories": 2,
+        "max_consecutive": 3,
+        "retention_days": 30,
+    }
+
+    for manifest_path in sorted(worldpacks_root.glob("*/manifest.json")):
+        pack_root = manifest_path.parent.resolve()
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        files = manifest.get("files") if isinstance(manifest, dict) else None
+        relative_path = files.get("rp_supervisor") if isinstance(files, dict) else None
+        conventional_path = pack_root / "rp-supervisor.json"
+        if relative_path is None:
+            if conventional_path.exists():
+                fail(errors, f"undeclared WorldPack rp-supervisor.json: {manifest_path.parent.relative_to(ROOT)}")
+            continue
+        label = str(manifest_path.relative_to(ROOT))
+        if not isinstance(relative_path, str) or not relative_path.strip():
+            fail(errors, f"invalid WorldPack rp_supervisor path: {label}")
+            continue
+        contract_path = (pack_root / relative_path).resolve()
+        if (contract_path != pack_root and pack_root not in contract_path.parents) or not contract_path.is_file():
+            fail(errors, f"missing or unsafe WorldPack rp_supervisor file: {label}")
+            continue
+        try:
+            contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        relative_contract = contract_path.relative_to(ROOT)
+        if not isinstance(contract, dict) or set(contract) != required:
+            fail(errors, f"invalid WorldPack RP supervisor envelope: {relative_contract}")
+            continue
+        mode = contract.get("mode")
+        confidence = contract.get("confidence_threshold")
+        if (
+            contract.get("schema_version") != "rp-gateway.rp-supervisor.v1"
+            or mode not in {"observe", "enforce"}
+            or not isinstance(confidence, (int, float))
+            or isinstance(confidence, bool)
+            or not 0 <= confidence <= 1
+            or any(contract.get(key) != value for key, value in fixed.items())
+        ):
+            fail(errors, f"invalid WorldPack RP supervisor header: {relative_contract}")
+        rules = contract.get("rules")
+        if not isinstance(rules, list) or len(rules) != len(rule_ids):
+            fail(errors, f"WorldPack RP supervisor must declare six rules: {relative_contract}")
+            continue
+        actual_ids: list[str] = []
+        for index, rule in enumerate(rules):
+            rule_label = f"{relative_contract}:rules[{index}]"
+            allowed = {"id", "title", "rubric"}
+            if mode == "enforce":
+                allowed |= {"corridor", "advisory_below", "advisory_above"}
+            if not isinstance(rule, dict) or set(rule) != allowed:
+                fail(errors, f"invalid WorldPack RP supervisor rule shape: {rule_label}")
+                continue
+            rule_id = str(rule.get("id") or "")
+            actual_ids.append(rule_id)
+            title = str(rule.get("title") or "").strip()
+            rubric = str(rule.get("rubric") or "").strip()
+            if not title or len(title) > 120 or not rubric or len(rubric) > 1200:
+                fail(errors, f"invalid WorldPack RP supervisor rule text: {rule_label}")
+            if mode != "enforce":
+                continue
+            corridor = rule.get("corridor")
+            lower = corridor.get("min") if isinstance(corridor, dict) else None
+            upper = corridor.get("max") if isinstance(corridor, dict) else None
+            if (
+                not isinstance(corridor, dict)
+                or set(corridor) != {"min", "max"}
+                or not isinstance(lower, (int, float))
+                or isinstance(lower, bool)
+                or not isinstance(upper, (int, float))
+                or isinstance(upper, bool)
+                or not 0 <= lower < upper <= 1
+            ):
+                fail(errors, f"invalid WorldPack RP supervisor corridor: {rule_label}")
+            for field in ("advisory_below", "advisory_above"):
+                advisory = str(rule.get(field) or "").strip()
+                if (
+                    not advisory
+                    or len(advisory) > 240
+                    or "\n" in advisory
+                    or "{" in advisory
+                    or "}" in advisory
+                ):
+                    fail(errors, f"invalid WorldPack RP supervisor {field}: {rule_label}")
+        if tuple(actual_ids) != rule_ids:
+            fail(errors, f"WorldPack RP supervisor rule order/ids are not canonical: {relative_contract}")
+
+
 def validate_worldpack_narrative_variants(errors: list[str]) -> None:
     worldpacks_root = ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks"
 
@@ -958,6 +1075,7 @@ def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
         "story_memory_canonical=false",
         "rp-gateway.worldpack-lore-cards.v1",
         "rp-gateway.world-clock.v1",
+        "rp-gateway.rp-supervisor.v1",
         '"presets_default"',
         '"openings_default"',
         "prompts/openings/<id>/state-seed.json",
@@ -994,6 +1112,7 @@ def main() -> int:
     validate_json(errors)
     validate_worldpack_lore_cards(errors)
     validate_world_clocks(errors)
+    validate_rp_supervisors(errors)
     validate_worldpack_narrative_variants(errors)
     validate_wiki(errors)
     validate_agents(errors)
@@ -1006,7 +1125,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks/narrative variants, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
+    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks/RP supervisors/narrative variants, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
     return 0
 
 

@@ -148,8 +148,19 @@ backfill-ятся и не мигрируются; поздний WorldPack edit 
 или prompt. Checksums служат аудитной сверкой и не создают телеметрию или новый
 readiness signal.
 
-Source mechanism пока имеет ceiling `11`, observed `10` и не содержит
-revision-11 pack; storage migration в source не является runtime activation.
+### RP supervisor: typed retention без raw trace
+
+Decision 040 добавляет `rp_supervisor_evaluations`, изолированную по
+`state_campaign_id` и hash WorldPack-контракта. Строка хранит границы exact
+50-unit окна, source request/turn, шесть typed оценок, выбранные authored
+advisories, diagnostic flags, provider/model, status и latency. Prompt и raw
+response не сохраняются ни здесь, ни в `service_call_log`.
+
+TTL фиксирован на 30 дней и очищается при следующем сохранении/явной cleanup.
+Rollback инвалидирует оценки, окно которых содержит исключённый turn; удаление
+party удаляет их до turns. Они не входят в canonical state, story memory или
+dataset и не используются как authority локации. `observe` никогда не создаёт
+narrator advisory.
 
 ## Где находятся данные
 
@@ -174,6 +185,7 @@ SQLite используется несколькими service stores, но scop
 | State/history | `campaigns`, `state_versions`, `turns`, `checks`, `state_patches`, `audit_events` |
 | Memory | `rp_story_memory_snapshots`, `memory_chapters`, legacy `memory_summaries`, `journal_entries`, `lore_cards`, `service_jobs` |
 | Reliability | `turn_requests`, `memory_checkpoints`, `party_branches`, `autotest_runs` |
+| RP supervision | `rp_supervisor_evaluations` (typed, 30-day TTL, no raw prompt/response) |
 | Dataset | `dataset_turn_labels`, `turn_feedback` |
 | Showroom | `showroom_scenarios`, `showroom_visitors`, `showroom_runs` |
 | Training artifacts | `training_artifacts`, `training_artifact_events` |
@@ -320,7 +332,9 @@ attempts, `turn_state_mutations` — exact before/after и фактически�
 lane только для изменившихся
 in-place проекций, а `turn_phase_annotations` — идемпотентные пользовательские
 заметки. Существующий `service_call_log` сохраняет exact redacted ordered messages
-и raw provider response служебной модели; второй журнал completions не создаётся.
+и raw provider response обычных служебных completions; privacy-исключение
+Decision 040 пишет только typed `rp_supervisor_evaluations`, не создавая второй
+raw журнал completions.
 
 Все записи изолированы по `state_campaign_id` и `request_id`. Gateway разрешает
 `party_id` и опциональный `branch_id` только после admin-gate; обычный владелец

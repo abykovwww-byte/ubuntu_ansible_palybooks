@@ -65,6 +65,19 @@ SHA-256, но не полные materialized prompt texts или state seed.
 party сохранила оба ID и revision `11`. Это уровень `подключено`; отдельного
 зарегистрированного causal probe и endurance-доказательства для revision 11 нет.
 
+### Статус RP supervisor
+
+Если WorldPack объявляет `manifest.files.rp_supervisor`, существующая панель
+памяти дополнительно читает owner-scoped
+`GET /api/parties/{party_id}/supervisor`. Она показывает режим, число canonical
+playable units до следующей ретроспективы, статус последней оценки и фактически
+выбранную глобальную служебную модель. Отдельного selector модели нет.
+
+В `observe` UI прямо сообщает, что оценки не влияют на narrator. В `enforce`
+он показывает число активных authored рекомендаций, но не раскрывает service
+prompt или raw response. Party без opt-in контракта не получает ни вызовов, ни
+лишнего блока в панели.
+
 ### Lore Cards в revision 8
 
 History API возвращает для хода `metadata.prompt_assembly.lore_card_ids` и

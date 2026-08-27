@@ -178,6 +178,20 @@ Revision-11 mechanism имеет уровень `подключено`: прим
 зарегистрированный causal probe и endurance для более высоких ступеней не
 выполнялись.
 
+## Optional RP supervisor contract
+
+WorldPack может добавить `manifest.files.rp_supervisor` со strict
+`rp-gateway.rp-supervisor.v1`. Контракт фиксирует `50` playable units, cadence
+`8`, максимум `2` advisories, подтверждение отклонения на `3` последовательных
+оценках, retention `30` дней и ровно шесть canonical rule IDs. В `observe`
+правила содержат только title/rubric; corridor и authored below/above advisory
+разрешены только в `enforce`.
+
+Первый opt-in — `day-watch-moscow-v2` в режиме `observe`. Это не повышает RP
+revision, не меняет preset/opening snapshot и не вводит отдельную service model.
+`scene_mobility` оценивает развитие ситуации и ритм, а не каноническую локацию:
+место действия остаётся задачей narrator и существующих игровых контрактов.
+
 ## Revision 7: DC4 authored scene facts
 
 [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
