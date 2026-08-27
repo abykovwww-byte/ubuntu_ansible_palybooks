@@ -151,6 +151,7 @@ setup-flow.md
 relationships/model.json
 lore-cards/<group>.json
 world-clock.json                 # optional for a revision-10+ authored calendar
+rp-supervisor.json               # optional RP narrator-drift observation/enforcement contract
 ```
 
 `relationships/model.json` is required when `scenario_types.supported`
@@ -200,6 +201,12 @@ World-pack requirements:
 - Add `files.world_clock` only when the revision-10+ pack needs an authored
   calendar and cancelable events. Validate those events against the Lore Card
   library; the file remains optional and existing packs stay pinned.
+- Add `files.rp_supervisor` only when the pack deliberately opts into
+  `rp-gateway.rp-supervisor.v1`. Start with `mode: observe`: it scores exactly
+  six behavior axes over 50 canonical turns every eight turns and never changes
+  the narrator prompt. `mode: enforce` additionally requires authored corridors
+  and both advisory directions for every rule. This file does not define scene
+  location, select a provider/model, or require an RP revision bump.
 - Reuse stable location and character IDs from `state-seed.json` throughout the pack. Revision 8 adds no scene manifest field and its narrator does not receive `scene_state`. When maintaining a revision-7 pack, an additional invariant narrative affiliation may use the existing bounded `rp_contract.stable_affiliations` compatibility field; never infer professions, goals, beliefs, emotions, or relationship-model roles into it.
 - Do not copy `scene_claims`, `scene_delta`, or the private narrator bundle schema into `gm-system.md` or `authors-note.md`. They belong only to Gateway's revision-7 compatibility path; revisions 8+ request plain narrator text.
 - Include focused lorebook entries, not one giant encyclopedia entry.
@@ -311,6 +318,10 @@ Pop-Location
   timezone/date and duration, unique IDs, acyclic `after_event` references,
   known markers, non-empty supersession for every event, allowed consequence
   types, and referenced authored Lore Card keys.
+- For packs with `files.rp_supervisor`, validate the closed
+  `rp-gateway.rp-supervisor.v1` envelope, the fixed 50/8 window and cadence,
+  all six canonical rule IDs, observe/enforce rule shapes, two-advisory limit,
+  three-cycle reassertion limit, and 30-day typed-result retention.
 - For every revision-11 pack, validate both closed catalogs, explicit defaults,
   stable unique IDs, safe existing paths, exact opening seed convention,
   canonical byte-equal root aliases, root/default `player_role` equality, and

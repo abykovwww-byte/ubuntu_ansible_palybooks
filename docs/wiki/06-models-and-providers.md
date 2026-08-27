@@ -116,6 +116,7 @@ OpenAI-compatible `HTTP 200` с отсутствующим или пустым �
 | RP rev9 GM intent / patch draft | Exact local Gemma; `2000/100` и `4000/300` input chars/output tokens, без fallback |
 | RP relationship extraction | Revisions 0..8: глобальная service model; rev9: exact local Gemma, только `scenario_type=rp` |
 | RP rev10 world-clock elapsed | Exact local Gemma; только последняя записанная пара, `4000/50`, strict elapsed JSON, без fallback |
+| Opt-in RP supervisor | Текущая глобальная service model; один strict call по exact 50-turn окну, без отдельного selector или fallback |
 | LLM world-state draft | Глобальная service model |
 | Генерация/дополнение NPC | Глобальная service model |
 | Intent parsing и context estimation | Без LLM |
@@ -251,6 +252,21 @@ call и clock tick. После terminal retry Gateway применяет `PT0S` 
 авторитетной датой и durable deadline facts. Прямой откат времени получает одну
 обычную narrator repair-попытку, затем fail-before-commit. Эта проверка
 детерминированна и не создаёт служебный model call.
+
+### RP supervisor route
+
+[Decision 040](../../roles/apps/files/rp-stack/docs/decisions/040-rp-supervisor-rule-reassertion.md)
+намеренно использует единственный текущий global `SERVICE_MODEL_CHOICE` и
+stack-managed credential. Party narrator/BYOK, `LLM_PROVIDER`, отдельный model
+selector и смена provider при ошибке не участвуют. Недоступный либо слишком
+маленький route даёт typed `unchecked`, а игровой ход остаётся committed.
+
+Один strict structured call получает instruction и ровно 50 полных canonical
+playable units; story memory и другие provider prompts не передаются. Ответ
+содержит только шесть rule IDs, score/confidence/evidence/status. Gateway
+вычисляет corridor direction, cadence и advisories сам. Для privacy этот вызов
+не пишет raw prompt/response в `service_call_log`: сохраняются только typed
+результаты, фактический provider/model, границы окна, status и latency на 30 дней.
 
 ## Диагностика model attempts
 

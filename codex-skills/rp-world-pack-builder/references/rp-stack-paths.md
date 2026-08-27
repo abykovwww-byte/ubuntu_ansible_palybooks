@@ -64,6 +64,7 @@ POST /api/parties
 DELETE /api/parties/{party_id}
 GET  /api/parties/{party_id}/state
 GET  /api/parties/{party_id}/history
+GET  /api/parties/{party_id}/supervisor
 POST /api/parties/{party_id}/messages
 POST /api/parties/{party_id}/checks
 POST /api/parties/{party_id}/world/instruct

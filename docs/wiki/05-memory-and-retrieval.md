@@ -308,7 +308,8 @@ flowchart TB
     C9 --> G["8. Только содержательный AUTHORITATIVE_OUTCOME"]
     G --> H["9. RELATIONSHIP_PRESSURE + due resolution"]
     H --> WC["10. Rev10 СОБЫТИЯ МИРА · до 800 chars"]
-    WC --> I["11. WORLD_AUTHORS_NOTE · до 1500 chars · последний system block"]
+    WC --> RS["10a. RP_SUPERVISOR_ADVISORY · enforce opt-in · до 800 chars"]
+    RS --> I["11. WORLD_AUTHORS_NOTE · до 1500 chars · последний authored system block"]
     I --> J["12. Current player action · последнее message"]
 ```
 
@@ -429,6 +430,19 @@ Opening и его repair получают ту же дату/проекцию; s
 создаётся. Неканоничный safe fallback также не снимает event ID, не получает
 world-clock metadata и не создаёт elapsed job: дата остаётся прежней, а событие
 переходит в следующий доступный narrator prompt.
+
+### RP supervisor не является памятью или scene authority
+
+Opt-in supervisor читает отдельное exact окно из 50 последних canonical
+playable units каждые восемь новых units. Он не получает story-memory snapshot,
+не меняет пять section coverages, archive/retrieval, RAW anchor или canonical
+state. Его typed оценки живут отдельно и автоматически истекают через 30 дней.
+
+В `observe` prompt-блока нет. Только `enforce` может добавить не более двух
+коротких заранее написанных WorldPack advisories после relationship pressure и
+world events, но до author note/current action; narrator repair получает ту же
+проекцию. Ни одна supervisor rule не определяет текущую локацию и не заменяет
+работу narrator по ведению места действия.
 
 ## Revision 11: materialized prompts, не новый слой памяти
 

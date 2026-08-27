@@ -170,6 +170,14 @@ canary подтвердил local clock jobs, authored event/fact и отсут�
 но не содержит `world-clock.json`: новые партии получают cumulative rev8/rev9
 контракты, а clock jobs, дата и `СОБЫТИЯ МИРА` для них не создаются.
 
+[Decision 040](../../roles/apps/files/rp-stack/docs/decisions/040-rp-supervisor-rule-reassertion.md)
+добавляет opt-in RP supervisor без новой revision и без authority над локацией.
+После первых 56 canonical playable units и затем каждые восемь ходов Gateway
+отдаёт глобальной служебной модели ровно последние 50 units для оценки шести
+authored правил. `day-watch-moscow-v2` первым включает режим `observe`: оценки
+хранятся и видны владельцу в панели памяти, но не меняют narrator prompt. Source
+readiness Decision 040 остаётся `каркас` до apply и реального 50-turn baseline.
+
 [Decision 041](../../roles/apps/files/rp-stack/docs/decisions/041-rp-narrative-presets-and-opening-seeds.md)
 задаёт revision `11` и закрытые authored каталоги narrative presets/opening
 seeds. Отдельная activation-поставка добавляет `day-watch-moscow-v2` рядом с
@@ -220,6 +228,7 @@ flowchart LR
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
 - **Revision 10 активирована на уровне capability WorldPack.** «Купец» прошёл первый 60-turn production endurance как authored-clock canary; `day-watch-moscow` объявляет revision `10` без календаря. Текущий closure ещё не применён, а старые партии автоматически не мигрируют.
 - **Revision 11 подключена на live-сервере.** Полные authored preset/opening выбираются по ID и закрепляются в party snapshot; applied `day-watch-moscow-v2` и ordinary party подтвердили non-default выбор и prompt path. Уровни `наблюдается` и `держится` без causal probe/endurance не заявляются.
+- **RP supervisor пока только наблюдает.** Opt-in WorldPack получает шесть typed оценок по exact 50-turn окну каждые восемь ходов; `observe` ничего не подмешивает narrator и не вводит отдельную модель или локационную authority.
 - **S2 оставляет Lore Cards короткими и управляемыми.** WorldPack cards reviewed до commit, hidden content не является trigger, exact raised IDs видны рядом с ответом, а service draft не сохраняется без подтверждения игрока.
 - **S3 отделяет исправление от сцены.** Rev9 GM channel не вызывает narrator, показывает exact diff, сохраняет отдельный `gm_correction` и держит правку в защищённом overlay до one-section absorption; первый live-call выявил collision, исправленный повтор ещё впереди.
 - **S4 отделяет время от канона.** Rev10 local Gemma возвращает только bounded elapsed; cancelable события и два разрешённых consequence применяет Gateway. Ordinary clock path уже исполнялся в 60-turn партии; исправленная opening-проекция и fallback retention ждут повторного live-proof.

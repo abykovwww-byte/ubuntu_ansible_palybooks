@@ -490,6 +490,25 @@ bounded narrator repair; повторное нарушение не коммит
 общий NLP-оракул времени: косвенные намёки и новые способы формулировки требуют
 provider canary и при необходимости узкого расширения gate.
 
+### Opt-in RP supervisor после commit
+
+[Decision 040](../../roles/apps/files/rp-stack/docs/decisions/040-rp-supervisor-rule-reassertion.md)
+не меняет основной commit. Только после успешного canonical ordinary turn
+Gateway проверяет cadence opt-in контракта и при необходимости ставит один
+`rp_supervisor` job. Opening, `gm_correction`, world command, rollback-excluded
+и noncanonical fallback в счётчик и окно не входят.
+
+Первая оценка возникает на 56-й playable unit, далее — на 64-й, 72-й и так
+далее. Каждый job замораживает source request/turn и передаёт одной глобальной
+служебной модели ровно последние 50 полных player/narrator units без story
+memory и усечения. Ошибка остаётся typed `error/unchecked` и не откатывает ход.
+
+В `observe` результат только сохраняется. В `enforce` Gateway сам выбирает не
+более двух authored advisories; отклонение должно повториться три оценки подряд.
+Короткий `RP_SUPERVISOR_ADVISORY` попадает после relationship/world events и до
+author note/current action; repair собирает тот же порядок. Supervisor не
+вычисляет и не исправляет локацию действия.
+
 ## Обычный ход
 
 ```mermaid
