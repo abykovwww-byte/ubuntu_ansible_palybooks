@@ -6,6 +6,39 @@
     fail_msg: "docker_apps must be a list of Docker Compose application definitions."
   tags: [apps, preflight]
 
+- name: Require credentials for private Docker app repositories
+  ansible.builtin.assert:
+    that:
+      - app_repo_token | length > 0
+    fail_msg: "Enabled Docker app {{ app.name }} requires its server-local repository token."
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_token_required | default(false) | bool
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
+  no_log: true
+  tags: [apps, preflight, source, git]
+
+- name: Validate commit-pinned Docker app revisions
+  ansible.builtin.assert:
+    that:
+      - (app.repo_version | default('')) is match('^[0-9a-f]{40}$')
+    fail_msg: "Commit-pinned Docker app {{ app.name }} requires a full lowercase commit SHA."
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_version_is_commit | default(false) | bool
+  tags: [apps, preflight, source, git]
+
 - name: Validate RP Stack training runtime WorldPacks
   ansible.builtin.command:
     argv:
@@ -326,6 +359,7 @@
     - item.changed | default(false) | bool
     - item.app is defined
     - item.app.name is defined
+  no_log: true
   tags: [apps, compose]
 
 - name: Collect changed Docker apps from runtime file tasks

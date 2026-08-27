@@ -1035,6 +1035,171 @@ def validate_environment_contracts(errors: list[str]) -> None:
             fail(errors, f".graphifyignore missing required entry: {required}")
 
 
+def validate_awareness_showroom_iac(errors: list[str]) -> None:
+    inventory_path = ROOT / "inventories" / "local" / "group_vars" / "server.yml"
+    production_env_path = ROOT / "roles" / "apps" / "templates" / "awareness-showroom.env.j2"
+    example_env_path = ROOT / "roles" / "apps" / "templates" / "awareness-showroom.env.example.j2"
+    apps_tasks_path = ROOT / "roles" / "apps" / "tasks" / "main.yml"
+    required_paths = (inventory_path, production_env_path, example_env_path, apps_tasks_path)
+    for path in required_paths:
+        if not path.is_file():
+            fail(errors, f"missing Awareness Showroom IaC contract: {path.relative_to(ROOT)}")
+    if any(not path.is_file() for path in required_paths):
+        return
+
+    inventory = inventory_path.read_text(encoding="utf-8")
+    production_env = production_env_path.read_text(encoding="utf-8")
+    example_env = example_env_path.read_text(encoding="utf-8")
+    apps_tasks = apps_tasks_path.read_text(encoding="utf-8")
+    placeholder = "_".join(("ROOT", "FINAL", "PIN"))
+
+    pin_values = re.findall(
+        r'(?m)^awareness_showroom_repo_version:\s*"([^"\s]+)"\s*(?:#.*)?$',
+        inventory,
+    )
+    if len(pin_values) != 1:
+        fail(errors, "Awareness Showroom inventory must declare exactly one repository pin")
+    else:
+        pin = pin_values[0]
+        if pin != placeholder and not re.fullmatch(r"[0-9a-f]{40}", pin):
+            fail(errors, "Awareness Showroom repository pin must be the scaffold placeholder or a full lowercase commit SHA")
+        placeholder_count = sum(text.count(placeholder) for text in (inventory, production_env, example_env))
+        expected_placeholder_count = 1 if pin == placeholder else 0
+        if placeholder_count != expected_placeholder_count:
+            fail(errors, "Awareness Showroom final-pin placeholder must exist only at the inventory repository pin")
+
+    inventory_markers = (
+        'awareness_showroom_enabled: "{{ (awareness_showroom_repo_version | length) == 40 }}"',
+        'awareness_showroom_repo_url: "https://github.com/abykovwww-byte/tavern-awareness-showroom.git"',
+        'awareness_showroom_project_dir: "{{ app_deploy_base_dir }}/awareness-showroom"',
+        'awareness_showroom_data_dir: "{{ app_data_base_dir }}/awareness-showroom"',
+        'awareness_showroom_cover_dir: "{{ awareness_showroom_data_dir }}/showroom-covers"',
+        'awareness_showroom_backup_dir: "{{ app_backup_base_dir }}/awareness-showroom"',
+        'awareness_showroom_bind_host: "127.0.0.1"',
+        "awareness_showroom_host_port: 18011",
+        'awareness_showroom_gateway_database_url: "sqlite:////data/awareness_gateway.db"',
+        "awareness_showroom_gateway_session_cookie_name: awareness_gateway_session",
+        "awareness_showroom_visitor_cookie_name: awareness_showroom_visitor",
+        '- "deepseek/deepseek-v4-flash"',
+        '- "google/gemini-3.6-flash"',
+        "awareness_showroom_local_llm_enabled: false",
+        'awareness_showroom_local_llm_network: "rp-llm"',
+        'awareness_showroom_local_llm_base_url: "http://rp-local-llm:8080/v1"',
+    )
+    for marker in inventory_markers:
+        if marker not in inventory:
+            fail(errors, f"Awareness Showroom inventory contract missing marker: {marker}")
+
+    app_match = re.search(
+        r"(?ms)^  - name: awareness-showroom\n(?P<body>.*?)(?=^\S|\Z)",
+        inventory,
+    )
+    if app_match is None:
+        fail(errors, "docker_apps does not contain Awareness Showroom")
+    else:
+        app_body = app_match.group("body")
+        app_markers = (
+            'enabled: "{{ awareness_showroom_enabled }}"',
+            'repo_url: "{{ awareness_showroom_repo_url }}"',
+            'repo_version: "{{ awareness_showroom_repo_version }}"',
+            "repo_version_is_commit: true",
+            "repo_token_var: awareness_showroom_github_token",
+            "repo_token_required: true",
+            'project_dir: "{{ awareness_showroom_project_dir }}"',
+            "env_template: awareness-showroom.env.j2",
+            "env_example_template: awareness-showroom.env.example.j2",
+            "compose_remove_orphans: true",
+            '- "{{ awareness_showroom_gateway_data_dir }}"',
+            '- "{{ awareness_showroom_state_dir }}"',
+            '- "{{ awareness_showroom_cover_dir }}"',
+            '- "{{ awareness_showroom_backup_dir }}"',
+        )
+        for marker in app_markers:
+            if marker not in app_body:
+                fail(errors, f"Awareness Showroom docker_apps contract missing marker: {marker}")
+        for forbidden in ("source_dir:", "compose_template:"):
+            if forbidden in app_body:
+                fail(errors, f"Awareness Showroom source/Compose must remain owned by its repository: {forbidden}")
+
+        rp_stack_position = inventory.find("  - name: rp-stack\n")
+        awareness_position = inventory.find("  - name: awareness-showroom\n")
+        if rp_stack_position < 0 or awareness_position <= rp_stack_position:
+            fail(errors, "Awareness Showroom must follow RP Stack in docker_apps for deterministic future cutover ordering")
+
+    production_markers = (
+        "COMPOSE_PROJECT_NAME=tavern-awareness-showroom",
+        "APP_REVISION={{ awareness_showroom_repo_version }}",
+        "SHOWROOM_BIND_HOST={{ awareness_showroom_bind_host }}",
+        "SHOWROOM_HOST_PORT={{ awareness_showroom_host_port }}",
+        "AWARENESS_GATEWAY_DATA_DIR={{ awareness_showroom_gateway_data_dir }}",
+        "AWARENESS_STATE_DIR={{ awareness_showroom_state_dir }}",
+        "AWARENESS_SHOWROOM_COVER_DIR={{ awareness_showroom_cover_dir }}",
+        "AWARENESS_BACKUP_DIR={{ awareness_showroom_backup_dir }}",
+        "LOCAL_LLM_NETWORK={{ awareness_showroom_local_llm_network }}",
+        "SCENARIO_TYPE=training",
+        "DATABASE_URL={{ awareness_showroom_gateway_database_url }}",
+        "STATE_SCHEMA_PATH=/app/state-schema.json",
+        "LOCAL_LLM_BASE_URL={{ awareness_showroom_local_llm_base_url }}",
+        "SERVICE_OPENROUTER_API_KEY={{ awareness_showroom_service_openrouter_api_key }}",
+        "SERVICE_MODEL_CHOICE={{ awareness_showroom_service_model_choice }}",
+        "GATEWAY_SESSION_COOKIE_NAME={{ awareness_showroom_gateway_session_cookie_name }}",
+        "SHOWROOM_VISITOR_COOKIE_NAME={{ awareness_showroom_visitor_cookie_name }}",
+    )
+    for marker in production_markers:
+        if marker not in production_env:
+            fail(errors, f"Awareness Showroom production env missing marker: {marker}")
+    if "rp_stack_" in production_env or "rp_gateway_session" in production_env:
+        fail(errors, "Awareness Showroom production env must not inherit RP Stack variable or cookie identities")
+
+    example_markers = (
+        "SHOWROOM_BIND_HOST=127.0.0.1",
+        "SHOWROOM_HOST_PORT=18011",
+        "AWARENESS_GATEWAY_DATA_DIR=/srv/app-data/awareness-showroom/gateway",
+        "AWARENESS_STATE_DIR=/srv/app-data/awareness-showroom/state",
+        "AWARENESS_SHOWROOM_COVER_DIR=/srv/app-data/awareness-showroom/showroom-covers",
+        "AWARENESS_BACKUP_DIR=/srv/backups/awareness-showroom",
+        "LOCAL_LLM_NETWORK=rp-llm",
+        "LOCAL_LLM_ENABLED=false",
+        "SCENARIO_TYPE=training",
+        "DATABASE_URL=sqlite:////data/awareness_gateway.db",
+        "GATEWAY_SESSION_COOKIE_NAME=awareness_gateway_session",
+        "SHOWROOM_VISITOR_COOKIE_NAME=awareness_showroom_visitor",
+        "OPENROUTER_API_KEY=",
+        "SERVICE_OPENROUTER_API_KEY=",
+        "OPENROUTER_MODELS=deepseek/deepseek-v4-flash,google/gemini-3.6-flash,openrouter/auto,openrouter/free",
+        "GEMINI_API_KEY=",
+    )
+    for marker in example_markers:
+        if marker not in example_env:
+            fail(errors, f"Awareness Showroom example env missing marker: {marker}")
+
+    collector_match = re.search(
+        r"(?ms)^- name: Collect changed Docker apps from app-level tasks\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if collector_match is None or "\n  no_log: true\n" not in collector_match.group("body"):
+        fail(errors, "token-auth Docker app results must stay hidden while collecting changed apps")
+
+    private_preflight_match = re.search(
+        r"(?ms)^- name: Require credentials for private Docker app repositories\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if private_preflight_match is None:
+        fail(errors, "private Docker app repository credentials require an early preflight")
+    else:
+        private_preflight = private_preflight_match.group("body")
+        for marker in ("app.repo_token_required", "app_repo_token | length > 0", "\n  no_log: true\n"):
+            if marker not in private_preflight:
+                fail(errors, f"private repository credential preflight missing marker: {marker.strip()}")
+
+    commit_preflight_match = re.search(
+        r"(?ms)^- name: Validate commit-pinned Docker app revisions\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if commit_preflight_match is None or "^[0-9a-f]{40}$" not in commit_preflight_match.group("body"):
+        fail(errors, "commit-pinned Docker apps require a server-side full-SHA preflight")
+
+
 def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
     inventory = ROOT / "inventories" / "local" / "group_vars" / "server.yml"
     if not inventory.is_file():
@@ -1118,6 +1283,7 @@ def main() -> int:
     validate_agents(errors)
     validate_plugin(errors)
     validate_environment_contracts(errors)
+    validate_awareness_showroom_iac(errors)
     validate_rp_world_pack_builder_contract(errors)
     validate_adr_registry(errors)
     if errors:
@@ -1125,7 +1291,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks/RP supervisors/narrative variants, Wiki, AGENTS, plugin, environment, RP builder, SSH, policy, and Graphify guards.")
+    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks/RP supervisors/narrative variants, Wiki, AGENTS, plugin, environment, Awareness Showroom IaC, RP builder, SSH, policy, and Graphify guards.")
     return 0
 
 
