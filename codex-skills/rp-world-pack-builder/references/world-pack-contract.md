@@ -88,11 +88,11 @@ contain only `rp`. Route `training` packs to `training-world-pack-builder`. The 
 chooses the party type manually; this metadata does not auto-select it.
 Every pack supporting `rp` declares `rp_contract.schema_version=rp-core.v2` and
 the highest cumulative `rp_contract.revision` it supports. New RP packs created
-by this builder use revision `10`. Gateway still caps ordinary party creation by
+by this builder use revision `11` and the variant contract below. Gateway still caps ordinary party creation by
 the observed runtime revision. Existing manifests and parties remain pinned and
 are not blanket-migrated; raise an existing pack only as an explicit compatible
-update. `merchant-sviatoslav` is the first revision-10 activation target, while
-the other existing packs retain their declared revisions.
+update. Revision `10` remains valid for compatible existing packs without
+presets/openings; `day-watch-moscow-v2` is the first revision-11 activation.
 
 ## Revision 7 Authoring Boundary
 
@@ -334,10 +334,9 @@ or future events in `gm-system.md`, author note, state seed, or Lore Cards.
 
 ## Revision 11 Narrative Presets and Opening Seeds
 
-Revision 11 is available in source, while the current default for new packs and
-the observed runtime remain revision 10 until a separate pack-and-activation
-delivery. Do not add a revision-11 declaration merely because the loader knows
-the shape. An explicitly approved pack uses:
+Revision 11 is the current contract for new RP packs and the observed runtime is
+11. Existing revision-10 and older packs remain pinned and do not acquire
+variant catalogs implicitly. A revision-11 pack uses:
 
 ```json
 {

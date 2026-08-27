@@ -2,7 +2,7 @@
 
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki проверена 26 августа 2026 года и отделяет source revision от фактического
+Эта Wiki проверена 27 августа 2026 года и отделяет source revision от фактического
 runtime. RP-only living story memory реализована в исходном коде и описана в
 [Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
 но статус push, Ansible apply и live verification всегда сообщается отдельно.
@@ -171,12 +171,12 @@ canary подтвердил local clock jobs, authored event/fact и отсут�
 контракты, а clock jobs, дата и `СОБЫТИЯ МИРА` для них не создаются.
 
 [Decision 041](../../roles/apps/files/rp-stack/docs/decisions/041-rp-narrative-presets-and-opening-seeds.md)
-поднимает только source ceiling до revision `11` и добавляет закрытые authored
-каталоги narrative presets и opening seeds. Клиент выбирает стабильные ID до
-создания партии, а Gateway один раз материализует полные prompt/role/seed в её
-снимок. Inventory остаётся observed `10`; revision-11 WorldPack в этой поставке
-не добавлен, поэтому ни source merge, ни зелёные tests не являются activation
-или live-доказательством.
+задаёт revision `11` и закрытые authored каталоги narrative presets/opening
+seeds. Отдельная activation-поставка добавляет `day-watch-moscow-v2` рядом с
+неизменённым v1 и настраивает inventory на observed `11`. Клиент выбирает
+стабильные ID до создания партии, а Gateway один раз материализует полные
+prompt/role/seed в её снимок. До Ansible apply и реальной партии это source
+activation, а не live-доказательство.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
@@ -262,8 +262,7 @@ SillyTavern не входит в текущий Compose RP Stack. Lorebook JSON 
 
 - семантический RAG через embeddings и vector database;
 - динамические или сгенерированные моделью варианты ответа игрока не реализованы;
-  authored full-prompt presets/opening seeds revision 11 уже имеют source API и
-  UI-механизм, но ещё не имеют committed pack или runtime activation;
+  revision 11 использует только committed authored presets/opening seeds;
 - встроенный GitHub Wiki-репозиторий — эта Wiki хранится в `docs/wiki/`, потому что `ubuntu_ansible_palybooks.wiki.git` ещё не инициализирован.
 
 ## Источники истины
