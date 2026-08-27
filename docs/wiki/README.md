@@ -175,8 +175,11 @@ canary подтвердил local clock jobs, authored event/fact и отсут�
 seeds. Отдельная activation-поставка добавляет `day-watch-moscow-v2` рядом с
 неизменённым v1 и настраивает inventory на observed `11`. Клиент выбирает
 стабильные ID до создания партии, а Gateway один раз материализует полные
-prompt/role/seed в её снимок. До Ansible apply и реальной партии это source
-activation, а не live-доказательство.
+prompt/role/seed в её снимок. Activation merge `80ab6d3` применён 27 августа
+2026 года; авторизованный Light GUI и ordinary party с non-default
+`strategic`/`inquisition-observer` подтвердили реальный тракт, persisted snapshot
+и выбранный prompt. Registry 041 имеет уровень `подключено`; causal probe и
+endurance для более высоких ступеней не заявлены.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
@@ -216,7 +219,7 @@ flowchart LR
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
 - **Revision 10 активирована на уровне capability WorldPack.** «Купец» прошёл первый 60-turn production endurance как authored-clock canary; `day-watch-moscow` объявляет revision `10` без календаря. Текущий closure ещё не применён, а старые партии автоматически не мигрируют.
-- **Revision 11 пока является только source-механизмом.** Полные authored preset/opening выбираются по ID и закрепляются в party snapshot; committed rev11 pack, observed `11`, apply и реальная партия относятся к отдельной activation-поставке.
+- **Revision 11 подключена на live-сервере.** Полные authored preset/opening выбираются по ID и закрепляются в party snapshot; applied `day-watch-moscow-v2` и ordinary party подтвердили non-default выбор и prompt path. Уровни `наблюдается` и `держится` без causal probe/endurance не заявляются.
 - **S2 оставляет Lore Cards короткими и управляемыми.** WorldPack cards reviewed до commit, hidden content не является trigger, exact raised IDs видны рядом с ответом, а service draft не сохраняется без подтверждения игрока.
 - **S3 отделяет исправление от сцены.** Rev9 GM channel не вызывает narrator, показывает exact diff, сохраняет отдельный `gm_correction` и держит правку в защищённом overlay до one-section absorption; первый live-call выявил collision, исправленный повтор ещё впереди.
 - **S4 отделяет время от канона.** Rev10 local Gemma возвращает только bounded elapsed; cancelable события и два разрешённых consequence применяет Gateway. Ordinary clock path уже исполнялся в 60-turn партии; исправленная opening-проекция и fallback retention ждут повторного live-proof.

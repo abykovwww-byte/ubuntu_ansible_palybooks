@@ -4,13 +4,14 @@
 
 ## RP contract в manifest
 
-Текущие committed RP WorldPacks объявляют не выше revision `10`:
+Текущая максимальная declared revision RP WorldPack — `11`; revisions `0..10`
+сохраняют прежний контракт:
 
 ```json
-"rp_contract": {"schema_version": "rp-core.v2", "revision": 10}
+"rp_contract": {"schema_version": "rp-core.v2", "revision": 11}
 ```
 
-Source понимает revision `11`, а inventory activation-поставки настраивает
+Source понимает revision `11`, а применённая activation-поставка настраивает
 observed `11`. Gateway ограничивает обычные
 партии значением `RP_CONTRACT_OBSERVED_REVISION`; revision выше effective
 observed разрешена только изолированной checkpoint/autotest-ветке. `training`
@@ -24,11 +25,14 @@ stamp proof 23 августа 2026 года; отдельный rollout зате
 `day-watch-moscow-v2` объявляет revision `11`. Новая обычная RP-партия
 получает `min(declared, observed)`, existing party остаётся pinned; остальные
 WorldPacks сохраняют declarations `6/7`. Source merge сам по себе не доказывает
-runtime activation: нужны Ansible apply и новая party.
+runtime activation. Для revision `11` эти отдельные шаги выполнены 27 августа
+2026 года: activation merge `80ab6d3` применён, а новая ordinary party сохранила
+effective revision `11`.
 
 Revision-11 pack и observed `11` поставляются вместе: ordinary party не получает
 молчаливую effective revision `10` для manifest revision `11`. Source merge не
-равен runtime activation; до Ansible apply live-сервер может оставаться на 10.
+равен runtime activation; текущий live-сервер подтверждён уже после Ansible
+apply, а existing parties не мигрировались автоматически.
 
 ## Что такое WorldPack
 
@@ -167,8 +171,12 @@ conflict prohibitions автор помещает в authors note и прове�
 Repository gate проверяет структуру, пути, непустой текст, aliases и размеры,
 но не делает вид, что понимает семантику текста.
 
-Source mechanism имеет уровень `каркас`: committed rev11 pack, observed `11`,
-Ansible apply и live party относятся к отдельной activation-поставке.
+Revision-11 mechanism имеет уровень `подключено`: применённый сервер отдал
+каталоги `day-watch-moscow-v2` в авторизованный Light GUI, а ordinary party
+сохранила не-default `strategic` и `inquisition-observer`, их hashes, полный seed
+и revision `11`. Выбранные материалы присутствовали в реальных narrator prompts;
+зарегистрированный causal probe и endurance для более высоких ступеней не
+выполнялись.
 
 ## Revision 7: DC4 authored scene facts
 

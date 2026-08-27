@@ -59,8 +59,11 @@ WorldPack. `PlayerCharacterSummary` возвращает resolved `opening_id`.
 SHA-256, но не полные materialized prompt texts или state seed.
 
 Для паков revisions `0..10` новые поля отсутствуют из ответа и форма сохраняет
-прежний UX. `day-watch-moscow-v2` предоставляет selectors; их наличие в source
-и observed `11` в inventory ещё не доказывают Ansible apply или live UX.
+прежний UX. Activation merge `80ab6d3` применён 27 августа 2026 года:
+авторизованный Light GUI показал все три preset и четыре opening варианта,
+передал выбранные `strategic` и `inquisition-observer`, а созданная ordinary
+party сохранила оба ID и revision `11`. Это уровень `подключено`; отдельного
+зарегистрированного causal probe и endurance-доказательства для revision 11 нет.
 
 ### Lore Cards в revision 8
 
