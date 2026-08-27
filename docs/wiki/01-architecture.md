@@ -47,6 +47,32 @@ flowchart TB
 
 Gateway не публикует host port. Снаружи доступны только nginx-контейнеры Light GUI и Showroom. Local LLM находится в отдельной internal-сети и не принимает запросы с LAN.
 
+### Принятая целевая граница
+
+Decision 018 принят, но эта схема ещё не является live. После shadow-проверки
+и cutover Showroom и Awareness переходят в отдельный application repository и
+не используют RP SQLite, state root, cookies или Docker network:
+
+```mermaid
+flowchart LR
+    U["RP player"] -->|":8010"| L["Light GUI"]
+    L --> R["RP-only Gateway"]
+    R --> RDB[("RP SQLite + state")]
+
+    V["Training visitor"] -->|":8011"| S["Awareness Showroom"]
+    S --> T["Training-only Gateway"]
+    T --> TDB[("Awareness SQLite + state")]
+
+    I["ubuntu_ansible_palybooks\nIaC"] --> R
+    I -->|"exact private repo commit"| T
+```
+
+Порт не является security boundary для cookie, поэтому новый project использует
+собственные `awareness_gateway_session` и `awareness_showroom_visitor`. На
+миграции переносится только configuration сценариев и covers; run/history/auth
+identity начинается заново. Между Gateway нет runtime-вызовов, общей БД или
+dual-write.
+
 ## Ответственность компонентов
 
 | Компонент | Отвечает за | Не отвечает за |
@@ -169,6 +195,10 @@ SQLite/JSON-операцией без LLM. Отдельный фоновый wor
 
 Текущий Compose содержит `rp-gateway`, `rp-light-gui`, `rp-showcase-gui` и опциональный `rp-local-llm`. SillyTavern-контейнера в нём нет.
 
+Это описание остаётся верным до cutover Decision 018. Целевой RP Compose не
+содержит `rp-showcase-gui` и training WorldPacks; Awareness Showroom поставляется
+отдельным commit-pinned application через IaC.
+
 При этом сохранены:
 
 - `/v1/chat/completions` для OpenAI-compatible интеграций;
@@ -183,5 +213,7 @@ SQLite/JSON-операцией без LLM. Отдельный фоновый wor
 - [Decision 010 — scenario types](../../roles/apps/files/rp-stack/docs/decisions/010-party-scenario-types.md)
 - [Decision 015 — training interaction capabilities](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
 - [Decision 017 — WorldPack-owned training runtime](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
+- [Decision 018 — separate training and RP gateways](../../roles/apps/files/rp-stack/docs/decisions/018-separate-training-and-rp-gateways.md)
+- [Plan 018 — Awareness Showroom project split](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md)
 - [Decision 027 — request-centric Turn Trace Workbench](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Compose](../../roles/apps/templates/rp-stack.compose.yml.j2)
