@@ -201,6 +201,11 @@ endpoint: пользовательская session, visitor cookie и `run_id` �
 
 Showroom — отдельная витрина на `:8011` для прохождения опубликованных сценариев без регистрации.
 
+Decision 018 сохраняет этот пользовательский адрес и публичный `run_id` API, но
+меняет deployment ownership: после cutover UI и API обслуживает private
+`tavern-awareness-showroom` с training-only Gateway. Выбор `rp` и создание мира
+по prompt исчезают из Showroom. До cutover текущий общий Gateway остаётся live.
+
 ```mermaid
 sequenceDiagram
     participant Visitor as Посетитель
@@ -304,8 +309,9 @@ Party-scoped `POST /api/parties/{party_id}/checks` также сохранён �
 ## Исходники
 
 - [Light GUI](../../roles/apps/files/rp-stack/rp-light-gui)
-- [Showroom](../../roles/apps/files/rp-stack/rp-showcase-gui)
+- [Showroom до cutover](../../roles/apps/files/rp-stack/rp-showcase-gui)
 - [Showroom ADR](../../roles/apps/files/rp-stack/docs/decisions/012-public-showroom-scenarios.md)
+- [Project split plan](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md)
 - [Training capabilities ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
 - [Turn Trace Workbench ADR](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Gateway endpoints](../../roles/apps/files/rp-stack/rp-gateway/app/main.py)

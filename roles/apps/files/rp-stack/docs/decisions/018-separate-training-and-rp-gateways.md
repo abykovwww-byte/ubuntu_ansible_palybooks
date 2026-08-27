@@ -4,15 +4,30 @@ Date: 2026-08-08 · Переоформлено 2026-08-09 в формат ADR + 
 
 ## Status
 
-Proposed. Направление принято; Decision 019 выполнил подготовительный этап:
-предметный legacy Awareness удалён из общего Gateway, а снятие narrative
-validator из RP выполняется после зелёного integration gate. Разделение
-процессов и Compose topology ещё не начато. В
-`roles/apps/templates/rp-stack.compose.yml.j2` по-прежнему один
-сервис `rp-gateway` (контейнер `rp-stack-gateway`), оба GUI зависят от него
-через `depends_on`, `OutputValidator` и `safe_fallback` импортируются в общем
-пути `app/main.py` и `app/services/adjudicator.py`, а `Adjudicator.__init__`
-создаёт валидатор безусловно. API routing и Compose topology не изменены.
+Accepted 2026-08-27; implementation in progress.
+
+Decision 019 выполнил подготовительный этап: предметный legacy Awareness удалён
+из общего Gateway, а training contract стал WorldPack-owned. Владелец принял
+следующую конкретную границу реализации:
+
+- Showroom, `awareness`, `awareness-one-day` и generic training runtime
+  переносятся в отдельный private GitHub project;
+- новый Gateway обслуживает только `scenario_type=training`, использует свою
+  SQLite, state, cookies, Docker network и backup;
+- исходный RP Stack после cutover обслуживает только `scenario_type=rp` и
+  сохраняет Light GUI на порту `8010`;
+- новый Showroom после cutover сохраняет пользовательский адрес на порту
+  `8011`; shadow-проверка выполняется на временном порту `18011`;
+- конфигурация Showroom-сценариев и covers переносится через публичные
+  admin/API-контракты, а runs, visitors, sessions, BYOK и история прохождений не
+  мигрируются;
+- общая SQLite, dual-write, runtime-вызовы между проектами и общий Python
+  package не создаются.
+
+Текущий production runtime на момент принятия решения всё ещё использует один
+`rp-gateway` и одну SQLite. Порядок реализации, cutover и rollback зафиксирован
+в [Plan 018](../plans/018-awareness-showroom-project-split.md). До завершения
+cutover этот раздел описывает цель, а не live-состояние.
 
 ## Контекст
 
@@ -169,21 +184,21 @@ Training Gateway сохраняет schema validation, hard/soft constraints,
 
 ---
 
-# Part B — Execution brief for Codex
+# Part B — Historical execution brief for Codex
 
 <!--
-Non-normative, датировано, теряет силу после реализации. Не является частью
-истории решений.
+Non-normative, датировано, утратило силу после закрытия вопросов B.6
+2026-08-27. Сохранено как история принятия решения; актуальное исполнение — в
+Plan 018.
 -->
 
 **Написано:** 2026-08-09 · **Runner:** Codex `gpt-5.6-sol`,
 `model_reasoning_effort = "medium"` · **Ветка:** `codex/018-mode-isolation`
 (отдельный worktree в `codex-worktrees/`) · **База:** `codex/rp-stack-devkit`
 
-> **Готова к исполнению только Wave A.** Waves B и C заблокированы открытыми
-> вопросами в B.6 — это решения пользователя, а не Codex. Wave A существует
-> именно для того, чтобы собрать доказательства, которыми эти вопросы
-> закрываются.
+> **Архивная инструкция.** Waves B и C больше не заблокированы: владелец выбрал
+> отдельный private project, независимые SQLite и config-only migration. Не
+> исполнять этот brief как текущий план.
 
 **Состояние дерева на момент написания:** ветка `codex/rp-stack-devkit`, рабочее
 дерево грязное, среди прочего изменены `rp-gateway/app/services/adjudicator.py`

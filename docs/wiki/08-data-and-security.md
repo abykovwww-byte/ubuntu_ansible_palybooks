@@ -221,6 +221,13 @@ service settings. Миграция существующей базы добав�
 
 Showroom использует отдельный visitor token. Run доступен только cookie-владельцу; raw party ID не возвращается клиенту.
 
+После cutover Decision 018 это становится физической границей данных: Awareness
+Showroom использует отдельные SQLite/state/covers/backup paths и cookies
+`awareness_gateway_session` / `awareness_showroom_visitor`. Порты `8010` и
+`8011` сами по себе cookies не изолируют. Общих writable volumes, dual-write и
+runtime API между RP и training Gateway нет. Старые Showroom rows сохраняются в
+legacy RP SQLite, но новый training runtime их не читает.
+
 `rp_story_memory_snapshots` всегда фильтруется по `state_campaign_id`. Updater получает NPC без поля `secrets`; в prompt narrator этот snapshot поступает только для RP-партии. Snapshot не имеет права менять canonical state и не создаётся для `training`.
 
 ## Безопасность training artifacts

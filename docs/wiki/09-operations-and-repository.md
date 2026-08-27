@@ -290,6 +290,27 @@ curl -fsS http://192.168.1.88:8010/api/worldpacks
 curl -fsS http://192.168.1.88:8011/health
 ```
 
+### Migration Decision 018
+
+До cutover команда выше проверяет единый RP Stack. Новое приложение сначала
+разворачивается в shadow на `:18011` из полного commit SHA private repository:
+
+```text
+/srv/apps/awareness-showroom
+/srv/app-data/awareness-showroom/gateway
+/srv/app-data/awareness-showroom/state
+/srv/app-data/awareness-showroom/showroom-covers
+/srv/backups/awareness-showroom
+```
+
+Только после полного training acceptance IaC переводит `:8011` на новый
+Showroom, а старый Compose становится RP-only. `:8010` не меняется. Проекты не
+разделяют SQLite/state/cookies/network и не вызывают Gateway друг друга.
+
+До конца rollback window старый Showroom и legacy data не удаляются. Rollback
+возвращает предыдущий IaC topology/pin; новую SQLite не сливают обратно. Полный
+порядок и acceptance matrix: [Plan 018](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md).
+
 Gateway строится из корня `rp-stack`: образ получает приложение и тесты из
 `rp-gateway`, а также `/evals`, `/scripts` и `/worldpacks`, которые нужны полному
 контейнерному pytest. Поэтому `docker compose run --rm rp-gateway pytest`

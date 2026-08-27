@@ -75,6 +75,14 @@ legacy compatibility resolver до отдельной миграции его п
 
 WorldPack сам связывает публичный результат с numeric state path через `manifest.showroom_result`. Showroom scenario может включить leaderboard, но не выбирает, откуда взять score. Это сохраняет ownership оценки у authored training world.
 
+После cutover Decision 018 этот контракт исполняется отдельным training-only
+Gateway. Он начинает с новой SQLite: настройки опубликованных сценариев и covers
+воссоздаются через admin API, а visitors, runs, parties, turns, feedback,
+leaderboard, sessions и BYOK не переносятся. Поэтому `Мои прохождения` и рейтинг
+начинаются с нуля; старые результаты остаются только в legacy snapshot/backup RP
+Stack. `manifest.showroom_result` остаётся authority и не заменяется полем
+миграции.
+
 Corporate portal — только presentational snapshot. Он не содержит schedule, rubric или скрытые ответы.
 
 ### Capability dimensions

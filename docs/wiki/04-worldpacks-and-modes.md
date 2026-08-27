@@ -34,6 +34,19 @@ Revision-11 pack и observed `11` поставляются вместе: ordinar
 равен runtime activation; текущий live-сервер подтверждён уже после Ansible
 apply, а existing parties не мигрировались автоматически.
 
+## Git ownership после Decision 018
+
+Цель принята, но ещё не применена. После cutover RP WorldPacks остаются в
+`ubuntu_ansible_palybooks`, а `awareness` и `awareness-one-day` становятся
+source-owned private project `tavern-awareness-showroom`. Один и тот же активный
+WorldPack не поддерживается одновременно в двух repositories.
+
+Новый project публикует только packs с
+`scenario_types: {recommended: training, supported: [training]}` и не разрешает
+prompt-generated worlds. `incident-50` остаётся RP-only в исходном project.
+Training runtime по-прежнему остаётся generic interpreter: предметная программа,
+score и debrief принадлежат WorldPack, а не Gateway.
+
 ## Что такое WorldPack
 
 WorldPack — версионируемый набор авторского контента и начального состояния. Он описывает мир, а не конкретное прохождение.
