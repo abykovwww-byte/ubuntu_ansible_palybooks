@@ -165,25 +165,30 @@ output в существующий `retry -> stale`, запрещает pressure
 ## RP contract revision 11: mechanism and activation
 
 [Decision 041](../../roles/apps/files/rp-stack/docs/decisions/041-rp-narrative-presets-and-opening-seeds.md)
-поставляется двумя раздельными изменениями. Первый поднимает Gateway
-source ceiling и provider-canary argument до `0..11`, добавляет API/storage/UI
-mechanism, repository guards и docs. В нём нет revision-11 WorldPack, поэтому
-inventory обязан остаться
-`rp_stack_gateway_rp_contract_observed_revision: 10`. Existing packs/parties и
-их revisions не меняются; source test не доказывает applied/runtime состояние.
+поставлен двумя раздельными изменениями. PR #85 поднял Gateway source ceiling и
+provider-canary argument до `0..11`, добавил API/storage/UI mechanism,
+repository guards и docs, сохранив inventory observed `10`. Activation PR #86
+добавил отдельный `day-watch-moscow-v2`, не меняя v1, и переключил source
+inventory на observed `11`. Repository gate требует эти pack и observed value в
+одной activation-поставке, поэтому ordinary party не может молча получить
+effective revision `10` для revision-11 manifest.
 
-Repository gate уже готов к следующей границе: без committed rev11 pack он
-требует observed `10`, а при появлении такого pack требует observed `11` в той
-же activation-поставке. Это не позволяет ordinary party молча запустить
-revision-11 manifest как effective revision `10`.
+Merge `80ab6d3f199b8935d4efdac7d5b55437dbb837e7` применён 27 августа 2026
+года. Ansible recap: `ok=69`, `changed=7`, `unreachable=0`, `failed=0`; server
+checkout совпал с merge, все 28 файлов deployed `day-watch-moscow-v2` совпали с
+source по SHA-256, четыре контейнера остались healthy, HTTP smoke прошёл, а
+production-image Gateway suite завершилась `657 passed, 1 skipped`.
 
-Вторая поставка добавляет отдельный `day-watch-moscow-v2`, не меняя v1, и
-переключает source inventory на observed `11`. После merge пользователь отдельно запускает
-pull-based Ansible apply. Live proof требует как минимум реальный выбор разных
-preset/opening в Light GUI, сохранённые IDs/audit hashes, разные стартовые state
-из полных seeds и exact выбранные `WORLD_SYSTEM_PROMPT`/
-`WORLD_AUTHORS_NOTE` в recorded first-turn prompt. Зелёный CI, наличие файлов и
-совпадение SHA-256 сами по себе этим доказательством не являются.
+Авторизованный Light GUI показал presets `book/action/strategic` и все четыре
+opening seeds. Ordinary party `party_3e09b9092765` сохранила revision `11`,
+`preset_id=strategic`, `opening_id=inquisition-observer`, audit hashes, выбранную
+роль и полный seed с 11 NPC без world clock. Recorded prompts содержали выбранные
+opening и preset. Auto-start дошёл до этого prompt, но выбранный тогда Gemini
+profile вернул HTTP `400`; после переключения party на OpenRouter
+`deepseek/deepseek-v4-flash` два последующих хода завершились HTTP `200` без
+fallback и repair и продолжили сцену Инквизиции. Registry 041 поэтому имеет
+уровень `подключено`; отдельного зарегистрированного causal probe и endurance для
+`наблюдается` или `держится` нет.
 
 ## Codex devkit, worktrees и CI
 
