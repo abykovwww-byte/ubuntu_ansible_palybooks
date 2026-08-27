@@ -238,6 +238,73 @@ rp_stack_rp_story_memory_prompt_max_chars: 24000
 rp_stack_rp_story_memory_reserve_tokens: 10000
 rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
+
+# Deploy only this exact merged application commit; do not replace it with a branch or tag.
+awareness_showroom_repo_version: "536444091195b2c0be2f0ef8b0a137a0ed7f8a56"
+awareness_showroom_enabled: "{{ (awareness_showroom_repo_version | length) == 40 }}"
+awareness_showroom_repo_url: "https://github.com/abykovwww-byte/tavern-awareness-showroom.git"
+# Required for this private repository; set only in /etc/ansible/local-overrides.yml.
+awareness_showroom_github_token: ""
+awareness_showroom_project_dir: "{{ app_deploy_base_dir }}/awareness-showroom"
+awareness_showroom_data_dir: "{{ app_data_base_dir }}/awareness-showroom"
+awareness_showroom_gateway_data_dir: "{{ awareness_showroom_data_dir }}/gateway"
+awareness_showroom_state_dir: "{{ awareness_showroom_data_dir }}/state"
+awareness_showroom_cover_dir: "{{ awareness_showroom_data_dir }}/showroom-covers"
+awareness_showroom_backup_dir: "{{ app_backup_base_dir }}/awareness-showroom"
+awareness_showroom_bind_host: "127.0.0.1"
+awareness_showroom_host_port: 18011
+awareness_showroom_gateway_port: 8088
+awareness_showroom_gateway_database_url: "sqlite:////data/awareness_gateway.db"
+awareness_showroom_gateway_log_level: INFO
+awareness_showroom_gateway_log_prompts: "false"
+awareness_showroom_gateway_max_repair_attempts: 1
+awareness_showroom_gateway_training_repair_attempts: 1
+awareness_showroom_gateway_request_timeout_seconds: 900
+awareness_showroom_gateway_model_attempt_timeout_seconds: 150
+awareness_showroom_gateway_party_start_model_attempt_timeout_seconds: 300
+awareness_showroom_gateway_service_call_log_retention_days: 0
+awareness_showroom_gateway_auth_enabled: true
+awareness_showroom_gateway_bootstrap_admin_username: admin
+awareness_showroom_gateway_bootstrap_admin_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/awareness-showroom-gateway-admin-password length=24 chars=ascii_letters,digits') }}"
+awareness_showroom_gateway_session_ttl_seconds: 1209600
+awareness_showroom_gateway_cookie_secure: false
+awareness_showroom_gateway_session_cookie_name: awareness_gateway_session
+awareness_showroom_visitor_cookie_name: awareness_showroom_visitor
+awareness_showroom_visitor_ttl_seconds: 2592000
+awareness_showroom_cover_max_bytes: 5242880
+awareness_showroom_llm_provider: openrouter
+awareness_showroom_gemini_api_base: "https://generativelanguage.googleapis.com/v1beta/openai"
+awareness_showroom_gemini_api_key: ""
+awareness_showroom_gemini_models:
+  - "gemini-3.6-flash"
+  - "gemini-3.5-flash"
+awareness_showroom_gemini_model_catalog_live: false
+awareness_showroom_openrouter_api_base: "https://openrouter.ai/api/v1"
+awareness_showroom_openrouter_api_key: ""
+awareness_showroom_service_openrouter_api_key: ""
+awareness_showroom_openrouter_models:
+  - "deepseek/deepseek-v4-flash"
+  - "google/gemini-3.6-flash"
+  - "openrouter/auto"
+  - "openrouter/free"
+awareness_showroom_openrouter_fallback_models:
+  - "openrouter/auto"
+awareness_showroom_openrouter_model_catalog_live: true
+awareness_showroom_provider_model_catalog_ttl_seconds: 86400
+awareness_showroom_narrative_model: "openrouter/auto"
+awareness_showroom_intent_model: "openrouter/auto"
+awareness_showroom_validator_model: "openrouter/auto"
+awareness_showroom_service_model_choice: "or-qwen-3.5-flash"
+awareness_showroom_post_turn_helpers_inline: false
+awareness_showroom_rate_limit_retry_attempts: 1
+awareness_showroom_rate_limit_retry_default_wait_seconds: 1
+awareness_showroom_rate_limit_retry_max_wait_seconds: 10
+awareness_showroom_local_llm_enabled: false
+awareness_showroom_local_llm_network: "rp-llm"
+awareness_showroom_local_llm_base_url: "http://rp-local-llm:8080/v1"
+awareness_showroom_local_llm_model_alias: "gemma-4-26b-a4b-it-rp-q4"
+awareness_showroom_local_llm_context_tokens: 32768
+awareness_showroom_local_llm_timeout_seconds: 240
 docker_apps:
   - name: beszel
     enabled: "{{ beszel_enabled }}"
@@ -520,6 +587,30 @@ docker_apps:
             ],
             "idIndex": 5
           }
+  - name: awareness-showroom
+    enabled: "{{ awareness_showroom_enabled }}"
+    repo_url: "{{ awareness_showroom_repo_url }}"
+    repo_version: "{{ awareness_showroom_repo_version }}"
+    repo_version_is_commit: true
+    repo_token_var: awareness_showroom_github_token
+    repo_token_required: true
+    repo_recreate_if_not_git: true
+    project_dir: "{{ awareness_showroom_project_dir }}"
+    owner: abykov
+    group: abykov
+    directory_mode: "0750"
+    env_template: awareness-showroom.env.j2
+    env_example_template: awareness-showroom.env.example.j2
+    env_mode: "0600"
+    compose_up: true
+    compose_remove_orphans: true
+    managed_directories:
+      - "{{ awareness_showroom_data_dir }}"
+      - "{{ awareness_showroom_gateway_data_dir }}"
+      - "{{ awareness_showroom_state_dir }}"
+      - "{{ awareness_showroom_state_dir }}/parties"
+      - "{{ awareness_showroom_cover_dir }}"
+      - "{{ awareness_showroom_backup_dir }}"
 nginx_remove_default_site: true
 nginx_client_max_body_size: 64m
 nginx_proxy_read_timeout: 60s

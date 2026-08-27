@@ -191,6 +191,73 @@ rp-stack-gateway      -> internal http://rp-gateway:8088
 
 Light GUI proxies `/api/*` to `rp-gateway:8088`.
 
+## Awareness Showroom Shadow
+
+The I1 scaffold deploys the private application repository independently from
+the bundled RP Stack source. IaC owns the exact Git commit, server paths,
+server-only secrets, and rendered `.env`; the application repository owns its
+`compose.yml`, images, Gateway, Showroom UI, and training WorldPacks.
+
+The inventory enables the app only with its single full 40-character merge
+commit. The role rejects a missing private-repository token before clone and
+rejects a branch or tag used as the deploy revision.
+
+Runtime paths:
+
+```text
+Repository:      https://github.com/abykovwww-byte/tavern-awareness-showroom.git
+Project:         /srv/apps/awareness-showroom
+Persistent data: /srv/app-data/awareness-showroom
+Gateway data:    /srv/app-data/awareness-showroom/gateway
+State:           /srv/app-data/awareness-showroom/state
+Covers:          /srv/app-data/awareness-showroom/showroom-covers
+Backups:         /srv/backups/awareness-showroom
+Shadow URL:      http://127.0.0.1:18011
+```
+
+The shadow bind is loopback-only. Port `8011` remains owned by the old Showroom
+until the separately reviewed C1 cutover. The standalone Compose project uses
+unique services `awareness-gateway` and `showroom`, its own default network and
+data mounts. Base shadow deployment keeps local LLM disabled and does not join
+the RP network. A future explicitly selected Compose overlay may attach to the
+external `rp-llm` network only to reach `http://rp-local-llm:8080/v1` as a model
+provider; it must never mount RP Stack data, state, WorldPacks, or SQLite.
+
+Private repository and provider secrets remain server-only:
+
+```yaml
+awareness_showroom_github_token: "..."
+awareness_showroom_gemini_api_key: "..."
+awareness_showroom_openrouter_api_key: "..."
+awareness_showroom_service_openrouter_api_key: "..."
+```
+
+Set `awareness_showroom_github_token` before apply. Set only the provider keys
+actually used by the published scenarios in
+`/etc/ansible/local-overrides.yml`; keep the service key separate when the
+training service model uses OpenRouter. Never copy users, sessions, provider
+keys, runs, or the old RP Stack SQLite into the shadow data directory.
+
+The initial config-only import maps the published scenario profiles by
+`(provider, base_url, model)`. The shadow catalog therefore includes the two
+currently published OpenRouter model IDs `deepseek/deepseek-v4-flash` and
+`google/gemini-3.6-flash`; it does not reuse legacy profile IDs.
+
+After an authorized apply, verify the pinned checkout and loopback shadow:
+
+```bash
+cd /srv/apps/awareness-showroom
+git rev-parse HEAD
+docker compose ps
+docker compose config --quiet
+curl -fsS -o /tmp/awareness-showroom.html -w '%{http_code} %{size_download}\n' http://127.0.0.1:18011/
+```
+
+These checks prove deployment shape and HTTP reachability only. A real
+Awareness run, provider evidence, artifact/workspace events, persistence after
+restart, SQLite checks, backup/test-restore, and browser verification remain
+mandatory before C1.
+
 ## Deploy Commands
 
 From the local workstation:
