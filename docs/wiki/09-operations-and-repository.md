@@ -162,10 +162,10 @@ output в существующий `retry -> stale`, запрещает pressure
 проецирует часы в opening. До повторной post-apply ручной партии весь этот набор
 остаётся на уровне `каркас`.
 
-## RP contract revision 11: mechanism before activation
+## RP contract revision 11: mechanism and activation
 
 [Decision 041](../../roles/apps/files/rp-stack/docs/decisions/041-rp-narrative-presets-and-opening-seeds.md)
-поставляется двумя раздельными изменениями. Первый, текущий, поднимает Gateway
+поставляется двумя раздельными изменениями. Первый поднимает Gateway
 source ceiling и provider-canary argument до `0..11`, добавляет API/storage/UI
 mechanism, repository guards и docs. В нём нет revision-11 WorldPack, поэтому
 inventory обязан остаться
@@ -178,7 +178,7 @@ Repository gate уже готов к следующей границе: без c
 revision-11 manifest как effective revision `10`.
 
 Вторая поставка добавляет отдельный `day-watch-moscow-v2`, не меняя v1, и
-переключает observed на `11`. После merge пользователь отдельно запускает
+переключает source inventory на observed `11`. После merge пользователь отдельно запускает
 pull-based Ansible apply. Live proof требует как минимум реальный выбор разных
 preset/opening в Light GUI, сохранённые IDs/audit hashes, разные стартовые state
 из полных seeds и exact выбранные `WORLD_SYSTEM_PROMPT`/

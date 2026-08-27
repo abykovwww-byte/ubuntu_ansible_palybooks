@@ -5,8 +5,8 @@
 ## RP contract revision
 
 `PartySummary` совместимо хранит целое поле `rp_contract_revision` (`0..11`).
-Gateway source поддерживает candidate revision `11`, а inventory остаётся
-observed `10`, пока в репозитории нет revision-11 WorldPack. Для declarations
+Gateway source поддерживает revision `11`, а activation inventory настроен на
+observed `11` вместе с первым revision-11 WorldPack. Для declarations
 `0..10` обычная новая RP-партия получает `min(WorldPack declared, observed)`.
 Declared revision `11` требует observed `>=11` и иначе fail-closed, без
 downgrade до `10`. Запрос создания
@@ -59,8 +59,8 @@ WorldPack. `PlayerCharacterSummary` возвращает resolved `opening_id`.
 SHA-256, но не полные materialized prompt texts или state seed.
 
 Для паков revisions `0..10` новые поля отсутствуют из ответа и форма сохраняет
-прежний UX. Наличие selector в source не означает activation: inventory всё ещё
-observed `10`, а revision-11 pack поставляется отдельно.
+прежний UX. `day-watch-moscow-v2` предоставляет selectors; их наличие в source
+и observed `11` в inventory ещё не доказывают Ansible apply или live UX.
 
 ### Lore Cards в revision 8
 

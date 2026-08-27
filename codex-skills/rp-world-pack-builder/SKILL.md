@@ -70,10 +70,10 @@ For the revision-8+ history-first authoring contract:
 
 For the revision-10 world-clock contract:
 
-- Use revision 10 for new packs while the source observed gate is 10. Raise an
-  existing pack only in an explicit compatible update; do not blanket-migrate
-  packs or parties. Declare `manifest.files.world_clock` only when the pack
-  authors a calendar and cancelable events.
+- Revision 10 remains the cumulative world-clock boundary for compatible legacy
+  packs. Raise an existing pack only in an explicit compatible update; do not
+  blanket-migrate packs or parties. Declare `manifest.files.world_clock` only
+  when the pack authors a calendar and cancelable events.
 - Author `world-clock.json` with schema `rp-gateway.world-clock.v1`, an initial
   timezone-aware date, ISO-8601 `max_step`, typed markers, and at least one
   event. Conditions are only `date_gte`, `after_event`, or `after_confirmed`.
@@ -162,12 +162,12 @@ World-pack requirements:
 
 - Put the starting player role in `manifest.player_role`; Light GUI uses it as the default player character description.
 - Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`. This metadata filters incompatible combinations but never auto-selects the party type.
-- For a new pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 10}`. This is the maximum contract understood by the pack, not a migration flag: ordinary parties are capped by Gateway's observed revision, and existing packs and parties remain pinned until an explicit compatible update. Do not blanket-migrate them or author a new RP pack against the legacy mechanical v1 contract.
-- Revision 11 is an explicit multi-variant contract, not the default for a new
-  pack while the repository has no activated revision-11 WorldPack. Use
-  `"rp_contract": {"schema_version": "rp-core.v2", "revision": 11}` only in a
-  separately approved compatible pack-and-activation delivery. The mechanism
-  source alone remains observed at revision 10.
+- For a new pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 11}` and author the required presets/openings contract below. This is the maximum contract understood by the pack, not a migration flag: ordinary parties are capped by Gateway's observed revision, and existing packs and parties remain pinned until an explicit compatible update. Do not blanket-migrate them or author a new RP pack against the legacy mechanical v1 contract.
+- Revision 10 remains valid for existing compatible packs and does not require
+  presets/openings; its declaration remains `"rp_contract": {"schema_version":
+  "rp-core.v2", "revision": 10}`. `day-watch-moscow-v2` is the first activated
+  revision-11 pack; inventory observes revision 11, while v1 packs and existing
+  parties keep their declared/materialized revisions.
 - A revision-11 manifest declares non-empty top-level `presets` and `openings`
   plus explicit `"presets_default"` and `"openings_default"`. Preset entries are
   exactly `id`, `title`, `world_system_prompt`, `world_authors_note`; opening

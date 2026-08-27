@@ -10,8 +10,8 @@
 "rp_contract": {"schema_version": "rp-core.v2", "revision": 10}
 ```
 
-Source уже понимает candidate revision `11`, но это capability, а не
-автоматическая активация. Gateway ограничивает обычные
+Source понимает revision `11`, а inventory activation-поставки настраивает
+observed `11`. Gateway ограничивает обычные
 партии значением `RP_CONTRACT_OBSERVED_REVISION`; revision выше effective
 observed разрешена только изолированной checkpoint/autotest-ветке. `training`
 этот маркер не использует.
@@ -19,16 +19,16 @@ observed разрешена только изолированной checkpoint/a
 Declared revision сама по себе не означает observed activation. Исторический
 rollout `RP_CONTRACT_OBSERVED_REVISION=7` прошёл pull-based apply и post-apply
 stamp proof 23 августа 2026 года; отдельный rollout затем подтвердил revision
-`8`. Текущий inventory держит observed gate `10`; declared revision
-`10` есть у `merchant-sviatoslav` и `day-watch-moscow`, но календарь объявляет
-только первый из них. Новая обычная RP-партия
+`8`. Текущий source inventory задаёт observed gate `11`; declared revision
+`10` остаётся у `merchant-sviatoslav` и `day-watch-moscow`, а отдельный
+`day-watch-moscow-v2` объявляет revision `11`. Новая обычная RP-партия
 получает `min(declared, observed)`, existing party остаётся pinned; остальные
 WorldPacks сохраняют declarations `6/7`. Source merge сам по себе не доказывает
 runtime activation: нужны Ansible apply и новая party.
 
-Revision-11 pack в этой mechanism-поставке отсутствует. Когда он будет добавлен,
-inventory должен одновременно перейти на observed `11`: ordinary party не
-получает молчаливую effective revision `10` для manifest revision `11`.
+Revision-11 pack и observed `11` поставляются вместе: ordinary party не получает
+молчаливую effective revision `10` для manifest revision `11`. Source merge не
+равен runtime activation; до Ansible apply live-сервер может оставаться на 10.
 
 ## Что такое WorldPack
 
@@ -360,6 +360,7 @@ pack обязан объявить `training_runtime` и хранить расп
 | `awareness` | Awareness | `training` | `training` | WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; предметной логики в Gateway нет |
 | `awareness-one-day` | Awareness. One day | `training` | `training` | WorldPack-owned runtime, 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
 | `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Revision 10 без authored-календаря: свободный персонаж, точка входа из PlayerCharacter, authored Lore Cards и закрытые мотивации NPC |
+| `day-watch-moscow-v2` | Дневной Дозор: Москва — четыре начала | `rp` | `rp` | Revision 11: presets `book/action/strategic`, четыре независимых opening seeds, 20 Lore Cards и те же 11 активных NPC; world clock не добавлен |
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |
