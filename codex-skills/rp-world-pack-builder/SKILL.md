@@ -289,13 +289,7 @@ Before commit/deploy:
 $python = "$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 ```
 
-- Run the full repository gate from the repository root:
-
-```powershell
-powershell.exe -File scripts\ci.ps1
-```
-
-- During iteration, run the focused repository and relationship checks:
+- Run the focused repository and relationship checks for the changed World/Scenario surface:
 
 ```powershell
 & $python scripts\validate-repository.py
@@ -304,6 +298,8 @@ Push-Location roles\apps\files\rp-stack
 & $python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --schema state\schema.json
 Pop-Location
 ```
+
+- Run `powershell.exe -File scripts\ci.ps1` only for a shared-gate change, cross-component integration/cutover, or before deployment.
 
 - For every relationship model, confirm that `character_weights` keys exist in
   the state seed; every state character has at least one unique alias form;
