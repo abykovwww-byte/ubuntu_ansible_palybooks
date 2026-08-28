@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
   schedule:
@@ -28,6 +31,7 @@ jobs:
         run: ./scripts/test-devkit.ps1
 
   gateway:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -40,6 +44,7 @@ jobs:
         run: docker run --rm rp-stack-gateway-ci pytest -q
 
   rp-contracts:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -63,6 +68,7 @@ jobs:
         run: python scripts/test-check-workflow.py
 
   browser-clients:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +86,7 @@ jobs:
           find roles/apps/files/rp-stack -name '*.test.js' -print0 | sort -z | xargs -0 -n1 node
 
   ansible-syntax:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

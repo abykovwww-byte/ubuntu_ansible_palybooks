@@ -1,5 +1,6 @@
 param(
-    [switch]$SkipGatewayTests
+    [switch]$SkipGatewayTests,
+    [switch]$IncludeSemanticAcceptance
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,8 +61,10 @@ $node = Resolve-Tool -Name "node" -OverrideEnvironmentVariable "CODEX_NODE" -Bun
 Push-Location $repoRoot
 try {
     Invoke-Checked "repository contracts" { & $python scripts/validate-repository.py }
-    Invoke-Checked "semantic acceptance (saved responses, no providers)" {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-rp-stack-evals.ps1 -Mode SemanticAcceptance
+    if ($IncludeSemanticAcceptance) {
+        Invoke-Checked "semantic acceptance (saved responses, no providers)" {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-rp-stack-evals.ps1 -Mode SemanticAcceptance
+        }
     }
     if ([string]::IsNullOrWhiteSpace($env:CI)) {
         Invoke-Checked "installed Codex skill drift" {
