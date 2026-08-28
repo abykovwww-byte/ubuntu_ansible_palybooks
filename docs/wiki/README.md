@@ -246,8 +246,8 @@ flowchart LR
 | RP Gateway | Только внутренняя Docker-сеть, порт `8088` | API, правила, state, история, LLM-вызовы и хранение |
 | Local LLM | Только внутренняя сеть `rp-llm`, порт `8080` | Gemma 4 26B A4B Q4 для служебных задач и опционального автотестового игрока |
 
-> **Принято, но ещё не применено:** Decision 018 выносит Showroom и Awareness
-> в private `tavern-awareness-showroom` с отдельным training-only Gateway и
+> **I1 shadow применён, cutover ещё не выполнен:** private
+> `tavern-awareness-showroom` уже развёрнут с отдельным training-only Gateway и
 > SQLite. После cutover `:8010` остаётся RP Light GUI, а `:8011` обслуживается
 > новым project. Текущая таблица выше описывает live topology до cutover.
 

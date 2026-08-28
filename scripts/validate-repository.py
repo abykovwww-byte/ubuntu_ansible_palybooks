@@ -1040,7 +1040,14 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     production_env_path = ROOT / "roles" / "apps" / "templates" / "awareness-showroom.env.j2"
     example_env_path = ROOT / "roles" / "apps" / "templates" / "awareness-showroom.env.example.j2"
     apps_tasks_path = ROOT / "roles" / "apps" / "tasks" / "main.yml"
-    required_paths = (inventory_path, production_env_path, example_env_path, apps_tasks_path)
+    work_standard_path = ROOT / "docs" / "repository-work-standard.md"
+    required_paths = (
+        inventory_path,
+        production_env_path,
+        example_env_path,
+        apps_tasks_path,
+        work_standard_path,
+    )
     for path in required_paths:
         if not path.is_file():
             fail(errors, f"missing Awareness Showroom IaC contract: {path.relative_to(ROOT)}")
@@ -1051,6 +1058,7 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     production_env = production_env_path.read_text(encoding="utf-8")
     example_env = example_env_path.read_text(encoding="utf-8")
     apps_tasks = apps_tasks_path.read_text(encoding="utf-8")
+    work_standard = work_standard_path.read_text(encoding="utf-8")
     placeholder = "_".join(("ROOT", "FINAL", "PIN"))
 
     pin_values = re.findall(
@@ -1105,9 +1113,11 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
             "repo_version_is_commit: true",
             "repo_token_var: awareness_showroom_github_token",
             "repo_token_required: true",
+            "repo_normalize_ownership: true",
             'project_dir: "{{ awareness_showroom_project_dir }}"',
             "env_template: awareness-showroom.env.j2",
             "env_example_template: awareness-showroom.env.example.j2",
+            "env_example_force: false",
             "compose_remove_orphans: true",
             '- "{{ awareness_showroom_gateway_data_dir }}"',
             '- "{{ awareness_showroom_state_dir }}"',
@@ -1139,6 +1149,7 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         "SCENARIO_TYPE=training",
         "DATABASE_URL={{ awareness_showroom_gateway_database_url }}",
         "STATE_SCHEMA_PATH=/app/state-schema.json",
+        "SHOWROOM_CATALOG_PATH=/app/configs/showroom/scenarios.json",
         "LOCAL_LLM_BASE_URL={{ awareness_showroom_local_llm_base_url }}",
         "SERVICE_OPENROUTER_API_KEY={{ awareness_showroom_service_openrouter_api_key }}",
         "SERVICE_MODEL_CHOICE={{ awareness_showroom_service_model_choice }}",
@@ -1162,6 +1173,7 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         "LOCAL_LLM_ENABLED=false",
         "SCENARIO_TYPE=training",
         "DATABASE_URL=sqlite:////data/awareness_gateway.db",
+        "SHOWROOM_CATALOG_PATH=/app/configs/showroom/scenarios.json",
         "GATEWAY_SESSION_COOKIE_NAME=awareness_gateway_session",
         "SHOWROOM_VISITOR_COOKIE_NAME=awareness_showroom_visitor",
         "OPENROUTER_API_KEY=",
@@ -1179,6 +1191,74 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     )
     if collector_match is None or "\n  no_log: true\n" not in collector_match.group("body"):
         fail(errors, "token-auth Docker app results must stay hidden while collecting changed apps")
+
+    env_example_match = re.search(
+        r"(?ms)^- name: Render Docker app example environment files\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if (
+        env_example_match is None
+        or 'force: "{{ app.env_example_force | default(true) }}"'
+        not in env_example_match.group("body")
+    ):
+        fail(errors, "Docker app example env rendering must support source-owned opt-out with force default true")
+
+    ownership_match = re.search(
+        r"(?ms)^- name: Normalize ownership for opt-in Docker app repositories\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if ownership_match is None:
+        fail(errors, "opt-in external repository ownership normalization task is missing")
+    else:
+        ownership_task = ownership_match.group("body")
+        for marker in (
+            "app.repo_normalize_ownership",
+            'path: "{{ app.project_dir | default(app_deploy_base_dir ~ \'/\' ~ app.name) }}"',
+            "state: directory",
+            "recurse: true",
+            "follow: false",
+            'owner: "{{ app.owner | default(docker_apps_default_owner) }}"',
+            'group: "{{ app.group | default(docker_apps_default_group) }}"',
+        ):
+            if marker not in ownership_task:
+                fail(errors, f"repository ownership normalization missing marker: {marker}")
+        if "register:" in ownership_task:
+            fail(errors, "repository ownership normalization must not feed a Compose restart collector")
+        reset_task_marker = "- name: Reset token-auth Docker app repositories\n"
+        reset_task_index = apps_tasks.find(reset_task_marker)
+        if reset_task_index < 0 or reset_task_index >= ownership_match.start():
+            fail(errors, "repository ownership normalization must run after token-auth Git reset")
+
+    for task_name in (
+        "Fetch token-auth Docker app repositories",
+        "Reset token-auth Docker app repositories",
+    ):
+        task_match = re.search(
+            rf"(?ms)^- name: {re.escape(task_name)}\n(?P<body>.*?)(?=^- name:|\Z)",
+            apps_tasks,
+        )
+        if task_match is None:
+            fail(errors, f"missing token-auth Git task: {task_name}")
+            continue
+        task_body = task_match.group("body")
+        marker = (
+            "      - -c\n"
+            '      - "safe.directory={{ app.project_dir | default(app_deploy_base_dir ~ \'/\' ~ app.name) }}"'
+        )
+        if marker not in task_body:
+            fail(errors, f"{task_name} missing exact -c/safe.directory argv pair")
+
+    if "safe.directory=*" in apps_tasks:
+        fail(errors, "Docker app Git tasks must not use a wildcard safe.directory")
+
+    checkout_doc_markers = (
+        "/srv/apps/awareness-showroom",
+        "safe.directory=/srv/apps/awareness-showroom",
+        "`.env.example`",
+    )
+    for marker in checkout_doc_markers:
+        if marker not in work_standard:
+            fail(errors, f"Awareness checkout contract missing from {work_standard_path.relative_to(ROOT)}: {marker}")
 
     private_preflight_match = re.search(
         r"(?ms)^- name: Require credentials for private Docker app repositories\n(?P<body>.*?)(?=^- name:|\Z)",

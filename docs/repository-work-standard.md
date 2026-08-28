@@ -32,6 +32,13 @@ detail.
   `merged` and asks the user to run `sudo systemctl start
   ansible-local-apply.service` interactively. Never request, log, or store the
   password.
+- The external checkout `/srv/apps/awareness-showroom` is an explicit ownership
+  exception: after each pinned reset the apps role recursively normalizes it to
+  `abykov:abykov`. Root-run Git uses only the per-command exact
+  `safe.directory=/srv/apps/awareness-showroom`; no wildcard or persistent
+  system/global exception is created. Its tracked `.env.example` stays owned by
+  the application repository, while Ansible continues to render only the
+  server-private runtime `.env`.
 - For a Python production probe, send a local script on stdin instead of nesting
   PowerShell, SSH, and Python quoting:
 

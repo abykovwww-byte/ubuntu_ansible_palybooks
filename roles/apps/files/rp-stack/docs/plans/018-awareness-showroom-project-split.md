@@ -1,6 +1,6 @@
 # Plan 018: вынести Awareness и Showroom в training-only project
 
-Date: 2026-08-27 · Owner decision: accepted · Runtime status: not cut over.
+Date: 2026-08-27 · Owner decision: accepted · Runtime status: I1 shadow applied, not cut over.
 
 ## Результат
 
@@ -82,15 +82,22 @@ WorldPack-owned deterministic training scenarios.
 
 ## Данные и identity
 
-Новый project стартует с пустой SQLite. Автоматически переносятся только
-настройки опубликованных сценариев:
+Новый project стартует с пустой SQLite. В Git-каталог нового project
+переносятся только настройки опубликованных сценариев:
 
 - title, description, status, sort order;
 - WorldPack slug;
 - model profile, сопоставленный по `(provider, base_url, model)`, а не legacy ID;
 - leaderboard presentation flags;
 - independent links/workspace capability flags;
-- cover, повторно загруженный через API после получения нового scenario ID.
+- cover как проверяемый файл внутри Git-каталога либо явный `null`.
+
+`SHOWROOM_CATALOG_PATH=/app/configs/showroom/scenarios.json` включает
+fail-closed startup reconciliation. Стабильный catalog `key` создаёт
+`scenario_catalog_<key>`; повторный startup обновляет только
+фактически изменившиеся поля/обложку. Нулевое или неоднозначное
+совпадение model tuple останавливает startup. Импорт не удаляет
+необъявленные DB-сценарии и не изменяет run data.
 
 Не переносятся visitors, runs, internal parties, turns, state versions,
 training event history, sessions, users, provider keys, BYOK, feedback и
@@ -134,11 +141,23 @@ IaC клонирует новый private repository на exact commit в
 `/srv/backups/awareness-showroom`. Showroom временно публикуется на `18011`,
 старый `8011` продолжает обслуживать пользователей.
 
+I1 применён: отдельные containers, loopback `:18011`, SQLite/state/covers
+и backup paths подняты. Пустая витрина доказала топологию,
+но не training acceptance.
+
+### I2 — source-owned scenario catalog
+
+Текущие published training configs и обложки публикуются отдельным PR
+нового application repository. IaC после его merge пинит exact commit и
+включает catalog path. До apply и живого прохождения это только
+source/delivery contract.
+
 ### O1 — freeze and drain
 
 На старом Showroom запретить создание новых сценариев/runs, дождаться
-завершения нужных активных runs, экспортировать config-only snapshot и
-импортировать его через новый admin API.
+завершения нужных активных runs и read-only сверить legacy published
+config с Git-каталогом. Любой delta идёт обычным application PR; runtime
+admin mutation не становится authority.
 
 ### C1 — cutover
 
