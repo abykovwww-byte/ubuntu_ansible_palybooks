@@ -4,13 +4,14 @@ Ansible foundation for a local Ubuntu server that will host application deployme
 
 ## RP Stack Wiki
 
-The repository includes a multi-page, human-readable description of the RP,
-collaborative-novel, and deterministic-training platform:
+The repository includes a multi-page, human-readable description of the RP and
+deterministic-training platform:
 
 - [RP Stack Wiki](docs/wiki/README.md)
 - [Architecture](docs/wiki/01-architecture.md)
 - [WorldPacks and scenario modes](docs/wiki/04-worldpacks-and-modes.md)
 - [Operations and repository map](docs/wiki/09-operations-and-repository.md)
+- [Checked repository work standard](docs/repository-work-standard.md)
 
 ## Repository Layout
 
@@ -133,19 +134,19 @@ ansible-playbook playbooks/site.yml --check --diff
 
 ## Pull Model On The Target Server
 
-For a self-hosted local server that pulls this public repository from GitHub and applies Ansible to itself:
+For a self-hosted local server that pulls this private repository from GitHub with a read-only deploy key and applies Ansible to itself:
 
 ```bash
 sudo apt update
 sudo apt install -y git python3-venv python3-pip
-sudo git clone https://github.com/abykovwww-byte/ubuntu_ansible_palybooks.git /opt/ubuntu_ansible_palybooks
-sudo chown -R "$USER:$USER" /opt/ubuntu_ansible_palybooks
+sudo install -d -o "$USER" -g "$USER" /opt/ubuntu_ansible_palybooks
+git clone git@github.com:abykovwww-byte/ubuntu_ansible_palybooks.git /opt/ubuntu_ansible_palybooks
 cd /opt/ubuntu_ansible_palybooks
 chmod +x scripts/apply-local.sh
 ./scripts/apply-local.sh playbooks/bootstrap.yml
 ```
 
-Local-only overrides can be placed in `/etc/ansible/local-overrides.yml`. Do not commit that file. Use it for real SSH public keys, local domains, firewall flags, and other host-specific values that should not live in the public repository.
+Configure the deploy key in the server account's SSH configuration before cloning; grant it read-only access to this repository and never commit the private key. Local-only overrides can be placed in `/etc/ansible/local-overrides.yml`. Do not commit that file. Use it for real SSH public keys, local domains, firewall flags, and other host-specific values that should not live in the repository.
 
 ## Tags
 
@@ -311,7 +312,7 @@ sudo sysctl --system
 Load AD data from the Windows export folder through the tunnel:
 
 ```powershell
-cd C:\Users\albykov\Documents\Пользователи\opensearch-ad
+Set-Location "$env:USERPROFILE\Documents\Пользователи\opensearch-ad"
 $env:OPENSEARCH_URL = "https://127.0.0.1:9200"
 $env:OPENSEARCH_USER = "admin"
 $env:OPENSEARCH_PASSWORD = "PASTE_SERVER_PASSWORD_HERE"
@@ -342,7 +343,7 @@ Keep provider keys server-side by setting them only in
 `/etc/ansible/local-overrides.yml` on `192.168.1.88`:
 
 ```yaml
-rp_stack_nvidia_api_key: "..."
+rp_stack_openrouter_api_key: "..."
 ```
 
 State workflow:

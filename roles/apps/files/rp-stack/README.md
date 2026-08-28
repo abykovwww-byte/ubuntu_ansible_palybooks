@@ -24,6 +24,30 @@ and character generation for every current and future party. Party narrator
 models remain independent. User BYOK credentials are scoped to exactly one
 party and are never used by the service model.
 
+Active cloud narrator routes are Gemini and OpenRouter. The service model uses
+only an explicitly selected local or OpenRouter route and never changes provider
+when the local runner is unavailable. Retired provider/profile/log rows remain
+readable for history, but cannot be selected for new or continuing runtime work.
+
+Revision-8 RP WorldPacks may declare reviewed `lore-cards/*.json`. Gateway copies
+them into a new party without a model call, retrieves them only by whole
+title/keyword matches from the current-plus-three-turn scan, and records the
+exact raised IDs in turn metadata. A player-triggered Lore Card draft uses one
+bounded stack-key OpenRouter call and is persisted only after explicit confirm.
+
+Candidate revision-9 RP adds a separate confirmed GM correction path. Bounded
+local Gemma calls may classify and draft only an edit of an existing target;
+Gateway alone commits it without advancing the scene and keeps a typed overlay
+until the affected OpenRouter memory section absorbs authority `user`. This
+source capability is not an activation or live-runtime claim.
+
+Candidate revision-10 RP may declare an authored `world-clock.json`. Exact local
+Gemma estimates only elapsed time from the last committed turn; Gateway applies
+cancelable authored events atomically as durable world facts or existing Lore
+Card toggles. The narrator and Light GUI receive a bounded one-shot event plus
+nearest horizon. Observed revision remains 8 until a separate activation and
+live verification slice.
+
 ## Runtime paths
 
 ```text
@@ -50,7 +74,9 @@ server. Never store them in Git or enter them in the browser.
 
 ## Deployment
 
-Commit and push IaC changes, then apply the server checkout through:
+Commit on a `codex/` branch or in an isolated worktree, push only that branch,
+open a non-draft PR, and merge it into `main` after CI is green. Direct pushes
+to `main` are prohibited. Then apply the server checkout through:
 
 ```bash
 sudo systemctl start ansible-local-apply.service

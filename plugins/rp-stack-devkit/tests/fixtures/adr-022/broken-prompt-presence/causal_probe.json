@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "party_id": "party_fixture_broken",
+  "expectation": "seed_trust_influences_plot",
+  "assertion": "prompt_presence",
+  "passed": false,
+  "break_at": "prompt_presence",
+  "steps": [
+    {
+      "step": "seeded_trust",
+      "assertion": "state_change",
+      "passed": true,
+      "evidence": {
+        "seeded_characters": 1,
+        "character_ids": ["npc_lyubava"]
+      }
+    },
+    {
+      "step": "event_projection",
+      "assertion": "projection",
+      "passed": true,
+      "evidence": {
+        "events": 1,
+        "first_opened_turn": 4
+      }
+    },
+    {
+      "step": "prompt_presence",
+      "assertion": "prompt_presence",
+      "passed": false,
+      "evidence": {
+        "matching_turns": 0
+      }
+    }
+  ]
+}

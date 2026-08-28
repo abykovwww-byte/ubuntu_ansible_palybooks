@@ -13,6 +13,7 @@ const appState = {
   checkpoints: [],
   branches: [],
   serviceJobs: [],
+  supervisor: null,
   characters: null,
   promptPreview: null,
   history: null,
@@ -21,6 +22,10 @@ const appState = {
   busy: false,
   busyText: "",
   pendingMessages: {},
+  pendingStoryMemoryCorrections: [],
+  pendingGmRoute: null,
+  pendingGmDraft: null,
+  pendingLoreCardSourceTurnIds: [],
   adminUsers: [],
   adminWorldpacks: [],
   byokKeys: [],
@@ -40,6 +45,7 @@ const els = {
   accountStrip: document.querySelector("#accountStrip"),
   currentUserLabel: document.querySelector("#currentUserLabel"),
   logoutButton: document.querySelector("#logoutButton"),
+  traceWorkbenchLink: document.querySelector("#traceWorkbenchLink"),
   partyList: document.querySelector("#partyList"),
   activeWorld: document.querySelector("#activeWorld"),
   activePartyTitle: document.querySelector("#activePartyTitle"),
@@ -54,6 +60,20 @@ const els = {
   messageForm: document.querySelector("#messageForm"),
   messageInput: document.querySelector("#messageInput"),
   messageSubmit: document.querySelector("#messageSubmit"),
+  gmMessageSubmit: document.querySelector("#gmMessageSubmit"),
+  gmDecisionPanel: document.querySelector("#gmDecisionPanel"),
+  gmDecisionLabel: document.querySelector("#gmDecisionLabel"),
+  gmDecisionTitle: document.querySelector("#gmDecisionTitle"),
+  gmDecisionHint: document.querySelector("#gmDecisionHint"),
+  gmDraftDiff: document.querySelector("#gmDraftDiff"),
+  gmDraftBefore: document.querySelector("#gmDraftBefore"),
+  gmDraftAfter: document.querySelector("#gmDraftAfter"),
+  gmRouteActions: document.querySelector("#gmRouteActions"),
+  gmDraftActions: document.querySelector("#gmDraftActions"),
+  gmRouteMasterButton: document.querySelector("#gmRouteMasterButton"),
+  gmRouteSceneButton: document.querySelector("#gmRouteSceneButton"),
+  gmConfirmButton: document.querySelector("#gmConfirmButton"),
+  gmRejectButton: document.querySelector("#gmRejectButton"),
   partyMeta: document.querySelector("#partyMeta"),
   stateSummary: document.querySelector("#stateSummary"),
   contextSummary: document.querySelector("#contextSummary"),
@@ -66,6 +86,8 @@ const els = {
   loreCardContent: document.querySelector("#loreCardContent"),
   loreCardKeywords: document.querySelector("#loreCardKeywords"),
   loreCardAlwaysOn: document.querySelector("#loreCardAlwaysOn"),
+  loreCardDraftHint: document.querySelector("#loreCardDraftHint"),
+  loreCardSubmitButton: document.querySelector("#loreCardSubmitButton"),
   loreCardList: document.querySelector("#loreCardList"),
   checkpointForm: document.querySelector("#checkpointForm"),
   checkpointLabel: document.querySelector("#checkpointLabel"),
@@ -96,6 +118,10 @@ const els = {
   partyForm: document.querySelector("#partyForm"),
   partyTitleInput: document.querySelector("#partyTitleInput"),
   worldSelect: document.querySelector("#worldSelect"),
+  partyPresetFields: document.querySelector("#partyPresetFields"),
+  partyPresetSelect: document.querySelector("#partyPresetSelect"),
+  partyOpeningFields: document.querySelector("#partyOpeningFields"),
+  partyOpeningSelect: document.querySelector("#partyOpeningSelect"),
   worldReadyFields: document.querySelector("#worldReadyFields"),
   worldPromptFields: document.querySelector("#worldPromptFields"),
   worldPromptTextFields: document.querySelector("#worldPromptTextFields"),
@@ -114,10 +140,18 @@ const els = {
   worldPreview: document.querySelector("#worldPreview"),
   worldInstruction: document.querySelector("#worldInstruction"),
   worldPreviewLlmButton: document.querySelector("#worldPreviewLlmButton"),
-  checkForm: document.querySelector("#checkForm"),
-  checkPanel: document.querySelector("#checkPanel"),
   partyModelProviderSelect: document.querySelector("#partyModelProviderSelect"),
   partyModelSelect: document.querySelector("#partyModelSelect"),
+  narratorSettingsAvailability: document.querySelector("#narratorSettingsAvailability"),
+  narratorSettingsFields: document.querySelector("#narratorSettingsFields"),
+  narratorReasoningSelect: document.querySelector("#narratorReasoningSelect"),
+  narratorTemperatureField: document.querySelector("#narratorTemperatureField"),
+  narratorTemperatureInput: document.querySelector("#narratorTemperatureInput"),
+  narratorTopPField: document.querySelector("#narratorTopPField"),
+  narratorTopPInput: document.querySelector("#narratorTopPInput"),
+  narratorMaxTokensSelect: document.querySelector("#narratorMaxTokensSelect"),
+  resetNarratorSettingsButton: document.querySelector("#resetNarratorSettingsButton"),
+  narratorSettingsSavedHint: document.querySelector("#narratorSettingsSavedHint"),
   changePartyModelButton: document.querySelector("#changePartyModelButton"),
   deletePartyButton: document.querySelector("#deletePartyButton"),
   operationStatus: document.querySelector("#operationStatus"),
@@ -141,6 +175,7 @@ const els = {
   adminAutotestPromptInput: document.querySelector("#adminAutotestPromptInput"),
   adminAutotestProviderSelect: document.querySelector("#adminAutotestProviderSelect"),
   adminAutotestModelSelect: document.querySelector("#adminAutotestModelSelect"),
+  adminAutotestRevisionInput: document.querySelector("#adminAutotestRevisionInput"),
   adminAutotestTurnsInput: document.querySelector("#adminAutotestTurnsInput"),
   adminAutotestStartButton: document.querySelector("#adminAutotestStartButton"),
   adminAutotestRunsList: document.querySelector("#adminAutotestRunsList"),
@@ -162,6 +197,7 @@ const els = {
 };
 
 const checkLabels = {
+  narrative: "Намерение",
   persuasion: "Убеждение",
   intimidation: "Запугивание",
   deception: "Обман",
@@ -182,18 +218,26 @@ const metaHints = {
 };
 
 const scenarioTypeLabels = {
-  rp: "RP · D20",
-  novel: "Роман",
+  rp: "RP",
+  novel: "Архивный Novel",
   training: "Обучение",
 };
 
 const providerLabels = {
   local: "Локальная Vulkan",
-  nvidia: "NVIDIA",
+  nvidia: "NVIDIA (архив)",
   gemini: "Gemini",
   openrouter: "OpenRouter",
 };
-const providerOrder = ["local", "nvidia", "gemini", "openrouter"];
+const providerOrder = ["local", "gemini", "openrouter"];
+const narratorReasoningLabels = {
+  none: "Выкл.",
+  low: "Низкая",
+  medium: "Средняя",
+  high: "Высокая",
+  xhigh: "Очень высокая",
+  max: "Максимальная",
+};
 
 const CHAT_VISIBLE_TURNS = 4;
 const AUTO_START_HISTORY_MESSAGE = "[AUTO_START] Старт партии";
@@ -233,6 +277,7 @@ function bindEvents() {
   document.querySelector("#rollbackButton").addEventListener("click", rollbackParty);
   els.memorySummarizeButton.addEventListener("click", summarizeMemory);
   els.memoryClearButton.addEventListener("click", clearLatestMemory);
+  els.memorySummary.addEventListener("click", handleStoryMemoryCorrectionAction);
   els.loreCardForm.addEventListener("submit", createLoreCard);
   els.loreCardList.addEventListener("click", handleLoreCardAction);
   els.checkpointForm.addEventListener("submit", createCheckpoint);
@@ -242,21 +287,29 @@ function bindEvents() {
   els.characterLlmDraftButton.addEventListener("click", previewCharacterLlmDraft);
   els.promptPreviewButton.addEventListener("click", previewPrompt);
   els.changePartyModelButton.addEventListener("click", changePartyModel);
+  els.resetNarratorSettingsButton.addEventListener("click", resetNarratorSettingsForm);
   els.deletePartyButton.addEventListener("click", deleteActiveParty);
   els.worldSelect.addEventListener("change", () => {
+    renderPartyWorldChoices();
     syncAutoPartyTitle();
     renderWorldPreview();
     syncReadyCharacterDescription();
   });
+  els.partyOpeningSelect.addEventListener("change", syncReadyCharacterDescription);
   els.worldPromptTitleInput.addEventListener("input", renderWorldPreview);
   els.worldPromptInput.addEventListener("input", renderWorldPreview);
   els.worldMarkdownInput.addEventListener("change", loadWorldMarkdownFile);
   els.modelProviderSelect.addEventListener("change", renderDialogModelOptions);
   els.modelSelect.addEventListener("change", renderModelPreview);
   els.partyModelProviderSelect.addEventListener("change", renderPartyModelOptions);
+  els.partyModelSelect.addEventListener("change", renderNarratorSettings);
   els.messageForm.addEventListener("submit", sendMessage);
+  els.gmMessageSubmit.addEventListener("click", sendMessageToGM);
+  els.gmRouteMasterButton.addEventListener("click", () => routePendingGmMessage("gm"));
+  els.gmRouteSceneButton.addEventListener("click", () => routePendingGmMessage("scene"));
+  els.gmConfirmButton.addEventListener("click", () => decideGmDraft("confirm"));
+  els.gmRejectButton.addEventListener("click", () => decideGmDraft("reject"));
   els.partyForm.addEventListener("submit", createParty);
-  els.checkForm.addEventListener("submit", runCheck);
   els.adminUserForm.addEventListener("submit", createAdminUser);
   els.byokKeyForm.addEventListener("submit", createByokKey);
   els.serviceModelForm.addEventListener("submit", saveServiceModel);
@@ -274,6 +327,7 @@ function bindEvents() {
   els.datasetTurnDialog.addEventListener("click", handleAdminDatasetDialogAction);
   els.datasetTurnDialog.addEventListener("close", () => { appState.adminDatasetReviewTurnId = null; });
   els.chatLog.addEventListener("click", handleTurnFeedbackClick);
+  els.chatLog.addEventListener("click", draftLoreCardFromTurn);
   [els.chatLog, els.historyControls].filter(Boolean).forEach((node) => node.addEventListener("click", handleChatArchiveClick));
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeInspector();
@@ -397,6 +451,7 @@ async function boot() {
       appState.partyState = null;
       appState.contextEstimate = null;
       appState.memory = null;
+      appState.supervisor = null;
       appState.characters = null;
       appState.byokKeys = [];
       appState.promptPreview = null;
@@ -476,12 +531,17 @@ function clearWorkspaceState() {
   appState.checkpoints = [];
   appState.branches = [];
   appState.serviceJobs = [];
+  appState.supervisor = null;
   appState.characters = null;
   appState.promptPreview = null;
   appState.history = null;
   appState.chatArchiveExpanded = false;
   appState.proposals = [];
   appState.pendingMessages = {};
+  appState.pendingStoryMemoryCorrections = [];
+  appState.pendingGmRoute = null;
+  appState.pendingGmDraft = null;
+  appState.pendingLoreCardSourceTurnIds = [];
   appState.adminUsers = [];
   appState.byokKeys = [];
   appState.serviceModelSettings = null;
@@ -498,6 +558,9 @@ function renderAuth() {
   }
   if (els.adminPanel) {
     els.adminPanel.classList.toggle("hidden", !isAdmin());
+  }
+  if (els.traceWorkbenchLink) {
+    els.traceWorkbenchLink.classList.toggle("hidden", appState.authEnabled && !isAdmin());
   }
   if (els.autotestBlock) {
     els.autotestBlock.classList.toggle("hidden", !isAdmin());
@@ -526,10 +589,14 @@ async function selectParty(partyId) {
     appState.checkpoints = [];
     appState.branches = [];
     appState.serviceJobs = [];
+    appState.supervisor = null;
     appState.byokKeys = [];
+    resetLoreCardDraft();
   }
   appState.activeParty = party;
   appState.activeBranch = null;
+  appState.pendingStoryMemoryCorrections = [];
+  clearGmDecision();
   localStorage.setItem(ACTIVE_PARTY_STORAGE_KEY, party.id);
   await reloadActiveParty();
   if (isAdmin()) await reloadAdminAutotestRuns(party.id);
@@ -578,6 +645,7 @@ async function openPartyBranch(partyId, branchId) {
   const payload = await apiGet(`/api/parties/${partyId}/branches/${branchId}`);
   if (appState.activeParty?.id !== partyId) return;
   appState.activeBranch = payload.branch;
+  clearGmDecision();
   appState.partyState = payload.state;
   appState.history = {
     party_id: partyId,
@@ -588,6 +656,7 @@ async function openPartyBranch(partyId, branchId) {
   appState.characters = { characters: payload.characters || {} };
   appState.contextEstimate = null;
   appState.memory = null;
+  appState.supervisor = null;
   appState.byokKeys = [];
   appState.proposals = [];
   appState.chatArchiveExpanded = false;
@@ -603,11 +672,12 @@ async function reloadActiveBranch() {
 }
 
 async function loadOptionalPartyData(partyId, reloadGeneration) {
-  const [loreCards, checkpoints, branches, serviceJobs, byok] = await Promise.allSettled([
+  const [loreCards, checkpoints, branches, serviceJobs, supervisor, byok] = await Promise.allSettled([
     apiGet(`/api/parties/${partyId}/lore-cards`),
     apiGet(`/api/parties/${partyId}/checkpoints`),
     apiGet(`/api/parties/${partyId}/branches`),
     apiGet(`/api/parties/${partyId}/service-jobs`),
+    apiGet(`/api/parties/${partyId}/supervisor`),
     apiGet(`/api/parties/${partyId}/byok`),
   ]);
   if (appState.activeParty?.id !== partyId || reloadGeneration !== partyReloadGeneration) return;
@@ -615,6 +685,7 @@ async function loadOptionalPartyData(partyId, reloadGeneration) {
   if (checkpoints.status === "fulfilled") appState.checkpoints = checkpoints.value.checkpoints || [];
   if (branches.status === "fulfilled") appState.branches = branches.value.branches || [];
   if (serviceJobs.status === "fulfilled") appState.serviceJobs = serviceJobs.value.jobs || [];
+  appState.supervisor = supervisor.status === "fulfilled" ? supervisor.value : null;
   if (byok.status === "fulfilled") appState.byokKeys = byok.value.api_keys || [];
   renderMemoryTools();
   renderByok();
@@ -641,7 +712,7 @@ function renderAll() {
 
 function renderBranchReadOnlyControls() {
   if (!appState.activeBranch) return;
-  const containers = [els.loreCardForm, els.checkpointForm, els.checkForm];
+  const containers = [els.loreCardForm, els.checkpointForm];
   containers.forEach((container) => {
     container?.querySelectorAll("input, textarea, select, button").forEach((node) => { node.disabled = true; });
   });
@@ -706,9 +777,6 @@ function renderMeta() {
   const branch = appState.activeBranch;
   els.deletePartyButton.disabled = !party || Boolean(branch);
   els.changePartyModelButton.disabled = !party || Boolean(branch);
-  if (els.checkPanel) {
-    els.checkPanel.classList.toggle("hidden", !party || Boolean(branch) || party.scenario_type !== "rp");
-  }
   renderPartyModelSelect();
   if (!party) {
     els.partyMeta.innerHTML = `<dt title="Статус выбранной партии">Статус</dt><dd>партия не выбрана</dd>`;
@@ -746,6 +814,112 @@ function renderPartyModelOptions() {
   if (profiles.some((profile) => profile.id === current)) {
     els.partyModelSelect.value = current;
   }
+  renderNarratorSettings();
+}
+
+function narratorControlsForProfile(profile) {
+  const raw = profile?.params?.narrator_controls;
+  if (!raw || !Array.isArray(raw.reasoning_efforts) || !Array.isArray(raw.max_tokens)) return null;
+  return {
+    reasoning_efforts: [...raw.reasoning_efforts],
+    default_reasoning_effort: String(raw.default_reasoning_effort || ""),
+    temperature: Boolean(raw.temperature),
+    top_p: Boolean(raw.top_p),
+    max_tokens: raw.max_tokens.map(Number),
+  };
+}
+
+function narratorSettingsPayload(controls, values) {
+  if (!controls) return {};
+  const payload = {};
+  const effort = String(values.reasoning_effort || "");
+  if (effort) {
+    if (!controls.reasoning_efforts.includes(effort)) throw new Error("Выбранная глубина рассуждений недоступна для этой модели.");
+    payload.reasoning_effort = effort;
+  }
+  const temperature = String(values.temperature ?? "").trim();
+  if (controls.temperature && temperature) {
+    const parsed = Number(temperature);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 2) throw new Error("Температура должна быть от 0 до 2.");
+    payload.temperature = parsed;
+  }
+  const topP = String(values.top_p ?? "").trim();
+  if (controls.top_p && topP) {
+    const parsed = Number(topP);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) throw new Error("Top P должен быть от 0 до 1.");
+    payload.top_p = parsed;
+  }
+  const maxTokens = String(values.max_tokens ?? "").trim();
+  if (maxTokens) {
+    const parsed = Number(maxTokens);
+    if (!controls.max_tokens.includes(parsed)) throw new Error("Выбранный бюджет ответа недоступен для этой модели.");
+    payload.max_tokens = parsed;
+  }
+  return payload;
+}
+
+function selectedPartyModelProfile() {
+  return appState.modelProfiles.find((profile) => profile.id === els.partyModelSelect?.value) || null;
+}
+
+function renderNarratorSettings() {
+  const profile = selectedPartyModelProfile();
+  const controls = narratorControlsForProfile(profile);
+  const party = appState.activeParty;
+  const readOnly = !party || Boolean(appState.activeBranch);
+  if (!controls) {
+    els.narratorSettingsAvailability.textContent = profile
+      ? "Для этой модели ручные параметры пока не предусмотрены."
+      : "Выберите поддерживаемую модель.";
+    els.narratorSettingsFields.hidden = true;
+    els.resetNarratorSettingsButton.hidden = true;
+    els.narratorSettingsSavedHint.hidden = true;
+    return;
+  }
+
+  const saved = profile?.id === party?.model_profile_id ? (party.narrator_settings || {}) : {};
+  const defaultEffort = narratorReasoningLabels[controls.default_reasoning_effort] || controls.default_reasoning_effort;
+  els.narratorSettingsAvailability.textContent = "Оставьте «Авто», чтобы использовать настройки модели.";
+  els.narratorReasoningSelect.innerHTML = [
+    `<option value="">Авто${defaultEffort ? ` (по умолчанию: ${escapeHtml(defaultEffort.toLowerCase())})` : ""}</option>`,
+    ...controls.reasoning_efforts.map((effort) => `<option value="${escapeHtml(effort)}">${escapeHtml(narratorReasoningLabels[effort] || effort)}</option>`),
+  ].join("");
+  els.narratorReasoningSelect.value = saved.reasoning_effort || "";
+  els.narratorTemperatureField.hidden = !controls.temperature;
+  els.narratorTemperatureInput.value = controls.temperature && saved.temperature != null ? saved.temperature : "";
+  els.narratorTopPField.hidden = !controls.top_p;
+  els.narratorTopPInput.value = controls.top_p && saved.top_p != null ? saved.top_p : "";
+  els.narratorMaxTokensSelect.innerHTML = [
+    `<option value="">Авто</option>`,
+    ...controls.max_tokens.map((value) => `<option value="${value}">${value.toLocaleString("ru-RU")}</option>`),
+  ].join("");
+  els.narratorMaxTokensSelect.value = saved.max_tokens != null ? String(saved.max_tokens) : "";
+  [
+    els.narratorReasoningSelect,
+    els.narratorTemperatureInput,
+    els.narratorTopPInput,
+    els.narratorMaxTokensSelect,
+    els.resetNarratorSettingsButton,
+  ].forEach((element) => { element.disabled = readOnly; });
+  els.narratorSettingsFields.hidden = false;
+  els.resetNarratorSettingsButton.hidden = false;
+  els.narratorSettingsSavedHint.hidden = false;
+}
+
+function resetNarratorSettingsForm() {
+  els.narratorReasoningSelect.value = "";
+  els.narratorTemperatureInput.value = "";
+  els.narratorTopPInput.value = "";
+  els.narratorMaxTokensSelect.value = "";
+}
+
+function readNarratorSettings() {
+  return narratorSettingsPayload(narratorControlsForProfile(selectedPartyModelProfile()), {
+    reasoning_effort: els.narratorReasoningSelect.value,
+    temperature: els.narratorTemperatureInput.value,
+    top_p: els.narratorTopPInput.value,
+    max_tokens: els.narratorMaxTokensSelect.value,
+  });
 }
 
 function renderState() {
@@ -762,12 +936,12 @@ function renderState() {
   const relationships = state.relationships || {};
   const relRows = Object.entries(relationships)
     .slice(0, 5)
-    .map(([key, value]) => `${escapeHtml(key)}: доверие ${escapeHtml(value.trust ?? "-")}, подозрение ${escapeHtml(value.suspicion ?? "-")}`);
+    .map(([key, value]) => `${escapeHtml(key)}: подозрение ${escapeHtml(value.suspicion ?? "-")}`);
   els.stateSummary.innerHTML = [
     stateItem("Версия", `v${meta.state_version ?? "-"} · ход ${meta.turn ?? "-"}`, "Номер сохраненного state и текущий ход партии."),
     stateItem("Локация", playerLocation, "Где сейчас находится персонаж."),
     stateItem("Ресурсы", resources, "Подтвержденные ресурсы игрока; их нельзя выдумывать в ходе."),
-    stateItem("Отношения", relRows.length ? relRows.join("<br>") : "нет записей", "Доверие/подозрение NPC и фракций к игроку."),
+    stateItem("Отношения", relRows.length ? relRows.join("<br>") : "нет записей", "Подозрение NPC и фракций к игроку."),
     stateItem(
       "Нити",
       threads.length ? threads.map((thread) => escapeHtml(thread.description || thread.id)).join("<br>") : "нет активных",
@@ -830,7 +1004,7 @@ function renderContext() {
       : (Number(cache.cache_write_tokens || 0) ? `запись: ${formatTokens(cache.cache_write_tokens)}` : "провайдер не вернул cache hit"))
     : "провайдер не передал метрики";
   els.contextSummary.innerHTML = `
-    <div class="context-meter ${escapeHtml(estimate.severity || "unknown")}" title="Оценка приблизительная: tokenizer NVIDIA недоступен, считаем по размеру prompt.">
+    <div class="context-meter ${escapeHtml(estimate.severity || "unknown")}" title="Оценка приблизительная: считаем по размеру prompt.">
       <div class="context-meter-head">
         <strong>~${formatTokens(estimate.estimated_total_tokens)} токенов</strong>
         <span>${escapeHtml(source)} · ${escapeHtml(percentLabel)}</span>
@@ -841,7 +1015,7 @@ function renderContext() {
     ${stateItem("Лимит модели", `${escapeHtml(limitLabel)} · ${escapeHtml(estimate.context_window || "уточняется")}`, "Контекстное окно активной модели из model profile.")}
     ${stateItem("История", `${escapeHtml(historyText)}${omitted ? `<br><span class="warning-text">вне прямого окна ~${omitted} ходов</span>` : ""}`, historyHint)}
     ${stateItem("Разбивка", `state ~${escapeHtml(stateTokens)} · главы ~${escapeHtml(memoryTokens)}${escapeHtml(storyMemoryBreakdown)} · история ~${escapeHtml(historyTokens)}${escapeHtml(memoryCoverage)} · ответ до ${escapeHtml(formatTokens(estimate.completion_reserved_tokens || 0))}`, "Оценка входного prompt плюс зарезервированный max_tokens ответа.")}
-    ${stateItem("Prompt cache", escapeHtml(cacheValue), "Фактическая метрика последнего ответа: hit — токены, прочитанные из кэша; запись — создание нового кэш-префикса. Для NVIDIA и локальной модели метрика может отсутствовать.")}
+    ${stateItem("Prompt cache", escapeHtml(cacheValue), "Фактическая метрика последнего ответа: hit — токены, прочитанные из кэша; запись — создание нового кэш-префикса. Для локальной модели метрика может отсутствовать.")}
     ${stateItem("NPC", `~${escapeHtml(characterTokens)}`, "Выбранные карточки персонажей в фактическом prompt.")}
     ${notes.length ? `<div class="context-notes">${notes.map((note) => `<div>${escapeHtml(note)}</div>`).join("")}</div>` : ""}
   `;
@@ -912,26 +1086,124 @@ function rpStoryMemoryHtml(snapshot, stats) {
   }
   const data = snapshot.memory || {};
   const covered = `${snapshot.from_turn_id ?? "-"}-${snapshot.to_turn_id ?? "-"}`;
+  const currentSituation = activeStoryText(data.current_situation);
+  const contractRevision = Number(appState.activeParty?.rp_contract_revision || 0);
+  const correctionsEnabled = contractRevision >= 2 && !appState.activeBranch;
+  const pendingCorrections = contractRevision < 9
+    ? appState.pendingStoryMemoryCorrections || []
+    : [];
+  const pendingHtml = pendingCorrections.length
+    ? `<div class="state-item memory-list"><strong>Коррекции со следующим ходом</strong><ul>${pendingCorrections.map((item) => `
+        <li>${escapeHtml(item.action === "replace" ? "Исправить" : "Отозвать")}: ${escapeHtml(item.fact_id)}
+          <button class="text-button" type="button" data-story-memory-action="cancel" data-field="${escapeHtml(item.field)}" data-fact-id="${escapeHtml(item.fact_id)}">Отменить</button>
+        </li>`).join("")}</ul></div>`
+    : "";
   return `
     ${stateItem("RP story memory", `revision ${escapeHtml(snapshot.revision || 1)} · ходы ${escapeHtml(covered)}`, "Кумулятивный RP-only snapshot; canonical state имеет больший приоритет.")}
-    ${data.current_situation ? `<div class="state-item memory-text"><strong>Текущая ситуация</strong>${escapeHtml(clipText(data.current_situation, 900))}</div>` : ""}
-    ${memoryList("Канон", data.canon)}
-    ${memoryList("Персонажи", data.characters)}
-    ${memoryList("Активные линии", data.active_threads)}
-    ${memoryList("Нераскрытые зацепки", data.unresolved_hooks)}
+    ${pendingHtml}
+    ${currentSituation ? `<div class="state-item memory-text"><strong>Текущая ситуация</strong>${escapeHtml(clipText(currentSituation, 900))}</div>` : ""}
+    ${storyMemoryList("Канон", "canon", data.canon, correctionsEnabled)}
+    ${storyMemoryList("Правила и способности", "rules_and_abilities", data.rules_and_abilities, correctionsEnabled)}
+    ${storyMemoryList("Инвентарь и активы", "inventory_and_assets", data.inventory_and_assets, correctionsEnabled)}
+    ${storyMemoryList("Персонажи", "characters", data.characters, correctionsEnabled)}
+    ${storyMemoryList("Активные линии", "active_threads", data.active_threads, correctionsEnabled)}
+    ${storyMemoryList("Завершённые линии", "resolved_threads", data.resolved_threads, correctionsEnabled)}
+    ${storyMemoryList("Нераскрытые зацепки", "unresolved_hooks", data.unresolved_hooks, correctionsEnabled)}
+    ${storyMemoryList("Хронология", "chronology", data.chronology, correctionsEnabled)}
   `;
+}
+
+function storyMemoryList(title, field, items, correctionsEnabled = false) {
+  const rows = activeStoryItems(items).slice(0, 4);
+  if (!rows.length) return "";
+  const html = rows.map((item) => {
+    const text = escapeHtml(memoryItemText(item));
+    if (!correctionsEnabled || !item || typeof item !== "object" || !item.fact_id) return `<li>${text}</li>`;
+    const attributes = `data-field="${escapeHtml(field)}" data-fact-id="${escapeHtml(item.fact_id)}"`;
+    return `<li><span>${text}</span><span class="inline-actions">
+      <button class="text-button" type="button" data-story-memory-action="replace" ${attributes}>Исправить</button>
+      <button class="text-button danger-text" type="button" data-story-memory-action="retract" ${attributes}>Отозвать</button>
+    </span></li>`;
+  }).join("");
+  return `<div class="state-item memory-list"><strong>${escapeHtml(title)}</strong><ul>${html}</ul></div>`;
+}
+
+async function handleStoryMemoryCorrectionAction(event) {
+  const button = event.target.closest("[data-story-memory-action]");
+  if (
+    !button
+    || appState.activeParty?.scenario_type !== "rp"
+    || Number(appState.activeParty?.rp_contract_revision || 0) < 2
+    || appState.activeBranch
+  ) return;
+  const action = button.dataset.storyMemoryAction;
+  const field = button.dataset.field;
+  const factId = button.dataset.factId;
+  const revision = Number(appState.activeParty?.rp_contract_revision || 0);
+  if (!field || !factId) return;
+  if (action === "cancel") {
+    appState.pendingStoryMemoryCorrections = appState.pendingStoryMemoryCorrections.filter(
+      (item) => item.field !== field || item.fact_id !== factId,
+    );
+    renderMemory();
+    return;
+  }
+  let replacementText = null;
+  if (action === "replace") {
+    replacementText = window.prompt(
+      revision >= 9
+        ? "Введите исправленный факт. Мастер покажет точный diff перед записью."
+        : "Введите исправленный факт. Он заменит выбранную запись со следующим ходом.",
+    );
+    if (!replacementText?.trim()) return;
+    replacementText = replacementText.trim();
+  } else if (action === "retract") {
+    if (!window.confirm(
+      revision >= 9
+        ? "Подготовить отзыв этого факта у мастера? Перед записью будет подтверждение."
+        : "Отозвать этот факт из RP story memory со следующим ходом?",
+    )) return;
+  } else {
+    return;
+  }
+  if (revision >= 9) {
+    const content = action === "replace"
+      ? replacementText
+      : "Отозвать выбранный факт.";
+    if (content.length > 600) {
+      showToast("Исправление не должно превышать 600 символов.");
+      return;
+    }
+    await submitPartyMessage(content, {
+      channel: "gm",
+      targetSlot: `memory:${field}:${factId}:${action}`,
+    });
+    return;
+  }
+  const correction = {
+    field,
+    fact_id: factId,
+    action,
+    ...(replacementText ? { replacement_text: replacementText } : {}),
+  };
+  appState.pendingStoryMemoryCorrections = [
+    ...appState.pendingStoryMemoryCorrections.filter((item) => item.field !== field || item.fact_id !== factId),
+    correction,
+  ];
+  renderMemory();
+  showToast("Коррекция подготовлена. Отправьте следующий ход, чтобы записать её с точным turn ID.");
 }
 
 function renderMemoryTools() {
   if (!els.loreCardList || !els.checkpointList) return;
-  const activeJobs = (appState.serviceJobs || []).filter((job) => ["pending", "running", "failed"].includes(job.status));
+  const activeJobs = (appState.serviceJobs || []).filter((job) => ["pending", "running", "failed", "stale"].includes(job.status));
   const jobHtml = activeJobs.length
     ? `<div class="state-item"><strong>Служебная LLM</strong>${activeJobs
         .map((job) => `${escapeHtml(job.job_type)}: ${escapeHtml(job.status)} · попытка ${escapeHtml(job.attempts)}/${escapeHtml(job.max_attempts)}${job.last_error ? ` · ${escapeHtml(job.last_error)}` : ""}`)
         .join("<br>")}</div>`
     : `<div class="state-item"><strong>Служебная LLM</strong>очередь пуста</div>`;
   const cards = appState.loreCards || [];
-  els.loreCardList.innerHTML = jobHtml + (cards.length
+  els.loreCardList.innerHTML = rpSupervisorStatusHtml() + jobHtml + (cards.length
     ? cards.map((card) => `<div class="state-item lore-card">
         <strong>${escapeHtml(card.title)}</strong>
         <div>${escapeHtml(clipText(card.content, 500))}</div>
@@ -958,6 +1230,37 @@ function renderMemoryTools() {
       </div>`).join("")
     : `<div class="state-item">Веток пока нет.</div>`;
   els.checkpointList.innerHTML = `${checkpointHtml}${branchHtml}`;
+}
+
+function rpSupervisorStatusHtml() {
+  const supervisor = appState.supervisor;
+  if (!supervisor?.enabled) return "";
+  const mode = supervisor.mode === "enforce" ? "режим рекомендаций" : "наблюдение";
+  const storyTurns = Number(supervisor.story_turn_count || 0);
+  const firstDue = Number(supervisor.first_retrospective_story_turn || 56);
+  const nextDue = Number(supervisor.next_retrospective_story_turn || firstDue);
+  const progress = storyTurns < firstDue
+    ? `${storyTurns}/${firstDue} канонических ходов до первой оценки`
+    : `последний учтённый ход ${storyTurns} · следующая оценка на ${nextDue}`;
+  const last = supervisor.last_evaluation || null;
+  const statusLabels = { checked: "проверено", unchecked: "не проверено", error: "ошибка" };
+  const lastStatus = last
+    ? `${statusLabels[last.status] || last.status}${last.status_reason ? ` · ${last.status_reason}` : ""}`
+    : "ещё не запускался";
+  const serviceModel = supervisor.service_model || {};
+  const model = serviceModel.title || serviceModel.model || "служебная модель не выбрана";
+  const activeAdvisories = Number(supervisor.active_advisory_count || 0);
+  const modeHint = supervisor.mode === "enforce"
+    ? (activeAdvisories > 0
+      ? `Активных рекомендаций: ${activeAdvisories}. Канон и правила мира всегда выше.`
+      : "Активных рекомендаций нет; Gateway не добавляет supervisor-блок в prompt.")
+    : "Режим наблюдения только измеряет дрейф и ничего не добавляет в prompt нарратора.";
+  return `<div class="state-item">
+    <strong>Надзор · ${escapeHtml(mode)}</strong>
+    <div>${escapeHtml(progress)}</div>
+    <div class="mini-metrics"><span>${escapeHtml(lastStatus)}</span><span>${escapeHtml(model)}</span></div>
+    <div class="muted-label">${escapeHtml(modeHint)}</div>
+  </div>`;
 }
 
 function renderCharacters() {
@@ -1212,6 +1515,49 @@ function promptBlock(block, index) {
   </details>`;
 }
 
+function raisedLoreCardsForTurn(turn) {
+  const ids = turn?.metadata?.prompt_assembly?.lore_card_ids;
+  if (!Array.isArray(ids)) return [];
+  const summaries = new Map(
+    (turn.activated_lore_cards || []).map((card) => [Number(card.id), card]),
+  );
+  return ids
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .map((id) => ({ id, title: summaries.get(id)?.title || `Lore Card #${id}` }));
+}
+
+function worldClockEventsForTurn(turn) {
+  const value = turn?.metadata?.world_clock_events;
+  if (!value || typeof value !== "object") return null;
+  const normalize = (items) => (Array.isArray(items) ? items : [])
+    .filter((item) => item && typeof item === "object" && String(item.text || "").trim())
+    .map((item) => ({
+      id: String(item.id || ""),
+      text: String(item.text || "").trim(),
+      date: item.date ? String(item.date) : null,
+    }));
+  const occurred = normalize(value.occurred);
+  const horizon = normalize(value.horizon);
+  if (!occurred.length && !horizon.length) return null;
+  return {
+    date: value.date ? String(value.date) : null,
+    occurred,
+    horizon,
+  };
+}
+
+function gmCorrectionMessageHtml(turn) {
+  const correction = turn?.player_correction || turn?.metadata?.player_correction || {};
+  const before = String(correction.before || "").trim();
+  const after = String(correction.after || "").trim();
+  const status = correction.status === "absorbed" ? "записано в память" : "активно поверх истории";
+  const content = correction.action === "retract" || !after
+    ? `Отозвано: ${before}\nСтатус: ${status}`
+    : `Было: ${before}\nСтало: ${after}\nСтатус: ${status}`;
+  return messageHtml("gm-note", "Мастер · исправление", content, turn.created_at);
+}
+
 function renderChat({ scrollMode = "bottom" } = {}) {
   const turns = appState.history?.turns || [];
   const pending = activePendingMessage();
@@ -1232,7 +1578,14 @@ function renderChat({ scrollMode = "bottom" } = {}) {
   if (hiddenTurnCount) {
     messages.push(chatArchiveHtml(hiddenTurnCount));
   }
+  const allowLoreDraft = !appState.activeBranch
+    && appState.activeParty?.scenario_type === "rp"
+    && Number(appState.activeParty?.rp_contract_revision || 0) >= 8;
   for (const turn of visibleTurns) {
+    if (turn.turn_kind === "gm_correction") {
+      messages.push(gmCorrectionMessageHtml(turn));
+      continue;
+    }
     const autoStart = isAutoStartTurn(turn);
     if (autoStart) {
       messages.push(messageHtml("system", "Старт", "Партия началась автоматически.", turn.created_at));
@@ -1250,6 +1603,9 @@ function renderChat({ scrollMode = "bottom" } = {}) {
       },
       turn.artifacts || [],
       turn.id,
+      raisedLoreCardsForTurn(turn),
+      allowLoreDraft,
+      worldClockEventsForTurn(turn),
     ));
   }
   if (pending && !turns.some((turn) => turn.request_id === pending.requestId)) {
@@ -1861,7 +2217,7 @@ function renderDialogOptions() {
     input.checked = false;
   });
   renderWorldOptions();
-  renderProviderOptions(els.modelProviderSelect, "nvidia");
+  renderProviderOptions(els.modelProviderSelect, "openrouter");
   renderDialogModelOptions();
   const pack = selectedWorldpack();
   els.partyTitleInput.value = pack ? `${pack.title}: партия` : "Новая партия";
@@ -1872,7 +2228,7 @@ function renderDialogOptions() {
   els.worldMarkdownStatus.textContent = WORLD_MARKDOWN_HELP;
   appState.worldMarkdownImport = null;
   els.characterNameInput.value = "Игрок";
-  els.characterDescriptionInput.value = pack?.manifest?.player_role || "";
+  els.characterDescriptionInput.value = selectedPartyWorldChoices(pack).opening?.player_role || pack?.manifest?.player_role || "";
   renderWorldPreview();
   renderModelPreview();
 }
@@ -1899,12 +2255,60 @@ function renderWorldOptions() {
   if (available.some((pack) => pack.id === previous)) {
     els.worldSelect.value = previous;
   }
+  renderPartyWorldChoices();
 }
 
 function worldSupportsScenario(pack, scenarioType) {
   if (!scenarioType) return true;
   const supported = pack?.manifest?.scenario_types?.supported;
   return !Array.isArray(supported) || !supported.length || supported.includes(scenarioType);
+}
+
+function resolveWorldpackChoice(items, selectedId, defaultId) {
+  const options = Array.isArray(items) ? items : [];
+  return options.find((item) => item?.id === selectedId)
+    || options.find((item) => item?.id === defaultId)
+    || null;
+}
+
+function selectedPartyWorldChoices(pack = selectedWorldpack()) {
+  if (selectedRadioValue("scenarioType", "") !== "rp") {
+    return { preset: null, opening: null };
+  }
+  return {
+    preset: resolveWorldpackChoice(pack?.presets, els.partyPresetSelect?.value, pack?.presets_default),
+    opening: resolveWorldpackChoice(pack?.openings, els.partyOpeningSelect?.value, pack?.openings_default),
+  };
+}
+
+function renderPartyWorldChoices() {
+  const readyWorld = selectedRadioValue("worldSource") === "ready";
+  const rpScenario = selectedRadioValue("scenarioType", "") === "rp";
+  const pack = readyWorld && rpScenario ? selectedWorldpack() : null;
+
+  const renderChoice = (fields, select, items, defaultId, placeholder) => {
+    const options = Array.isArray(items) ? items : [];
+    const visible = Boolean(pack && options.length);
+    fields.classList.toggle("hidden", !visible);
+    select.toggleAttribute("required", visible);
+    select.disabled = !visible;
+    if (!visible) {
+      select.innerHTML = "";
+      select.dataset.worldpackId = "";
+      return;
+    }
+
+    const selectedId = select.dataset.worldpackId === pack.id ? select.value : "";
+    select.innerHTML = [
+      `<option value="">${escapeHtml(placeholder)}</option>`,
+      ...options.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.title)}</option>`),
+    ].join("");
+    select.value = resolveWorldpackChoice(options, selectedId, defaultId)?.id || "";
+    select.dataset.worldpackId = pack.id;
+  };
+
+  renderChoice(els.partyPresetFields, els.partyPresetSelect, pack?.presets, pack?.presets_default, "Выбери стиль повествования");
+  renderChoice(els.partyOpeningFields, els.partyOpeningSelect, pack?.openings, pack?.openings_default, "Выбери старт партии");
 }
 
 function syncAutoPartyTitle() {
@@ -1929,12 +2333,13 @@ function renderCreationModes() {
   els.worldSelect.toggleAttribute("required", !generatedWorld);
   els.worldPromptInput.toggleAttribute("required", worldPrompt);
   els.worldMarkdownInput.toggleAttribute("required", worldMarkdown);
+  renderPartyWorldChoices();
   els.characterDescriptionLabel.textContent = characterPrompt ? "Prompt персонажа" : "Описание готового персонажа";
   els.characterDescriptionHint.textContent = characterPrompt
     ? "Опиши роль, характер, ограничения и стартовые ресурсы. Gateway сохранит это в profile персонажа."
     : generatedWorld
       ? "Для созданного мира используется стандартная роль игрока; можно заменить ее своим описанием."
-      : "Берется роль игрока из worldpack; можно слегка поправить перед стартом.";
+      : "Берется роль из выбранного старта; для прежнего worldpack используется общая роль. Можно слегка поправить перед стартом.";
   if (!characterPrompt) {
     syncReadyCharacterDescription();
   }
@@ -2058,7 +2463,7 @@ function renderModelPreview() {
 function syncReadyCharacterDescription() {
   if (selectedRadioValue("characterSource") === "prompt") return;
   const pack = selectedWorldpack();
-  els.characterDescriptionInput.value = pack?.manifest?.player_role || "";
+  els.characterDescriptionInput.value = selectedPartyWorldChoices(pack).opening?.player_role || pack?.manifest?.player_role || "";
 }
 
 async function createParty(event) {
@@ -2071,26 +2476,36 @@ async function createParty(event) {
     if (!modelProfileId) throw new Error("Нет доступной модели для партии.");
     if (!scenarioType) throw new Error("Выбери тип сценария.");
     const worldpack = await resolveWorldpack();
+    const choices = selectedPartyWorldChoices(worldpack);
+    const hasPresets = scenarioType === "rp" && Array.isArray(worldpack?.presets) && worldpack.presets.length > 0;
+    const hasOpenings = scenarioType === "rp" && Array.isArray(worldpack?.openings) && worldpack.openings.length > 0;
+    if (hasPresets && !choices.preset) throw new Error("Выбери стиль повествования.");
+    if (hasOpenings && !choices.opening) throw new Error("Выбери старт партии.");
     const concept = characterPrompt
       ? els.characterDescriptionInput.value.trim()
-      : els.characterDescriptionInput.value.trim() || worldpack?.manifest?.player_role || "Игроковый персонаж.";
-    const draft = await apiPost("/api/player-characters/draft", {
+      : els.characterDescriptionInput.value.trim() || choices.opening?.player_role || worldpack?.manifest?.player_role || "Игроковый персонаж.";
+    const draftPayload = {
       worldpack_id: worldpack.id,
       name: els.characterNameInput.value.trim(),
       concept,
-    });
+    };
+    if (choices.opening) draftPayload.opening_id = choices.opening.id;
+    const draft = await apiPost("/api/player-characters/draft", draftPayload);
     draft.draft.profile = {
       ...(draft.draft.profile || {}),
       character_source: characterPrompt ? "prompt" : "worldpack_template",
     };
     const character = await apiPost("/api/player-characters", draft.draft);
-    const party = await apiPost("/api/parties", {
+    const partyPayload = {
       title: els.partyTitleInput.value.trim(),
       scenario_type: scenarioType,
       worldpack_id: worldpack.id,
       player_character_id: character.player_character.id,
       model_profile_id: modelProfileId,
-    });
+    };
+    if (choices.preset) partyPayload.preset_id = choices.preset.id;
+    if (choices.opening) partyPayload.opening_id = choices.opening.id;
+    const party = await apiPost("/api/parties", partyPayload);
     closePartyDialog();
     await boot();
     await selectParty(party.party.id);
@@ -2175,10 +2590,19 @@ async function autoStartParty(partyId) {
 
 async function sendMessage(event) {
   event.preventDefault();
+  await submitComposerMessage("auto");
+}
+
+async function sendMessageToGM() {
+  await submitComposerMessage("gm");
+}
+
+async function submitComposerMessage(channel) {
   if (activePendingMessage()) {
     showToast("Дождись ответа GM по предыдущему ходу.");
     return;
   }
+  if (appState.busy) return;
   const text = els.messageInput.value.trim();
   if (!text || !appState.activeParty) return;
   try {
@@ -2187,18 +2611,60 @@ async function sendMessage(event) {
     showToast(error.message);
     return;
   }
+  els.messageInput.value = "";
+  await submitPartyMessage(text, { channel });
+}
+
+async function submitPartyMessage(text, { channel = "auto", targetSlot = null } = {}) {
+  if (!text || !appState.activeParty || activePendingMessage()) return;
   const partyId = appState.activeParty.id;
   const requestId = makeClientRequestId();
-  els.messageInput.value = "";
-  startPendingMessage(partyId, requestId, text);
-  appendPendingMessage(text, requestId);
+  const revision = Number(appState.activeParty.rp_contract_revision || 0);
+  const submittedCorrections = revision < 9
+    ? [...appState.pendingStoryMemoryCorrections]
+    : [];
+  let turnCommitted = false;
+  const mayCommitNarrative = channel !== "gm";
+  startPendingMessage(partyId, requestId, text, {
+    status: channel === "gm" ? "Мастер готовит черновик исправления..." : "Определяю маршрут и готовлю ответ...",
+  });
+  if (mayCommitNarrative) appendPendingMessage(text, requestId);
   try {
-    setPendingStatus("GM формирует ответ...", partyId);
+    setPendingStatus(
+      channel === "gm" ? "Мастер готовит черновик исправления..." : "GM формирует ответ...",
+      partyId,
+    );
     const result = await apiPost(
       `/api/parties/${partyId}/messages`,
-      { content: text, idempotency_key: requestId },
+      partyMessagePayload(text, requestId, submittedCorrections, channel, targetSlot),
       { "X-Request-ID": requestId },
     );
+    if (result.status === "route_required") {
+      appState.pendingGmDraft = null;
+      appState.pendingGmRoute = {
+        text,
+        targetSlot,
+        reason: result.routing?.reason || "uncertain",
+      };
+      clearPendingMessage(partyId);
+      renderChat();
+      renderGmDecision();
+      return;
+    }
+    if (result.status === "gm_draft" && result.gm_patch_draft) {
+      appState.pendingGmRoute = null;
+      appState.pendingGmDraft = {
+        text,
+        targetSlot,
+        proposal: result.gm_patch_draft,
+      };
+      clearPendingMessage(partyId);
+      renderChat();
+      renderGmDecision();
+      return;
+    }
+    turnCommitted = true;
+    appState.pendingStoryMemoryCorrections = [];
     const content = result.message?.content || "";
     if (content) {
       replacePendingMessage(partyId, requestId, content);
@@ -2210,6 +2676,10 @@ async function sendMessage(event) {
       showToast(`Ответ получен, но история не обновилась: ${syncError.message}`);
     }
   } catch (error) {
+    if (channel === "gm") {
+      showToast(error.message);
+      return;
+    }
     setPendingStatus("Запрос оборвался. Проверяю историю...", partyId);
     let recoveryError = null;
     const recovered = await waitForRecoveredMessage(partyId, requestId).catch((recoverError) => {
@@ -2217,6 +2687,8 @@ async function sendMessage(event) {
       return null;
     });
     if (recovered?.narrative_response) {
+      turnCommitted = true;
+      appState.pendingStoryMemoryCorrections = [];
       showToast("Ответ подтянут из истории.");
     } else {
       const message = recoveryError?.message || error.message;
@@ -2224,8 +2696,114 @@ async function sendMessage(event) {
       showToast(message);
     }
   } finally {
+    if (turnCommitted) renderMemory();
     clearPendingMessage(partyId);
   }
+}
+
+function partyMessagePayload(
+  text,
+  requestId,
+  corrections = [],
+  channel = "auto",
+  targetSlot = null,
+) {
+  const payload = { content: text, idempotency_key: requestId };
+  if (channel !== "auto") payload.channel = channel;
+  if (targetSlot) payload.gm_target_slot = targetSlot;
+  if (Array.isArray(corrections) && corrections.length) {
+    payload.story_memory_corrections = corrections;
+  }
+  return payload;
+}
+
+async function routePendingGmMessage(channel) {
+  const pending = appState.pendingGmRoute;
+  if (!pending || appState.busy || activePendingMessage()) return;
+  appState.pendingGmRoute = null;
+  renderGmDecision();
+  await submitPartyMessage(pending.text, {
+    channel,
+    targetSlot: channel === "gm" ? pending.targetSlot : null,
+  });
+}
+
+async function decideGmDraft(decision) {
+  const pending = appState.pendingGmDraft;
+  const partyId = appState.activeParty?.id;
+  if (!pending?.proposal || !partyId || appState.busy) return;
+  const idempotencyKey = `gm-confirm:${pending.proposal.proposal_id}`;
+  try {
+    setBusy(true, decision === "confirm" ? "Записываю исправление..." : "Отклоняю черновик...");
+    const result = await apiPost(
+      `/api/parties/${partyId}/gm-corrections/decide`,
+      {
+        decision,
+        proposal: pending.proposal,
+        idempotency_key: idempotencyKey,
+      },
+      { "X-Request-ID": idempotencyKey },
+    );
+    clearGmDecision();
+    if (decision === "confirm") {
+      await reloadPartyIfActive(partyId);
+      showToast("Исправление записано вне сцены.");
+    } else {
+      showToast(result.status === "rejected" ? "Черновик отклонён." : "Решение принято.");
+    }
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function clearGmDecision() {
+  appState.pendingGmRoute = null;
+  appState.pendingGmDraft = null;
+  renderGmDecision();
+  renderMessageControls();
+}
+
+function renderGmDecision() {
+  if (!els.gmDecisionPanel) return;
+  const route = appState.pendingGmRoute;
+  const draft = appState.pendingGmDraft;
+  const visible = Boolean(route || draft);
+  els.gmDecisionPanel.classList.toggle("hidden", !visible);
+  if (!visible) return;
+
+  if (route) {
+    els.gmDecisionLabel.textContent = "Маршрут не определён";
+    els.gmDecisionTitle.textContent = "Куда отправить эту реплику?";
+    els.gmDecisionHint.textContent = "Ничего не записано. Выберите обращение к мастеру или обычное действие в сцене.";
+    els.gmDraftDiff.classList.add("hidden");
+    els.gmRouteActions.classList.remove("hidden");
+    els.gmDraftActions.classList.add("hidden");
+    return;
+  }
+
+  const proposal = draft.proposal;
+  const targetLabels = {
+    memory: "story memory",
+    raw: `ход ${proposal.target_turn_id ?? proposal.target_id}`,
+    absolute_rule: "абсолютное правило мира",
+  };
+  const forbiddenClaims = proposal.target_kind === "absolute_rule"
+    && Array.isArray(proposal.forbidden_claims)
+    && proposal.forbidden_claims.length
+    ? ` Запрещённые трактовки после правки: ${proposal.forbidden_claims.join("; ")}.`
+    : "";
+  els.gmDecisionLabel.textContent = "Черновик мастера";
+  els.gmDecisionTitle.textContent = proposal.action === "retract"
+    ? "Проверьте отзыв утверждения"
+    : "Проверьте исправление";
+  els.gmDraftBefore.textContent = proposal.before || "—";
+  els.gmDraftAfter.textContent = proposal.action === "retract" ? "Утверждение будет отозвано" : proposal.after || "—";
+  els.gmDecisionHint.textContent = `Цель: ${targetLabels[proposal.target_kind] || proposal.target_kind}. После подтверждения сцена и игровое время не сдвинутся.${forbiddenClaims}`;
+  els.gmDraftDiff.classList.remove("hidden");
+  els.gmRouteActions.classList.add("hidden");
+  els.gmDraftActions.classList.remove("hidden");
 }
 
 async function previewWorldInstruction(options = {}) {
@@ -2484,6 +3062,12 @@ async function createAdminAutotest(event) {
     showToast("Количество ходов должно быть от 1 до 30.");
     return;
   }
+  const revisionText = els.adminAutotestRevisionInput.value.trim();
+  const candidateRevision = revisionText === "" ? undefined : Number(revisionText);
+  if (candidateRevision !== undefined && (!Number.isInteger(candidateRevision) || candidateRevision < 0 || candidateRevision > 7)) {
+    showToast("Candidate revision RP-контракта должна быть от 0 до 7.");
+    return;
+  }
   try {
     setBusy(true, "Сохраняю checkpoint и создаю ветку автотеста...");
     const result = await apiPost("/api/admin/autotests", {
@@ -2491,6 +3075,7 @@ async function createAdminAutotest(event) {
       player_prompt: els.adminAutotestPromptInput.value.trim(),
       turn_count: turnCount,
       player_model_profile_id: els.adminAutotestModelSelect.value,
+      rp_contract_revision: candidateRevision,
     });
     appState.adminAutotestRuns = [
       result.run,
@@ -2634,6 +3219,44 @@ async function rollbackParty() {
   }
 }
 
+function resetLoreCardDraft() {
+  appState.pendingLoreCardSourceTurnIds = [];
+  els.loreCardForm?.reset();
+  if (els.loreCardDraftHint) {
+    els.loreCardDraftHint.textContent = "";
+    els.loreCardDraftHint.classList.add("hidden");
+  }
+}
+
+async function draftLoreCardFromTurn(event) {
+  const button = event.target.closest("[data-lore-draft-turn-id]");
+  if (!button || !appState.activeParty || appState.activeBranch) return;
+  const turnId = Number(button.dataset.loreDraftTurnId);
+  if (!Number.isInteger(turnId) || turnId <= 0) return;
+  try {
+    setBusy(true, `Служебная модель готовит Lore Card из хода ${turnId}...`);
+    const response = await apiPost(`/api/parties/${appState.activeParty.id}/lore-cards/draft`, {
+      source_turn_ids: [turnId],
+    });
+    const draft = response.draft || {};
+    els.loreCardTitle.value = draft.title || "";
+    els.loreCardContent.value = draft.content || "";
+    els.loreCardKeywords.value = (draft.keywords || []).join(", ");
+    els.loreCardAlwaysOn.checked = false;
+    appState.pendingLoreCardSourceTurnIds = draft.source_turn_ids || [turnId];
+    els.loreCardDraftHint.textContent = `Черновик по ходу ${turnId}. Проверьте текст и подтвердите сохранение.`;
+    els.loreCardDraftHint.classList.remove("hidden");
+    openInspector();
+    openPanelFor(els.loreCardForm);
+    els.loreCardForm.scrollIntoView({ block: "center", behavior: "smooth" });
+    showToast("Черновик готов. В память партии он ещё не записан.");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function createLoreCard(event) {
   event.preventDefault();
   if (!appState.activeParty) return;
@@ -2646,9 +3269,10 @@ async function createLoreCard(event) {
       keywords,
       always_on: els.loreCardAlwaysOn.checked,
       enabled: true,
-      source_turn_ids: [],
+      source_turn_ids: appState.pendingLoreCardSourceTurnIds,
     });
     els.loreCardForm.reset();
+    resetLoreCardDraft();
     await reloadActiveParty();
     openPanelFor(els.loreCardList);
     showToast("Lore Card добавлена. Она не меняет canonical state.");
@@ -2781,35 +3405,18 @@ async function deleteActiveParty() {
 async function changePartyModel() {
   const party = appState.activeParty;
   const modelProfileId = els.partyModelSelect.value;
-  if (!party || !modelProfileId || modelProfileId === party.model_profile_id) return;
+  if (!party || !modelProfileId) return;
   const profile = appState.modelProfiles.find((item) => item.id === modelProfileId);
   try {
-    setBusy(true, "Меняю модель партии...");
-    await apiPatch(`/api/parties/${party.id}/model`, { model_profile_id: modelProfileId });
+    const narratorSettings = readNarratorSettings();
+    setBusy(true, "Сохраняю модель и параметры наратора...");
+    await apiPatch(`/api/parties/${party.id}/model`, {
+      model_profile_id: modelProfileId,
+      narrator_settings: narratorSettings,
+    });
     await boot();
     await selectParty(party.id);
-    showToast(`Модель партии: ${profile?.title || modelProfileId}`);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function runCheck(event) {
-  event.preventDefault();
-  if (!appState.activeParty) return;
-  try {
-    setBusy(true, "Провожу проверку и обновляю state...");
-    await apiPost(`/api/parties/${appState.activeParty.id}/checks`, {
-      check_type: document.querySelector("#checkType").value,
-      target: document.querySelector("#checkTarget").value.trim() || null,
-      skill: Number(document.querySelector("#checkSkill").value || 0),
-      difficulty: Number(document.querySelector("#checkDifficulty").value || 10),
-      goal: document.querySelector("#checkGoal").value.trim(),
-    });
-    await reloadActiveParty();
-    openPanelFor(els.stateSummary);
+    showToast(`Модель и параметры наратора сохранены: ${profile?.title || modelProfileId}`);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -2848,7 +3455,7 @@ function startPendingMessage(partyId, requestId, text, options = {}) {
     partyId,
     requestId,
     text,
-    status: "GM формирует ответ...",
+    status: String(options.status || "GM формирует ответ..."),
     autoStart: Boolean(options.autoStart),
     createdAt: Date.now(),
   };
@@ -3033,13 +3640,22 @@ function renderMessageControls() {
     (run) => run.test_party_id === appState.activeParty?.id && ["running", "stopping"].includes(run.status),
   );
   const branchReadOnly = Boolean(appState.activeBranch);
-  const locked = Boolean(pendingMessage || activeAutotest || branchReadOnly);
+  const gmDecisionPending = Boolean(appState.pendingGmRoute || appState.pendingGmDraft);
+  const locked = Boolean(pendingMessage || activeAutotest || branchReadOnly || gmDecisionPending);
   const hasParty = Boolean(appState.activeParty);
+  const gmAvailable = hasParty
+    && !branchReadOnly
+    && appState.activeParty?.scenario_type === "rp"
+    && Number(appState.activeParty?.rp_contract_revision || 0) >= 9;
   if (els.messageInput) {
     els.messageInput.disabled = locked || !hasParty;
   }
   if (els.messageSubmit) {
     els.messageSubmit.disabled = locked || !hasParty;
+  }
+  if (els.gmMessageSubmit) {
+    els.gmMessageSubmit.classList.toggle("hidden", !gmAvailable);
+    els.gmMessageSubmit.disabled = locked || !gmAvailable;
   }
   if (els.messageForm) {
     els.messageForm.setAttribute("aria-busy", locked ? "true" : "false");
@@ -3050,12 +3666,15 @@ function renderMessageControls() {
     const status = pendingMessage?.status
       || (branchReadOnly
         ? "Открыта изолированная ветка. Вернитесь в основную линию, выбрав партию слева."
-        : "Автотест управляет этой партией; ручной ввод временно отключён.");
+        : gmDecisionPending
+          ? "Завершите выбор в панели мастера."
+          : "Автотест управляет этой партией; ручной ввод временно отключён.");
     els.messageStatus.innerHTML = `${pendingMessage ? `<span class="spinner" aria-hidden="true"></span>` : ""}<span>${escapeHtml(status)}</span>`;
   } else {
     els.messageStatus.classList.add("hidden");
     els.messageStatus.innerHTML = "";
   }
+  renderGmDecision();
 }
 
 function pendingMessageHtml(requestId, status, timestamp = Date.now()) {
@@ -3272,41 +3891,55 @@ function renderProviderOptions(select, preferred) {
 }
 
 function modelOptionHtml(profile) {
+  const referenceCost = normalizeProvider(profile?.provider || "") === "openrouter" && !profile?.is_free
+    ? modelReferenceTurnCost(profile, MODEL_PRICE_WARM_CACHE_RATIO)
+    : null;
+  const costEstimate = referenceCost === null
+    ? ""
+    : `≈${formatTurnCost(referenceCost)}${perMillionPriceValue(profile?.pricing_input_cache_read) === null ? "" : " warm"}`;
   const markers = [
     featuredOpenRouterRank(profile) ? "TOP" : "",
     profile.is_free ? "FREE" : modelCostTier(profile),
+    costEstimate,
     profile.rp_specialized ? "RP" : "",
   ].filter(Boolean);
   const prefix = markers.length ? `[${markers.join(" · ")}] ` : "";
   return `<option value="${escapeHtml(profile.id)}">${escapeHtml(prefix + profile.title)}</option>`;
 }
 
+const MODEL_PRICE_REFERENCE_INPUT_TOKENS = 95_000;
+const MODEL_PRICE_REFERENCE_OUTPUT_TOKENS = 650;
+const MODEL_PRICE_WARM_CACHE_RATIO = 0.8;
+const MODEL_PRICE_TIER_LIMITS = [0.02, 0.05, 0.1, 0.25];
+
 function modelCostTierLabel(profile) {
   if (profile.is_free) return "FREE";
   const tier = modelCostTier(profile);
-  return tier || "\u043d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d";
+  if (!tier) return "\u043d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d";
+  const warmCost = modelReferenceTurnCost(profile, MODEL_PRICE_WARM_CACHE_RATIO);
+  const hasCacheDiscount = perMillionPriceValue(profile?.pricing_input_cache_read) !== null;
+  const cacheNote = hasCacheDiscount ? "80% cached input" : "\u0431\u0435\u0437 \u0441\u043a\u0438\u0434\u043a\u0438 \u043a\u044d\u0448\u0430";
+  return `${tier} \u00b7 \u2248 ${formatTurnCost(warmCost)}/\u0445\u043e\u0434 (${cacheNote})`;
 }
 
 function modelCostTier(profile) {
   if (normalizeProvider(profile?.provider || "") !== "openrouter" || profile?.is_free) return "";
-  const cost = modelCostPerMillion(profile);
+  const cost = modelReferenceTurnCost(profile, MODEL_PRICE_WARM_CACHE_RATIO);
   if (cost === null) return "";
-  const costs = profilesForProvider("openrouter")
-    .filter((candidate) => !candidate.is_free)
-    .map(modelCostPerMillion)
-    .filter((candidate) => candidate !== null)
-    .sort((left, right) => left - right);
-  if (!costs.length) return "";
-  const position = costs.filter((candidate) => candidate <= cost).length;
-  const tier = Math.min(5, Math.max(1, Math.ceil((position / costs.length) * 5)));
+  const tierIndex = MODEL_PRICE_TIER_LIMITS.findIndex((limit) => cost <= limit);
+  const tier = tierIndex < 0 ? 5 : tierIndex + 1;
   return "$".repeat(tier);
 }
 
-function modelCostPerMillion(profile) {
+function modelReferenceTurnCost(profile, cacheRatio = 0) {
   const prompt = perMillionPriceValue(profile?.pricing_prompt);
   const completion = perMillionPriceValue(profile?.pricing_completion);
-  if (prompt === null && completion === null) return null;
-  return (prompt || 0) + (completion || 0);
+  if (prompt === null || completion === null) return null;
+  const cacheRead = perMillionPriceValue(profile?.pricing_input_cache_read);
+  const ratio = cacheRead === null ? 0 : Math.min(1, Math.max(0, Number(cacheRatio) || 0));
+  const inputCost = MODEL_PRICE_REFERENCE_INPUT_TOKENS * (prompt * (1 - ratio) + (cacheRead || 0) * ratio);
+  const outputCost = MODEL_PRICE_REFERENCE_OUTPUT_TOKENS * completion;
+  return (inputCost + outputCost) / 1_000_000;
 }
 
 function modelPricingLabel(profile) {
@@ -3314,7 +3947,22 @@ function modelPricingLabel(profile) {
   const prompt = perMillionPrice(profile.pricing_prompt);
   const completion = perMillionPrice(profile.pricing_completion);
   if (!prompt && !completion) return "не указана каталогом";
-  return `$${prompt || "?"}/M input · $${completion || "?"}/M output`;
+  const tokenPrices = `$${prompt || "?"}/M input · $${completion || "?"}/M output`;
+  if (normalizeProvider(profile?.provider || "") !== "openrouter") return tokenPrices;
+  const cacheRead = perMillionPrice(profile.pricing_input_cache_read);
+  const coldCost = modelReferenceTurnCost(profile, 0);
+  const warmCost = modelReferenceTurnCost(profile, MODEL_PRICE_WARM_CACHE_RATIO);
+  const cachePrice = cacheRead ? ` · $${cacheRead}/M cached input` : "";
+  const warmLabel = cacheRead
+    ? `warm 80% ${formatTurnCost(warmCost)}`
+    : "скидка cached input не заявлена";
+  return `${tokenPrices}${cachePrice} · ход 95k/650: cold ${formatTurnCost(coldCost)} · ${warmLabel}`;
+}
+
+function formatTurnCost(value) {
+  if (value === null || !Number.isFinite(value)) return "?";
+  const digits = value < 0.01 ? 4 : value < 1 ? 3 : 2;
+  return `$${value.toFixed(digits)}`;
 }
 
 function perMillionPrice(value) {
@@ -3335,9 +3983,6 @@ function selectedRadioValue(name, fallback = "ready") {
 
 function sourceLabel(source) {
   const labels = {
-    static_build_nvidia_fallback: "статичный fallback build.nvidia.com",
-    build_nvidia_live: "live build.nvidia.com",
-    nvidia_api_live: "live NVIDIA /v1/models",
     gemini_server_config: "настроено на сервере",
     gemini_api_live: "live Gemini /models",
     openrouter_server_config: "настроено на сервере",
@@ -3436,7 +4081,46 @@ function messageTimeHtml(timestamp) {
   return `<time class="message-time" datetime="${escapeHtml(formatted.iso)}" title="${escapeHtml(formatted.title)}">${escapeHtml(formatted.text)}</time>`;
 }
 
-function messageHtml(kind, role, content, timestamp = Date.now(), feedback = null, artifacts = [], turnId = null) {
+function loreCardToolsHtml(cards, turnId, allowDraft) {
+  if (!turnId) return "";
+  const raised = Array.isArray(cards) && cards.length
+    ? `<div class="raised-lore-cards" aria-label="Lore Cards этого ответа">${cards
+        .map((card) => `<span class="lore-card-chip" data-lore-card-id="${escapeHtml(Number(card.id))}">${escapeHtml(card.title)}</span>`)
+        .join("")}</div>`
+    : "";
+  const draft = allowDraft
+    ? `<button class="text-button lore-card-draft-button" type="button" data-lore-draft-turn-id="${escapeHtml(Number(turnId))}">Сделать Lore Card из хода</button>`
+    : "";
+  return raised || draft ? `<div class="message-lore-tools">${raised}${draft}</div>` : "";
+}
+
+function worldClockToolsHtml(worldClockEvents) {
+  if (!worldClockEvents) return "";
+  const occurred = worldClockEvents.occurred || [];
+  const horizon = worldClockEvents.horizon || [];
+  const occurredHtml = occurred.length
+    ? `<div><strong>В мире произошло:</strong> ${occurred.map((item) => escapeHtml(item.text)).join("; ")}</div>`
+    : "";
+  const horizonHtml = horizon.length
+    ? `<div><strong>Ближайший горизонт:</strong> ${horizon.map((item) => escapeHtml(item.text)).join("; ")}</div>`
+    : "";
+  return occurredHtml || horizonHtml
+    ? `<section class="world-clock-update" aria-label="События мира">${occurredHtml}${horizonHtml}</section>`
+    : "";
+}
+
+function messageHtml(
+  kind,
+  role,
+  content,
+  timestamp = Date.now(),
+  feedback = null,
+  artifacts = [],
+  turnId = null,
+  loreCards = [],
+  allowLoreDraft = false,
+  worldClockEvents = null,
+) {
   const rendered = kind === "assistant"
     ? narrativeContentHtml(content)
     : { html: escapeHtml(content || ""), hasArtifacts: false };
@@ -3449,7 +4133,9 @@ function messageHtml(kind, role, content, timestamp = Date.now(), feedback = nul
   const html = `<article class="message ${kind}${rendered.hasArtifacts ? " message-rich" : ""}">
     <div class="role">${escapeHtml(role)}</div>
     <div class="message-content">${rendered.html}</div>
+    ${kind === "assistant" ? worldClockToolsHtml(worldClockEvents) : ""}
     ${artifactHost}
+    ${kind === "assistant" ? loreCardToolsHtml(loreCards, turnId, allowLoreDraft) : ""}
     ${messageTimeHtml(timestamp)}
     ${feedbackHtml}
   </article>`;
@@ -3473,13 +4159,23 @@ function memoryList(title, items) {
 function memoryItemText(item) {
   if (typeof item === "string") return item;
   if (!item || typeof item !== "object") return String(item ?? "");
-  return item.fact || item.thread || item.change || item.promise || item.obligation || JSON.stringify(item);
+  return item.text || item.fact || item.thread || item.change || item.promise || item.obligation || JSON.stringify(item);
+}
+
+function activeStoryItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items.filter((item) => typeof item === "string" || item?.status === "active");
+}
+
+function activeStoryText(item) {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object" || item.status !== "active") return "";
+  return item.text || "";
 }
 
 function relationshipText(relationship) {
   if (!relationship || typeof relationship !== "object") return "";
   const bits = [];
-  if (relationship.trust !== undefined) bits.push(`доверие ${relationship.trust}`);
   if (relationship.suspicion !== undefined) bits.push(`подозрение ${relationship.suspicion}`);
   if (relationship.fear !== undefined) bits.push(`страх ${relationship.fear}`);
   return bits.join(" · ");

@@ -7,7 +7,7 @@ Server IP:        192.168.1.88
 SSH user:         abykov
 Observed host:    abykovserv
 GitHub IaC repo:  https://github.com/abykovwww-byte/ubuntu_ansible_palybooks
-Local checkout:   C:\Users\albykov\Documents\Tavern\ubuntu_ansible_palybooks
+Local checkout:   C:\Users\Адександр\Documents\Tavern\ubuntu_ansible_palybooks
 Server checkout:  /opt/ubuntu_ansible_palybooks
 Main branch:      main
 ```
@@ -17,11 +17,17 @@ The server is self-hosted and pull-based:
 ```text
 Codex edits local checkout
 -> git commit
--> git push origin main
--> SSH to server
--> sudo systemctl start ansible-local-apply.service
--> server pulls GitHub and applies Ansible to localhost
+-> push the working codex/ branch
+-> open a non-draft PR
+-> wait for green CI and merge the PR into main
+-> verify SSH with the explicit workstation identity
+-> user runs sudo systemctl start ansible-local-apply.service interactively
+-> server uses a read-only deploy key, pulls GitHub, and applies Ansible to localhost
 ```
+
+The private deploy key is stored only in the server account's SSH directory.
+The repository-local `core.sshCommand` selects it for pull operations; the key
+is not committed and has no push permission.
 
 `scripts/apply-local.sh` performs:
 
@@ -55,8 +61,23 @@ server, use escalation:
 }
 ```
 
-Use `C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "..."` from
-PowerShell. Do not try to work around the sandbox with unrelated tools.
+Use
+`C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "..."`
+from PowerShell. The local SSH config also names this identity, but the agent is
+stopped and disabled, so repository commands keep `-i` explicit. Do not try to
+work around the sandbox with unrelated tools.
+
+`sudo -n` fails on this host. Codex must stop at `merged` and ask the user to
+run the apply interactively; never request or capture the sudo password.
+
+## Workstation tools
+
+`gh` 2.97.0 is authorized as `abykovwww-byte` with `gist`, `read:org`, `repo`,
+and `workflow` scopes when normal network access is available. Bundled Python
+3.12.13 and Node.js 24.14.0 live under
+`%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\`.
+Do not call the unusable PATH `python`; use `scripts/ci.ps1`, which resolves the
+bundled runtime.
 
 ## Ansible Structure
 
@@ -126,7 +147,7 @@ ssh_public_keys: []
 hardening_manage_ssh: false
 hardening_manage_ufw: false
 coolify_enabled: false
-rp_stack_nvidia_api_key: "..."
+rp_stack_openrouter_api_key: "..."
 ```
 
 Generated server secrets are also under `/etc/ansible/`, for example app
@@ -143,10 +164,11 @@ rp_stack_enabled: true
 rp_stack_bind_host: "192.168.1.88"
 rp_stack_light_gui_host_port: 8010
 rp_stack_gateway_port: 8088
-rp_stack_nvidia_api_base: "https://integrate.api.nvidia.com/v1"
-rp_stack_nvidia_model: "z-ai/glm-5.2"
-rp_stack_nvidia_model_catalog_live: true
-rp_stack_nvidia_model_catalog_url: "https://build.nvidia.com/models?q=llm"
+rp_stack_openrouter_api_base: "https://openrouter.ai/api/v1"
+rp_stack_openrouter_models:
+  - "openrouter/auto"
+  - "openrouter/free"
+rp_stack_service_model_choice: "local-gemma"
 ```
 
 Runtime paths:
@@ -169,6 +191,73 @@ rp-stack-gateway      -> internal http://rp-gateway:8088
 
 Light GUI proxies `/api/*` to `rp-gateway:8088`.
 
+## Awareness Showroom Shadow
+
+The I1 scaffold deploys the private application repository independently from
+the bundled RP Stack source. IaC owns the exact Git commit, server paths,
+server-only secrets, and rendered `.env`; the application repository owns its
+`compose.yml`, images, Gateway, Showroom UI, and training WorldPacks.
+
+The inventory enables the app only with its single full 40-character merge
+commit. The role rejects a missing private-repository token before clone and
+rejects a branch or tag used as the deploy revision.
+
+Runtime paths:
+
+```text
+Repository:      https://github.com/abykovwww-byte/tavern-awareness-showroom.git
+Project:         /srv/apps/awareness-showroom
+Persistent data: /srv/app-data/awareness-showroom
+Gateway data:    /srv/app-data/awareness-showroom/gateway
+State:           /srv/app-data/awareness-showroom/state
+Covers:          /srv/app-data/awareness-showroom/showroom-covers
+Backups:         /srv/backups/awareness-showroom
+Shadow URL:      http://127.0.0.1:18011
+```
+
+The shadow bind is loopback-only. Port `8011` remains owned by the old Showroom
+until the separately reviewed C1 cutover. The standalone Compose project uses
+unique services `awareness-gateway` and `showroom`, its own default network and
+data mounts. Base shadow deployment keeps local LLM disabled and does not join
+the RP network. A future explicitly selected Compose overlay may attach to the
+external `rp-llm` network only to reach `http://rp-local-llm:8080/v1` as a model
+provider; it must never mount RP Stack data, state, WorldPacks, or SQLite.
+
+Private repository and provider secrets remain server-only:
+
+```yaml
+awareness_showroom_github_token: "..."
+awareness_showroom_gemini_api_key: "..."
+awareness_showroom_openrouter_api_key: "..."
+awareness_showroom_service_openrouter_api_key: "..."
+```
+
+Set `awareness_showroom_github_token` before apply. Set only the provider keys
+actually used by the published scenarios in
+`/etc/ansible/local-overrides.yml`; keep the service key separate when the
+training service model uses OpenRouter. Never copy users, sessions, provider
+keys, runs, or the old RP Stack SQLite into the shadow data directory.
+
+The initial config-only import maps the published scenario profiles by
+`(provider, base_url, model)`. The shadow catalog therefore includes the two
+currently published OpenRouter model IDs `deepseek/deepseek-v4-flash` and
+`google/gemini-3.6-flash`; it does not reuse legacy profile IDs.
+
+After an authorized apply, verify the pinned checkout and loopback shadow:
+
+```bash
+cd /srv/apps/awareness-showroom
+git rev-parse HEAD
+docker compose ps
+docker compose config --quiet
+curl -fsS -o /tmp/awareness-showroom.html -w '%{http_code} %{size_download}\n' http://127.0.0.1:18011/
+```
+
+These checks prove deployment shape and HTTP reachability only. A real
+Awareness run, provider evidence, artifact/workspace events, persistence after
+restart, SQLite checks, backup/test-restore, and browser verification remain
+mandatory before C1.
+
 ## Deploy Commands
 
 From the local workstation:
@@ -178,34 +267,46 @@ git status --short --branch
 git diff
 git add <files>
 git commit -m "<message>"
-git push origin main
+git push -u origin <codex-branch>
+gh pr create --fill
+gh pr checks --watch
+gh pr merge --merge --delete-branch
 ```
+
+The pull request must be non-draft and merged only after CI is green. Direct
+pushes to `main` are prohibited.
 
 Remote apply:
 
 ```powershell
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "sudo systemctl start ansible-local-apply.service"
+# Run this interactively by the user; Codex does not supply the sudo password.
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "sudo systemctl start ansible-local-apply.service"
 ```
 
 Remote apply status:
 
 ```powershell
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "sudo systemctl status ansible-local-apply.service --no-pager -l"
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "sudo journalctl -u ansible-local-apply.service -n 100 --no-pager"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "systemctl status ansible-local-apply.service --no-pager -l"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "journalctl -u ansible-local-apply.service -n 100 --no-pager"
 ```
 
-If sudo requires a password, use the already established secure local method if
-available in the thread context. Never reveal the password.
+The apply command is intentionally user-interactive. Never ask the user to paste
+the password into Codex or make it available to automation.
 
 ## Verification
 
 RP Stack:
 
 ```powershell
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "cd /srv/apps/rp-stack && docker compose ps"
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "cd /srv/apps/rp-stack && docker compose run --rm rp-gateway pytest"
-C:\Windows\System32\OpenSSH\ssh.exe abykov@192.168.1.88 "curl -fsS -o /tmp/rp-light-gui.html -w '%{http_code} %{size_download}\n' http://192.168.1.88:8010/"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "cd /srv/apps/rp-stack && docker compose ps"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "cd /srv/apps/rp-stack && docker compose run --rm rp-gateway pytest"
+C:\Windows\System32\OpenSSH\ssh.exe -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 "curl -fsS -o /tmp/rp-light-gui.html -w '%{http_code} %{size_download}\n' http://192.168.1.88:8010/"
 ```
+
+For a production Python probe, send a local script on stdin instead of nesting
+PowerShell, SSH, and Python quoting. Open SQLite only with
+`file:/data/rp_gateway.db?mode=ro` and `uri=True`; do not print secret-bearing
+rows.
 
 Useful health checks:
 
@@ -224,8 +325,8 @@ Check visible Russian text, forms, console errors, and network-backed dropdowns.
 
 Preferred rollback:
 
-1. Revert or fix the bad commit in the IaC repository.
-2. Push to `origin/main`.
+1. Revert or fix the bad commit on a `codex/` branch or in an isolated worktree.
+2. Push the working branch, open a non-draft PR, and merge it after CI is green.
 3. Run `sudo systemctl start ansible-local-apply.service` on the server.
 4. Verify containers and HTTP endpoints.
 

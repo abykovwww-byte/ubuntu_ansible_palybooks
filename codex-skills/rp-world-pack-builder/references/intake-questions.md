@@ -51,7 +51,7 @@ Use only when they matter:
 - NSFW/romance policy: absent, fade-to-black, explicit only if allowed by the broader system and user.
 - Automation: draft only, install locally, deploy to server.
 - Creation path: quick Light GUI prompt-world, reviewable Git worldpack, or both.
-- Play surface: Light GUI.
+- Play surface: Light GUI first, SillyTavern compatibility, or legacy SillyTavern-only.
 
 ## Existing IP Handling
 
@@ -85,7 +85,7 @@ offer the new Light GUI path:
 ```text
 Можно быстро создать мир прямо в Light GUI через "Новая партия -> Мир -> Задать prompt".
 Это сохранит runtime prompt-world на сервере, но не создаст reviewable Git worldpack
-и не создаст reviewable Git worldpack.
+и не установит SillyTavern lorebook.
 ```
 
 Use the full mandatory intake only when the user wants a reusable/deployable

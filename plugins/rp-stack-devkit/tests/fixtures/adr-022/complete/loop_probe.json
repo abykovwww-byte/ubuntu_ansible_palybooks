@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "party_id": "party_fixture_complete",
+  "necessary_not_sufficient": true,
+  "operation_counters": {
+    "add": 3,
+    "replace": 1
+  },
+  "operations_total": 4,
+  "operations_outside_timeline": 2,
+  "nonempty_extraction_share": {
+    "nonempty_turns": 2,
+    "observed_turns": 4,
+    "share": 0.5
+  }
+}

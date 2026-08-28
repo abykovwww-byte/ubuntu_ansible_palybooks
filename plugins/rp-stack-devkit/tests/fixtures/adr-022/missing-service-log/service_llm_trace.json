@@ -1,0 +1,6 @@
+{
+  "ok": false,
+  "error_code": "service_call_log_missing",
+  "party_id": "party_fixture_complete",
+  "turn": 5
+}

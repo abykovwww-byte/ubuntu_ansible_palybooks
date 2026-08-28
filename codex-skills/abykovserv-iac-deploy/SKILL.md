@@ -14,27 +14,40 @@ user's home server:
 - observed hostname: `abykovserv`
 - SSH user: `abykov`
 - IaC repository: `https://github.com/abykovwww-byte/ubuntu_ansible_palybooks`
-- local workspace: `C:\Users\albykov\Documents\Tavern\ubuntu_ansible_palybooks`
+- local workspace: `C:\Users\Адександр\Documents\Tavern\ubuntu_ansible_palybooks`
 - server checkout: `/opt/ubuntu_ansible_palybooks`
 
 The core model is pull-based:
 
 ```text
-local repo changes -> commit -> push to GitHub main
-server -> git pull --ff-only -> Ansible against localhost -> Docker Compose apps
+local repo changes on a codex/ branch or in an isolated worktree -> commit
+-> push the working branch -> non-draft PR -> green CI -> merge into GitHub main
+server -> read-only deploy key -> git pull --ff-only -> Ansible against localhost -> Docker Compose apps
 ```
 
-GitHub does not connect to the server. The server pulls GitHub and applies
-Ansible locally.
+GitHub does not connect to the server. The server reads the private repository
+with a server-only read-only deploy key and applies Ansible locally.
 
 ## First Rules
 
-- Do not start local app servers unless the user explicitly asks. The normal
-  target is the live server at `192.168.1.88`.
+- Read `docs/repository-work-standard.md` for the checked workstation contract.
+- Allow project-scoped developer tools and dependencies on Windows for editing,
+  builds, tests, and validation when explicitly approved. This is not a local
+  RP Stack deployment; do not start local app servers unless the user asks.
 - Any SSH command to `192.168.1.88` or `abykovserv` needs sandbox escape:
   use `sandbox_permissions: "require_escalated"` with a short justification.
   Prefer a scoped prefix rule for OpenSSH, for example
   `["C:\\Windows\\System32\\OpenSSH\\ssh.exe"]`.
+- Always pass the workstation identity explicitly:
+  `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 ...`.
+  The same identity is present in the local SSH config, but `ssh-agent` is
+  stopped and disabled; repository instructions must not depend on agent state.
+- Work on a `codex/` branch or in an isolated worktree. Push only the working
+  branch, open a non-draft pull request, and merge it into `main` after CI is
+  green. Direct pushes to `main` are prohibited.
+- Remote `sudo` requires interactive user entry and `sudo -n` fails. Stop after
+  the PR is merged and ask the user to run the Ansible apply interactively.
+  Never request, log, or store the sudo password.
 - Do not put secrets, tokens, real passwords, API keys, or local-only private
   values in GitHub. Use `/etc/ansible/local-overrides.yml` on the server.
 - Treat GitHub + Ansible as the source of truth. Avoid hand-editing files under
@@ -46,6 +59,40 @@ Ansible locally.
   pages and Mermaid diagrams; documentation-neutral changes must be identified
   as such in the completion report.
 - Summarize remote command output to the user; they do not see tool output.
+
+## Decision 022 readiness gate
+
+For RP Stack requirements, use only the readiness levels `каркас` (code exists
+and module tests are green), `подключено` (execution in the real turn path), `наблюдается`
+(effect in the authoritative mechanic store and in a later real-party prompt),
+and `держится` (later scenes repeatedly account for the effect without drift).
+Do not use bare `implemented`, `working`, `ready`, `реализовано`, `работает`, or
+`готово` claims. Green CI is necessary for delivery, but is insufficient for
+`наблюдается` or `держится`.
+
+Treat `roles/apps/files/rp-stack/evals/acceptance/manifest.yml` and
+`roles/apps/files/rp-stack/evals/acceptance/corpus/**` as an independent,
+user-owned, read-only oracle. Never change its labels or thresholds during
+implementation. Read thresholds from the manifest and report
+`event_precision`, `event_recall`, `character_id_accuracy`,
+`empty_scene_false_positive_rate`, `positive_trust_recall`, and
+`correction_retention` separately, including per-event-class metrics when
+requested there.
+
+Do not collapse the evidence layers:
+
+- offline uses schemas and saved responses and never invokes providers;
+- provider-canary uses a real prompt and model through admin-autotest and does
+  not mutate the source party;
+- production-endurance uses a long live party and `causal_probe` through later
+  scene consequences; only it can establish `держится`.
+
+If the revision introduces or materially expands exact diagnostic
+prompt/response capture (`service_call_log`, `turn_trace_events`), or changes its
+retention or redaction, stop after merge and before any apply that would record
+live data. Obtain the user's explicit decision on retention and redaction depth.
+An accepted ADR for that exact revision satisfies the gate; green CI or a
+configured default does not.
 
 ## When More Detail Is Needed
 
@@ -64,12 +111,18 @@ published from `docs/wiki/README.md`.
 4. Update affected Wiki pages and Mermaid diagrams in the same change when the
    change is significant.
 5. Run focused local checks that do not start a local server.
-6. Commit and push to `origin/main` when the change is ready.
-7. SSH to `abykov@192.168.1.88` with sandbox escalation.
-8. Run `sudo systemctl start ansible-local-apply.service`.
-9. Check `sudo journalctl -u ansible-local-apply.service -n 100 --no-pager`.
-10. Verify the deployed service on the server with Docker Compose, container
-   tests, HTTP smoke checks, and Browser checks for UI work.
+6. Commit and push the working branch when the change is ready.
+7. Open a non-draft PR, wait for green CI, and merge it into `main`; do not
+   leave merge-ready work on the branch.
+8. Verify access with
+   `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 hostname`.
+9. If the revision introduces or materially expands exact diagnostic
+   prompt/response capture, or changes retention/redaction, obtain the user's
+   explicit decision before proceeding to apply.
+10. Stop at `merged` and ask the user to run
+   `sudo systemctl start ansible-local-apply.service` interactively.
+11. After the user confirms apply completion, inspect status/journal and verify
+   Docker Compose, container tests, HTTP, and Browser checks as appropriate.
 
 ## Key Commands
 
@@ -110,7 +163,7 @@ Common examples:
 server_timezone: "Europe/Moscow"
 hardening_manage_ssh: false
 hardening_manage_ufw: false
-rp_stack_nvidia_api_key: "..."
+rp_stack_openrouter_api_key: "..."
 ```
 
 If the user asks "what line should I add to local-overrides", answer with the

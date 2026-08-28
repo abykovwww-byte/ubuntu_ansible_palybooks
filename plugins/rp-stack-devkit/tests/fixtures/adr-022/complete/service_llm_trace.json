@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "party_id": "party_fixture_complete",
+  "turn": 5,
+  "records": [
+    {
+      "party_id": "party_fixture_complete",
+      "turn_id": 5,
+      "role": "relationship_extraction",
+      "prompt_text": "Extract events exactly. Authorization: Bearer fixture-secret-token",
+      "raw_response": "{\"events\":[],\"api_key\":\"sk-fixturesecret123\"}",
+      "created_at": 1786410000,
+      "status": "succeeded"
+    }
+  ]
+}

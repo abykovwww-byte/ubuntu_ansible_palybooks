@@ -50,7 +50,8 @@ services:
 {% endif %}
   rp-gateway:
     build:
-      context: ./rp-gateway
+      context: .
+      dockerfile: rp-gateway/Dockerfile
     container_name: rp-stack-gateway
     restart: unless-stopped
     env_file:
@@ -59,6 +60,7 @@ services:
       - "{{ rp_stack_gateway_data_dir }}:/data:rw"
       - "{{ rp_stack_state_dir }}:/state:rw"
       - "./worldpacks:/worldpacks:ro"
+      - "./scripts:/scripts:ro"
     expose:
       - "{{ rp_stack_gateway_port }}"
     security_opt:

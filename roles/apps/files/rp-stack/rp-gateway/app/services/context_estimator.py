@@ -9,10 +9,26 @@ from typing import Any
 
 from app.core.config import Settings
 from app.models.schemas import ModelProfileSummary
+from app.services.rp_story_memory import RPStoryMemoryUpdater
+from app.services.rp_history import story_memory_safe_coverage
 from app.services.state_store import StateStore
 
 
 TOKEN_CHARS = 2.5
+
+
+def recorded_prompt_assembly(
+    store: StateStore,
+    latest_turn: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Read the content-free assembly record committed with the selected prompt."""
+
+    turn_id = int((latest_turn or {}).get("id") or 0)
+    if turn_id <= 0:
+        return None
+    metadata = store.turn_metadata(turn_id)
+    value = metadata.get("prompt_assembly")
+    return dict(value) if isinstance(value, dict) else None
 
 
 def estimate_party_context(
@@ -25,12 +41,19 @@ def estimate_party_context(
     if latest_turn and latest_turn.get("prompt_json"):
         prompt_messages = load_prompt_messages(latest_turn["prompt_json"])
         if prompt_messages is None:
-            return empty_recorded_context(settings, model_profile, len(all_turns), latest_turn, source="invalid_recorded_prompt")
+            return empty_recorded_context(
+                settings,
+                model_profile,
+                len(all_turns),
+                latest_turn,
+                source="invalid_recorded_prompt",
+                store=store,
+            )
         prompt_source = "recorded_last_turn"
         source_turn_limit = None
         message_prompt_limit = None
     else:
-        return empty_recorded_context(settings, model_profile, len(all_turns), latest_turn)
+        return empty_recorded_context(settings, model_profile, len(all_turns), latest_turn, store=store)
 
     prompt_text = "\n".join(f"{message['role']}: {message['content']}" for message in prompt_messages)
 
@@ -42,14 +65,21 @@ def estimate_party_context(
     state_summary_text = first_system_content(prompt_messages, "Relevant state summary:")
     memory_text = first_system_content(prompt_messages, "LONG_TERM_PARTY_MEMORY")
     story_memory_text = first_system_content(prompt_messages, "RP_STORY_MEMORY")
+    recorded_story_coverage = story_memory_prompt_coverage(story_memory_text)
+    scene_state_text = first_system_content(prompt_messages, "SCENE_STATE")
     relevant_characters_text = first_system_content(prompt_messages, "RELEVANT_CHARACTERS")
     history_text = "\n".join(str(message.get("content") or "") for message in non_system_messages[:-1])
     memory_summary = store.latest_memory_coverage()
-    story_memory = store.latest_rp_story_memory() if settings.scenario_type == "rp" else None
+    story_memory = store.effective_rp_story_memory() if settings.scenario_type == "rp" else None
     cache_usage = cache_usage_from_response(latest_turn.get("response_json"))
     context_limit_tokens = settings.effective_party_context_limit_tokens
     prompt_tokens = estimate_tokens(prompt_text)
     completion_reserved_tokens = int((model_profile.params if model_profile else {}).get("max_tokens") or 0)
+    hard_input_budget_tokens = max(
+        context_limit_tokens
+        - max(settings.party_context_completion_reserve_tokens, completion_reserved_tokens),
+        1,
+    )
     total_with_reserved = prompt_tokens + completion_reserved_tokens
     usage_ratio = total_with_reserved / context_limit_tokens if context_limit_tokens else None
 
@@ -62,6 +92,10 @@ def estimate_party_context(
         "estimated_prompt_chars": len(prompt_text),
         "completion_reserved_tokens": completion_reserved_tokens,
         "estimated_total_tokens": total_with_reserved,
+        "hard_input_budget_tokens": hard_input_budget_tokens,
+        "hard_budget_status": (
+            "within_budget" if prompt_tokens <= hard_input_budget_tokens else "over_budget"
+        ),
         "usage_ratio": usage_ratio,
         "severity": severity_for_usage(usage_ratio),
         "state_summary_tokens": estimate_tokens(state_summary_text),
@@ -84,11 +118,68 @@ def estimate_party_context(
         "last_request_id": latest_turn.get("request_id") if latest_turn else None,
         "notes": notes_for_context(context_limit_tokens, omitted_history_turns_estimate, retained_history_messages),
     }
+    if settings.scenario_type == "rp" and settings.rp_contract_revision >= 7:
+        estimate["prompt_assembly"] = recorded_prompt_assembly(store, latest_turn)
     if settings.scenario_type == "rp":
+        story_stats = RPStoryMemoryUpdater(settings, store).stats()
         estimate["rp_story_memory_tokens"] = estimate_tokens(story_memory_text) if story_memory_text else 0
         estimate["rp_story_memory_covered_turns"] = (
             [story_memory.get("from_turn_id"), story_memory.get("to_turn_id")] if story_memory else None
         )
+        effective_story_coverage = (
+            story_memory_safe_coverage(story_memory)
+            if settings.rp_contract_revision >= 8
+            else int(story_memory.get("to_turn_id") or 0)
+            if story_memory
+            else 0
+        )
+        pending_threshold = int(
+            story_stats.get("pending_turn_threshold")
+            or settings.rp_story_memory_update_turns
+        )
+        pending_turns = int(story_stats.get("pending_turns") or 0)
+        threshold_exceeded = bool(
+            story_stats.get(
+                "pending_turn_threshold_exceeded",
+                pending_turns >= pending_threshold,
+            )
+        )
+        estimate["rp_story_memory_prompt_covered_through_turn_id"] = recorded_story_coverage
+        estimate["rp_story_memory_effective_covered_through_turn_id"] = (
+            effective_story_coverage or None
+        )
+        estimate["rp_story_memory_prompt_matches_effective_coverage"] = (
+            int(recorded_story_coverage or 0) == effective_story_coverage
+            if settings.rp_contract_revision >= 7
+            else None
+        )
+        estimate["rp_story_memory_pending_turns"] = pending_turns
+        estimate["rp_story_memory_pending_tokens"] = int(story_stats.get("pending_tokens") or 0)
+        estimate["rp_story_memory_pending_turn_threshold"] = pending_threshold
+        estimate["rp_story_memory_pending_threshold_exceeded"] = threshold_exceeded
+        estimate["rp_story_memory_operator_status"] = story_stats.get("operator_status") or (
+            "lagging" if threshold_exceeded else "normal"
+        )
+        estimate["rp_story_memory_hard_overflow"] = bool(story_stats.get("hard_overflow", False))
+        estimate["rp_story_memory_force_refresh_attempted"] = bool(
+            story_stats.get("force_refresh_attempted", False)
+        )
+        estimate["rp_story_memory_force_refresh_request_id"] = story_stats.get(
+            "force_refresh_request_id"
+        )
+        estimate["rp_story_memory_force_refresh_batches"] = int(
+            story_stats.get("force_refresh_batches") or 0
+        )
+        estimate["rp_story_memory_force_refresh_terminal_result"] = story_stats.get(
+            "force_refresh_terminal_result"
+        )
+        estimate["rp_story_memory_force_refresh_coverage_before"] = story_stats.get(
+            "force_refresh_coverage_before"
+        )
+        estimate["rp_story_memory_force_refresh_coverage_after"] = story_stats.get(
+            "force_refresh_coverage_after"
+        )
+        estimate["scene_state_tokens"] = estimate_tokens(scene_state_text) if scene_state_text else 0
     return estimate
 
 
@@ -98,8 +189,12 @@ def empty_recorded_context(
     history_turns_total: int,
     latest_turn: dict[str, Any] | None,
     source: str = "missing_recorded_prompt",
+    store: StateStore | None = None,
 ) -> dict[str, Any]:
     context_limit_tokens = settings.effective_party_context_limit_tokens
+    completion_reserved_tokens = int(
+        (model_profile.params if model_profile else {}).get("max_tokens") or 0
+    )
     if source == "invalid_recorded_prompt":
         note = "Записанный prompt_json последнего хода не удалось прочитать. Новые ходы будут считаться по свежему фактическому prompt."
     else:
@@ -115,8 +210,14 @@ def empty_recorded_context(
         "context_limit_tokens": context_limit_tokens,
         "estimated_prompt_tokens": 0,
         "estimated_prompt_chars": 0,
-        "completion_reserved_tokens": int((model_profile.params if model_profile else {}).get("max_tokens") or 0),
+        "completion_reserved_tokens": completion_reserved_tokens,
         "estimated_total_tokens": 0,
+        "hard_input_budget_tokens": max(
+            context_limit_tokens
+            - max(settings.party_context_completion_reserve_tokens, completion_reserved_tokens),
+            1,
+        ),
+        "hard_budget_status": "unknown",
         "usage_ratio": None,
         "severity": "unknown",
         "state_summary_tokens": 0,
@@ -139,9 +240,58 @@ def empty_recorded_context(
         "last_request_id": latest_turn.get("request_id") if latest_turn else None,
         "notes": [note],
     }
+    if (
+        settings.scenario_type == "rp"
+        and settings.rp_contract_revision >= 7
+        and store is not None
+    ):
+        estimate["prompt_assembly"] = recorded_prompt_assembly(store, latest_turn)
     if settings.scenario_type == "rp":
+        story_stats = RPStoryMemoryUpdater(settings, store).stats() if store is not None else {}
+        pending_threshold = int(
+            story_stats.get("pending_turn_threshold")
+            or settings.rp_story_memory_update_turns
+        )
+        pending_turns = int(story_stats.get("pending_turns") or 0)
         estimate["rp_story_memory_tokens"] = 0
         estimate["rp_story_memory_covered_turns"] = None
+        estimate["rp_story_memory_prompt_covered_through_turn_id"] = None
+        estimate["rp_story_memory_effective_covered_through_turn_id"] = story_stats.get(
+            "covered_through_turn_id"
+        )
+        estimate["rp_story_memory_prompt_matches_effective_coverage"] = None
+        estimate["rp_story_memory_pending_turns"] = pending_turns
+        estimate["rp_story_memory_pending_tokens"] = int(story_stats.get("pending_tokens") or 0)
+        estimate["rp_story_memory_pending_turn_threshold"] = pending_threshold
+        estimate["rp_story_memory_pending_threshold_exceeded"] = bool(
+            story_stats.get(
+                "pending_turn_threshold_exceeded",
+                pending_turns >= pending_threshold,
+            )
+        )
+        estimate["rp_story_memory_operator_status"] = story_stats.get("operator_status") or (
+            "lagging" if pending_turns >= pending_threshold else "normal"
+        )
+        estimate["rp_story_memory_hard_overflow"] = bool(story_stats.get("hard_overflow", False))
+        estimate["rp_story_memory_force_refresh_attempted"] = bool(
+            story_stats.get("force_refresh_attempted", False)
+        )
+        estimate["rp_story_memory_force_refresh_request_id"] = story_stats.get(
+            "force_refresh_request_id"
+        )
+        estimate["rp_story_memory_force_refresh_batches"] = int(
+            story_stats.get("force_refresh_batches") or 0
+        )
+        estimate["rp_story_memory_force_refresh_terminal_result"] = story_stats.get(
+            "force_refresh_terminal_result"
+        )
+        estimate["rp_story_memory_force_refresh_coverage_before"] = story_stats.get(
+            "force_refresh_coverage_before"
+        )
+        estimate["rp_story_memory_force_refresh_coverage_after"] = story_stats.get(
+            "force_refresh_coverage_after"
+        )
+        estimate["scene_state_tokens"] = 0
     return estimate
 
 
@@ -151,6 +301,11 @@ def first_system_content(messages: list[dict[str, Any]], prefix: str) -> str:
         if message.get("role") == "system" and content.startswith(prefix):
             return content
     return ""
+
+
+def story_memory_prompt_coverage(content: str) -> int | None:
+    match = re.search(r"^covered_through_turn_id=(\d+)$", content, flags=re.MULTILINE)
+    return int(match.group(1)) if match else None
 
 
 def load_prompt_messages(value: Any) -> list[dict[str, Any]] | None:

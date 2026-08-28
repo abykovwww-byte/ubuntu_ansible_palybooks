@@ -3,8 +3,8 @@
 - Preserve the boundary `browser -> Light GUI/Showroom -> Gateway -> SQLite/WorldPacks/providers`.
 - Gateway is the authority for state, permissions, idempotency, scoring, training events, datasets, memory, and provider fallback.
 - Browser-issued IDs, revisions, scores, URLs, and artifact facts are untrusted until Gateway validation.
-- Any new Gateway contract needs schema validation, focused pytest coverage, client compatibility checks, and Wiki updates.
-- Run offline contract validation from this directory before provider or browser checks:
+- Add, change, or remove a Gateway contract through its production schema/loader and actually affected clients. Add automated coverage only for player-visible behavior, authorization, data loss or mixing, atomicity/isolation/idempotency/recovery, or a real provider/storage boundary; remove dedicated checks with the superseded mechanism. Update the Wiki only for changed external behavior or operator workflow.
+- Run these offline legacy WorldPack/training checks only when that surface changes; they are not a general RP gate, and Awareness keeps its existing deterministic requirements:
   - `python3 scripts/validate-state.py --state worldpacks/<slug>/state-seed.json --schema state/schema.json` for every WorldPack state seed;
   - `python3 scripts/validate-training-runtime.py --worldpacks worldpacks`
   - `python3 scripts/test-state-workflow.py`
