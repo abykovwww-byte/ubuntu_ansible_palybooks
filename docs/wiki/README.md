@@ -189,6 +189,16 @@ prompt/role/seed в её снимок. Activation merge `80ab6d3` применё
 и выбранный prompt. Registry 041 имеет уровень `подключено`; causal probe и
 endurance для более высоких ступеней не заявлены.
 
+[Decision 042](../../roles/apps/files/rp-stack/docs/decisions/042-rp-explicit-gm-and-typed-lore-drafts.md)
+сохраняет контракты typed Lore и Gateway-owned correction targets, а
+[Decision 043](../../roles/apps/files/rp-stack/docs/decisions/043-rp-stack-rebuild.md)
+принимает полный ребилд RP-контура вокруг World / Scenario / Party, трёх
+раздельных модельных ролей и единственного мира `day-watch-moscow-v2`. Decision
+043 вытесняет staged revision 8–12 rollout из 042; старый `Adjudicator` ради него
+не расширяется. Оба решения **Accepted, но не реализованы**: текущая Wiki ниже
+продолжает описывать действующий runtime до отдельных source, merge, apply и
+live-verification поставок; новый уровень готовности не заявляется.
+
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
 links/workspace и рабочий диск реализованы в следующей IaC-ревизии согласно
