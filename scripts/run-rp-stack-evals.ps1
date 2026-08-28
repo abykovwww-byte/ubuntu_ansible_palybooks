@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Offline", "ProviderCanary", "BrowserReport")]
+    [ValidateSet("Offline", "SemanticAcceptance", "ProviderCanary", "BrowserReport")]
     [string]$Mode,
     [string]$BaseUrl = "",
     [string]$SourcePartyId = "",
@@ -11,8 +11,11 @@ param(
     [ValidateRange(30, 900)]
     [int]$TimeoutSeconds = 300,
     [switch]$ConfirmProviderRun,
+    [string[]]$SemanticResponsesFile = @(),
     [string]$EvidenceFile = "",
-    [string]$Output = ""
+    [string]$Output = "",
+    [ValidateRange(0, 11)]
+    [Nullable[int]]$RpContractRevision = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +49,9 @@ switch ($Mode) {
     "Offline" {
         $arguments += "offline"
     }
+    "SemanticAcceptance" {
+        $arguments += "semantic-acceptance"
+    }
     "ProviderCanary" {
         if (-not $ConfirmProviderRun) {
             throw "Provider canary requires -ConfirmProviderRun."
@@ -54,6 +60,9 @@ switch ($Mode) {
             if ([string]::IsNullOrWhiteSpace($requiredValue)) {
                 throw "BaseUrl, SourcePartyId, PlayerModelProfileId, and PlayerPrompt are required."
             }
+        }
+        if ($SemanticResponsesFile.Count -lt 1) {
+            throw "ProviderCanary requires at least one -SemanticResponsesFile captured from a provider-canary run."
         }
         $arguments += @(
             "provider-canary",
@@ -65,6 +74,15 @@ switch ($Mode) {
             "--timeout-seconds", [string]$TimeoutSeconds,
             "--confirm-provider-run"
         )
+        if ($null -ne $RpContractRevision) {
+            $arguments += @("--rp-contract-revision", [string]$RpContractRevision)
+        }
+        foreach ($semanticResponses in $SemanticResponsesFile) {
+            if (-not (Test-Path -LiteralPath $semanticResponses -PathType Leaf)) {
+                throw "SemanticResponsesFile does not exist: $semanticResponses"
+            }
+            $arguments += @("--semantic-responses", $semanticResponses)
+        }
     }
     "BrowserReport" {
         if ([string]::IsNullOrWhiteSpace($EvidenceFile)) {

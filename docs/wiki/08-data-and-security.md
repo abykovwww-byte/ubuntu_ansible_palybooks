@@ -2,6 +2,166 @@
 
 [← Обучение и датасеты](07-training-autotests-datasets.md) · [Главная](README.md) · [Далее: эксплуатация →](09-operations-and-repository.md)
 
+## Изоляция RP revision
+
+Таблицы `parties` и `party_branches` хранят `rp_contract_revision` отдельно.
+Миграция схемы присваивает существующим строкам revision `0` и не обновляет старые
+партии автоматически. Ветка копирует checkpoint в отдельный `state_campaign_id`;
+candidate-ревизия применяется только при выполнении этой ветки. Raw turns source
+party и branch остаются раздельными и не переписываются при сборке prompt.
+
+Revision `7` расширяет допустимый revision range, но не меняет изоляцию.
+Отдельный activation change с explicit observed target `7` прошёл pull-based
+apply и stamp proof; existing party не получает новый revision автоматически.
+Checkpoint/autotest branch по-прежнему может явно закреплять допустимую revision
+независимо от source party.
+
+DC1 не добавляет таблиц и не переписывает raw turns. Bounded force-refresh может
+append-only сохранить новый `rp_story_memory_snapshots` как maintenance side
+effect, но конечный `PromptBudgetExceeded` не создаёт player turn/state version
+или relationship mutation. `audit_events` и `turn_requests` дают оператору
+sanitized status; Prompt Inspector при overflow возвращает пустые
+`messages/blocks` и не раскрывает world/player prompt text или secrets.
+
+DC4 из
+[Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+теперь доступен новым ordinary parties на observed revision `7`, а его delivery
+gates остаются только `подключено`. Он не
+добавляет таблицу: `scene_state` хранится внутри authoritative
+`state_versions.state_json`, а private minimal
+narrator bundle, normalized applied/dropped delta с actual bounded evidence и
+before/after scene projection — в existing `turns.metadata_json` и private
+audit/trace boundary. Public party response получает только narrator text и
+безопасные fallback markers, не private bundle/evidence.
+
+Accepted normal/opening bundle одной SQLite transaction сохраняет state
+version, scene projection, turn/private metadata и request completion. Ошибка
+любой authoritative write откатывает весь набор. `current.json` записывается
+best-effort только после SQLite commit; его failure не откатывает DB, а mirror
+восстанавливается из SQLite. Scene-affecting explicit world command atomically
+ставит stale/as-of marker, но не может напрямую патчить `scene_state`; rollback
+восстанавливает historical projection либо stale bootstrap.
+
+Pre-bundle transport fallback, напротив, записывается как committed
+noncanonical turn: `story_memory_canonical=false`, last-reliable as-of и stale
+scene marker сохраняются atomically. Gateway-authored fallback prose исключается
+из raw-story, RP story memory, chapters, archive/retrieval и relationship canon;
+player input и unresolved marker явно видны следующему prompt. Private evidence
+имеет ту же retention/backup/owner-admin boundary, что turn, не копируется в
+Prompt Inspector/public API и не экспортируется в dataset без обычного review.
+
+Все registry-строки Decision 031 имеют уровень `подключено`: implementation и
+failure-boundary tests merged/applied, а isolated production-store proofs
+подтвердили accepted atomic paths, repeated mismatch без commit и noncanonical
+fallback без canonical leakage. Protected existing-party rows и state-file
+hashes не изменились; external provider calls не выполнялись. Semantic
+continuity не доказана; последующая ordinary activation отдельно прошла
+post-apply stamp-proof boundary и не повышает readiness DC4.
+
+### Revision 8: sectioned-memory migration
+
+[Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
+остаётся на уровне `каркас` до live gates. Source activation задаёт observed `8`
+и declared `8` только для `merchant-sviatoslav`; apply и новая stamp-party уже
+подтвердили effective `8` без model calls. Миграция сохраняет существующие snapshot rows,
+добавляет nullable `base_snapshot_id` и `update_id` и заменяет legacy uniqueness
+по `(campaign_id, to_turn_id)` на idempotency по `(campaign_id, update_id)`.
+Legacy caller без `update_id` по-прежнему дедуплицируется по coverage; только
+явный rev-8 same-coverage update требует `update_id` и актуальный base snapshot.
+
+`service_call_log` получает nullable `section_key` и `update_id`: штатный общий
+request пишет `section_key=all`, а структурно невалидная секция — свой exact key
+в отдельной строке. Это позволяет доказать один-call normal path и точечный retry
+без чтения prompt text. Политика retention и backup не меняется. Rev-8+ corrections пишут
+зарезервированный authority `user`; при чтении sectioned snapshot legacy
+`user_correction` нормализуется в `user`. Revisions `0..7` продолжают хранить и
+возвращать `user_correction`. S1 сам не создаёт absorption/overlay; candidate S3
+добавляет их только для revision `9` ниже.
+
+Rev8 turn `metadata_json` также получает три content-free поля наблюдаемости:
+`cached_prompt_tokens`, `prompt_tokens` и `stable_prompt_prefix_hash`. Первые два
+копируются из сохранённого provider response, hash — SHA-256 повторяемой основы
+rules + первых 50 RAW units. Prompt content в metadata не дублируется, схема
+SQLite и retention policy ради этих полей не меняются.
+
+### Revision 9: GM correction artifacts
+
+[Decision 038](../../roles/apps/files/rp-stack/docs/decisions/038-rp-gm-corrections-and-player-overlay.md)
+расширяет source revision range до `9`, но не меняет observed revision,
+WorldPack declarations или existing party rows. Candidate не добавляет таблиц и
+не переписывает RAW:
+
+- typed `rp-gateway.player-correction.v1` хранится в
+  `turns.metadata_json.player_correction` у строки
+  `turn_kind=gm_correction`, `excluded_from_memory=1`;
+- confirm atomically пишет `state_versions +1`, correction turn, completed
+  `turn_requests` и audit, сохраняя party turn, scene и игровое время;
+- memory/RAW target использует request-scoped existing `service_jobs` и
+  `rp_story_memory_snapshots`; absorption меняет artifact status с `active` на
+  `absorbed` только после durable user-authority projection и coverage gate;
+- absolute rule replacement остаётся в canonical state version и сохраняет
+  существующий rule ID/scope/kind.
+
+Public owner-scoped History и memory API возвращают correction artifact для UI,
+но модель не может передать authority/provenance в confirm: Gateway назначает их
+сам. Proposal повторно сверяется с current state/snapshot и exact target, поэтому
+клиент не может использовать confirm как произвольный state patch. Input
+correction ограничен 600 символами и не усекается; GM drafts и prompt content
+имеют ту же redaction/retention boundary, что остальные строки
+`service_call_log`.
+
+### Revision 10: world clock state and jobs
+
+[Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md)
+добавляет optional `world_clock` только в canonical party state. Он хранит дату,
+processed party turn, confirmed markers, retained event statuses/IDs, durable
+facts, pending announcements и последний elapsed reason. Новый отдельный
+calendar/event store не создаётся.
+
+`service_jobs.party_turn` и partial unique index дают один clock job на игровой
+ход и строгий порядок применения. `lore_cards.authored_key` позволяет событию
+переключить только заранее скопированную WorldPack card. Clock tick одной
+`BEGIN IMMEDIATE` transaction пишет state version, statuses/facts, card flags и
+audit; при active main turn он откладывается без расхода model attempt.
+
+Turn `metadata_json.world_clock_events` хранит только безопасные occurred/horizon
+labels для History/UI. Exact local prompt/response остаётся в существующем
+`service_call_log` с прежней redaction/retention policy; новые TTL, backup scope
+или provider credentials не добавляются.
+
+### Revision 11: immutable WorldPack materialization
+
+Для новой revision-11 party существующая строка `parties` хранит выбранные
+`preset_id`, `opening_id` и internal JSON snapshot: точные system/authors/opening
+тексты, выбранный `player_role`, полный state seed и SHA-256 каждого payload.
+Новая content table не создаётся. Public party summary может вернуть IDs и
+audit hashes, но исключает полные prompt texts и seed.
+
+Выбор разрешается только по bounded ASCII ID внутри manifest, поэтому клиент не
+задаёт filesystem path. Pack paths проходят repository/runtime containment
+checks. Omitted ID означает explicit default; неизвестное или path-like значение
+не даёт fallback. Player-character draft/create сохраняют resolved `opening_id`,
+чтобы роль и opening будущей партии совпадали.
+
+Branch/autotest descendant использует и наследует тот же source-party snapshot. Существующие партии не
+backfill-ятся и не мигрируются; поздний WorldPack edit не переписывает их state
+или prompt. Checksums служат аудитной сверкой и не создают телеметрию или новый
+readiness signal.
+
+### RP supervisor: typed retention без raw trace
+
+Decision 040 добавляет `rp_supervisor_evaluations`, изолированную по
+`state_campaign_id` и hash WorldPack-контракта. Строка хранит границы exact
+50-unit окна, source request/turn, шесть typed оценок, выбранные authored
+advisories, diagnostic flags, provider/model, status и latency. Prompt и raw
+response не сохраняются ни здесь, ни в `service_call_log`.
+
+TTL фиксирован на 30 дней и очищается при следующем сохранении/явной cleanup.
+Rollback инвалидирует оценки, окно которых содержит исключённый turn; удаление
+party удаляет их до turns. Они не входят в canonical state, story memory или
+dataset и не используются как authority локации. `observe` никогда не создаёт
+narrator advisory.
+
 ## Где находятся данные
 
 ```text
@@ -21,13 +181,15 @@ SQLite используется несколькими service stores, но scop
 | Группа | Примеры |
 |---|---|
 | Identity | `users`, `sessions`, `global_settings` |
-| Party registry | `worldpacks`, `player_characters`, `model_profiles`, `parties` |
+| Party registry | `worldpacks`, `player_characters`, `model_profiles`, `parties` с `narrator_settings_json` |
 | State/history | `campaigns`, `state_versions`, `turns`, `checks`, `state_patches`, `audit_events` |
 | Memory | `rp_story_memory_snapshots`, `memory_chapters`, legacy `memory_summaries`, `journal_entries`, `lore_cards`, `service_jobs` |
 | Reliability | `turn_requests`, `memory_checkpoints`, `party_branches`, `autotest_runs` |
+| RP supervision | `rp_supervisor_evaluations` (typed, 30-day TTL, no raw prompt/response) |
 | Dataset | `dataset_turn_labels`, `turn_feedback` |
 | Showroom | `showroom_scenarios`, `showroom_visitors`, `showroom_runs` |
 | Training artifacts | `training_artifacts`, `training_artifact_events` |
+| Diagnostics | `turn_trace_events`, `turn_state_mutations`, `turn_phase_annotations`, `service_call_log` |
 | Provider access | `provider_api_keys` |
 
 ## Изоляция пользователей и партий
@@ -37,11 +199,13 @@ flowchart TB
     U["Gateway User"] --> PC["Player Characters"]
     U --> P["Parties"]
     P --> K["Party BYOK"]
+    P --> NS["Narrator settings"]
     P --> C["state_campaign_id"]
     C --> T["Turns / checks / chapters / legacy journal"]
     C --> RPS["RP-only story-memory snapshots"]
     C --> B["Branch campaign IDs"]
     C --> TA["Training artifact snapshots / events"]
+    C --> DT["Trace events / mutations / annotations / service log"]
 
     AV["Anonymous visitor"] --> SR["ShowroomRun"]
     SR --> IP["Internal Party"]
@@ -49,7 +213,44 @@ flowchart TB
 
 Обычный API получает owner из Gateway session. `PartyStore` фильтрует parties и characters по `owner_user_id`; `StateStore` — по `state_campaign_id`. Admin role даёт административные операции, но сама игра всё равно адресуется конкретной Party.
 
+`narrator_settings_json` — небольшой не-секретный JSON-объект в строке Party.
+Gateway хранит только разрешённые `reasoning_effort`, `temperature`, `top_p` и
+`max_tokens`, повторно валидирует их при сохранении и не копирует в глобальные
+service settings. Миграция существующей базы добавляет поле с `{}` без изменения
+выбранной модели или старых партий. API keys в этом JSON не хранятся.
+
 Showroom использует отдельный visitor token. Run доступен только cookie-владельцу; raw party ID не возвращается клиенту.
+
+После cutover Decision 018 это становится физической границей данных: Awareness
+Showroom использует отдельные SQLite/state/covers/backup paths и cookies
+`awareness_gateway_session` / `awareness_showroom_visitor`. Порты `8010` и
+`8011` сами по себе cookies не изолируют. Общих writable volumes, dual-write и
+runtime API между RP и training Gateway нет. Старые Showroom rows сохраняются в
+legacy RP SQLite, но новый training runtime их не читает.
+
+I1 shadow уже использует эти отдельные paths на loopback `:18011`, но
+cutover не выполнен. Пустая standalone SQLite и healthy containers доказывают
+только изоляцию топологии, а не training flow или restore.
+
+### Git-каталог Showroom
+
+Конфигурации опубликованных training-сценариев теперь являются
+версионируемым application source, а не переносом legacy SQLite.
+`SHOWROOM_CATALOG_PATH=/app/configs/showroom/scenarios.json` включает
+согласование при startup:
+
+- стабильный `key` адресует только строку `scenario_catalog_<key>` в
+  standalone SQLite;
+- profile выбирается только по exact `(provider, base_url, model)`, а не по
+  legacy ID; zero/multiple active matches закрывают startup;
+- `cover` явно задаёт относительный файл каталога либо `null`; файл повторно
+  пишется в persistent covers только при изменении bytes/MIME, а `null`
+  удаляет runtime drift для управляемого сценария;
+- undeclared DB-сценарии не удаляются, а runs, parties, turns, state,
+  visitors, sessions, users, provider keys, feedback и leaderboard rows не импортируются.
+
+Каталог создаёт новые scenario IDs и не даёт доступ к legacy results. После
+apply живые training runs и backups доказываются отдельно.
 
 `rp_story_memory_snapshots` всегда фильтруется по `state_campaign_id`. Updater получает NPC без поля `secrets`; в prompt narrator этот snapshot поступает только для RP-партии. Snapshot не имеет права менять canonical state и не создаётся для `training`.
 
@@ -154,6 +355,41 @@ Party BYOK:
 
 Private visibility в Gateway скрывает мир от runtime-пользователей и Showroom, но не делает уже закоммиченный public repository content секретным.
 
+## Turn Trace Workbench и диагностические журналы
+
+Request-centric read model объединяет существующие авторитетные записи с тремя
+добавочными таблицами: `turn_trace_events` хранит факты исполнения и narrator
+attempts, `turn_state_mutations` — exact before/after и фактический main/background
+lane только для изменившихся
+in-place проекций, а `turn_phase_annotations` — идемпотентные пользовательские
+заметки. Существующий `service_call_log` сохраняет exact redacted ordered messages
+и raw provider response обычных служебных completions; privacy-исключение
+Decision 040 пишет только typed `rp_supervisor_evaluations`, не создавая второй
+raw журнал completions.
+
+Все записи изолированы по `state_campaign_id` и `request_id`. Gateway разрешает
+`party_id` и опциональный `branch_id` только после admin-gate; обычный владелец
+партии, Showroom visitor cookie и `run_id` не дают доступа к trace API. Это не
+позволяет участнику training-сценария прочитать server-only
+`AUTHORITATIVE_OUTCOME`, scoring и assessment policy из exact prompt. Аннотация
+зеркалит безопасные метаданные в `audit_events`, но не меняет state, prompt,
+scoring или модельный маршрут.
+
+По умолчанию диагностические данные не истекают: новые trace-таблицы не имеют
+TTL, а `SERVICE_CALL_LOG_RETENTION_DAYS=0` означает unlimited. Положительное
+значение управляется IaC-переменной
+`rp_stack_gateway_service_call_log_retention_days` (host-specific override — в
+`/etc/ansible/local-overrides.yml`) и включает явную очистку старых service rows.
+Это увеличивает privacy и
+storage impact: exact prompt/response могут содержать нарратив пользователя,
+поэтому входят в Gateway backup scope, не экспортируются в dataset автоматически
+и должны редактировать вероятные ключи, bearer tokens, cookies и passwords на
+записи диагностической копии.
+
+Trace — только диагностика: ни одна игровая фаза не читает эти таблицы как
+authority или readiness signal. Отказ записи трассы не должен менять outcome,
+commit, repair/fallback или исполнение Decision 026.
+
 ### Импорт Markdown в generated WorldPack
 
 Light GUI принимает только выбранный пользователем файл с расширением `.md`, проверяет предел 1 МиБ и читает его как текст. Gateway повторно проверяет basename, расширение, отсутствие NUL-байтов и предел 200 000 символов. MIME не считается источником доверия; содержимое не рендерится, не исполняется и не запускает конвертеры или filesystem scan.
@@ -166,7 +402,13 @@ Raw logs могут содержать личные данные, copyrighted te
 
 ## Backup и restore
 
-Backup содержит state, историю, users, provider keys и dataset labels. Перед restore нужно проверить архив и точные target paths, остановить stack и только затем восстанавливать. Нельзя пересылать backup через публичные каналы.
+Backup содержит state, историю, диагностическую трассу, users, provider keys и dataset labels. Перед restore нужно проверить архив и точные target paths, остановить stack и только затем восстанавливать. Нельзя пересылать backup через публичные каналы.
+
+Awareness backup находится в `/srv/backups/awareness-showroom` и не
+смешивается с RP backup. До C1 test restore должен идти в отдельные
+временные target paths и доказать SQLite integrity, наличие реального run,
+scoring/debrief и resume data, не перезаписывая live data directory. Этот
+runtime gate ещё не пройден.
 
 ## Источники
 
@@ -174,4 +416,13 @@ Backup содержит state, историю, users, provider keys и dataset l
 - [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
 - [ShowroomStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/showroom.py)
 - [TrainingArtifactService](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
+- [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
+- [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
+- [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
+- [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
+- [Decision 032](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)
 - [Compose networks](../../roles/apps/templates/rp-stack.compose.yml.j2)
+
+### Relationship projection repair
+
+The relationship-pressure projection stores active boundary events and their deadlines. When resuming an older party, Gateway idempotently restores a missing `due_turn` from `opened_turn` and the current WorldPack clock before processing the turn. This updates only the derived projection, not raw turns or canonical state; new rows require a non-null deadline.

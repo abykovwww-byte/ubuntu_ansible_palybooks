@@ -6,6 +6,39 @@
     fail_msg: "docker_apps must be a list of Docker Compose application definitions."
   tags: [apps, preflight]
 
+- name: Require credentials for private Docker app repositories
+  ansible.builtin.assert:
+    that:
+      - app_repo_token | length > 0
+    fail_msg: "Enabled Docker app {{ app.name }} requires its server-local repository token."
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_token_required | default(false) | bool
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
+  no_log: true
+  tags: [apps, preflight, source, git]
+
+- name: Validate commit-pinned Docker app revisions
+  ansible.builtin.assert:
+    that:
+      - (app.repo_version | default('')) is match('^[0-9a-f]{40}$')
+    fail_msg: "Commit-pinned Docker app {{ app.name }} requires a full lowercase commit SHA."
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_version_is_commit | default(false) | bool
+  tags: [apps, preflight, source, git]
+
 - name: Validate RP Stack training runtime WorldPacks
   ansible.builtin.command:
     argv:
@@ -34,6 +67,24 @@
   loop: "{{ docker_apps | subelements('managed_directories', skip_missing=True) }}"
   when: item.0.enabled | default(true) | bool
   tags: [apps, directories]
+
+- name: Check USE Framework private inventory source
+  ansible.builtin.stat:
+    path: "{{ use_framework_inventory_source_host_path }}"
+  register: use_framework_inventory_source
+  when: use_framework_enabled | default(false) | bool
+  tags: [apps, preflight, use-framework]
+
+- name: Require USE Framework private inventory source
+  ansible.builtin.assert:
+    that:
+      - use_framework_inventory_source.stat.exists
+      - use_framework_inventory_source.stat.isreg
+    fail_msg: >-
+      USE Framework requires the server-private NS1 registry at
+      {{ use_framework_inventory_source_host_path }}; synthetic fixtures are forbidden in production.
+  when: use_framework_enabled | default(false) | bool
+  tags: [apps, preflight, use-framework]
 
 - name: Check token-auth Docker app repository state
   ansible.builtin.stat:
@@ -92,10 +143,38 @@
     - app.repo_url is defined
     - app_repo_token | length > 0
     - not docker_app_repo_state.results[app_index].stat.exists
+    - not (app.repo_version_is_commit | default(false) | bool)
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   no_log: true
   register: docker_app_token_clone
+  tags: [apps, source, git]
+
+- name: Clone commit-pinned token-auth Docker app repositories
+  ansible.builtin.command:
+    argv:
+      - git
+      - -c
+      - "http.extraHeader=Authorization: Basic {{ ('x-access-token:' ~ app_repo_token) | b64encode }}"
+      - clone
+      - --no-checkout
+      - "{{ app.repo_url }}"
+      - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+    index_var: app_index
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app_repo_token | length > 0
+    - not docker_app_repo_state.results[app_index].stat.exists
+    - app.repo_version_is_commit | default(false) | bool
+  vars:
+    app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
+  no_log: true
+  register: docker_app_token_commit_clone
   tags: [apps, source, git]
 
 - name: Fetch token-auth Docker app repositories
@@ -104,6 +183,8 @@
       - git
       - -C
       - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+      - -c
+      - "safe.directory={{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
       - -c
       - "http.extraHeader=Authorization: Basic {{ ('x-access-token:' ~ app_repo_token) | b64encode }}"
       - fetch
@@ -129,6 +210,8 @@
       - git
       - -C
       - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+      - -c
+      - "safe.directory={{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
       - reset
       - --hard
       - FETCH_HEAD
@@ -163,6 +246,24 @@
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   register: docker_app_public_repo
+  tags: [apps, source, git]
+
+- name: Normalize ownership for opt-in Docker app repositories
+  ansible.builtin.file:
+    path: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+    state: directory
+    owner: "{{ app.owner | default(docker_apps_default_owner) }}"
+    group: "{{ app.group | default(docker_apps_default_group) }}"
+    recurse: true
+    follow: false
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_normalize_ownership | default(false) | bool
   tags: [apps, source, git]
 
 - name: Copy Docker app source
@@ -250,6 +351,7 @@
     owner: "{{ app.owner | default(docker_apps_default_owner) }}"
     group: "{{ app.group | default(docker_apps_default_group) }}"
     mode: "0644"
+    force: "{{ app.env_example_force | default(true) }}"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app
@@ -268,6 +370,7 @@
       [
         docker_app_removed_non_git.results | default([]),
         docker_app_token_clone.results | default([]),
+        docker_app_token_commit_clone.results | default([]),
         docker_app_token_reset.results | default([]),
         docker_app_public_repo.results | default([]),
         docker_app_source_copy.results | default([]),
@@ -279,6 +382,7 @@
     - item.changed | default(false) | bool
     - item.app is defined
     - item.app.name is defined
+  no_log: true
   tags: [apps, compose]
 
 - name: Collect changed Docker apps from runtime file tasks
@@ -303,6 +407,74 @@
     docker_app_changed_names: "{{ docker_app_changed_names | default([]) | unique | list }}"
   tags: [apps, compose]
 
+- name: Check pending Showroom port handoff
+  ansible.builtin.stat:
+    path: "{{ awareness_showroom_data_dir | default('/srv/app-data/awareness-showroom') }}/.port-8011-handoff-pending"
+  register: showroom_port_handoff_marker
+  tags: [apps, compose]
+
+- name: Resolve coordinated Showroom port handoff
+  ansible.builtin.set_fact:
+    showroom_port_handoff_required: >-
+      {{
+        showroom_port_handoff_marker.stat.exists | default(false)
+        or (
+          'rp-stack' in (docker_app_changed_names | default([]))
+          and 'awareness-showroom' in (docker_app_changed_names | default([]))
+        )
+      }}
+  tags: [apps, compose]
+
+- name: Persist pending Showroom port handoff
+  ansible.builtin.file:
+    path: "{{ awareness_showroom_data_dir | default('/srv/app-data/awareness-showroom') }}/.port-8011-handoff-pending"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose]
+
+- name: Keep both Showroom owners in the handoff start set
+  ansible.builtin.set_fact:
+    docker_app_changed_names: >-
+      {{ (docker_app_changed_names + ['rp-stack', 'awareness-showroom']) | unique | list }}
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose]
+
+- name: Check legacy RP Showroom container before handoff
+  ansible.builtin.command:
+    argv:
+      - docker
+      - container
+      - inspect
+      - rp-stack-showcase-gui
+  register: legacy_rp_showroom_container
+  changed_when: false
+  failed_when: false
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose]
+
+- name: Stop legacy RP Showroom before handoff
+  ansible.builtin.command:
+    argv:
+      - docker
+      - stop
+      - rp-stack-showcase-gui
+  when:
+    - showroom_port_handoff_required | bool
+    - legacy_rp_showroom_container.rc == 0
+  changed_when: true
+  tags: [apps, compose]
+
+- name: Stop standalone Showroom before handoff
+  ansible.builtin.command:
+    cmd: docker compose stop showroom
+    chdir: "{{ awareness_showroom_project_dir | default(app_deploy_base_dir ~ '/awareness-showroom') }}"
+  when: showroom_port_handoff_required | bool
+  changed_when: true
+  tags: [apps, compose]
+
 - name: Start changed Docker apps
   ansible.builtin.command:
     cmd: >-
@@ -325,6 +497,13 @@
   delay: "{{ app.compose_retry_delay | default(docker_apps_compose_retry_delay) }}"
   until: docker_app_start.rc == 0
   changed_when: true
+  tags: [apps, compose]
+
+- name: Clear completed Showroom port handoff
+  ansible.builtin.file:
+    path: "{{ awareness_showroom_data_dir | default('/srv/app-data/awareness-showroom') }}/.port-8011-handoff-pending"
+    state: absent
+  when: showroom_port_handoff_required | bool
   tags: [apps, compose]
 
 - name: Configure Beszel monitoring agent

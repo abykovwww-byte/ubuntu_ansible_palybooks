@@ -13,10 +13,10 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
-from app.services.provider_auth import outbound_headers
 from app.core.json_patch import PatchError
 from app.models.schemas import PatchOperation, StatePatch, WorldInstructionDraft
 from app.services.narrative import response_text
+from app.services.service_model_client import ServiceModelClient, service_prompt_text
 from app.services.service_models import service_model_settings
 from app.services.state_store import StateStore
 
@@ -62,7 +62,14 @@ class WorldInstructor:
         verb = verb.lower()
         if verb in {"apply", "confirm"}:
             proposal_id = rest.strip() or "latest"
-            state = self.store.apply_pending_patch(proposal_id, reason=f"world_apply:{request_id}")
+            state = self.store.apply_pending_patch(
+                proposal_id,
+                reason=f"world_apply:{request_id}",
+                scene_state_enabled=(
+                    self.settings.scenario_type == "rp"
+                    and self.settings.rp_contract_revision == 7
+                ),
+            )
             self.store.audit("world_apply", {"proposal_id": proposal_id, "state_version": state["meta"]["state_version"]}, request_id)
             return self.chat_response(
                 f"World patch applied: {state['last_turn']['state_patch_id']}\nState version: {state['meta']['state_version']}",
@@ -74,7 +81,12 @@ class WorldInstructor:
             self.store.audit("world_discard", {"proposal_id": discarded}, request_id)
             return self.chat_response(f"World proposal discarded: {discarded}", model)
         if verb in {"rollback", "undo"}:
-            state = self.store.rollback()
+            state = self.store.rollback(
+                scene_state_enabled=(
+                    self.settings.scenario_type == "rp"
+                    and self.settings.rp_contract_revision == 7
+                )
+            )
             self.store.audit("world_rollback", {"state_version": state["meta"]["state_version"]}, request_id)
             return self.chat_response(f"World state rolled back.\nState version: {state['meta']['state_version']}", model)
         if verb in {"show", "state", "status"}:
@@ -83,7 +95,7 @@ class WorldInstructor:
             body = rest.strip()
 
         try:
-            draft = await self.draft_instruction(body, authorization)
+            draft = await self.draft_instruction(body, authorization, request_id=request_id)
             self.store.create_patch_proposal(draft.patch)
             self.store.audit(
                 "world_proposal",
@@ -105,17 +117,30 @@ class WorldInstructor:
 
         return self.chat_response(self.preview_text(draft), model)
 
-    async def draft_instruction(self, instruction: str, authorization: str | None, use_llm: bool = True) -> WorldInstructionDraft:
+    async def draft_instruction(
+        self,
+        instruction: str,
+        authorization: str | None,
+        use_llm: bool = True,
+        *,
+        request_id: str | None = None,
+    ) -> WorldInstructionDraft:
         instruction = instruction.strip()
         if not instruction:
             raise ValueError("world instruction is empty")
         state = self.store.get_state()
         proposal_id = f"world-{uuid.uuid4().hex[:12]}"
-        if not use_llm or service_model_settings(self.settings).nvidia_api_base.startswith("mock://"):
+        if not use_llm or service_model_settings(self.settings).llm_api_base.startswith("mock://"):
             draft = self.mock_draft(state, instruction, proposal_id)
         else:
             try:
-                draft = await self.llm_draft(state, instruction, proposal_id, authorization)
+                draft = await self.llm_draft(
+                    state,
+                    instruction,
+                    proposal_id,
+                    authorization,
+                    request_id=request_id,
+                )
             except PermissionError:
                 raise
             except Exception as exc:  # noqa: BLE001 - safe fallback keeps the UI usable
@@ -131,9 +156,10 @@ class WorldInstructor:
         instruction: str,
         proposal_id: str,
         inbound_authorization: str | None,
+        *,
+        request_id: str | None = None,
     ) -> WorldInstructionDraft:
         runtime = service_model_settings(self.settings)
-        headers = outbound_headers(runtime, None)
 
         turn = int(state.get("meta", {}).get("turn", 0)) + 1
         payload = {
@@ -160,75 +186,80 @@ class WorldInstructor:
                 },
             ],
         }
-        timeout = httpx.Timeout(runtime.model_attempt_timeout_seconds, connect=15.0)
         attempts = self.model_attempts(runtime.intent_model, runtime)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            for index, model in enumerate(attempts):
-                payload["model"] = model
-                started = time.perf_counter()
-                logger.info(
-                    "world_llm_attempt_start proposal_id=%s model=%s attempt=%s/%s timeout_seconds=%s",
+        client = ServiceModelClient(runtime)
+        for index, model in enumerate(attempts):
+            payload["model"] = model
+            started = time.perf_counter()
+            logger.info(
+                "world_llm_attempt_start proposal_id=%s model=%s attempt=%s/%s timeout_seconds=%s",
+                proposal_id,
+                model,
+                index + 1,
+                len(attempts),
+                runtime.model_attempt_timeout_seconds,
+            )
+            try:
+                completion = await client.complete(
+                    role="world_instructor",
+                    provider=runtime.llm_provider,
+                    model=model,
+                    party_id=self.store.campaign_id,
+                    turn_id=None,
+                    request_id=request_id,
+                    party_turn=turn,
+                    attempt=index + 1,
+                    prompt=service_prompt_text(payload),
+                    payload=payload,
+                )
+            except httpx.TimeoutException:
+                elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+                logger.warning(
+                    "world_llm_attempt_timeout proposal_id=%s model=%s attempt=%s/%s elapsed_ms=%s fallback=%s",
                     proposal_id,
                     model,
                     index + 1,
                     len(attempts),
-                    runtime.model_attempt_timeout_seconds,
+                    elapsed_ms,
+                    index < len(attempts) - 1,
                 )
-                try:
-                    response = await client.post(
-                        f"{runtime.nvidia_api_base.rstrip('/')}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
-                except httpx.TimeoutException:
-                    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-                    logger.warning(
-                        "world_llm_attempt_timeout proposal_id=%s model=%s attempt=%s/%s elapsed_ms=%s fallback=%s",
-                        proposal_id,
-                        model,
-                        index + 1,
-                        len(attempts),
-                        elapsed_ms,
-                        index < len(attempts) - 1,
-                    )
-                    if index < len(attempts) - 1:
-                        continue
-                    raise
-                if response.status_code == 429:
-                    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-                    logger.warning(
-                        "world_llm_attempt_rate_limited proposal_id=%s model=%s elapsed_ms=%s",
-                        proposal_id,
-                        model,
-                        elapsed_ms,
-                    )
-                    raise RuntimeError(f"{runtime.llm_provider} API returned 429 rate limit")
-                try:
-                    response.raise_for_status()
-                except httpx.HTTPStatusError:
-                    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-                    logger.warning(
-                        "world_llm_attempt_http_error proposal_id=%s model=%s status=%s elapsed_ms=%s fallback=%s",
-                        proposal_id,
-                        model,
-                        response.status_code,
-                        elapsed_ms,
-                        index < len(attempts) - 1,
-                    )
-                    if index < len(attempts) - 1 and response.status_code in {400, 404, 408, 500, 502, 503, 504}:
-                        continue
-                    raise
+                if index < len(attempts) - 1:
+                    continue
+                raise
+            except httpx.HTTPStatusError as exc:
                 elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-                logger.info(
-                    "world_llm_attempt_success proposal_id=%s model=%s status=%s elapsed_ms=%s fallback_used=%s",
+                status_code = exc.response.status_code
+                logger.warning(
+                    "world_llm_attempt_http_error proposal_id=%s model=%s status=%s elapsed_ms=%s fallback=%s",
                     proposal_id,
                     model,
-                    response.status_code,
+                    status_code,
                     elapsed_ms,
-                    index > 0 or model != runtime.intent_model,
+                    index < len(attempts) - 1,
                 )
-                break
-        data = self.extract_json(response_text(response.json()))
+                if index < len(attempts) - 1 and status_code in {400, 404, 408, 500, 502, 503, 504}:
+                    continue
+                raise
+            except RuntimeError:
+                elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+                logger.warning(
+                    "world_llm_attempt_rate_limited proposal_id=%s model=%s elapsed_ms=%s",
+                    proposal_id,
+                    model,
+                    elapsed_ms,
+                )
+                raise
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+            logger.info(
+                "world_llm_attempt_success proposal_id=%s model=%s status=%s elapsed_ms=%s fallback_used=%s",
+                proposal_id,
+                model,
+                completion.status_code,
+                elapsed_ms,
+                index > 0 or model != runtime.intent_model,
+            )
+            break
+        data = self.extract_json(response_text(completion.data))
         patch_data = data.get("patch", {})
         operations = patch_data.get("patch") or data.get("operations") or []
         patch = StatePatch(
@@ -251,8 +282,8 @@ class WorldInstructor:
 
     def model_attempts(self, primary_model: str, runtime: Settings | None = None) -> list[str]:
         runtime = runtime or self.settings
-        disabled = set(runtime.nvidia_disabled_models)
-        candidates = [primary_model, *runtime.nvidia_fallback_models]
+        disabled = set(runtime.llm_disabled_models)
+        candidates = [primary_model, *runtime.llm_fallback_models]
         attempts: list[str] = []
         for model in candidates:
             if not model or model in disabled or model in attempts:

@@ -2,6 +2,10 @@
 
 Date: 2026-06-08
 
+Current workstation/Codex facts are maintained separately in
+[`repository-work-standard.md`](repository-work-standard.md); this file remains
+the longer server-setup record.
+
 Target server:
 
 ```text
@@ -16,11 +20,11 @@ Hostname observed: abykovserv
 The server uses a pull-based self-hosted Ansible model:
 
 ```text
-Ubuntu server -> GitHub public repository over HTTPS
+Ubuntu server -> private GitHub repository over SSH with a read-only deploy key
 Ubuntu server -> applies Ansible playbooks to localhost
 ```
 
-GitHub does not connect to the server. The server pulls the public repository and runs Ansible locally.
+GitHub does not connect to the server. The server pulls the private repository with a server-only read-only deploy key and runs Ansible locally.
 
 ## Repository On Server
 
@@ -33,7 +37,7 @@ The repository is cloned here:
 Remote repository:
 
 ```text
-https://github.com/abykovwww-byte/ubuntu_ansible_palybooks
+git@github.com:abykovwww-byte/ubuntu_ansible_palybooks.git
 ```
 
 The checkout was verified on branch:
@@ -112,7 +116,7 @@ ansible_connection: local
 
 ## Local-Only Overrides
 
-Host-specific values that must not be committed to the public repository are stored here:
+Host-specific values that must not be committed to the repository are stored here:
 
 ```text
 /etc/ansible/local-overrides.yml
@@ -141,7 +145,7 @@ Coolify enablement
 private registry settings
 ```
 
-Do not put secrets or real private values into the public repository.
+Do not put secrets or real private values into the repository. The GitHub deploy key is also server-only and must remain outside Git.
 
 ## Systemd Manual Apply Service
 
@@ -178,20 +182,27 @@ sudo git config --system --add safe.directory /opt/ubuntu_ansible_palybooks
 
 ## Day-To-Day Workflow
 
-1. Change Ansible code in GitHub or locally.
-2. Push changes to `main`.
-3. SSH to the server.
-4. Run:
+1. Change Ansible code on a `codex/` branch or in an isolated worktree.
+2. Run the relevant checks, commit, and push only the working branch.
+3. Open a non-draft pull request and merge it into `main` after CI is green;
+   direct pushes to `main` are prohibited.
+4. Verify the server with
+   `ssh -i ~/.ssh/id_ed25519_codex_abykovserv abykov@192.168.1.88 hostname`.
+5. The user runs interactively:
 
 ```bash
 sudo systemctl start ansible-local-apply.service
 ```
 
-5. Check logs:
+6. Check logs:
 
 ```bash
 sudo journalctl -u ansible-local-apply.service -n 100 --no-pager
 ```
+
+The workstation has no non-interactive sudo path (`sudo -n` fails). Do not ask
+for or capture the password; automation stops at `merged` until the user reports
+that the apply completed.
 
 ## Safer Manual Playbook Runs
 
@@ -429,7 +440,7 @@ curl -fsS http://127.0.0.1:5601/api/status
 AD CSV snapshots can be loaded from the Windows export folder through the SSH tunnel:
 
 ```powershell
-cd C:\Users\albykov\Documents\Пользователи\opensearch-ad
+Set-Location "$env:USERPROFILE\Documents\Пользователи\opensearch-ad"
 $env:OPENSEARCH_URL = "https://127.0.0.1:9200"
 $env:OPENSEARCH_USER = "admin"
 $env:OPENSEARCH_PASSWORD = "PASTE_SERVER_PASSWORD_HERE"

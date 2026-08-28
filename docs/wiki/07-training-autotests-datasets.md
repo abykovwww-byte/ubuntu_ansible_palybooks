@@ -23,8 +23,9 @@ Gateway.
 ```mermaid
 flowchart LR
     Pack["WorldPack runtime snapshot"] --> Surface["Active surface N"]
-    Surface --> LLM["One narrator call"]
-    LLM --> Valid["WorldPack validation or fallback"]
+    Surface --> LLM["Initial narrator call"]
+    LLM --> Norm["Canonical normalization"]
+    Norm --> Valid["Hard fallback or one soft repair"]
     Valid --> Action["Явное действие игрока"]
     Action --> Rules["Generic detectors + authored rules"]
     Rules --> Score["Canonical score/evidence"]
@@ -32,7 +33,12 @@ flowchart LR
     Next -->|"final gate"| Debrief["Debrief из state"]
 ```
 
-Для интерактивного surface путь расширяется без второго LLM-вызова: narrator возвращает письмо и разрешённые текстовые slots сайта одним bundle, Gateway создаёт snapshot, а `opened` / `submitted` / `reported` становятся типизированным evidence следующего хода. Отправка непустой формы считается `fail` только там, где это задаёт authored policy конкретной surface; содержимое полей не проверяется и не сохраняется.
+Для интерактивного surface письмо и разрешённые текстовые slots сайта приходят
+в одном bundle: отдельного LLM-вызова для построения сайта нет. Возможный общий
+soft-repair чинит тот же bundle целиком. Gateway создаёт snapshot, а `opened` /
+`submitted` / `reported` становятся типизированным evidence следующего хода.
+Отправка непустой формы считается `fail` только там, где это задаёт authored
+policy конкретной surface; содержимое полей не проверяется и не сохраняется.
 
 Runtime-контракт хешируется и сохраняется на party. Branch копирует тот же
 snapshot. Обновление файлов мира не переписывает активное обучение. На каждом
@@ -41,11 +47,14 @@ visible state и включённые interaction contracts; score, future turns
 assessment появляются только в отдельном debrief.
 
 Границы формата тоже принадлежат WorldPack: активный prompt получает точные
-`header` и `question`, но не fallback. На обычном ходу модель возвращает только
+`header` и `question`, prose `must_include` и optional `variation_budget`, но не
+fallback или raw regex. На обычном ходу модель возвращает только
 видимый текст; при включённом interaction contract — один JSON object с полным
 текстом в `narrative_text`. Одна provider-added Markdown fence нормализуется
-Gateway до строгой schema validation; malformed или multiple bundles уходят в
-authored fallback без второго LLM-вызова.
+Gateway до строгой schema validation. Gateway подставляет canonical
+header/question и no-link marker. Мягкое нарушение полей/профиля допускает один
+training-repair; hard shape/identity/URL/attachment/score и повторная ошибка
+уходят в authored fallback.
 
 Live acceptance на `awareness-one-day` подтвердил полный путь: authored ход создал письмо и `corporate-sso` snapshot, Showroom открыл credential-form, Gateway принял `link_opened`, `credentials_submitted` и `site_closed`, а следующий ход атомарно пометил события consumed и добавил UI-evidence в canonical scoring. В тестовом fail-пути увеличились `credential-exposure`, `suspicious-artifacts-opened` и `unsafe-actions`; решение принял RuleEngine, не narrator.
 
@@ -65,6 +74,14 @@ legacy compatibility resolver до отдельной миграции его п
 ## Showroom и результат
 
 WorldPack сам связывает публичный результат с numeric state path через `manifest.showroom_result`. Showroom scenario может включить leaderboard, но не выбирает, откуда взять score. Это сохраняет ownership оценки у authored training world.
+
+После cutover Decision 018 этот контракт исполняется отдельным training-only
+Gateway. Он начинает с новой SQLite: настройки опубликованных сценариев и covers
+воссоздаются через admin API, а visitors, runs, parties, turns, feedback,
+leaderboard, sessions и BYOK не переносятся. Поэтому `Мои прохождения` и рейтинг
+начинаются с нуля; старые результаты остаются только в legacy snapshot/backup RP
+Stack. `manifest.showroom_result` остаётся authority и не заменяется полем
+миграции.
 
 Corporate portal — только presentational snapshot. Он не содержит schedule, rubric или скрытые ответы.
 
@@ -120,23 +137,33 @@ Auto-player видит только public character description и player/GM tr
 
 Runs сохраняют status, requested/completed turns, fallback count, provider/model, prompt, last action и error. Каждый narrator turn имеет idempotency key. Незавершённый run может продолжиться после рестарта Gateway без дублирования завершённого хода.
 
-## Три уровня eval-проверок
+## Три уровня semantic evidence
 
 Devkit не смешивает детерминированные тесты, реальные provider-вызовы и
 браузерную приёмку в один нечёткий статус:
 
 | Уровень | Что проверяет | Разрешённые эффекты |
 |---|---|---|
-| Offline | state/schema, WorldPack runtime, workflow scripts, полный Gateway pytest, JS syntax/tests | Нет сети, provider-вызовов и запуска приложения |
-| Provider canary | Реальный narrator/player путь, status, completed/fallback turns и неизменность source Party | Только явно подтверждённый bounded autotest branch, до 5 ходов из runner |
-| Browser smoke | Authenticated DOM, реальные API responses, exactly-once turn, artifacts и Showroom isolation | Один заранее выбранный безопасный тестовый ход на уже развёрнутой revision |
+| Offline | Схемы, сохранённые service responses, детектор тавтологии, отдельные метрики, Gateway/JS tests | Нет сети, provider-вызовов и запуска приложения |
+| Provider canary | Реальный prompt/model через admin-autotest, повторные semantic reports и неизменность source Party | Только явно подтверждённый bounded autotest branch; сохранённые ответы помечены `producer: provider-canary` |
+| Production endurance | Длинная живая RP-партия и `causal_probe` до влияния на последующие сцены | Только read-only наблюдение уже записанного runtime; эта ступень одна может доказать `держится` |
 
 Provider canary использует существующий `POST /api/admin/autotests`: до запуска
 он хеширует history/state source Party, после завершения сравнивает их снова и
 считает run неуспешным при любом изменении main-line. Session cookie или bearer
 берутся только из process environment, не попадают в аргументы, JSON report или
 Git. При poll timeout runner запрашивает stop, чтобы не оставлять бесконтрольный
-фоновой run.
+фоновой run. Candidate revision выше observed нужно передать явно; runner пишет
+в отчёт requested и effective revision созданной branch и не принимает proof,
+если Gateway создал ветку с другим значением.
+
+Оракул `evals/acceptance/manifest.yml` и `acceptance/corpus/**` размечен
+пользователем и read-only для исполнителя. Пороги читаются только из манифеста.
+Отчёт не сворачивает метрики: отдельно показывает event precision/recall,
+character attribution accuracy, empty-scene false-positive rate,
+positive-trust recall, correction retention и разрезы по классу события. Ответ
+`events=[]` на всём корпусе обязан провалить recall. Зелёный offline CI даёт
+только `каркас`; он не доказывает реальную семантику provider и длинной партии.
 
 Browser smoke не заменяется `curl`: UI считается проверенным только после
 осмотра authenticated DOM, browser console и фактических network responses.

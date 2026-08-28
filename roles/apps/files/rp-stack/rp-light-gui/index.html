@@ -59,6 +59,7 @@
               <span id="currentUserLabel"></span>
               <button class="text-button" id="logoutButton" type="button">Выйти</button>
             </div>
+            <a id="traceWorkbenchLink" class="text-button hidden" href="/trace.html" title="Открыть операторские трассы запросов">Трассы</a>
             <div class="status-strip">
               <span class="status-dot" id="gatewayDot"></span>
               <span id="gatewayStatus">gateway</span>
@@ -75,8 +76,29 @@
 
         <div class="message-status-bar hidden" id="messageStatus" role="status" aria-live="polite"></div>
 
+        <section class="gm-decision hidden" id="gmDecisionPanel" aria-live="polite">
+          <div>
+            <div class="section-label" id="gmDecisionLabel">Обращение к мастеру</div>
+            <strong id="gmDecisionTitle"></strong>
+          </div>
+          <div class="gm-diff hidden" id="gmDraftDiff">
+            <div><span>Было</span><p id="gmDraftBefore"></p></div>
+            <div><span>Станет</span><p id="gmDraftAfter"></p></div>
+          </div>
+          <p class="panel-hint" id="gmDecisionHint"></p>
+          <div class="inline-actions hidden" id="gmRouteActions">
+            <button class="tool-button" id="gmRouteMasterButton" type="button">Мастеру</button>
+            <button class="text-button" id="gmRouteSceneButton" type="button">В сцену</button>
+          </div>
+          <div class="inline-actions hidden" id="gmDraftActions">
+            <button class="tool-button" id="gmConfirmButton" type="button">Подтвердить исправление</button>
+            <button class="text-button danger-text" id="gmRejectButton" type="button">Отклонить</button>
+          </div>
+        </section>
+
         <form class="composer" id="messageForm">
-          <textarea id="messageInput" rows="2" placeholder="Действие персонажа или команда /check"></textarea>
+          <textarea id="messageInput" rows="2" placeholder="Опишите намерение, действие или реплику персонажа"></textarea>
+          <button class="gm-send-button hidden" id="gmMessageSubmit" type="button" title="Сказать мастеру вне сцены">Мастеру</button>
           <button class="send-button" id="messageSubmit" type="submit" title="Отправить">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             Отправить
@@ -184,13 +206,14 @@
             </button>
           </div>
           <div class="section-label subsection-label">Lore Cards</div>
-          <p class="panel-hint">Только ваши подтвержденные заметки. Карточка помогает retrieval, но не становится canonical state.</p>
+          <p class="panel-hint">WorldPack-карточки копируются при создании партии. Черновик из хода появляется здесь и попадет в память только после вашего подтверждения.</p>
           <form id="loreCardForm" class="stack-form">
             <input id="loreCardTitle" maxlength="160" placeholder="Название карточки" required>
             <textarea id="loreCardContent" rows="3" maxlength="12000" placeholder="Факт, деталь мира или нить сюжета" required></textarea>
-            <input id="loreCardKeywords" maxlength="500" placeholder="Триггеры через запятую">
+            <input id="loreCardKeywords" maxlength="500" placeholder="Триггеры через запятую" required>
             <label class="check-row"><input id="loreCardAlwaysOn" type="checkbox"> Всегда добавлять в prompt</label>
-            <button class="tool-button" type="submit">Добавить Lore Card</button>
+            <p id="loreCardDraftHint" class="panel-hint hidden"></p>
+            <button id="loreCardSubmitButton" class="tool-button" type="submit">Подтвердить Lore Card</button>
           </form>
           <div id="loreCardList" class="state-summary"></div>
           <div class="section-label subsection-label">Checkpoints</div>
@@ -231,32 +254,6 @@
           <div id="proposalList" class="proposal-list"></div>
         </section>
 
-        <section class="summary-panel" id="checkPanel">
-          <div class="section-label">Проверка</div>
-          <p class="panel-hint">Быстрый /check: gateway решает исход, а модель только описывает его как сцену.</p>
-          <form id="checkForm" class="check-form">
-            <select id="checkType" title="Тип проверки: социальная, скрытность, ресурсы или реалистичность действия">
-              <option value="persuasion">Убеждение</option>
-              <option value="intimidation">Запугивание</option>
-              <option value="deception">Обман</option>
-              <option value="stealth">Скрытность</option>
-              <option value="information">Поиск сведений</option>
-              <option value="resource">Ресурс</option>
-              <option value="feasibility">Реалистичность</option>
-            </select>
-            <input id="checkTarget" placeholder="Цель" title="NPC, фракция, ресурс или объект, на который направлено действие" />
-            <div class="split-row">
-              <input id="checkSkill" type="number" value="0" title="Модификатор навыка/подготовки игрока" />
-              <input id="checkDifficulty" type="number" value="10" title="Сложность проверки; 10 - обычная, 20+ - тяжелая" />
-            </div>
-            <input id="checkGoal" placeholder="Цель действия" title="Чего игрок хочет добиться этой проверкой" />
-            <button class="tool-button" type="submit" title="Запустить проверку и добавить ход в историю">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>
-              Проверить
-            </button>
-          </form>
-        </section>
-
         <section class="summary-panel">
           <div class="section-label">Управление</div>
           <p class="panel-hint">Операции над текущей партией. Миры и персонажи не удаляются этой кнопкой.</p>
@@ -268,9 +265,37 @@
             <span>Модель партии</span>
             <select id="partyModelSelect" title="Сменить модель для следующих ходов этой партии"></select>
           </label>
-          <button id="changePartyModelButton" class="tool-button wide-button" type="button" title="Применить выбранную модель к этой партии">
+          <div id="narratorSettingsPanel" class="narrator-settings">
+            <div class="narrator-settings-title">Параметры наратора</div>
+            <p id="narratorSettingsAvailability" class="panel-hint">Выберите поддерживаемую модель.</p>
+            <div id="narratorSettingsFields" class="narrator-settings-fields" hidden>
+              <label class="management-field">
+                <span>Глубина рассуждений</span>
+                <select id="narratorReasoningSelect"></select>
+                <small>Сколько усилий модель тратит на обдумывание ответа. Чем выше, тем обычно медленнее и дороже.</small>
+              </label>
+              <label id="narratorTemperatureField" class="management-field">
+                <span>Температура</span>
+                <input id="narratorTemperatureInput" type="number" min="0" max="2" step="0.05" placeholder="Авто" />
+                <small>Управляет разнообразием формулировок. Ниже — стабильнее, выше — смелее, но менее предсказуемо.</small>
+              </label>
+              <label id="narratorTopPField" class="management-field">
+                <span>Top P</span>
+                <input id="narratorTopPInput" type="number" min="0" max="1" step="0.05" placeholder="Авто" />
+                <small>Ограничивает выбор наиболее вероятными продолжениями. Обычно меняйте его или температуру, но не оба сразу.</small>
+              </label>
+              <label class="management-field">
+                <span>Бюджет ответа</span>
+                <select id="narratorMaxTokensSelect"></select>
+                <small>Общий лимит на обдумывание и итоговый текст. Слишком низкое значение может оборвать сцену.</small>
+              </label>
+            </div>
+            <button id="resetNarratorSettingsButton" class="text-button wide-button" type="button" hidden>Все параметры — Авто</button>
+            <p id="narratorSettingsSavedHint" class="narrator-settings-note" hidden>Сохраняется для текущей партии и применяется со следующего ответа наратора.</p>
+          </div>
+          <button id="changePartyModelButton" class="tool-button wide-button" type="button" title="Применить выбранную модель и параметры наратора к этой партии">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3h4v4"/><path d="M21 3 13 11"/><path d="M7 21H3v-4"/><path d="M3 21l8-8"/></svg>
-            Сменить модель
+            Применить модель и параметры
           </button>
           <button id="deletePartyButton" class="tool-button danger wide-button" type="button" title="Удалить партию, ее историю ходов и isolated state">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
@@ -282,7 +307,6 @@
             <div id="byokKeysList" class="admin-list"></div>
             <form id="byokKeyForm" class="admin-form">
               <select id="byokKeyProviderSelect" title="Провайдер для этого API key">
-                <option value="nvidia">NVIDIA</option>
                 <option value="gemini">Gemini</option>
                 <option value="openrouter">OpenRouter</option>
               </select>
@@ -303,6 +327,7 @@
                 <label class="management-field"><span>Провайдер игрока</span><select id="adminAutotestProviderSelect" required></select></label>
                 <label class="management-field"><span>Модель игрока</span><select id="adminAutotestModelSelect" required></select></label>
               </div>
+              <label class="management-field"><span>Candidate revision RP-контракта · 0–7</span><input id="adminAutotestRevisionInput" type="number" min="0" max="7" placeholder="Как у исходной партии" /></label>
               <label class="management-field"><span>Ходов LLM-игрока · максимум 30</span><input id="adminAutotestTurnsInput" type="number" min="1" max="30" value="5" required /></label>
               <button id="adminAutotestStartButton" class="tool-button wide-button" type="submit">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9V3Z"/></svg>
@@ -409,8 +434,7 @@
           <fieldset class="choice-block wide">
             <legend>Тип сценария</legend>
             <div class="segmented scenario-type-segmented">
-              <label title="Ролевая игра с D20, навыками, сложностью и механическими исходами"><input type="radio" name="scenarioType" value="rp" required /> RP · D20</label>
-              <label title="Совместное повествование без бросков, навыков и механических проверок"><input type="radio" name="scenarioType" value="novel" required /> Роман</label>
+              <label title="Ролевая игра без скрытых проверок: последствия следуют из мира, персонажей и состояния"><input type="radio" name="scenarioType" value="rp" required /> RP</label>
               <label title="Детерминированный учебный сценарий со строгой последовательностью и валидацией"><input type="radio" name="scenarioType" value="training" required /> Обучение</label>
             </div>
           </fieldset>
@@ -428,6 +452,16 @@
           <label class="wide" id="worldReadyFields">
             <span>Готовый мир</span>
             <select id="worldSelect" required title="Worldpack, установленный на сервере"></select>
+          </label>
+
+          <label class="wide hidden" id="partyPresetFields">
+            <span>Стиль повествования</span>
+            <select id="partyPresetSelect" title="Авторский вариант правил и формы повествования для этой партии"></select>
+          </label>
+
+          <label class="wide hidden" id="partyOpeningFields">
+            <span>Старт партии</span>
+            <select id="partyOpeningSelect" title="Авторская стартовая роль и исходное состояние этой партии"></select>
           </label>
 
           <div class="prompt-fields wide hidden" id="worldPromptFields">
@@ -453,7 +487,7 @@
               <label><input type="radio" name="characterSource" value="ready" checked /> Роль из мира</label>
               <label><input type="radio" name="characterSource" value="prompt" /> Задать prompt</label>
             </div>
-            <p class="field-hint">Роль из мира берется из `manifest.player_role`; prompt-персонаж сохраняется в profile персонажа.</p>
+            <p class="field-hint">Роль берется из выбранного старта; для прежних worldpacks — из `manifest.player_role`. Prompt-персонаж сохраняется в profile персонажа.</p>
           </fieldset>
 
           <label>
@@ -535,6 +569,6 @@
     <script src="/structured-content.js?v=20260729-messenger-boundary"></script>
     <script src="/message-time.js?v=20260729-message-time"></script>
     <script src="/training-artifacts.js?v=20260731-messenger-links"></script>
-    <script src="/app.js?v=20260803-markdown-import"></script>
+    <script src="/app.js?v=20260812-adr026-candidate-revision"></script>
   </body>
 </html>

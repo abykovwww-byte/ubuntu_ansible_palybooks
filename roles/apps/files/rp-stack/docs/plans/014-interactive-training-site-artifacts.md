@@ -525,7 +525,7 @@ codex-skills/training-world-pack-builder/
 Update `SKILL.md` and `references/training-contract.md`; add a focused
 `references/site-artifacts-contract.md`. The repository copy is authoritative.
 After validation, synchronize the installed local skill under
-`C:\Users\albykov\.codex\skills\training-world-pack-builder\` as a separate,
+`$env:USERPROFILE\.codex\skills\training-world-pack-builder\` as a separate,
 reported local delivery step.
 
 The skill must:
@@ -746,7 +746,10 @@ processing exceeds 50 ms under the expected single-user load.
    links use the same UI affordance.
 10. Update the versioned training skill, its references, and local installed
     copy; validate generated packs against the new contract.
-11. Run local static/JS checks, commit and push through the normal IaC workflow.
+11. Run local static/JS checks, commit on a `codex/` branch or in an isolated
+    worktree, push only that branch, open a non-draft PR, and merge it after CI
+    is green through the normal IaC workflow. Direct pushes to `main` are
+    prohibited.
 12. Apply through `ansible-local-apply.service`; run Gateway pytest in the
     deployed container, HTTP checks, authenticated Light GUI checks, and
     desktop/mobile Showroom browser acceptance.
@@ -792,7 +795,8 @@ The implementation must follow:
 
 ```text
 local IaC edit and focused checks
--> commit and push origin/main
+-> commit and push the working codex/ branch
+-> non-draft PR -> green CI -> merge into main
 -> abykovserv ansible-local-apply.service
 -> Gateway container pytest and migration checks
 -> Light GUI and Showroom HTTP/browser acceptance

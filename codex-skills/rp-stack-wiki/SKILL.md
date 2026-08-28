@@ -10,7 +10,7 @@ with the implementation.
 
 ## Canonical Locations
 
-- repository: `C:\Users\albykov\Documents\Tavern\ubuntu_ansible_palybooks`
+- repository: `C:\Users\Адександр\Documents\Tavern\ubuntu_ansible_palybooks`
 - Wiki hub: `docs/wiki/README.md`
 - Wiki pages: `docs/wiki/01-architecture.md` through
   `docs/wiki/09-operations-and-repository.md`
@@ -24,16 +24,50 @@ for implementation facts.
 ## Start Here
 
 1. Read `docs/wiki/README.md` completely.
-2. Read every Wiki page relevant to the request. For a full architecture review,
+2. Read `docs/repository-work-standard.md` for the checked workstation and
+   delivery contract.
+3. Read every Wiki page relevant to the request. For a full architecture review,
    read all numbered pages and `_Sidebar.md`.
-3. Inspect the current Git status and preserve unrelated work.
-4. Verify claims against current source and IaC. Use Graphify for navigation when
+4. Inspect the current Git status and preserve unrelated work.
+5. Verify claims against current source and IaC. Use Graphify for navigation when
    `graphify-out/` exists, but confirm important facts in source.
-5. Distinguish implemented behavior, planned work, compatibility surfaces, and
+6. Distinguish implemented behavior, planned work, compatibility surfaces, and
    retired behavior explicitly.
 
 Do not use an older Wiki revision, adjacent task, ADR, or graph result as proof
 that a feature is still implemented.
+
+## Decision 022 evidence language
+
+Describe RP Stack readiness only as `каркас` (code exists and module tests are green),
+`подключено` (execution in the real turn path), `наблюдается` (effect in the
+authoritative mechanic store and in a later real-party prompt), or `держится`
+(later scenes repeatedly account for the effect without drift). Do not use bare
+`implemented`, `working`, `ready`, `реализовано`, `работает`, or `готово` claims.
+Green CI is necessary delivery evidence, but is insufficient for
+`наблюдается` or `держится`.
+
+Document the acceptance oracle at
+`roles/apps/files/rp-stack/evals/acceptance/manifest.yml` and
+`roles/apps/files/rp-stack/evals/acceptance/corpus/**` as independent,
+user-owned, and read-only. Its labels and thresholds are not implementation
+inputs to rewrite. Reports must read thresholds from the manifest and keep
+`event_precision`, `event_recall`, `character_id_accuracy`,
+`empty_scene_false_positive_rate`, `positive_trust_recall`, and
+`correction_retention` separate, including per-event-class metrics when the
+manifest requires them.
+
+Keep evidence split into three layers: offline uses saved responses and no
+providers; provider-canary uses a real prompt and model through admin-autotest
+without mutating the source party; production-endurance uses a long live party
+and `causal_probe` through later scene consequences. Only production endurance
+can establish `держится`.
+
+When a change introduces or materially expands exact diagnostic prompt/response
+capture (`service_call_log`, `turn_trace_events`), or changes its retention or
+redaction, record that deployment is paused until the user explicitly decides
+retention and redaction depth. An accepted ADR for that exact revision satisfies
+the gate; a green PR or configured default does not.
 
 ## Documentation Impact Gate
 
@@ -46,7 +80,7 @@ Treat a change as significant when it changes any of these contracts:
   branches, audit, or idempotency;
 - prompt composition, history, memory, lore, retrieval, context budgets, or model
   routing;
-- `rp`, `novel`, or `training` semantics and WorldPack contracts;
+- `rp` or `training` semantics, retired-mode boundaries, and WorldPack contracts;
 - deterministic scoring, debrief, autotests, dataset review, or export;
 - persistent data, migrations, backups, restore, privacy, or security risks;
 - Ansible delivery, Compose topology, server paths, verification, or rollback.

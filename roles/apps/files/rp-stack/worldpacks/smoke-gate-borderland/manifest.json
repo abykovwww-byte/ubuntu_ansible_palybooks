@@ -6,11 +6,16 @@
   "tone": ["dark fantasy", "frontier intrigue", "survival mystery"],
   "player_role": "Временный поверенный Пограничной Канцелярии с ограниченным правом расследования",
   "created_for": "rp-gateway-light-gui",
-  "scenario_types": {"recommended": "rp", "supported": ["rp", "novel"]},
+  "scenario_types": {"recommended": "rp", "supported": ["rp"]},
+  "rp_contract": {"schema_version": "rp-core.v2", "revision": 6},
+  "relationships": {
+    "schema_version": "rp-relationships.v2",
+    "model": "relationships/model.json"
+  },
   "assumptions": [
     "Оригинальный мир без привязки к существующим франшизам.",
     "Игра идет на русском языке.",
-    "Кампания рассчитана на проверку полного flow: GUI, gateway, /world, /check и первые игровые ходы.",
+    "Кампания рассчитана на проверку полного flow: GUI, gateway, /world и первые игровые ходы без скрытых проверок.",
     "Игрок начинает компетентным, но не влиятельным: у него есть право задавать вопросы, но нет права приказывать."
   ],
   "files": {

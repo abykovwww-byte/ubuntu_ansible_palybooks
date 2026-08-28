@@ -9,12 +9,15 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.schemas import InteractionEvidence, Intent, TrainingArtifactEventRequest, WorldPackSummary
-from app.services.rule_engine import AWARENESS_ONE_DAY_ID, RuleEngine
+from app.services.narrative import training_artifact_prompt_block
+from app.services.rule_engine import RuleEngine
 from app.services.state_store import StateStore
 from app.services.training_artifacts import TrainingArtifactService
+from app.services.training_runtime import TrainingRuntimeService
 
 
 WORLD_PACKS_ROOT = Path(__file__).resolve().parents[2] / "worldpacks"
+AWARENESS_ONE_DAY_ID = "awareness-one-day"
 WORLD_ROOT = WORLD_PACKS_ROOT / AWARENESS_ONE_DAY_ID
 WEEKLY_AWARENESS_ID = "awareness"
 
@@ -77,6 +80,20 @@ def test_materializes_only_allowlisted_public_artifact(tmp_path: Path):
     assert result.public_artifacts[0]["field_ids"] == ["login", "password"]
     assert "policy" not in result.public_artifacts[0]
     assert "credential_field_ids" not in json.dumps(result.response)
+
+
+def test_artifact_object_still_rejects_display_url_as_an_extra_field(tmp_path: Path):
+    _, service, state = artifact_service(tmp_path)
+    contract = service.contract_for_state(state)
+    response = response_with_bundle(contract)
+    bundle = json.loads(response["choices"][0]["message"]["content"])
+    bundle["artifacts"][0]["display_url"] = contract["display_url"]
+    response["choices"][0]["message"]["content"] = json.dumps(bundle, ensure_ascii=False)
+
+    result = service.materialize_response(response, contract)
+
+    assert result.valid is False
+    assert any("display_url" in violation for violation in result.violations)
 
 
 def test_materializes_single_fenced_bundle_after_provider_preamble(tmp_path: Path):
@@ -156,6 +173,25 @@ def test_weekly_awareness_keeps_non_site_decision_surfaces(tmp_path: Path, turn:
     _, service, state = artifact_service(tmp_path, turn=turn, world_id=WEEKLY_AWARENESS_ID)
 
     assert service.contract_for_state(state) is None
+
+
+@pytest.mark.parametrize(
+    ("world_id", "turn"),
+    [(AWARENESS_ONE_DAY_ID, 4), (WEEKLY_AWARENESS_ID, 1)],
+)
+def test_artifact_prompt_keeps_fixed_url_only_in_visible_links_field(
+    tmp_path: Path,
+    world_id: str,
+    turn: int,
+):
+    _, service, state = artifact_service(tmp_path, turn=turn, world_id=world_id)
+    contract = service.contract_for_state(state)
+
+    prompt = training_artifact_prompt_block({"site": contract, "workspace": None})
+
+    assert "only in the visible narrative_text field line 'Ссылки:'" in prompt
+    assert "Do not emit display_url" in prompt
+    assert "Repeat the exact fixed display_url" not in prompt
 
 
 @pytest.mark.parametrize("turn", [4, 6, 9])
@@ -245,7 +281,7 @@ def test_neutral_one_day_site_report_does_not_award_security_score(tmp_path: Pat
 
 
 def test_weekly_risky_link_is_consumed_by_awareness_scoring(tmp_path: Path):
-    _, _, state = artifact_service(tmp_path, turn=5, world_id=WEEKLY_AWARENESS_ID)
+    store, artifacts, state = artifact_service(tmp_path, turn=5, world_id=WEEKLY_AWARENESS_ID)
     failed_link = InteractionEvidence(
         event_sequence=1,
         event_id="evt-weekly-failed-link",
@@ -267,6 +303,7 @@ def test_weekly_risky_link_is_consumed_by_awareness_scoring(tmp_path: Path):
         campaign_id=WEEKLY_AWARENESS_ID,
         scenario_type="training",
         interaction_evidence=[failed_link],
+        training_runtime=TrainingRuntimeService(artifacts.worldpack, store),
     )
 
     values = patch_values(score_patch)
@@ -341,6 +378,7 @@ def test_event_is_idempotent_private_and_consumed_by_scoring(tmp_path: Path):
         campaign_id=AWARENESS_ONE_DAY_ID,
         scenario_type="training",
         interaction_evidence=evidence,
+        training_runtime=TrainingRuntimeService(service.worldpack, store),
     )
     values = patch_values(score_patch)
     assert values["/player/resources/links-opened"] == 1

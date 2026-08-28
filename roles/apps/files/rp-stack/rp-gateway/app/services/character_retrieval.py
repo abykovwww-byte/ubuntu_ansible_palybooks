@@ -72,6 +72,87 @@ def retrieve_relevant_characters(
     ]
 
 
+def relationship_scene_character_ids(
+    state: dict[str, Any],
+    latest_player_message: str,
+    *,
+    outcome_target: str | None = None,
+    character_aliases: dict[str, list[str]] | None = None,
+    use_scene_state: bool = True,
+    use_seed_signals: bool = True,
+) -> set[str]:
+    """Return reliable committed presence, or the deterministic legacy fallback scope."""
+
+    characters = state.get("characters")
+    if not isinstance(characters, dict):
+        return set()
+    scene_state = state.get("scene_state") if use_scene_state else None
+    if (
+        isinstance(scene_state, dict)
+        and scene_state.get("stale") is False
+        and isinstance(scene_state.get("present_character_ids"), list)
+    ):
+        return {
+            str(character_id)
+            for character_id in scene_state["present_character_ids"]
+            if str(character_id) in characters
+        }
+
+    player = state.get("player") if use_seed_signals else None
+    player_location = normalized_text(player.get("location")) if isinstance(player, dict) else ""
+    action = normalized_text(latest_player_message)
+    target = normalized_text(outcome_target)
+    declared_aliases = character_aliases or {}
+    active_thread_ids = (
+        character_ids_in_threads(state.get("active_threads"))
+        if use_seed_signals
+        else set()
+    )
+    ranked: list[tuple[int, str]] = []
+
+    for raw_id, raw_character in characters.items():
+        if not isinstance(raw_id, str) or not isinstance(raw_character, dict):
+            continue
+        character_id = raw_id.strip()
+        if not character_id:
+            continue
+        aliases = {
+            normalized_text(character_id),
+            normalized_text(raw_character.get("name")),
+            normalized_text(raw_character.get("display_name")),
+            *(
+                normalized_text(alias)
+                for alias in declared_aliases.get(character_id, [])
+                if isinstance(alias, str)
+            ),
+        }
+        aliases.discard("")
+        mentioned = any(f" {alias} " in f" {action} " for alias in aliases)
+        targeted = any(f" {alias} " in f" {target} " for alias in aliases)
+        same_location = bool(
+            use_seed_signals
+            and player_location
+            and normalized_text(raw_character.get("location")) == player_location
+        )
+        if not (mentioned or targeted or same_location):
+            continue
+
+        score = 0
+        if mentioned or targeted:
+            score += 100
+        if same_location:
+            score += 30
+        if use_seed_signals and character_id in active_thread_ids:
+            score += 20
+        ranked.append((score, character_id))
+
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return {
+        character_id
+        for _score, character_id in ranked[:MAX_RETRIEVED_CHARACTERS]
+    }
+
+
 def selected_character_relationships(state: dict[str, Any], characters: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     selected_ids = {entry.get("id") for entry in characters if isinstance(entry.get("id"), str)}
     relationships = state.get("relationships")
@@ -134,7 +215,6 @@ def compact_character(character_id: str, character: dict[str, Any]) -> dict[str,
         "status",
         "location",
         "attitude_to_player",
-        "trust",
         "fear",
         "loyalty",
         "current_goal",
@@ -152,7 +232,7 @@ def compact_character(character_id: str, character: dict[str, Any]) -> dict[str,
 
 def compact_relationship(relationship: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {}
-    for key in ("from", "to", "trust", "suspicion", "fear", "loyalty"):
+    for key in ("from", "to", "suspicion", "fear", "loyalty"):
         value = relationship.get(key)
         if value not in (None, "", [], {}):
             compact[key] = value

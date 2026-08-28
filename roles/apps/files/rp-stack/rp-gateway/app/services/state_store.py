@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -12,7 +13,23 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from app.core.json_patch import apply_patch
-from app.models.schemas import StatePatch
+from app.models.schemas import PatchOperation, StatePatch
+from app.services.scene_state import initial_scene_state, mark_scene_stale
+from app.services.trace_redaction import redact_trace_value
+from app.services.world_clock import (
+    WorldClockBusy,
+    advance_world_clock_state,
+    confirm_world_clock_marker_state,
+    initial_world_clock_state,
+    mark_world_clock_events_announced,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+class StateVersionConflict(RuntimeError):
+    """A generated turn was based on a state version that is no longer current."""
 
 
 def now_ts() -> int:
@@ -82,6 +99,63 @@ class StateStore:
                     id TEXT PRIMARY KEY,
                     created_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS relationship_causes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id TEXT NOT NULL,
+                    character_id TEXT NOT NULL,
+                    axis TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    weight INTEGER NOT NULL,
+                    turn_id INTEGER NOT NULL,
+                    party_turn INTEGER NOT NULL,
+                    expires_turn INTEGER,
+                    evidence TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(campaign_id, character_id, axis, event_id, turn_id),
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+                );
+                CREATE TABLE IF NOT EXISTS character_badges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id TEXT NOT NULL,
+                    character_id TEXT NOT NULL,
+                    badge_kind TEXT NOT NULL,
+                    badge_id TEXT NOT NULL,
+                    party_turn INTEGER NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    payload_json TEXT,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(campaign_id, character_id, badge_kind, badge_id),
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+                );
+                CREATE TABLE IF NOT EXISTS narrative_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id TEXT NOT NULL,
+                    character_id TEXT NOT NULL,
+                    axis TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    opened_turn INTEGER NOT NULL,
+                    due_turn INTEGER NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    resolution TEXT,
+                    resolved_turn INTEGER,
+                    resolved_turn_id INTEGER,
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+                );
+                CREATE TABLE IF NOT EXISTS character_axis_state (
+                    campaign_id TEXT NOT NULL,
+                    character_id TEXT NOT NULL,
+                    axis TEXT NOT NULL,
+                    band TEXT NOT NULL,
+                    band_since_turn INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY(campaign_id, character_id, axis),
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_narrative_events_active
+                    ON narrative_events(campaign_id, status, due_turn);
                 CREATE TABLE IF NOT EXISTS training_runtime_snapshots (
                     campaign_id TEXT PRIMARY KEY,
                     contract_hash TEXT NOT NULL,
@@ -110,6 +184,8 @@ class StateStore:
                     prompt_json TEXT,
                     metadata_json TEXT,
                     state_version INTEGER NOT NULL,
+                    party_turn INTEGER,
+                    excluded_from_memory INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     UNIQUE(campaign_id, idempotency_key),
                     FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
@@ -241,6 +317,65 @@ class StateStore:
                     created_at INTEGER NOT NULL,
                     FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
                 );
+                CREATE TABLE IF NOT EXISTS turn_trace_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    turn_id INTEGER,
+                    party_turn INTEGER,
+                    phase_key TEXT NOT NULL,
+                    alignment_key TEXT NOT NULL,
+                    lane TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    UNIQUE(campaign_id, request_id, phase_key),
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+                    FOREIGN KEY(turn_id) REFERENCES turns(id) ON DELETE SET NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_turn_trace_events_request
+                    ON turn_trace_events(campaign_id, request_id, id);
+                CREATE INDEX IF NOT EXISTS idx_turn_trace_events_turn
+                    ON turn_trace_events(campaign_id, turn_id, id);
+                CREATE TABLE IF NOT EXISTS turn_state_mutations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    turn_id INTEGER,
+                    party_turn INTEGER,
+                    phase_key TEXT NOT NULL,
+                    store_name TEXT NOT NULL,
+                    entity_key TEXT NOT NULL,
+                    before_json TEXT,
+                    after_json TEXT,
+                    lane TEXT NOT NULL DEFAULT 'background' CHECK(lane IN ('main', 'background')),
+                    source TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+                    FOREIGN KEY(turn_id) REFERENCES turns(id) ON DELETE SET NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_turn_state_mutations_request
+                    ON turn_state_mutations(campaign_id, request_id, id);
+                CREATE INDEX IF NOT EXISTS idx_turn_state_mutations_turn
+                    ON turn_state_mutations(campaign_id, turn_id, id);
+                CREATE TABLE IF NOT EXISTS turn_phase_annotations (
+                    id TEXT NOT NULL,
+                    campaign_id TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    turn_id INTEGER,
+                    phase_key TEXT NOT NULL,
+                    author_user_id TEXT,
+                    body TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    PRIMARY KEY(campaign_id, id),
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+                    FOREIGN KEY(turn_id) REFERENCES turns(id) ON DELETE SET NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_turn_phase_annotations_request
+                    ON turn_phase_annotations(campaign_id, request_id, phase_key, created_at);
                 CREATE TABLE IF NOT EXISTS memory_summaries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     campaign_id TEXT NOT NULL,
@@ -288,9 +423,12 @@ class StateStore:
                     memory_json TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
                     model TEXT NOT NULL,
+                    invalidated INTEGER NOT NULL DEFAULT 0,
+                    base_snapshot_id INTEGER,
+                    update_id TEXT,
                     FOREIGN KEY(campaign_id) REFERENCES campaigns(id),
                     UNIQUE(campaign_id, revision),
-                    UNIQUE(campaign_id, to_turn_id)
+                    UNIQUE(campaign_id, update_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_rp_story_memory_campaign_to
                     ON rp_story_memory_snapshots(campaign_id, to_turn_id DESC, revision DESC);
@@ -312,6 +450,7 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS lore_cards (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     campaign_id TEXT NOT NULL,
+                    authored_key TEXT,
                     title TEXT NOT NULL,
                     content TEXT NOT NULL,
                     keywords_json TEXT NOT NULL,
@@ -348,6 +487,7 @@ class StateStore:
                     max_attempts INTEGER NOT NULL,
                     next_attempt_at INTEGER NOT NULL,
                     request_id TEXT,
+                    party_turn INTEGER,
                     last_error TEXT,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
@@ -355,14 +495,82 @@ class StateStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_service_jobs_campaign_status
                     ON service_jobs(campaign_id, status, next_attempt_at, id);
+                CREATE TABLE IF NOT EXISTS rp_supervisor_evaluations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id TEXT NOT NULL,
+                    request_id TEXT,
+                    source_turn_id INTEGER NOT NULL,
+                    source_party_turn INTEGER NOT NULL,
+                    story_turn_count INTEGER NOT NULL,
+                    window_start_turn_id INTEGER NOT NULL,
+                    window_end_turn_id INTEGER NOT NULL,
+                    window_hash TEXT NOT NULL,
+                    contract_hash TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    status_reason TEXT,
+                    results_json TEXT NOT NULL,
+                    advisories_json TEXT NOT NULL,
+                    diagnostic_flags_json TEXT NOT NULL,
+                    latency_ms REAL NOT NULL,
+                    context_tokens INTEGER NOT NULL,
+                    estimated_input_tokens INTEGER NOT NULL,
+                    invalidated INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id),
+                    FOREIGN KEY(source_turn_id) REFERENCES turns(id)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_rp_supervisor_window_contract
+                    ON rp_supervisor_evaluations(campaign_id, window_end_turn_id, contract_hash);
+                CREATE INDEX IF NOT EXISTS idx_rp_supervisor_campaign_latest
+                    ON rp_supervisor_evaluations(campaign_id, invalidated, expires_at, window_end_turn_id DESC);
                 """
             )
             self.migrate_turn_columns(connection)
+            self.migrate_rp_story_memory_columns(connection)
+            self.migrate_relationship_turn_columns(connection)
+            self.migrate_narrative_event_resolution_columns(connection)
             self.migrate_turn_feedback_columns(connection)
+            self.migrate_turn_trace_tables(connection)
+            self.migrate_lore_card_columns(connection)
+            self.migrate_service_job_columns(connection)
             connection.execute(
                 "INSERT OR IGNORE INTO campaigns(id, created_at) VALUES(?, ?)",
                 (self.campaign_id, now_ts()),
             )
+
+    @staticmethod
+    def migrate_lore_card_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(lore_cards)").fetchall()
+        }
+        if "authored_key" not in columns:
+            connection.execute("ALTER TABLE lore_cards ADD COLUMN authored_key TEXT")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_lore_cards_campaign_authored_key "
+            "ON lore_cards(campaign_id, authored_key) WHERE authored_key IS NOT NULL"
+        )
+
+    @staticmethod
+    def migrate_service_job_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(service_jobs)").fetchall()
+        }
+        if "party_turn" not in columns:
+            connection.execute("ALTER TABLE service_jobs ADD COLUMN party_turn INTEGER")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_service_jobs_world_clock_turn "
+            "ON service_jobs(campaign_id, party_turn) "
+            "WHERE job_type = 'world_clock' AND party_turn IS NOT NULL"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_service_jobs_rp_supervisor_request "
+            "ON service_jobs(campaign_id, request_id) "
+            "WHERE job_type = 'rp_supervisor' AND request_id IS NOT NULL"
+        )
 
     def migrate_turn_columns(self, connection: sqlite3.Connection) -> None:
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(turns)").fetchall()}
@@ -370,6 +578,224 @@ class StateStore:
             connection.execute("ALTER TABLE turns ADD COLUMN prompt_json TEXT")
         if "metadata_json" not in columns:
             connection.execute("ALTER TABLE turns ADD COLUMN metadata_json TEXT")
+        if "excluded_from_memory" not in columns:
+            connection.execute(
+                "ALTER TABLE turns ADD COLUMN excluded_from_memory INTEGER NOT NULL DEFAULT 0"
+            )
+        if "party_turn" not in columns:
+            connection.execute("ALTER TABLE turns ADD COLUMN party_turn INTEGER")
+        connection.execute(
+            """
+            UPDATE turns AS current_turn
+            SET party_turn = (
+                SELECT COUNT(*)
+                FROM turns AS preceding_turn
+                WHERE preceding_turn.campaign_id = current_turn.campaign_id
+                  AND preceding_turn.id <= current_turn.id
+            )
+            WHERE current_turn.party_turn IS NULL
+            """
+        )
+
+    def migrate_rp_story_memory_columns(self, connection: sqlite3.Connection) -> None:
+        column_rows = connection.execute(
+            "PRAGMA table_info(rp_story_memory_snapshots)"
+        ).fetchall()
+        columns = {str(row["name"]) for row in column_rows}
+        had_invalidated = "invalidated" in columns
+        unique_columns: set[tuple[str, ...]] = set()
+        for index_row in connection.execute(
+            "PRAGMA index_list(rp_story_memory_snapshots)"
+        ).fetchall():
+            if not bool(index_row["unique"]):
+                continue
+            index_name = str(index_row["name"]).replace("'", "''")
+            unique_columns.add(
+                tuple(
+                    str(row["name"])
+                    for row in connection.execute(
+                        f"PRAGMA index_info('{index_name}')"
+                    ).fetchall()
+                )
+            )
+
+        requires_rebuild = (
+            "invalidated" not in columns
+            or "base_snapshot_id" not in columns
+            or "update_id" not in columns
+            or ("campaign_id", "to_turn_id") in unique_columns
+            or ("campaign_id", "update_id") not in unique_columns
+        )
+        if requires_rebuild:
+            invalidated_value = "invalidated" if "invalidated" in columns else "0"
+            base_snapshot_value = "base_snapshot_id" if "base_snapshot_id" in columns else "NULL"
+            update_value = "update_id" if "update_id" in columns else "NULL"
+            connection.execute(
+                "ALTER TABLE rp_story_memory_snapshots "
+                "RENAME TO rp_story_memory_snapshots_legacy_rev8"
+            )
+            connection.execute(
+                """
+                CREATE TABLE rp_story_memory_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    from_turn_id INTEGER NOT NULL,
+                    to_turn_id INTEGER NOT NULL,
+                    state_version INTEGER NOT NULL,
+                    memory_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    model TEXT NOT NULL,
+                    invalidated INTEGER NOT NULL DEFAULT 0,
+                    base_snapshot_id INTEGER,
+                    update_id TEXT,
+                    FOREIGN KEY(campaign_id) REFERENCES campaigns(id),
+                    UNIQUE(campaign_id, revision),
+                    UNIQUE(campaign_id, update_id)
+                )
+                """
+            )
+            connection.execute(
+                f"""
+                INSERT INTO rp_story_memory_snapshots(
+                    id, campaign_id, revision, from_turn_id, to_turn_id,
+                    state_version, memory_json, created_at, model, invalidated,
+                    base_snapshot_id, update_id
+                )
+                SELECT id, campaign_id, revision, from_turn_id, to_turn_id,
+                       state_version, memory_json, created_at, model, {invalidated_value},
+                       {base_snapshot_value}, {update_value}
+                FROM rp_story_memory_snapshots_legacy_rev8
+                """
+            )
+            connection.execute("DROP TABLE rp_story_memory_snapshots_legacy_rev8")
+            connection.execute(
+                """
+                CREATE INDEX idx_rp_story_memory_campaign_to
+                    ON rp_story_memory_snapshots(campaign_id, to_turn_id DESC, revision DESC)
+                """
+            )
+
+        if not had_invalidated:
+            connection.execute(
+                """
+                UPDATE rp_story_memory_snapshots AS snapshot
+                SET invalidated = 1
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM turns AS turn_record
+                    WHERE turn_record.campaign_id = snapshot.campaign_id
+                      AND turn_record.excluded_from_memory = 1
+                      AND turn_record.id BETWEEN snapshot.from_turn_id AND snapshot.to_turn_id
+                )
+                """
+            )
+
+    def migrate_relationship_turn_columns(self, connection: sqlite3.Connection) -> None:
+        cause_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(relationship_causes)").fetchall()
+        }
+        badge_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(character_badges)").fetchall()
+        }
+        if "party_turn" in cause_columns and "party_turn" in badge_columns:
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_relationship_causes_lookup "
+                "ON relationship_causes(campaign_id, character_id, axis, party_turn)"
+            )
+            return
+
+        relationship_tables = (
+            "relationship_causes",
+            "character_badges",
+            "narrative_events",
+            "character_axis_state",
+        )
+        populated = {
+            table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            for table in relationship_tables
+        }
+        if any(populated.values()):
+            raise RuntimeError(
+                "relationship party-turn migration requires empty relationship tables: "
+                + ", ".join(f"{table}={count}" for table, count in populated.items())
+            )
+
+        connection.execute("DROP INDEX IF EXISTS idx_relationship_causes_lookup")
+        connection.execute("DROP INDEX IF EXISTS idx_narrative_events_active")
+        for table in relationship_tables:
+            connection.execute(f"DROP TABLE {table}")
+        connection.executescript(
+            """
+            CREATE TABLE relationship_causes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NOT NULL,
+                character_id TEXT NOT NULL,
+                axis TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                weight INTEGER NOT NULL,
+                turn_id INTEGER NOT NULL,
+                party_turn INTEGER NOT NULL,
+                expires_turn INTEGER,
+                evidence TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(campaign_id, character_id, axis, event_id, turn_id),
+                FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+            );
+            CREATE TABLE character_badges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NOT NULL,
+                character_id TEXT NOT NULL,
+                badge_kind TEXT NOT NULL,
+                badge_id TEXT NOT NULL,
+                party_turn INTEGER NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                payload_json TEXT,
+                created_at INTEGER NOT NULL,
+                UNIQUE(campaign_id, character_id, badge_kind, badge_id),
+                FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+            );
+            CREATE TABLE narrative_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NOT NULL,
+                character_id TEXT NOT NULL,
+                axis TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                opened_turn INTEGER NOT NULL,
+                due_turn INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                resolution TEXT,
+                resolved_turn INTEGER,
+                resolved_turn_id INTEGER,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+            );
+            CREATE TABLE character_axis_state (
+                campaign_id TEXT NOT NULL,
+                character_id TEXT NOT NULL,
+                axis TEXT NOT NULL,
+                band TEXT NOT NULL,
+                band_since_turn INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(campaign_id, character_id, axis),
+                FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+            );
+            CREATE INDEX idx_relationship_causes_lookup
+                ON relationship_causes(campaign_id, character_id, axis, party_turn);
+            CREATE INDEX idx_narrative_events_active
+                ON narrative_events(campaign_id, status, due_turn);
+            """
+        )
+
+    @staticmethod
+    def migrate_narrative_event_resolution_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(narrative_events)").fetchall()
+        }
+        if "resolved_turn_id" not in columns:
+            connection.execute("ALTER TABLE narrative_events ADD COLUMN resolved_turn_id INTEGER")
 
     def migrate_turn_feedback_columns(self, connection: sqlite3.Connection) -> None:
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(turn_feedback)").fetchall()}
@@ -383,6 +809,51 @@ class StateStore:
             "CREATE INDEX IF NOT EXISTS idx_turn_feedback_rating "
             "ON turn_feedback(rating, campaign_id, turn_id)"
         )
+
+    def migrate_turn_trace_tables(self, connection: sqlite3.Connection) -> None:
+        """Upgrade additive trace fields and the draft annotation key."""
+
+        mutation_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(turn_state_mutations)").fetchall()
+        }
+        if "lane" not in mutation_columns:
+            connection.execute(
+                "ALTER TABLE turn_state_mutations "
+                "ADD COLUMN lane TEXT NOT NULL DEFAULT 'background' "
+                "CHECK(lane IN ('main', 'background'))"
+            )
+
+        columns = connection.execute("PRAGMA table_info(turn_phase_annotations)").fetchall()
+        primary_key = [row["name"] for row in sorted(columns, key=lambda row: int(row["pk"])) if row["pk"]]
+        if primary_key == ["id"]:
+            connection.execute("ALTER TABLE turn_phase_annotations RENAME TO turn_phase_annotations_legacy")
+            connection.executescript(
+                """
+            CREATE TABLE turn_phase_annotations (
+                id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                turn_id INTEGER,
+                phase_key TEXT NOT NULL,
+                author_user_id TEXT,
+                body TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(campaign_id, id),
+                FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+                FOREIGN KEY(turn_id) REFERENCES turns(id) ON DELETE SET NULL
+            );
+            INSERT INTO turn_phase_annotations(
+                id, campaign_id, request_id, turn_id, phase_key,
+                author_user_id, body, created_at
+            )
+            SELECT id, campaign_id, request_id, turn_id, phase_key,
+                   author_user_id, body, created_at
+            FROM turn_phase_annotations_legacy;
+            DROP TABLE turn_phase_annotations_legacy;
+            CREATE INDEX idx_turn_phase_annotations_request
+                ON turn_phase_annotations(campaign_id, request_id, phase_key, created_at);
+                """
+            )
 
     def recover_interrupted_work(self) -> dict[str, int]:
         """Reconcile work that could only remain running after a process restart."""
@@ -433,28 +904,64 @@ class StateStore:
             "resumed_jobs": max(resumed_jobs, 0),
         }
 
-    def enqueue_service_job(self, job_type: str, request_id: str | None, max_attempts: int = 5) -> dict[str, Any]:
-        if job_type not in {"memory", "rp_story_memory", "journal"}:
+    def enqueue_service_job(
+        self,
+        job_type: str,
+        request_id: str | None,
+        max_attempts: int = 5,
+        *,
+        request_scoped: bool = False,
+        party_turn: int | None = None,
+    ) -> dict[str, Any]:
+        if job_type not in {
+            "memory",
+            "rp_story_memory",
+            "relationship_extraction",
+            "journal",
+            "world_clock",
+            "rp_supervisor",
+        }:
             raise ValueError(f"unsupported service job type: {job_type}")
+        if job_type == "world_clock" and (party_turn is None or int(party_turn) < 1):
+            raise ValueError("world_clock service job requires a positive party_turn")
         timestamp = now_ts()
         with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT * FROM service_jobs
-                WHERE campaign_id = ? AND job_type = ? AND status IN ('pending', 'running')
-                ORDER BY id DESC LIMIT 1
-                """,
-                (self.campaign_id, job_type),
-            ).fetchone()
+            if job_type in {"relationship_extraction", "world_clock", "rp_supervisor"} or request_scoped:
+                row = connection.execute(
+                    """
+                    SELECT * FROM service_jobs
+                    WHERE campaign_id = ? AND job_type = ? AND request_id = ?
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (self.campaign_id, job_type, request_id),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT * FROM service_jobs
+                    WHERE campaign_id = ? AND job_type = ? AND status IN ('pending', 'running')
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (self.campaign_id, job_type),
+                ).fetchone()
             if row is None:
                 cursor = connection.execute(
                     """
                     INSERT INTO service_jobs(
                         campaign_id, job_type, status, attempts, max_attempts,
-                        next_attempt_at, request_id, last_error, created_at, updated_at
-                    ) VALUES(?, ?, 'pending', 0, ?, ?, ?, NULL, ?, ?)
+                        next_attempt_at, request_id, party_turn, last_error, created_at, updated_at
+                    ) VALUES(?, ?, 'pending', 0, ?, ?, ?, ?, NULL, ?, ?)
                     """,
-                    (self.campaign_id, job_type, max(max_attempts, 1), timestamp, request_id, timestamp, timestamp),
+                    (
+                        self.campaign_id,
+                        job_type,
+                        max(max_attempts, 1),
+                        timestamp,
+                        request_id,
+                        int(party_turn) if party_turn is not None else None,
+                        timestamp,
+                        timestamp,
+                    ),
                 )
                 row = connection.execute("SELECT * FROM service_jobs WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
         return self.service_job_from_row(row)
@@ -463,9 +970,22 @@ class StateStore:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT * FROM service_jobs
-                WHERE campaign_id = ? AND status = 'pending' AND next_attempt_at <= ?
-                ORDER BY next_attempt_at ASC, id ASC LIMIT 1
+                SELECT job.* FROM service_jobs AS job
+                WHERE job.campaign_id = ?
+                  AND job.status = 'pending'
+                  AND job.next_attempt_at <= ?
+                  AND (
+                    job.job_type <> 'world_clock'
+                    OR NOT EXISTS (
+                      SELECT 1 FROM service_jobs AS earlier
+                      WHERE earlier.campaign_id = job.campaign_id
+                        AND earlier.job_type = 'world_clock'
+                        AND earlier.status IN ('pending', 'running')
+                        AND COALESCE(earlier.party_turn, earlier.id)
+                            < COALESCE(job.party_turn, job.id)
+                    )
+                  )
+                ORDER BY job.next_attempt_at ASC, job.id ASC LIMIT 1
                 """,
                 (self.campaign_id, now_ts()),
             ).fetchone()
@@ -475,8 +995,21 @@ class StateStore:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT MIN(next_attempt_at) AS next_attempt_at FROM service_jobs
-                WHERE campaign_id = ? AND status = 'pending'
+                SELECT MIN(job.next_attempt_at) AS next_attempt_at
+                FROM service_jobs AS job
+                WHERE job.campaign_id = ?
+                  AND job.status = 'pending'
+                  AND (
+                    job.job_type <> 'world_clock'
+                    OR NOT EXISTS (
+                      SELECT 1 FROM service_jobs AS earlier
+                      WHERE earlier.campaign_id = job.campaign_id
+                        AND earlier.job_type = 'world_clock'
+                        AND earlier.status IN ('pending', 'running')
+                        AND COALESCE(earlier.party_turn, earlier.id)
+                            < COALESCE(job.party_turn, job.id)
+                    )
+                  )
                 """,
                 (self.campaign_id,),
             ).fetchone()
@@ -506,7 +1039,37 @@ class StateStore:
                 (now_ts(), job_id, self.campaign_id),
             )
 
-    def retry_service_job(self, job_id: int, error: str, retry_delay: int) -> None:
+    def defer_service_job(self, job_id: int, retry_delay: int, error: str) -> None:
+        """Return a clock job to pending without consuming a service attempt."""
+
+        timestamp = now_ts()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE service_jobs
+                SET status = 'pending', attempts = MAX(attempts - 1, 0),
+                    next_attempt_at = ?, last_error = ?, updated_at = ?
+                WHERE id = ? AND campaign_id = ? AND status = 'running'
+                """,
+                (
+                    timestamp + max(int(retry_delay), 1),
+                    str(error)[:500],
+                    timestamp,
+                    int(job_id),
+                    self.campaign_id,
+                ),
+            )
+
+    def retry_service_job(
+        self,
+        job_id: int,
+        error: str,
+        retry_delay: int,
+        *,
+        terminal_status: str = "failed",
+    ) -> None:
+        if terminal_status not in {"failed", "stale"}:
+            raise ValueError("unsupported terminal service-job status")
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT attempts, max_attempts FROM service_jobs WHERE id = ? AND campaign_id = ?",
@@ -523,7 +1086,7 @@ class StateStore:
                 WHERE id = ? AND campaign_id = ?
                 """,
                 (
-                    "failed" if terminal else "pending",
+                    terminal_status if terminal else "pending",
                     timestamp if terminal else timestamp + max(retry_delay, 1),
                     error[:500],
                     timestamp,
@@ -553,10 +1116,173 @@ class StateStore:
             "max_attempts": row["max_attempts"],
             "next_attempt_at": row["next_attempt_at"],
             "request_id": row["request_id"],
+            "party_turn": row["party_turn"],
             "last_error": row["last_error"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+    def cleanup_rp_supervisor_evaluations(self, *, timestamp: int | None = None) -> int:
+        """Delete expired typed retrospectives without touching turns or service traces."""
+
+        cutoff = int(timestamp if timestamp is not None else now_ts())
+        with self.connect() as connection:
+            deleted = connection.execute(
+                "DELETE FROM rp_supervisor_evaluations WHERE expires_at <= ?",
+                (cutoff,),
+            ).rowcount
+        return max(int(deleted), 0)
+
+    @staticmethod
+    def rp_supervisor_evaluation_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        def decode_list(column: str) -> list[Any]:
+            try:
+                value = json.loads(row[column] or "[]")
+            except (TypeError, json.JSONDecodeError):
+                return []
+            return value if isinstance(value, list) else []
+
+        return {
+            "id": int(row["id"]),
+            "campaign_id": str(row["campaign_id"]),
+            "request_id": row["request_id"],
+            "source_turn_id": int(row["source_turn_id"]),
+            "source_party_turn": int(row["source_party_turn"]),
+            "story_turn_count": int(row["story_turn_count"]),
+            "window_start_turn_id": int(row["window_start_turn_id"]),
+            "window_end_turn_id": int(row["window_end_turn_id"]),
+            "window_hash": str(row["window_hash"]),
+            "contract_hash": str(row["contract_hash"]),
+            "mode": str(row["mode"]),
+            "provider": str(row["provider"]),
+            "model": str(row["model"]),
+            "status": str(row["status"]),
+            "status_reason": row["status_reason"],
+            "results": decode_list("results_json"),
+            "advisories": decode_list("advisories_json"),
+            "diagnostic_flags": decode_list("diagnostic_flags_json"),
+            "latency_ms": float(row["latency_ms"]),
+            "context_tokens": int(row["context_tokens"]),
+            "estimated_input_tokens": int(row["estimated_input_tokens"]),
+            "invalidated": bool(row["invalidated"]),
+            "created_at": int(row["created_at"]),
+            "expires_at": int(row["expires_at"]),
+        }
+
+    def save_rp_supervisor_evaluation(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Upsert one metadata-only retrospective for a frozen canonical window."""
+
+        status = str(record.get("status") or "")
+        mode = str(record.get("mode") or "")
+        if status not in {"checked", "unchecked", "error"}:
+            raise ValueError("invalid RP supervisor evaluation status")
+        if mode not in {"observe", "enforce"}:
+            raise ValueError("invalid RP supervisor evaluation mode")
+        results = record.get("results")
+        advisories = record.get("advisories")
+        flags = record.get("diagnostic_flags")
+        if not isinstance(results, list) or not isinstance(advisories, list) or not isinstance(flags, list):
+            raise ValueError("RP supervisor typed results must be lists")
+        retention_days = int(record.get("retention_days") or 0)
+        if retention_days != 30:
+            raise ValueError("RP supervisor retention must equal 30 days")
+        created = now_ts()
+        expires = created + retention_days * 24 * 60 * 60
+        self.cleanup_rp_supervisor_evaluations(timestamp=created)
+        values = (
+            self.campaign_id,
+            record.get("request_id"),
+            int(record["source_turn_id"]),
+            int(record.get("source_party_turn") or 0),
+            int(record["story_turn_count"]),
+            int(record["window_start_turn_id"]),
+            int(record["window_end_turn_id"]),
+            str(record["window_hash"]),
+            str(record["contract_hash"]),
+            mode,
+            str(record.get("provider") or ""),
+            str(record.get("model") or ""),
+            status,
+            str(record.get("status_reason")) if record.get("status_reason") is not None else None,
+            json.dumps(results, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(advisories, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(flags, ensure_ascii=False, separators=(",", ":")),
+            float(record.get("latency_ms") or 0.0),
+            int(record.get("context_tokens") or 0),
+            int(record.get("estimated_input_tokens") or 0),
+            created,
+            expires,
+        )
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO rp_supervisor_evaluations(
+                    campaign_id, request_id, source_turn_id, source_party_turn,
+                    story_turn_count, window_start_turn_id, window_end_turn_id,
+                    window_hash, contract_hash, mode, provider, model, status,
+                    status_reason, results_json, advisories_json,
+                    diagnostic_flags_json, latency_ms, context_tokens,
+                    estimated_input_tokens, invalidated, created_at, expires_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                ON CONFLICT(campaign_id, window_end_turn_id, contract_hash) DO UPDATE SET
+                    request_id = excluded.request_id,
+                    source_turn_id = excluded.source_turn_id,
+                    source_party_turn = excluded.source_party_turn,
+                    story_turn_count = excluded.story_turn_count,
+                    window_start_turn_id = excluded.window_start_turn_id,
+                    window_hash = excluded.window_hash,
+                    mode = excluded.mode,
+                    provider = excluded.provider,
+                    model = excluded.model,
+                    status = excluded.status,
+                    status_reason = excluded.status_reason,
+                    results_json = excluded.results_json,
+                    advisories_json = excluded.advisories_json,
+                    diagnostic_flags_json = excluded.diagnostic_flags_json,
+                    latency_ms = excluded.latency_ms,
+                    context_tokens = excluded.context_tokens,
+                    estimated_input_tokens = excluded.estimated_input_tokens,
+                    invalidated = 0,
+                    created_at = excluded.created_at,
+                    expires_at = excluded.expires_at
+                """,
+                values,
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM rp_supervisor_evaluations
+                WHERE campaign_id = ? AND window_end_turn_id = ? AND contract_hash = ?
+                """,
+                (
+                    self.campaign_id,
+                    int(record["window_end_turn_id"]),
+                    str(record["contract_hash"]),
+                ),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("failed to save RP supervisor evaluation")
+        return self.rp_supervisor_evaluation_from_row(row)
+
+    def latest_rp_supervisor_evaluation(
+        self,
+        *,
+        contract_hash: str,
+        before_window_end_turn_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        timestamp = now_ts()
+        query = """
+            SELECT * FROM rp_supervisor_evaluations
+            WHERE campaign_id = ? AND contract_hash = ?
+              AND invalidated = 0 AND expires_at > ?
+        """
+        params: list[Any] = [self.campaign_id, str(contract_hash), timestamp]
+        if before_window_end_turn_id is not None:
+            query += " AND window_end_turn_id < ?"
+            params.append(int(before_window_end_turn_id))
+        query += " ORDER BY window_end_turn_id DESC, id DESC LIMIT 1"
+        with self.connect() as connection:
+            row = connection.execute(query, tuple(params)).fetchone()
+        return self.rp_supervisor_evaluation_from_row(row) if row is not None else None
 
     def create_lore_card(
         self,
@@ -566,6 +1292,7 @@ class StateStore:
         always_on: bool,
         enabled: bool,
         source_turn_ids: list[int],
+        authored_key: str | None = None,
     ) -> dict[str, Any]:
         timestamp = now_ts()
         clean_keywords = list(dict.fromkeys(keyword.strip() for keyword in keywords if keyword.strip()))[:40]
@@ -574,12 +1301,13 @@ class StateStore:
             cursor = connection.execute(
                 """
                 INSERT INTO lore_cards(
-                    campaign_id, title, content, keywords_json, always_on, enabled,
+                    campaign_id, authored_key, title, content, keywords_json, always_on, enabled,
                     archived, source_turn_ids_json, created_at, updated_at
-                ) VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
                     self.campaign_id,
+                    str(authored_key).strip() if authored_key else None,
                     title.strip(),
                     content.strip(),
                     json.dumps(clean_keywords, ensure_ascii=False),
@@ -635,17 +1363,36 @@ class StateStore:
             raise ValueError(f"lore card not found: {card_id}")
         return self.lore_card_from_row(row)
 
-    def lore_cards_for_prompt(self, query: str, limit: int = 8, max_chars: int = 12_000) -> list[dict[str, Any]]:
+    def lore_cards_for_prompt(
+        self,
+        query: str,
+        limit: int = 8,
+        max_chars: int = 12_000,
+        *,
+        title_keywords_only: bool = False,
+        whole_match: bool = False,
+    ) -> list[dict[str, Any]]:
         query_terms = archive_search_terms(query)
         query_stems = {archive_stem(term) for term in query_terms}
         ranked: list[tuple[float, dict[str, Any]]] = []
         for card in self.lore_cards(limit=500):
             if not card["enabled"] or card["archived"]:
                 continue
-            text = " ".join([card["title"], card["content"], *card["keywords"]]).lower()
-            lexical = sum(text.count(term) for term in query_terms)
-            card_stems = {archive_stem(token) for token in archive_word_tokens(text)}
-            stem_hits = len(query_stems & card_stems)
+            searchable = [card["title"], *card["keywords"]]
+            if not title_keywords_only:
+                searchable.insert(1, card["content"])
+            text = " ".join(searchable).lower()
+            if whole_match:
+                lexical = sum(
+                    len(re.findall(rf"(?<!\w){re.escape(str(trigger).strip().lower())}(?!\w)", query.lower()))
+                    for trigger in searchable
+                    if str(trigger).strip()
+                )
+                stem_hits = 0
+            else:
+                lexical = sum(text.count(term) for term in query_terms)
+                card_stems = {archive_stem(token) for token in archive_word_tokens(text)}
+                stem_hits = len(query_stems & card_stems)
             if not card["always_on"] and not lexical and not stem_hits:
                 continue
             score = 1_000.0 if card["always_on"] else float((lexical * 4) + (stem_hits * 2))
@@ -655,7 +1402,7 @@ class StateStore:
         used = 0
         for _, card in ranked[: max(limit, 1)]:
             size = len(card["title"]) + len(card["content"]) + sum(len(keyword) for keyword in card["keywords"])
-            if selected and used + size > max_chars:
+            if used + size > max_chars and (whole_match or selected):
                 continue
             selected.append(card)
             used += size
@@ -665,6 +1412,7 @@ class StateStore:
         return {
             "id": row["id"],
             "campaign_id": row["campaign_id"],
+            "authored_key": row["authored_key"],
             "title": row["title"],
             "content": row["content"],
             "keywords": self.json_list(row["keywords_json"]),
@@ -680,7 +1428,11 @@ class StateStore:
         latest_turn = self.latest_turn()
         coverage = self.latest_memory_coverage()
         state = self.get_state()
-        lore_card_ids = [card["id"] for card in self.lore_cards() if card["enabled"]]
+        lore_card_ids = [
+            card["id"]
+            for card in self.lore_cards(include_archived=True)
+            if card["enabled"] or card.get("authored_key")
+        ]
         with self.connect() as connection:
             cursor = connection.execute(
                 """
@@ -809,8 +1561,8 @@ class StateStore:
                             INSERT INTO turns(
                                 campaign_id, idempotency_key, request_id, player_message,
                                 narrative_response, response_json, prompt_json, metadata_json,
-                                state_version, created_at
-                            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                state_version, party_turn, excluded_from_memory, created_at
+                            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 target_campaign_id,
@@ -822,6 +1574,8 @@ class StateStore:
                                 row["prompt_json"],
                                 row["metadata_json"],
                                 row["state_version"],
+                                row["party_turn"],
+                                row["excluded_from_memory"],
                                 row["created_at"],
                             ),
                         )
@@ -897,7 +1651,7 @@ class StateStore:
                     story_row = connection.execute(
                         """
                         SELECT * FROM rp_story_memory_snapshots
-                        WHERE campaign_id = ? AND to_turn_id <= ?
+                        WHERE campaign_id = ? AND to_turn_id <= ? AND invalidated = 0
                         ORDER BY to_turn_id DESC, revision DESC LIMIT 1
                         """,
                         (self.campaign_id, int(through_turn_id)),
@@ -969,12 +1723,13 @@ class StateStore:
                     connection.execute(
                         """
                         INSERT INTO lore_cards(
-                            campaign_id, title, content, keywords_json, always_on, enabled,
+                            campaign_id, authored_key, title, content, keywords_json, always_on, enabled,
                             archived, source_turn_ids_json, created_at, updated_at
-                        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             target_campaign_id,
+                            row["authored_key"],
                             row["title"],
                             row["content"],
                             row["keywords_json"],
@@ -1016,7 +1771,7 @@ class StateStore:
         except Exception:
             with self.connect() as connection:
                 for table in (
-                    "turns", "turn_requests", "checks", "state_patches", "state_versions",
+                    "rp_supervisor_evaluations", "turns", "turn_requests", "checks", "state_patches", "state_versions",
                     "audit_events", "memory_summaries", "memory_chapters", "rp_story_memory_snapshots", "journal_entries",
                     "lore_cards", "memory_checkpoints", "service_jobs", "training_runtime_snapshots",
                 ):
@@ -1034,6 +1789,37 @@ class StateStore:
 
     def bootstrap_state(self) -> None:
         if self.current_version() is not None:
+            authoritative = self.get_state()
+            authoritative_version = int(
+                (authoritative.get("meta") or {}).get("state_version") or 0
+            )
+            recover_mirror = not self.state_path.exists()
+            if not recover_mirror:
+                try:
+                    mirrored = json.loads(self.state_path.read_text(encoding="utf-8"))
+                    mirrored_meta = mirrored.get("meta") if isinstance(mirrored, dict) else None
+                    mirrored_version = (
+                        mirrored_meta.get("state_version")
+                        if isinstance(mirrored_meta, dict)
+                        else None
+                    )
+                    recover_mirror = (
+                        not isinstance(mirrored_version, int)
+                        or isinstance(mirrored_version, bool)
+                        or mirrored_version != authoritative_version
+                        or mirrored_meta.get("campaign_id") != self.campaign_id
+                    )
+                except (OSError, UnicodeError, json.JSONDecodeError):
+                    recover_mirror = True
+            if recover_mirror:
+                try:
+                    self.write_state_file(authoritative)
+                except OSError as exc:
+                    logger.warning(
+                        "state_mirror_recovery_failed campaign_id=%s error=%s",
+                        self.campaign_id,
+                        f"{type(exc).__name__}: {exc}",
+                    )
             return
         if self.state_path.exists():
             state = json.loads(self.state_path.read_text(encoding="utf-8"))
@@ -1150,7 +1936,7 @@ class StateStore:
             rows = connection.execute(
                 """
                 SELECT t.id, t.request_id, t.player_message, t.narrative_response,
-                       t.state_version, t.created_at,
+                       t.state_version, t.party_turn, t.created_at, t.metadata_json,
                        COALESCE(f.rating, 0) AS player_rating_value,
                        COALESCE(f.liked, 0) AS player_liked
                 FROM turns t
@@ -1163,8 +1949,50 @@ class StateStore:
                 (self.campaign_id, limit),
             ).fetchall()
         turns = [dict(row) for row in reversed(rows)]
+        lore_cards = {
+            int(card["id"]): card
+            for card in self.lore_cards(include_archived=True, limit=500)
+        }
         for turn in turns:
             rating_value = int(turn.pop("player_rating_value"))
+            raw_metadata = turn.pop("metadata_json", None)
+            try:
+                metadata = json.loads(raw_metadata) if raw_metadata else {}
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            prompt_assembly = metadata.get("prompt_assembly")
+            lore_card_ids = (
+                prompt_assembly.get("lore_card_ids")
+                if isinstance(prompt_assembly, dict)
+                else None
+            )
+            normalized_lore_card_ids = [
+                int(card_id)
+                for card_id in lore_card_ids or []
+                if isinstance(card_id, int) and not isinstance(card_id, bool) and card_id > 0
+            ]
+            if isinstance(lore_card_ids, list):
+                turn["metadata"] = {
+                    "prompt_assembly": {"lore_card_ids": normalized_lore_card_ids}
+                }
+                turn["activated_lore_cards"] = [
+                    {
+                        "id": card_id,
+                        "title": str(lore_cards.get(card_id, {}).get("title") or f"Lore Card #{card_id}"),
+                    }
+                    for card_id in normalized_lore_card_ids
+                ]
+            world_clock_events = metadata.get("world_clock_events")
+            if isinstance(world_clock_events, dict):
+                turn.setdefault("metadata", {})["world_clock_events"] = world_clock_events
+            turn_kind = str(metadata.get("turn_kind") or "narrative")
+            turn["turn_kind"] = turn_kind
+            if turn_kind == "gm_correction":
+                correction = metadata.get("player_correction")
+                if isinstance(correction, dict):
+                    turn["player_correction"] = correction
             turn["player_rating"] = {1: "positive", -1: "negative"}.get(rating_value, "none")
             turn["player_liked"] = bool(turn["player_liked"])
             turn["player_disliked"] = rating_value == -1
@@ -1268,6 +2096,28 @@ class StateStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def turn_metadata(self, turn_id: int) -> dict[str, Any]:
+        """Read stored metadata without applying narrative-memory eligibility rules."""
+
+        if turn_id <= 0:
+            return {}
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT metadata_json
+                FROM turns
+                WHERE campaign_id = ? AND id = ?
+                """,
+                (self.campaign_id, turn_id),
+            ).fetchone()
+        if row is None or not row["metadata_json"]:
+            return {}
+        try:
+            metadata = json.loads(row["metadata_json"])
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+
     def turns_before(self, turn_id: int, limit: int = 50) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -1287,23 +2137,180 @@ class StateStore:
         after_turn_id: int = 0,
         to_turn_id: int | None = None,
         limit: int | None = None,
+        include_noncanonical_fallback: bool = False,
     ) -> list[dict[str, Any]]:
         query = """
-            SELECT id, request_id, player_message, narrative_response, state_version, created_at
+            SELECT id, request_id, player_message, narrative_response,
+                   state_version, party_turn, metadata_json, excluded_from_memory, created_at
             FROM turns
             WHERE campaign_id = ? AND id > ?
         """
         params: list[Any] = [self.campaign_id, after_turn_id]
+        if not include_noncanonical_fallback:
+            query += " AND excluded_from_memory = 0"
         if to_turn_id is not None:
             query += " AND id <= ?"
             params.append(to_turn_id)
         query += " ORDER BY id ASC"
-        if limit is not None:
+        if limit is not None and not include_noncanonical_fallback:
             query += " LIMIT ?"
             params.append(limit)
         with self.connect() as connection:
             rows = connection.execute(query, tuple(params)).fetchall()
-        return [dict(row) for row in rows]
+        turns: list[dict[str, Any]] = []
+        for row in rows:
+            turn = dict(row)
+            raw_metadata = turn.pop("metadata_json", None)
+            try:
+                metadata = json.loads(raw_metadata) if raw_metadata else {}
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            turn["metadata"] = metadata if isinstance(metadata, dict) else {}
+            excluded = bool(turn.pop("excluded_from_memory", 0))
+            noncanonical_fallback = bool(
+                turn["metadata"].get("fallback")
+                and turn["metadata"].get("story_memory_canonical") is False
+                and turn["metadata"].get("rollback_excluded") is not True
+            )
+            if excluded and not (include_noncanonical_fallback and noncanonical_fallback):
+                continue
+            if excluded and noncanonical_fallback and include_noncanonical_fallback:
+                turn["narrative_response"] = "NON_CANONICAL_SAFE_FALLBACK"
+                turn["noncanonical_safe_fallback"] = True
+            turns.append(turn)
+            if include_noncanonical_fallback and limit is not None and len(turns) >= limit:
+                break
+        return turns
+
+    def turn_record(self, turn_id: int) -> dict[str, Any] | None:
+        """Return one party turn with parsed metadata, including excluded GM rows."""
+
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, request_id, player_message, narrative_response,
+                       state_version, party_turn, metadata_json, excluded_from_memory, created_at
+                FROM turns
+                WHERE campaign_id = ? AND id = ?
+                """,
+                (self.campaign_id, int(turn_id)),
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        raw_metadata = result.pop("metadata_json", None)
+        try:
+            metadata = json.loads(raw_metadata) if raw_metadata else {}
+        except (TypeError, json.JSONDecodeError):
+            metadata = {}
+        result["metadata"] = metadata if isinstance(metadata, dict) else {}
+        result["excluded_from_memory"] = bool(result.get("excluded_from_memory"))
+        return result
+
+    def player_correction_records(self) -> list[dict[str, Any]]:
+        """Read typed player-correction artifacts from non-game turn metadata."""
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, request_id, party_turn, metadata_json, created_at
+                FROM turns
+                WHERE campaign_id = ? AND excluded_from_memory = 1
+                ORDER BY id ASC
+                """,
+                (self.campaign_id,),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(metadata, dict) or metadata.get("turn_kind") != "gm_correction":
+                continue
+            correction = metadata.get("player_correction")
+            if not isinstance(correction, dict):
+                continue
+            result.append(
+                {
+                    **correction,
+                    "source_turn_id": int(row["id"]),
+                    "request_id": str(row["request_id"]),
+                    "party_turn": int(row["party_turn"] or 0),
+                    "created_at": int(row["created_at"]),
+                }
+            )
+        return result
+
+    def mark_player_correction_absorbed(
+        self,
+        correction_id: str,
+        *,
+        snapshot_id: int,
+        section_key: str,
+        coverage: int,
+        request_id: str | None,
+    ) -> bool:
+        """Persist the terminal artifact status after both absorption gates pass."""
+
+        timestamp = now_ts()
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                """
+                SELECT id, metadata_json FROM turns
+                WHERE campaign_id = ? AND excluded_from_memory = 1
+                ORDER BY id DESC
+                """,
+                (self.campaign_id,),
+            ).fetchall()
+            for row in rows:
+                try:
+                    metadata = json.loads(row["metadata_json"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                correction = metadata.get("player_correction") if isinstance(metadata, dict) else None
+                if not isinstance(correction, dict):
+                    continue
+                if str(correction.get("correction_id") or "") != correction_id:
+                    continue
+                if correction.get("status") == "absorbed":
+                    return False
+                correction["status"] = "absorbed"
+                correction["absorption"] = {
+                    "snapshot_id": int(snapshot_id),
+                    "section_key": str(section_key),
+                    "coverage": int(coverage),
+                    "timestamp": timestamp,
+                }
+                metadata["player_correction"] = correction
+                connection.execute(
+                    "UPDATE turns SET metadata_json = ? WHERE id = ? AND campaign_id = ?",
+                    (json.dumps(metadata, ensure_ascii=False), int(row["id"]), self.campaign_id),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO audit_events(campaign_id, request_id, event_type, event_json, created_at)
+                    VALUES(?, ?, 'player_correction_absorbed', ?, ?)
+                    """,
+                    (
+                        self.campaign_id,
+                        request_id,
+                        json.dumps(
+                            {
+                                "correction_id": correction_id,
+                                "turn_id": int(row["id"]),
+                                "snapshot_id": int(snapshot_id),
+                                "section_key": str(section_key),
+                                "coverage": int(coverage),
+                            },
+                            ensure_ascii=False,
+                        ),
+                        timestamp,
+                    ),
+                )
+                return True
+        return False
 
     def search_archived_turns(self, query: str, through_turn_id: int, limit: int = 3) -> list[dict[str, Any]]:
         """Retrieve only already-compressed turns; the raw tail remains sequential in the prompt."""
@@ -1331,9 +2338,9 @@ class StateStore:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, player_message, narrative_response, state_version
+                SELECT id, player_message, narrative_response, state_version, metadata_json
                 FROM turns
-                WHERE campaign_id = ? AND id <= ?
+                WHERE campaign_id = ? AND id <= ? AND excluded_from_memory = 0
                 ORDER BY id DESC
                 """,
                 (self.campaign_id, through_turn_id),
@@ -1344,6 +2351,13 @@ class StateStore:
         newest_turn_id = int(rows[0]["id"]) if rows else through_turn_id
         for row in rows:
             item = dict(row)
+            raw_metadata = item.pop("metadata_json", None)
+            try:
+                metadata = json.loads(raw_metadata) if raw_metadata else {}
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            if isinstance(metadata, dict) and metadata.get("story_memory_canonical") is False:
+                continue
             text = f"{item['player_message']}\n{item['narrative_response']}".lower()
             text_tokens = archive_word_tokens(text)
             text_stems = {archive_stem(token) for token in text_tokens}
@@ -1421,6 +2435,22 @@ class StateStore:
             ).fetchone()
         return self.rp_story_memory_from_row(row) if row else None
 
+    def effective_rp_story_memory(self) -> dict[str, Any] | None:
+        """Return the newest snapshot whose covered turns are still part of memory."""
+
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM rp_story_memory_snapshots
+                WHERE campaign_id = ? AND invalidated = 0
+                ORDER BY to_turn_id DESC, revision DESC
+                LIMIT 1
+                """,
+                (self.campaign_id,),
+            ).fetchone()
+        return self.rp_story_memory_from_row(row) if row else None
+
     def rp_story_memories(self, limit: int = 20) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -1441,25 +2471,86 @@ class StateStore:
         state_version: int,
         memory: dict[str, Any],
         model: str,
-    ) -> dict[str, Any]:
+        contributing_turn_ids: list[int] | None = None,
+        base_snapshot_id: int | None = None,
+        update_id: str | None = None,
+        allow_same_coverage: bool = False,
+    ) -> dict[str, Any] | None:
+        turn_ids = list(dict.fromkeys(int(turn_id) for turn_id in contributing_turn_ids or []))
+        normalized_update_id = str(update_id).strip() if update_id is not None else None
+        if update_id is not None and not normalized_update_id:
+            raise ValueError("update_id must not be blank")
+        if allow_same_coverage and normalized_update_id is None:
+            raise ValueError("allow_same_coverage requires update_id")
         with self.connect() as connection:
-            existing = connection.execute(
-                "SELECT * FROM rp_story_memory_snapshots WHERE campaign_id = ? AND to_turn_id = ?",
-                (self.campaign_id, int(to_turn_id)),
-            ).fetchone()
-            if existing is not None:
-                return self.rp_story_memory_from_row(existing)
+            connection.execute("BEGIN IMMEDIATE")
+            if normalized_update_id is not None:
+                existing_update = connection.execute(
+                    """
+                    SELECT * FROM rp_story_memory_snapshots
+                    WHERE campaign_id = ? AND update_id = ?
+                    """,
+                    (self.campaign_id, normalized_update_id),
+                ).fetchone()
+                if existing_update is not None:
+                    return (
+                        self.rp_story_memory_from_row(existing_update)
+                        if not bool(existing_update["invalidated"])
+                        else None
+                    )
+            if not allow_same_coverage:
+                existing = connection.execute(
+                    """
+                    SELECT * FROM rp_story_memory_snapshots
+                    WHERE campaign_id = ? AND to_turn_id = ?
+                    ORDER BY revision DESC LIMIT 1
+                    """,
+                    (self.campaign_id, int(to_turn_id)),
+                ).fetchone()
+                if existing is not None:
+                    return (
+                        self.rp_story_memory_from_row(existing)
+                        if not bool(existing["invalidated"])
+                        else None
+                    )
             row = connection.execute(
                 "SELECT COALESCE(MAX(revision), 0) AS revision FROM rp_story_memory_snapshots WHERE campaign_id = ?",
                 (self.campaign_id,),
             ).fetchone()
             revision = int(row["revision"] or 0) + 1
-            cursor = connection.execute(
+            turn_placeholders = ", ".join("?" for _ in turn_ids)
+            turn_guard = (
+                f"""
+                AND (
+                    SELECT COUNT(*)
+                    FROM turns
+                    WHERE campaign_id = ?
+                      AND id IN ({turn_placeholders})
+                      AND excluded_from_memory = 0
+                ) = ?
                 """
+                if turn_ids
+                else ""
+            )
+            cursor = connection.execute(
+                f"""
                 INSERT INTO rp_story_memory_snapshots(
                     campaign_id, revision, from_turn_id, to_turn_id,
-                    state_version, memory_json, created_at, model
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                    state_version, memory_json, created_at, model,
+                    base_snapshot_id, update_id
+                )
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                WHERE (
+                    ? IS NULL
+                    OR ? = (
+                        SELECT id
+                        FROM rp_story_memory_snapshots
+                        WHERE campaign_id = ? AND invalidated = 0
+                        ORDER BY to_turn_id DESC, revision DESC
+                        LIMIT 1
+                    )
+                )
+                {turn_guard}
                 """,
                 (
                     self.campaign_id,
@@ -1470,8 +2561,20 @@ class StateStore:
                     json.dumps(memory, ensure_ascii=False),
                     now_ts(),
                     model,
+                    base_snapshot_id,
+                    normalized_update_id,
+                    base_snapshot_id,
+                    base_snapshot_id,
+                    self.campaign_id,
+                    *(
+                        (self.campaign_id, *turn_ids, len(turn_ids))
+                        if turn_ids
+                        else ()
+                    ),
                 ),
             )
+            if cursor.rowcount == 0:
+                return None
             created = connection.execute(
                 "SELECT * FROM rp_story_memory_snapshots WHERE id = ?",
                 (int(cursor.lastrowid),),
@@ -1493,6 +2596,9 @@ class StateStore:
             "memory": memory if isinstance(memory, dict) else {},
             "created_at": row["created_at"],
             "model": row["model"],
+            "invalidated": bool(row["invalidated"]),
+            "base_snapshot_id": row["base_snapshot_id"],
+            "update_id": row["update_id"],
         }
 
     def latest_memory_coverage(self) -> dict[str, Any] | None:
@@ -1740,14 +2846,88 @@ class StateStore:
             "model": row["model"],
         }
 
-    def preview_patch(self, patch: StatePatch) -> dict[str, Any]:
+    def preview_patch(
+        self,
+        patch: StatePatch,
+        *,
+        scene_state_enabled: bool | None = None,
+        trusted_internal: bool = False,
+    ) -> dict[str, Any]:
         state = self.get_state()
+        if not trusted_internal:
+            patch = self.scene_safe_external_patch(
+                state,
+                patch,
+                scene_state_enabled=scene_state_enabled,
+            )
         operations = [operation.model_dump(exclude_none=True) for operation in patch.patch]
         return apply_patch(state, operations)
+
+    @staticmethod
+    def scene_sensitive_patch_path(path: str) -> bool:
+        if path == "/player" or path == "/player/location":
+            return True
+        if path == "/locations" or path.startswith("/locations/"):
+            return True
+        if path == "/factions" or path.startswith("/factions/"):
+            return True
+        if path == "/characters":
+            return True
+        if not path.startswith("/characters/"):
+            return False
+        parts = path.split("/")
+        if len(parts) == 3:
+            return True
+        return len(parts) >= 4 and parts[3] in {"location", "status", "loyalty"}
+
+    @classmethod
+    def scene_safe_external_patch(
+        cls,
+        state: dict[str, Any],
+        patch: StatePatch,
+        *,
+        scene_state_enabled: bool | None = None,
+    ) -> StatePatch:
+        if any(
+            operation.path == "/scene_state"
+            or operation.path.startswith("/scene_state/")
+            for operation in patch.patch
+        ):
+            raise ValueError("external patches cannot write scene_state")
+        effective_scene_state_enabled = (
+            "scene_state" in state
+            if scene_state_enabled is None
+            else scene_state_enabled
+        )
+        if not effective_scene_state_enabled or not any(
+            cls.scene_sensitive_patch_path(operation.path) for operation in patch.patch
+        ):
+            return patch
+        stale_scene = mark_scene_stale(state, "world_change")
+        return patch.model_copy(
+            update={
+                "patch": [
+                    *patch.patch,
+                    PatchOperation(
+                        op="replace" if "scene_state" in state else "add",
+                        path="/scene_state",
+                        value=stale_scene,
+                        reason="Scene projection becomes stale in the same external world change.",
+                        turn=patch.turn,
+                    ),
+                ]
+            }
+        )
 
     def create_patch_proposal(self, patch: StatePatch) -> str:
         if not patch.check_id:
             raise ValueError("patch.check_id is required for proposals")
+        if any(
+            operation.path == "/scene_state"
+            or operation.path.startswith("/scene_state/")
+            for operation in patch.patch
+        ):
+            raise ValueError("external patches cannot write scene_state")
         with self.connect() as connection:
             connection.execute(
                 """
@@ -1844,7 +3024,13 @@ class StateStore:
             )
             return str(row["check_id"])
 
-    def apply_pending_patch(self, proposal_id: str = "latest", reason: str = "world_instruction_apply") -> dict[str, Any]:
+    def apply_pending_patch(
+        self,
+        proposal_id: str = "latest",
+        reason: str = "world_instruction_apply",
+        *,
+        scene_state_enabled: bool | None = None,
+    ) -> dict[str, Any]:
         with self.connect() as connection:
             if proposal_id == "latest":
                 row = connection.execute(
@@ -1897,6 +3083,11 @@ class StateStore:
                 if existing:
                     raise ValueError(f"patch for check_id {patch.check_id} is already applied")
 
+            patch = self.scene_safe_external_patch(
+                state,
+                patch,
+                scene_state_enabled=scene_state_enabled,
+            )
             operations = [operation.model_dump(exclude_none=True) for operation in patch.patch]
             candidate = apply_patch(state, operations)
             candidate.setdefault("meta", {})
@@ -1910,10 +3101,10 @@ class StateStore:
             connection.execute(
                 """
                 UPDATE state_patches
-                SET applied = 1, applied_at = ?
+                SET patch_json = ?, applied = 1, applied_at = ?
                 WHERE id = ?
                 """,
-                (now_ts(), row["id"]),
+                (patch.model_dump_json(), now_ts(), row["id"]),
             )
             connection.execute(
                 """
@@ -1925,7 +3116,13 @@ class StateStore:
         self.write_state_file(candidate)
         return candidate
 
-    def apply_state_patch(self, patch: StatePatch, reason: str) -> dict[str, Any]:
+    def apply_state_patch(
+        self,
+        patch: StatePatch,
+        reason: str,
+        *,
+        scene_state_enabled: bool | None = None,
+    ) -> dict[str, Any]:
         with self.connect() as connection:
             row = connection.execute(
                 """
@@ -1950,6 +3147,11 @@ class StateStore:
                 if existing:
                     raise ValueError(f"patch for check_id {patch.check_id} is already applied")
 
+            patch = self.scene_safe_external_patch(
+                state,
+                patch,
+                scene_state_enabled=scene_state_enabled,
+            )
             operations = [operation.model_dump(exclude_none=True) for operation in patch.patch]
             candidate = apply_patch(state, operations)
             candidate.setdefault("meta", {})
@@ -1979,6 +3181,749 @@ class StateStore:
         self.write_state_file(candidate)
         return candidate
 
+    def commit_gm_correction(
+        self,
+        *,
+        reason: str,
+        idempotency_key: str,
+        request_id: str,
+        player_message: str,
+        response_json: dict[str, Any],
+        metadata: dict[str, Any],
+        expected_state_version: int,
+        rule_replacement: dict[str, Any] | None = None,
+        audit_events: list[tuple[str, dict[str, Any]]] | None = None,
+    ) -> tuple[dict[str, Any], int]:
+        """Commit one confirmed out-of-fiction correction without advancing game time."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing_turn = connection.execute(
+                "SELECT id, state_version FROM turns WHERE campaign_id = ? AND idempotency_key = ?",
+                (self.campaign_id, idempotency_key),
+            ).fetchone()
+            if existing_turn is not None:
+                state_row = connection.execute(
+                    "SELECT state_json FROM state_versions WHERE campaign_id = ? AND version = ?",
+                    (self.campaign_id, int(existing_turn["state_version"])),
+                ).fetchone()
+                if state_row is None:
+                    raise RuntimeError("committed GM correction points to a missing state version")
+                return json.loads(state_row["state_json"]), int(existing_turn["id"])
+
+            current = connection.execute(
+                """
+                SELECT state_json, version FROM state_versions
+                WHERE campaign_id = ? ORDER BY version DESC LIMIT 1
+                """,
+                (self.campaign_id,),
+            ).fetchone()
+            if current is None:
+                state = self.empty_state()
+                version = 0
+            else:
+                state = json.loads(current["state_json"])
+                version = int(current["version"])
+            if version != int(expected_state_version):
+                raise StateVersionConflict(
+                    f"state version changed after GM draft: expected {expected_state_version}, current {version}"
+                )
+
+            candidate = json.loads(json.dumps(state, ensure_ascii=False))
+            party_turn = int(candidate.get("meta", {}).get("turn") or 0)
+            if rule_replacement is not None:
+                rule_id = str(rule_replacement.get("id") or "")
+                before = str(rule_replacement.get("before") or "")
+                constraints = candidate.get("world_constraints")
+                if not isinstance(constraints, list):
+                    raise ValueError("canonical world_constraints is not an array")
+                rule = next(
+                    (
+                        item
+                        for item in constraints
+                        if isinstance(item, dict)
+                        and item.get("kind") == "absolute"
+                        and str(item.get("id") or "") == rule_id
+                    ),
+                    None,
+                )
+                if rule is None:
+                    raise ValueError(f"absolute rule not found: {rule_id}")
+                if str(rule.get("text") or "").strip() != before.strip():
+                    raise StateVersionConflict("absolute rule changed after GM draft")
+                rule["text"] = str(rule_replacement["after"]).strip()
+                rule["turn"] = party_turn
+                rule["source"] = f"player:turn_{party_turn}"
+                forbidden_claims = [
+                    str(item).strip()
+                    for item in rule_replacement.get("forbidden_claims") or []
+                    if str(item).strip()
+                ]
+                if forbidden_claims:
+                    rule["forbidden_claims"] = forbidden_claims
+                else:
+                    rule.pop("forbidden_claims", None)
+
+            timestamp = now_ts()
+            candidate.setdefault("meta", {})
+            candidate["meta"]["state_version"] = version + 1
+            candidate["meta"]["turn"] = party_turn
+            candidate["meta"]["last_updated"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            )
+            connection.execute(
+                """
+                INSERT INTO state_versions(campaign_id, version, state_json, created_at, reason)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    version + 1,
+                    json.dumps(candidate, ensure_ascii=False),
+                    timestamp,
+                    reason,
+                ),
+            )
+            confirmation = str(
+                response_json.get("message", {}).get("content")
+                if isinstance(response_json.get("message"), dict)
+                else ""
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO turns(
+                    campaign_id, idempotency_key, request_id, player_message,
+                    narrative_response, response_json, prompt_json, metadata_json,
+                    state_version, party_turn, excluded_from_memory, created_at
+                ) VALUES(?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 1, ?)
+                """,
+                (
+                    self.campaign_id,
+                    idempotency_key,
+                    request_id,
+                    player_message,
+                    confirmation,
+                    json.dumps(response_json, ensure_ascii=False),
+                    json.dumps(metadata, ensure_ascii=False),
+                    version + 1,
+                    party_turn,
+                    timestamp,
+                ),
+            )
+            turn_id = int(cursor.lastrowid)
+            for event_type, payload in audit_events or []:
+                event_payload = dict(payload)
+                event_payload.setdefault("turn_id", turn_id)
+                connection.execute(
+                    """
+                    INSERT INTO audit_events(campaign_id, request_id, event_type, event_json, created_at)
+                    VALUES(?, ?, ?, ?, ?)
+                    """,
+                    (
+                        self.campaign_id,
+                        request_id,
+                        str(event_type),
+                        json.dumps(event_payload, ensure_ascii=False),
+                        timestamp,
+                    ),
+                )
+            completed = connection.execute(
+                """
+                UPDATE turn_requests
+                SET status = 'completed', response_json = ?, error = NULL, updated_at = ?
+                WHERE campaign_id = ? AND idempotency_key = ? AND status = 'running'
+                """,
+                (
+                    json.dumps(response_json, ensure_ascii=False),
+                    timestamp,
+                    self.campaign_id,
+                    idempotency_key,
+                ),
+            )
+            if completed.rowcount != 1:
+                raise RuntimeError("GM correction request is not running at atomic commit")
+
+        try:
+            self.write_state_file(candidate)
+        except OSError as exc:
+            logger.warning(
+                "state_mirror_write_failed campaign_id=%s request_id=%s error=%s",
+                self.campaign_id,
+                request_id,
+                f"{type(exc).__name__}: {exc}",
+            )
+        try:
+            self.link_turn_diagnostics(turn_id, request_id, party_turn)
+        except Exception:  # noqa: BLE001 - diagnostic linkage is post-commit best effort
+            logger.exception("gm_correction_diagnostic_link_failed request_id=%s", request_id)
+        return candidate, turn_id
+
+    def initialize_world_clock(self, contract: dict[str, Any]) -> dict[str, Any]:
+        """Enable an authored clock when a candidate branch starts at a checkpoint."""
+
+        candidate: dict[str, Any]
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                """
+                SELECT state_json, version FROM state_versions
+                WHERE campaign_id = ? ORDER BY version DESC LIMIT 1
+                """,
+                (self.campaign_id,),
+            ).fetchone()
+            if current is None:
+                raise ValueError("cannot initialize world clock without canonical state")
+            candidate = json.loads(current["state_json"])
+            if isinstance(candidate.get("world_clock"), dict):
+                return candidate
+            version = int(current["version"])
+            clock = initial_world_clock_state(contract)
+            clock["processed_party_turn"] = int(candidate.get("meta", {}).get("turn") or 0)
+            candidate["world_clock"] = clock
+            candidate.setdefault("meta", {})["state_version"] = version + 1
+            candidate["meta"]["last_updated"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            )
+            timestamp = now_ts()
+            connection.execute(
+                """
+                INSERT INTO state_versions(campaign_id, version, state_json, created_at, reason)
+                VALUES(?, ?, ?, ?, 'world_clock_initialize')
+                """,
+                (self.campaign_id, version + 1, json.dumps(candidate, ensure_ascii=False), timestamp),
+            )
+            connection.execute(
+                """
+                INSERT INTO audit_events(campaign_id, request_id, event_type, event_json, created_at)
+                VALUES(?, NULL, 'world_clock_initialized', ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    json.dumps(
+                        {
+                            "state_version": version + 1,
+                            "party_turn": clock["processed_party_turn"],
+                            "date": clock["date"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    timestamp,
+                ),
+            )
+        self.write_state_file(candidate)
+        return candidate
+
+    @staticmethod
+    def _apply_world_clock_lore_updates(
+        connection: sqlite3.Connection,
+        campaign_id: str,
+        updates: list[dict[str, Any]],
+        timestamp: int,
+    ) -> None:
+        for update in updates:
+            authored_key = str(update.get("key") or "")
+            row = connection.execute(
+                "SELECT id FROM lore_cards WHERE campaign_id = ? AND authored_key = ?",
+                (campaign_id, authored_key),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"authored lore card not found for world clock: {authored_key}")
+            connection.execute(
+                "UPDATE lore_cards SET enabled = ?, updated_at = ? WHERE id = ?",
+                (int(bool(update.get("enabled"))), timestamp, int(row["id"])),
+            )
+
+    def apply_world_clock_tick(
+        self,
+        contract: dict[str, Any],
+        *,
+        party_turn: int,
+        elapsed: str,
+        reason: str,
+        request_id: str | None,
+    ) -> dict[str, Any]:
+        """Apply elapsed time, event status, facts, and authored-card toggles atomically."""
+
+        candidate: dict[str, Any] | None = None
+        occurred: list[dict[str, Any]] = []
+        idempotent = False
+        version = 0
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            running = connection.execute(
+                """
+                SELECT 1 FROM turn_requests
+                WHERE campaign_id = ? AND status = 'running' LIMIT 1
+                """,
+                (self.campaign_id,),
+            ).fetchone()
+            if running is not None:
+                raise WorldClockBusy("main gameplay turn is running")
+            current = connection.execute(
+                """
+                SELECT state_json, version FROM state_versions
+                WHERE campaign_id = ? ORDER BY version DESC LIMIT 1
+                """,
+                (self.campaign_id,),
+            ).fetchone()
+            if current is None:
+                raise ValueError("cannot apply world clock without canonical state")
+            state = json.loads(current["state_json"])
+            version = int(current["version"])
+            candidate, lore_updates, occurred, idempotent = advance_world_clock_state(
+                state,
+                contract,
+                party_turn=int(party_turn),
+                elapsed=elapsed,
+                reason=reason,
+            )
+            if idempotent:
+                return {
+                    "applied": False,
+                    "idempotent": True,
+                    "state_version": version,
+                    "events": [],
+                }
+            candidate.setdefault("meta", {})["state_version"] = version + 1
+            candidate["meta"]["last_updated"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            )
+            timestamp = now_ts()
+            self._apply_world_clock_lore_updates(
+                connection,
+                self.campaign_id,
+                lore_updates,
+                timestamp,
+            )
+            connection.execute(
+                """
+                INSERT INTO state_versions(campaign_id, version, state_json, created_at, reason)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    version + 1,
+                    json.dumps(candidate, ensure_ascii=False),
+                    timestamp,
+                    f"world_clock:{party_turn}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO audit_events(campaign_id, request_id, event_type, event_json, created_at)
+                VALUES(?, ?, 'world_clock_tick', ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    request_id,
+                    json.dumps(
+                        {
+                            "party_turn": int(party_turn),
+                            "elapsed": candidate["world_clock"]["last_elapsed"]["elapsed"],
+                            "reason": reason,
+                            "date": candidate["world_clock"]["date"],
+                            "event_ids": [item["id"] for item in occurred],
+                            "lore_card_updates": lore_updates,
+                            "state_version": version + 1,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    timestamp,
+                ),
+            )
+        if candidate is None:
+            raise RuntimeError("world clock transaction did not produce state")
+        self.write_state_file(candidate)
+        return {
+            "applied": True,
+            "idempotent": False,
+            "state_version": version + 1,
+            "date": candidate["world_clock"]["date"],
+            "elapsed": candidate["world_clock"]["last_elapsed"],
+            "events": occurred,
+        }
+
+    def confirm_world_clock_marker(
+        self,
+        contract: dict[str, Any],
+        *,
+        marker_id: str,
+        request_id: str | None,
+    ) -> dict[str, Any]:
+        """Record one authored marker from an explicit player confirmation."""
+
+        candidate: dict[str, Any] | None = None
+        occurred: list[dict[str, Any]] = []
+        duplicate = False
+        version = 0
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            running = connection.execute(
+                "SELECT 1 FROM turn_requests WHERE campaign_id = ? AND status = 'running' LIMIT 1",
+                (self.campaign_id,),
+            ).fetchone()
+            if running is not None:
+                raise WorldClockBusy("main gameplay turn is running")
+            current = connection.execute(
+                """
+                SELECT state_json, version FROM state_versions
+                WHERE campaign_id = ? ORDER BY version DESC LIMIT 1
+                """,
+                (self.campaign_id,),
+            ).fetchone()
+            if current is None:
+                raise ValueError("cannot confirm world clock marker without canonical state")
+            state = json.loads(current["state_json"])
+            version = int(current["version"])
+            candidate, lore_updates, occurred, duplicate = confirm_world_clock_marker_state(
+                state,
+                contract,
+                marker_id=marker_id,
+            )
+            if duplicate:
+                return {
+                    "confirmed": True,
+                    "duplicate": True,
+                    "marker_id": marker_id,
+                    "state_version": version,
+                    "events": [],
+                }
+            candidate.setdefault("meta", {})["state_version"] = version + 1
+            candidate["meta"]["last_updated"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            )
+            timestamp = now_ts()
+            self._apply_world_clock_lore_updates(
+                connection,
+                self.campaign_id,
+                lore_updates,
+                timestamp,
+            )
+            connection.execute(
+                """
+                INSERT INTO state_versions(campaign_id, version, state_json, created_at, reason)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    version + 1,
+                    json.dumps(candidate, ensure_ascii=False),
+                    timestamp,
+                    f"world_clock_marker:{marker_id}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO audit_events(campaign_id, request_id, event_type, event_json, created_at)
+                VALUES(?, ?, 'world_clock_marker_confirmed', ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    request_id,
+                    json.dumps(
+                        {
+                            "marker_id": marker_id,
+                            "event_ids": [item["id"] for item in occurred],
+                            "lore_card_updates": lore_updates,
+                            "state_version": version + 1,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    timestamp,
+                ),
+            )
+        if candidate is None:
+            raise RuntimeError("world clock marker transaction did not produce state")
+        self.write_state_file(candidate)
+        return {
+            "confirmed": True,
+            "duplicate": False,
+            "marker_id": marker_id,
+            "state_version": version + 1,
+            "events": occurred,
+        }
+
+    def commit_turn(
+        self,
+        patch: StatePatch,
+        *,
+        reason: str,
+        idempotency_key: str,
+        request_id: str,
+        player_message: str,
+        narrative_response: str,
+        response_json: dict[str, Any],
+        expected_state_version: int | None = None,
+        prompt_messages: list[dict[str, str]] | None = None,
+        metadata: dict[str, Any] | None = None,
+        artifacts: list[dict[str, Any]] | None = None,
+        consumed_artifact_event_ids: list[int] | None = None,
+        workspace_files: list[dict[str, Any]] | None = None,
+        consumed_workspace_event_ids: list[int] | None = None,
+        consumed_world_clock_event_ids: list[str] | None = None,
+        post_commit_service_jobs: list[tuple[str, int]] | None = None,
+        party_turn: int | None = None,
+        audit_events: list[tuple[str, dict[str, Any]]] | None = None,
+        excluded_from_memory: bool = False,
+    ) -> tuple[dict[str, Any], int]:
+        """Commit all authoritative turn rows in one SQLite transaction."""
+
+        committed_state: dict[str, Any]
+        turn_id: int
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing_turn = connection.execute(
+                "SELECT id, state_version FROM turns WHERE campaign_id = ? AND idempotency_key = ?",
+                (self.campaign_id, idempotency_key),
+            ).fetchone()
+            if existing_turn is not None:
+                state_row = connection.execute(
+                    "SELECT state_json FROM state_versions WHERE campaign_id = ? AND version = ?",
+                    (self.campaign_id, int(existing_turn["state_version"])),
+                ).fetchone()
+                if state_row is None:
+                    raise RuntimeError("committed turn points to a missing state version")
+                return json.loads(state_row["state_json"]), int(existing_turn["id"])
+
+            current = connection.execute(
+                """
+                SELECT state_json, version FROM state_versions
+                WHERE campaign_id = ? ORDER BY version DESC LIMIT 1
+                """,
+                (self.campaign_id,),
+            ).fetchone()
+            if current is None:
+                state = self.empty_state()
+                version = 0
+            else:
+                state = json.loads(current["state_json"])
+                version = int(current["version"])
+            if expected_state_version is not None and version != int(expected_state_version):
+                raise StateVersionConflict(
+                    f"state version changed during narration: expected {expected_state_version}, current {version}"
+                )
+            if patch.check_id:
+                duplicate = connection.execute(
+                    "SELECT 1 FROM state_patches WHERE campaign_id = ? AND check_id = ? AND applied = 1",
+                    (self.campaign_id, patch.check_id),
+                ).fetchone()
+                if duplicate is not None:
+                    raise ValueError(f"patch for check_id {patch.check_id} is already applied")
+
+            operations = [operation.model_dump(exclude_none=True) for operation in patch.patch]
+            committed_state = apply_patch(state, operations)
+            committed_state.setdefault("meta", {})
+            committed_state["meta"]["state_version"] = version + 1
+            committed_state["meta"]["turn"] = max(
+                int(committed_state["meta"].get("turn", 0)) + 1,
+                patch.turn,
+            )
+            committed_state["meta"]["last_updated"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            )
+            committed_state.setdefault("last_turn", {})
+            committed_state["last_turn"]["turn"] = committed_state["meta"]["turn"]
+            committed_state["last_turn"]["state_patch_id"] = (
+                patch.check_id or f"gateway-v{version + 1}"
+            )
+            actual_party_turn = (
+                int(party_turn)
+                if party_turn is not None
+                else int(committed_state["meta"]["turn"])
+            )
+            mark_world_clock_events_announced(
+                committed_state,
+                consumed_world_clock_event_ids or [],
+                party_turn=actual_party_turn,
+            )
+            timestamp = now_ts()
+            connection.execute(
+                """
+                INSERT INTO state_patches(campaign_id, check_id, patch_json, applied, created_at, applied_at)
+                VALUES(?, ?, ?, 1, ?, ?)
+                """,
+                (self.campaign_id, patch.check_id, patch.model_dump_json(), timestamp, timestamp),
+            )
+            connection.execute(
+                """
+                INSERT INTO state_versions(campaign_id, version, state_json, created_at, reason)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    version + 1,
+                    json.dumps(committed_state, ensure_ascii=False),
+                    timestamp,
+                    reason,
+                ),
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO turns(
+                    campaign_id, idempotency_key, request_id, player_message,
+                    narrative_response, response_json, prompt_json, metadata_json,
+                    state_version, party_turn, excluded_from_memory, created_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    idempotency_key,
+                    request_id,
+                    player_message,
+                    narrative_response,
+                    json.dumps(response_json, ensure_ascii=False),
+                    json.dumps(prompt_messages, ensure_ascii=False) if prompt_messages is not None else None,
+                    json.dumps(metadata, ensure_ascii=False) if metadata is not None else None,
+                    version + 1,
+                    actual_party_turn,
+                    int(bool(excluded_from_memory)),
+                    timestamp,
+                ),
+            )
+            turn_id = int(cursor.lastrowid)
+
+            for job_type, max_attempts in post_commit_service_jobs or []:
+                if job_type != "world_clock":
+                    raise ValueError(f"unsupported atomic post-commit service job: {job_type}")
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO service_jobs(
+                        campaign_id, job_type, status, attempts, max_attempts,
+                        next_attempt_at, request_id, party_turn, last_error,
+                        created_at, updated_at
+                    ) VALUES(?, 'world_clock', 'pending', 0, ?, ?, ?, ?, NULL, ?, ?)
+                    """,
+                    (
+                        self.campaign_id,
+                        max(int(max_attempts), 1),
+                        timestamp,
+                        request_id,
+                        actual_party_turn,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+
+            for artifact in artifacts or []:
+                public = artifact.get("public") if isinstance(artifact, dict) else None
+                policy = artifact.get("policy") if isinstance(artifact, dict) else None
+                if not isinstance(public, dict) or not isinstance(policy, dict):
+                    raise ValueError("invalid training artifact persistence record")
+                connection.execute(
+                    """
+                    INSERT INTO training_artifacts(
+                        id, campaign_id, turn_id, artifact_key, artifact_revision,
+                        blueprint_id, public_json, policy_json, created_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        public["artifact_id"], self.campaign_id, turn_id,
+                        public["artifact_key"], int(public["artifact_revision"]),
+                        public["blueprint_id"], json.dumps(public, ensure_ascii=False),
+                        json.dumps(policy, ensure_ascii=False), timestamp,
+                    ),
+                )
+            for workspace_file in workspace_files or []:
+                public = workspace_file.get("public") if isinstance(workspace_file, dict) else None
+                policy = workspace_file.get("policy") if isinstance(workspace_file, dict) else None
+                if not isinstance(public, dict) or not isinstance(policy, dict):
+                    raise ValueError("invalid training workspace persistence record")
+                connection.execute(
+                    """
+                    INSERT INTO training_workspace_files(
+                        id, campaign_id, file_key, file_revision, blueprint_id, folder_id,
+                        turn_id, available_from_turn, available_until_turn, public_json,
+                        policy_json, materialized_turn, created_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(campaign_id, file_key, file_revision) DO NOTHING
+                    """,
+                    (
+                        public["file_id"], self.campaign_id, public["file_key"],
+                        int(public["file_revision"]), public["blueprint_id"], public["folder_id"],
+                        turn_id, int(public["available_from_turn"]), public.get("available_until_turn"),
+                        json.dumps(public, ensure_ascii=False), json.dumps(policy, ensure_ascii=False),
+                        int(public["materialized_turn"]), timestamp,
+                    ),
+                )
+            artifact_event_ids = [int(value) for value in consumed_artifact_event_ids or []]
+            if artifact_event_ids:
+                placeholders = ",".join("?" for _ in artifact_event_ids)
+                connection.execute(
+                    f"""
+                    UPDATE training_artifact_events SET consumed_turn_id = ?
+                    WHERE campaign_id = ? AND consumed_turn_id IS NULL AND id IN ({placeholders})
+                    """,
+                    (turn_id, self.campaign_id, *artifact_event_ids),
+                )
+            workspace_event_ids = [int(value) for value in consumed_workspace_event_ids or []]
+            if workspace_event_ids:
+                placeholders = ",".join("?" for _ in workspace_event_ids)
+                connection.execute(
+                    f"""
+                    UPDATE training_workspace_events SET consumed_turn_id = ?
+                    WHERE campaign_id = ? AND consumed_turn_id IS NULL AND id IN ({placeholders})
+                    """,
+                    (turn_id, self.campaign_id, *workspace_event_ids),
+                )
+            for event_type, payload in audit_events or []:
+                event_payload = dict(payload)
+                event_payload.setdefault("turn_id", turn_id)
+                connection.execute(
+                    """
+                    INSERT INTO audit_events(campaign_id, request_id, event_type, event_json, created_at)
+                    VALUES(?, ?, ?, ?, ?)
+                    """,
+                    (
+                        self.campaign_id,
+                        request_id,
+                        str(event_type),
+                        json.dumps(event_payload, ensure_ascii=False),
+                        timestamp,
+                    ),
+                )
+            completed = connection.execute(
+                """
+                UPDATE turn_requests
+                SET status = 'completed', response_json = ?, error = NULL, updated_at = ?
+                WHERE campaign_id = ? AND idempotency_key = ? AND status = 'running'
+                """,
+                (
+                    json.dumps(response_json, ensure_ascii=False),
+                    timestamp,
+                    self.campaign_id,
+                    idempotency_key,
+                ),
+            )
+            if completed.rowcount != 1:
+                raise RuntimeError("turn request is not running at atomic commit")
+
+        try:
+            self.write_state_file(committed_state)
+        except OSError as exc:
+            logger.warning(
+                "state_mirror_write_failed campaign_id=%s request_id=%s error=%s",
+                self.campaign_id,
+                request_id,
+                f"{type(exc).__name__}: {exc}",
+            )
+            try:
+                self.audit(
+                    "state_mirror_write_failed",
+                    {
+                        "request_id": request_id,
+                        "state_version": committed_state["meta"]["state_version"],
+                        "error_type": type(exc).__name__,
+                    },
+                    request_id,
+                )
+            except sqlite3.Error:
+                logger.exception("state_mirror_failure_audit_failed request_id=%s", request_id)
+        try:
+            self.link_turn_diagnostics(turn_id, request_id, actual_party_turn)
+        except Exception:  # noqa: BLE001 - diagnostic linkage is post-commit best effort
+            logger.exception("turn_diagnostic_link_failed request_id=%s", request_id)
+        return committed_state, turn_id
+
     def insert_state_version(self, state: dict[str, Any], reason: str) -> None:
         version = int(state.get("meta", {}).get("state_version", 1))
         with self.connect() as connection:
@@ -1996,7 +3941,14 @@ class StateStore:
         tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp, self.state_path)
 
-    def rollback(self, target_version: int | None = None) -> dict[str, Any]:
+    def rollback(
+        self,
+        target_version: int | None = None,
+        *,
+        scene_state_enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        if scene_state_enabled is None:
+            scene_state_enabled = "scene_state" in self.get_state()
         with self.connect() as connection:
             if target_version is None:
                 current = self.current_version()
@@ -2008,6 +3960,8 @@ class StateStore:
             if row is None:
                 raise ValueError(f"state version not found: {target_version}")
             restored = json.loads(row["state_json"])
+            if scene_state_enabled and "scene_state" not in restored:
+                restored["scene_state"] = initial_scene_state(restored)
             latest = self.current_version() or target_version
             restored["meta"]["state_version"] = latest + 1
             restored["meta"]["turn"] = int(restored["meta"].get("turn", 0)) + 1
@@ -2028,6 +3982,78 @@ class StateStore:
                     f"rollback:v{target_version}",
                 ),
             )
+            connection.execute(
+                """
+                UPDATE rp_story_memory_snapshots AS snapshot
+                SET invalidated = 1
+                WHERE snapshot.campaign_id = ?
+                  AND snapshot.invalidated = 0
+                  AND EXISTS (
+                      SELECT 1
+                      FROM turns AS turn_record
+                      WHERE turn_record.campaign_id = snapshot.campaign_id
+                        AND turn_record.state_version > ?
+                        AND turn_record.id BETWEEN snapshot.from_turn_id AND snapshot.to_turn_id
+                  )
+                """,
+                (self.campaign_id, target_version),
+            )
+            connection.execute(
+                """
+                UPDATE rp_supervisor_evaluations AS evaluation
+                SET invalidated = 1
+                WHERE evaluation.campaign_id = ?
+                  AND evaluation.invalidated = 0
+                  AND EXISTS (
+                      SELECT 1
+                      FROM turns AS turn_record
+                      WHERE turn_record.campaign_id = evaluation.campaign_id
+                        AND turn_record.state_version > ?
+                        AND turn_record.id BETWEEN evaluation.window_start_turn_id
+                                               AND evaluation.window_end_turn_id
+                  )
+                """,
+                (self.campaign_id, target_version),
+            )
+            connection.execute(
+                """
+                UPDATE narrative_events
+                SET status = 'active', resolution = NULL, resolved_turn = NULL, resolved_turn_id = NULL
+                WHERE campaign_id = ? AND status = 'resolved' AND resolution = 'delivered'
+                  AND resolved_turn_id IN (
+                      SELECT id FROM turns
+                      WHERE campaign_id = ? AND state_version > ? AND excluded_from_memory = 0
+                  )
+                """,
+                (self.campaign_id, self.campaign_id, target_version),
+            )
+            excluded_rows = connection.execute(
+                """
+                SELECT id, metadata_json FROM turns
+                WHERE campaign_id = ? AND state_version > ?
+                """,
+                (self.campaign_id, target_version),
+            ).fetchall()
+            for excluded_row in excluded_rows:
+                try:
+                    metadata = json.loads(excluded_row["metadata_json"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    metadata = {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                metadata["rollback_excluded"] = True
+                metadata["memory_exclusion_reason"] = "rollback"
+                connection.execute(
+                    "UPDATE turns SET metadata_json = ? WHERE id = ?",
+                    (json.dumps(metadata, ensure_ascii=False), int(excluded_row["id"])),
+                )
+            connection.execute(
+                """
+                UPDATE turns SET excluded_from_memory = 1
+                WHERE campaign_id = ? AND state_version > ?
+                """,
+                (self.campaign_id, target_version),
+            )
         self.write_state_file(restored)
         return restored
 
@@ -2043,7 +4069,8 @@ class StateStore:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, request_id, player_message, narrative_response, state_version, created_at
+                SELECT id, request_id, player_message, narrative_response,
+                       state_version, party_turn, metadata_json, excluded_from_memory, created_at
                 FROM turns
                 WHERE campaign_id = ? AND request_id = ?
                 ORDER BY id DESC
@@ -2051,11 +4078,31 @@ class StateStore:
                 """,
                 (self.campaign_id, request_id),
             ).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        result = dict(row)
+        raw_metadata = result.pop("metadata_json", None)
+        try:
+            metadata = json.loads(raw_metadata) if raw_metadata else {}
+        except (TypeError, json.JSONDecodeError):
+            metadata = {}
+        result["metadata"] = metadata if isinstance(metadata, dict) else {}
+        result["turn_kind"] = str(result["metadata"].get("turn_kind") or "narrative")
+        result["excluded_from_memory"] = bool(result["excluded_from_memory"])
+        return result
 
     def begin_turn_request(self, idempotency_key: str, request_id: str) -> dict[str, Any]:
+        idempotency_key = str(idempotency_key).strip()
+        request_id = str(request_id).strip()
+        if not idempotency_key:
+            raise ValueError("idempotency_key must not be blank")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,240}", request_id):
+            raise ValueError(
+                "request_id must contain only letters, digits, '.', '_', ':' or '-' and be at most 240 characters"
+            )
         timestamp = now_ts()
         with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             existing_turn = connection.execute(
                 "SELECT response_json FROM turns WHERE campaign_id = ? AND idempotency_key = ?",
                 (self.campaign_id, idempotency_key),
@@ -2066,36 +4113,63 @@ class StateStore:
                     "status": "completed",
                     "response": json.loads(existing_turn["response_json"]),
                 }
-            try:
-                connection.execute(
-                    """
-                    INSERT INTO turn_requests(
-                        campaign_id, idempotency_key, request_id, status,
-                        response_json, error, created_at, updated_at
+            existing_request = connection.execute(
+                """
+                SELECT * FROM turn_requests
+                WHERE campaign_id = ? AND idempotency_key = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (self.campaign_id, idempotency_key),
+            ).fetchone()
+            if existing_request is not None:
+                current = self.turn_request_from_row(existing_request)
+                if current["status"] == "failed":
+                    connection.execute(
+                        """
+                        UPDATE turn_requests
+                        SET status = 'running', response_json = NULL, error = NULL, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (timestamp, int(existing_request["id"])),
                     )
-                    VALUES(?, ?, ?, 'running', NULL, NULL, ?, ?)
-                    """,
-                    (self.campaign_id, idempotency_key, request_id, timestamp, timestamp),
+                    return {
+                        "acquired": True,
+                        "status": "running",
+                        "request_id": str(existing_request["request_id"]),
+                        "idempotency_key": idempotency_key,
+                        "retried": True,
+                    }
+                current["acquired"] = False
+                return current
+            request_conflict = connection.execute(
+                """
+                SELECT idempotency_key FROM turn_requests
+                WHERE campaign_id = ? AND request_id = ?
+                UNION ALL
+                SELECT idempotency_key FROM turns
+                WHERE campaign_id = ? AND request_id = ?
+                LIMIT 1
+                """,
+                (self.campaign_id, request_id, self.campaign_id, request_id),
+            ).fetchone()
+            if request_conflict is not None:
+                raise ValueError("request_id already belongs to a different idempotency_key")
+            connection.execute(
+                """
+                INSERT INTO turn_requests(
+                    campaign_id, idempotency_key, request_id, status,
+                    response_json, error, created_at, updated_at
                 )
-                return {
-                    "acquired": True,
-                    "status": "running",
-                    "request_id": request_id,
-                    "idempotency_key": idempotency_key,
-                }
-            except sqlite3.IntegrityError:
-                row = connection.execute(
-                    """
-                    SELECT * FROM turn_requests
-                    WHERE campaign_id = ? AND idempotency_key = ?
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (self.campaign_id, idempotency_key),
-                ).fetchone()
-        status = self.turn_request_from_row(row) if row else {"status": "unknown"}
-        status["acquired"] = False
-        return status
+                VALUES(?, ?, ?, 'running', NULL, NULL, ?, ?)
+                """,
+                (self.campaign_id, idempotency_key, request_id, timestamp, timestamp),
+            )
+            return {
+                "acquired": True,
+                "status": "running",
+                "request_id": request_id,
+                "idempotency_key": idempotency_key,
+            }
 
     def complete_turn_request(self, idempotency_key: str, response_json: dict[str, Any]) -> None:
         with self.connect() as connection:
@@ -2114,7 +4188,7 @@ class StateStore:
                 """
                 UPDATE turn_requests
                 SET status = 'failed', error = ?, updated_at = ?
-                WHERE campaign_id = ? AND idempotency_key = ?
+                WHERE campaign_id = ? AND idempotency_key = ? AND status = 'running'
                 """,
                 (error[:500], now_ts(), self.campaign_id, idempotency_key),
             )
@@ -2146,6 +4220,290 @@ class StateStore:
             "updated_at": row["updated_at"],
         }
 
+    def record_trace_event(
+        self,
+        *,
+        request_id: str,
+        phase_key: str,
+        alignment_key: str,
+        lane: str,
+        event_type: str,
+        status: str,
+        payload: dict[str, Any],
+        party_turn: int | None = None,
+        turn_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist one request-scoped diagnostic fact without affecting gameplay."""
+
+        request_id = str(request_id).strip()
+        phase_key = str(phase_key).strip()
+        alignment_key = str(alignment_key).strip()
+        if not request_id or len(request_id) > 240:
+            raise ValueError("invalid trace request_id")
+        if not phase_key or len(phase_key) > 240:
+            raise ValueError("invalid trace phase_key")
+        if not alignment_key or len(alignment_key) > 160:
+            raise ValueError("invalid trace alignment_key")
+        if lane not in {"main", "background"}:
+            raise ValueError("invalid trace lane")
+        if status not in {"running", "completed", "failed", "skipped"}:
+            raise ValueError("invalid trace status")
+        timestamp = now_ts()
+        completed_at = timestamp if status != "running" else None
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO turn_trace_events(
+                    campaign_id, request_id, turn_id, party_turn, phase_key,
+                    alignment_key, lane, event_type, status, payload_json,
+                    created_at, completed_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(campaign_id, request_id, phase_key) DO UPDATE SET
+                    turn_id = COALESCE(excluded.turn_id, turn_trace_events.turn_id),
+                    party_turn = COALESCE(excluded.party_turn, turn_trace_events.party_turn),
+                    alignment_key = excluded.alignment_key,
+                    lane = excluded.lane,
+                    event_type = excluded.event_type,
+                    status = excluded.status,
+                    payload_json = excluded.payload_json,
+                    completed_at = excluded.completed_at
+                """,
+                (
+                    self.campaign_id,
+                    request_id,
+                    turn_id,
+                    party_turn,
+                    phase_key,
+                    alignment_key,
+                    lane,
+                    event_type,
+                    status,
+                    json.dumps(redact_trace_value(payload), ensure_ascii=False),
+                    timestamp,
+                    completed_at,
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM turn_trace_events
+                WHERE campaign_id = ? AND request_id = ? AND phase_key = ?
+                """,
+                (self.campaign_id, request_id, phase_key),
+            ).fetchone()
+        return dict(row) if row else {}
+
+    def record_narrative_attempt(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Callback used by NarrativeClient for the exact provider attempt."""
+
+        request_id = str(event.get("request_id") or "").strip()
+        if not request_id:
+            return {}
+        status = str(event.get("status") or "failed")
+        with self.connect() as connection:
+            count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM turn_trace_events
+                    WHERE campaign_id = ? AND request_id = ?
+                      AND event_type = 'narrator_attempt'
+                    """,
+                    (self.campaign_id, request_id),
+                ).fetchone()["count"]
+            )
+        return self.record_trace_event(
+            request_id=request_id,
+            phase_key=f"narrator:attempt:{count + 1}",
+            alignment_key="narrator_attempt",
+            lane="main",
+            event_type="narrator_attempt",
+            status=status if status in {"running", "completed", "failed", "skipped"} else "failed",
+            payload={key: value for key, value in event.items() if key != "request_id"},
+        )
+
+    def trace_projection_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Snapshot only mutable projections whose prior values are otherwise lost."""
+
+        definitions = {
+            "character_badges": ("id",),
+            "narrative_events": ("id",),
+            "character_axis_state": ("character_id", "axis"),
+        }
+        snapshot: dict[str, dict[str, dict[str, Any]]] = {}
+        with self.connect() as connection:
+            available = {
+                str(row["name"])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+            for table, key_columns in definitions.items():
+                if table not in available:
+                    continue
+                rows = connection.execute(
+                    f"SELECT * FROM {table} WHERE campaign_id = ? ORDER BY rowid ASC",
+                    (self.campaign_id,),
+                ).fetchall()
+                snapshot[table] = {
+                    ":".join(str(row[column]) for column in key_columns): dict(row)
+                    for row in rows
+                }
+        return snapshot
+
+    def capture_projection_changes(
+        self,
+        request_id: str,
+        before: dict[str, dict[str, dict[str, Any]]],
+        *,
+        source: str,
+        reason: str,
+        lane: str = "background",
+    ) -> int:
+        """Record exact before/after transitions for in-place projections."""
+
+        if lane not in {"main", "background"}:
+            raise ValueError("invalid projection mutation lane")
+        after = self.trace_projection_snapshot()
+        turn = self.get_turn_by_request_id(request_id)
+        turn_id = int(turn["id"]) if turn else None
+        party_turn = int(turn["party_turn"]) if turn and turn.get("party_turn") is not None else None
+        changes: list[tuple[str, str, dict[str, Any] | None, dict[str, Any] | None]] = []
+        for store_name in sorted(set(before) | set(after)):
+            before_rows = before.get(store_name, {})
+            after_rows = after.get(store_name, {})
+            for entity_key in sorted(set(before_rows) | set(after_rows)):
+                old = before_rows.get(entity_key)
+                new = after_rows.get(entity_key)
+                if old != new:
+                    changes.append((store_name, entity_key, old, new))
+        if not changes:
+            return 0
+        timestamp = now_ts()
+        with self.connect() as connection:
+            start = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) AS count FROM turn_state_mutations
+                    WHERE campaign_id = ? AND request_id = ?
+                    """,
+                    (self.campaign_id, request_id),
+                ).fetchone()["count"]
+            )
+            for offset, (store_name, entity_key, old, new) in enumerate(changes, start=1):
+                connection.execute(
+                    """
+                    INSERT INTO turn_state_mutations(
+                        campaign_id, request_id, turn_id, party_turn, phase_key,
+                        store_name, entity_key, before_json, after_json,
+                        lane, source, reason, created_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        self.campaign_id,
+                        request_id,
+                        turn_id,
+                        party_turn,
+                        f"projection:{start + offset}",
+                        store_name,
+                        entity_key,
+                        json.dumps(old, ensure_ascii=False) if old is not None else None,
+                        json.dumps(new, ensure_ascii=False) if new is not None else None,
+                        lane,
+                        source[:80],
+                        reason[:240],
+                        timestamp,
+                    ),
+                )
+        return len(changes)
+
+    def add_trace_annotation(
+        self,
+        *,
+        annotation_id: str,
+        request_id: str,
+        phase_key: str,
+        author_user_id: str | None,
+        body: str,
+    ) -> dict[str, Any]:
+        annotation_id = str(annotation_id).strip()
+        request_id = str(request_id).strip()
+        phase_key = str(phase_key).strip()
+        body = str(body).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{8,160}", annotation_id):
+            raise ValueError("invalid annotation_id")
+        if not request_id or len(request_id) > 240:
+            raise ValueError("invalid request_id")
+        if not phase_key or len(phase_key) > 240:
+            raise ValueError("invalid phase_key")
+        if not body or len(body) > 4000:
+            raise ValueError("annotation body must contain 1..4000 characters")
+        turn = self.get_turn_by_request_id(request_id)
+        turn_id = int(turn["id"]) if turn else None
+        timestamp = now_ts()
+        with self.connect() as connection:
+            existing = connection.execute(
+                "SELECT * FROM turn_phase_annotations WHERE campaign_id = ? AND id = ?",
+                (self.campaign_id, annotation_id),
+            ).fetchone()
+            if existing:
+                current = dict(existing)
+                if (
+                    current["campaign_id"] != self.campaign_id
+                    or current["request_id"] != request_id
+                    or current["phase_key"] != phase_key
+                    or current["body"] != body
+                ):
+                    raise ValueError("annotation_id already belongs to different content")
+                current["duplicate"] = True
+                return current
+            connection.execute(
+                """
+                INSERT INTO turn_phase_annotations(
+                    id, campaign_id, request_id, turn_id, phase_key,
+                    author_user_id, body, created_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    annotation_id,
+                    self.campaign_id,
+                    request_id,
+                    turn_id,
+                    phase_key,
+                    author_user_id,
+                    body,
+                    timestamp,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO audit_events(campaign_id, request_id, event_type, event_json, created_at)
+                VALUES(?, ?, 'turn_trace_annotation_added', ?, ?)
+                """,
+                (
+                    self.campaign_id,
+                    request_id,
+                    json.dumps(
+                        {
+                            "annotation_id": annotation_id,
+                            "turn_id": turn_id,
+                            "phase_key": phase_key,
+                            "author_user_id": author_user_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    timestamp,
+                ),
+            )
+        return {
+            "id": annotation_id,
+            "campaign_id": self.campaign_id,
+            "request_id": request_id,
+            "turn_id": turn_id,
+            "phase_key": phase_key,
+            "author_user_id": author_user_id,
+            "body": body,
+            "created_at": timestamp,
+            "duplicate": False,
+        }
+
     def record_turn(
         self,
         idempotency_key: str,
@@ -2160,16 +4518,19 @@ class StateStore:
         consumed_artifact_event_ids: list[int] | None = None,
         workspace_files: list[dict[str, Any]] | None = None,
         consumed_workspace_event_ids: list[int] | None = None,
+        party_turn: int | None = None,
     ) -> int:
+        if party_turn is None:
+            party_turn = int(self.get_state().get("meta", {}).get("turn", 0))
         with self.connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO turns(
                     campaign_id, idempotency_key, request_id, player_message,
                     narrative_response, response_json, prompt_json, metadata_json,
-                    state_version, created_at
+                    state_version, party_turn, created_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self.campaign_id,
@@ -2181,6 +4542,7 @@ class StateStore:
                     json.dumps(prompt_messages, ensure_ascii=False) if prompt_messages is not None else None,
                     json.dumps(metadata, ensure_ascii=False) if metadata is not None else None,
                     state_version,
+                    party_turn,
                     now_ts(),
                 ),
             )
@@ -2261,7 +4623,63 @@ class StateStore:
                     """,
                     (turn_id, self.campaign_id, *workspace_event_ids),
                 )
-            return turn_id
+        self.link_turn_diagnostics(turn_id, request_id, party_turn)
+        return turn_id
+
+    def link_turn_diagnostics(self, turn_id: int, request_id: str, party_turn: int) -> None:
+        """Best-effort correlation after the authoritative turn transaction commits."""
+
+        try:
+            with self.connect() as connection:
+                available = {
+                    str(row["name"])
+                    for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+                }
+                if "turn_trace_events" in available:
+                    connection.execute(
+                        """
+                        UPDATE turn_trace_events SET turn_id = ?, party_turn = ?
+                        WHERE campaign_id = ? AND request_id = ? AND turn_id IS NULL
+                        """,
+                        (turn_id, party_turn, self.campaign_id, request_id),
+                    )
+                if "turn_state_mutations" in available:
+                    connection.execute(
+                        """
+                        UPDATE turn_state_mutations SET turn_id = ?, party_turn = ?
+                        WHERE campaign_id = ? AND request_id = ? AND turn_id IS NULL
+                        """,
+                        (turn_id, party_turn, self.campaign_id, request_id),
+                    )
+                if "turn_phase_annotations" in available:
+                    connection.execute(
+                        """
+                        UPDATE turn_phase_annotations SET turn_id = ?
+                        WHERE campaign_id = ? AND request_id = ? AND turn_id IS NULL
+                        """,
+                        (turn_id, self.campaign_id, request_id),
+                    )
+                if "service_call_log" in available:
+                    service_columns = {
+                        str(row["name"])
+                        for row in connection.execute("PRAGMA table_info(service_call_log)")
+                    }
+                    if {"request_id", "turn_id", "party_turn"}.issubset(service_columns):
+                        connection.execute(
+                            """
+                            UPDATE service_call_log
+                            SET turn_id = COALESCE(turn_id, ?), party_turn = COALESCE(party_turn, ?)
+                            WHERE party_id = ? AND request_id = ?
+                            """,
+                            (turn_id, party_turn, self.campaign_id, request_id),
+                        )
+        except Exception as exc:  # noqa: BLE001 - diagnostics cannot roll back a turn
+            logger.warning(
+                "turn_trace_link_failed request_id=%s turn_id=%s error=%s",
+                request_id,
+                turn_id,
+                f"{type(exc).__name__}: {exc}",
+            )
 
     def training_artifact(self, artifact_id: str) -> dict[str, Any] | None:
         with self.connect() as connection:
