@@ -1,11 +1,11 @@
 - requirement: "Relationship extraction attributes an event to one unambiguous canonical character"
-  level: наблюдается
+  level: подключено
   store: "relationship_causes"
   assertion: projection
   expectation: relationship_event_has_canonical_character_attribution
-  probe_command: "rp-stack-ops causal_probe --party party_16c210a8a099 --expectation relationship_event_has_canonical_character_attribution"
-  expected: "chain passes through projection"
-  waiver: null
+  probe_command: null
+  expected: null
+  waiver: "Decision 043 replaces the legacy relationship mechanism and requires a private party-closure archive before purge. This probe is retired, not rebound to a new party; the replacement requires its own causal-chain acceptance."
 - requirement: "A positive trust_gained event reaches canonical relationship projection and a later RP prompt"
   level: подключено
   store: "relationship_causes and later turn prompts"
