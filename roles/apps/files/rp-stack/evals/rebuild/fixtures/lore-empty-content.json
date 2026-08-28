@@ -1,0 +1,64 @@
+{
+  "representation": "curated/minimized reconstruction",
+  "boundary": "A completed transport call with length termination and empty content is not a Lore draft or no_candidate.",
+  "source": {
+    "archive": "/srv/backups/rp-evidence-2026-08-28/payload.tar",
+    "archive_sha256": "d7dbf2622a0c458a320e7d33acedd2aac7b7260141e20eeb4542e7ca00d15c1c",
+    "member": "party-evidence.sqlite3",
+    "table": "service_call_log",
+    "id": 533,
+    "response_sha256": "582181829b15872ca6e5ae33b610c93f3e36779f098e6c04e9547dca7fb02444",
+    "prompt_sha256": "146f37bc0511ab12811c60cf3f930eb1c49379aaa423d51dab92d1de65898a80",
+    "evidence_manifest": "roles/apps/files/rp-stack/docs/decisions/evidence/042-live-evidence-manifest.md",
+    "observed": {
+      "role": "lore_card_draft",
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v4-pro",
+      "status": "completed",
+      "finish_reason": "length",
+      "completion_tokens": 400,
+      "reasoning_tokens": 399,
+      "content_characters": 0
+    }
+  },
+  "adaptation": "The empty content, finish reason and token counts reproduce recorded properties. The source turn below is invented; no reasoning text or private prompt was copied. Historical model and usage are evidence, not new model defaults.",
+  "annotation_scope": "Input, response and expected_outcome are offline fixture data, not a new Gateway API schema. Texts and local IDs are invented; source hashes identify only the private original, not this reconstruction.",
+  "input": {
+    "request": {
+      "kind": "location",
+      "source_turn_ids": [
+        1
+      ]
+    },
+    "saved_turn": {
+      "id": 1,
+      "player_message": "Я осматриваю основание маяка.",
+      "narrative_response": "Нижний ярус маяка построен из чёрного камня."
+    }
+  },
+  "provider_response": {
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": ""
+        },
+        "finish_reason": "length"
+      }
+    ],
+    "usage": {
+      "completion_tokens": 400,
+      "completion_tokens_details": {
+        "reasoning_tokens": 399
+      }
+    }
+  },
+  "expected_outcome": {
+    "draft_accepted": false,
+    "no_candidate": false,
+    "lore_card_created": false,
+    "game_or_memory_changed": false,
+    "automatic_budget_increase": false,
+    "explanation": "Report an incomplete service draft. Empty content is failure, not a successful empty candidate. Zero reasoning cannot be assumed without the separate provider canary required by Decision 042."
+  }
+}

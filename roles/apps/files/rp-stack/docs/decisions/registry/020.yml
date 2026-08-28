@@ -7,10 +7,10 @@
   expected: null
   waiver: "Focused and end-to-end tests connect ordinary causes to a later RP prompt; a fresh deployed causal probe is pending."
 - requirement: "Relationship badges remain attributed to a canonical character in durable projection"
-  level: наблюдается
+  level: подключено
   store: "character_badges"
   assertion: projection
   expectation: relationship_badge_has_canonical_character_attribution
-  probe_command: "rp-stack-ops causal_probe --party party_16c210a8a099 --expectation relationship_badge_has_canonical_character_attribution"
-  expected: "chain passes through projection"
-  waiver: null
+  probe_command: null
+  expected: null
+  waiver: "Decision 043 replaces the legacy relationship mechanism and requires a private party-closure archive before purge. This probe is retired, not rebound to a new party; the replacement requires its own causal-chain acceptance."

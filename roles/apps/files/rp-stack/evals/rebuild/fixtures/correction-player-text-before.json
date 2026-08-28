@@ -1,0 +1,65 @@
+{
+  "representation": "curated/minimized reconstruction",
+  "boundary": "Player text cannot become canonical before; the model cannot return Gateway-owned target text.",
+  "source": {
+    "archive": "/srv/backups/rp-evidence-2026-08-28/payload.tar",
+    "archive_sha256": "d7dbf2622a0c458a320e7d33acedd2aac7b7260141e20eeb4542e7ca00d15c1c",
+    "member": "party-evidence.sqlite3",
+    "table": "service_call_log",
+    "id": 529,
+    "response_sha256": "7e5395f823b3198da0a79f9d5e0e681c51784940866609ba65de2b07f14d276c",
+    "prompt_sha256": "f89b4028c6719722955763297a117b270ab0090f10717c3bb3dbfa4b041f985a",
+    "evidence_manifest": "roles/apps/files/rp-stack/docs/decisions/evidence/042-live-evidence-manifest.md",
+    "observed": {
+      "role": "gm_patch_draft",
+      "provider": "local",
+      "model": "gemma-4-26b-a4b-it-rp-q4",
+      "status": "completed",
+      "finish_reason": "stop",
+      "completion_tokens": 140,
+      "reasoning_tokens": null,
+      "content_characters": 411
+    }
+  },
+  "adaptation": "The historic response used an out-of-character player instruction as before. Here a short invented OOC phrase is deliberately present in player_message and returned as an extra before field. The valid RAW slot is computed from narrator text by the Decision 042 identity formula. This is not a replay of legacy auto routing.",
+  "annotation_scope": "Input, response and expected_outcome are offline fixture data, not a new Gateway API schema. Texts and local IDs are invented; source hashes identify only the private original, not this reconstruction.",
+  "input": {
+    "saved_turn": {
+      "id": 1,
+      "player_message": "Опиши сцену подробнее.",
+      "narrative_response": "Дверь закрыта."
+    },
+    "instruction": "Исправь факт: дверь открыта.",
+    "candidates": [
+      {
+        "target_slot": "raw:1:6926397b17da39a57bd2",
+        "text": "Дверь закрыта.",
+        "allowed_actions": [
+          "replace"
+        ]
+      }
+    ]
+  },
+  "provider_response": {
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": "{\"result\":\"draft\",\"target_slot\":\"raw:1:6926397b17da39a57bd2\",\"action\":\"replace\",\"after\":\"Дверь открыта.\",\"forbidden_claims\":[],\"before\":\"Опиши сцену подробнее.\"}"
+        },
+        "finish_reason": "stop"
+      }
+    ]
+  },
+  "expected_outcome": {
+    "draft_accepted": false,
+    "forbidden_model_fields": [
+      "before"
+    ],
+    "gateway_owned_before": "Дверь закрыта.",
+    "player_message_used_as_canon": false,
+    "correction_applied": false,
+    "raw_rewritten": false,
+    "explanation": "The inherited service schema has additionalProperties=false and no before field. Reject this response even though its slot is valid. Gateway target reconstruction uses saved narrative_response only, never the concatenated player and narrator text."
+  }
+}

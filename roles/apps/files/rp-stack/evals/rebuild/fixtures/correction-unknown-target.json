@@ -1,0 +1,56 @@
+{
+  "representation": "curated/minimized reconstruction",
+  "boundary": "A model may choose only an existing target from the Gateway-supplied catalog.",
+  "source": {
+    "archive": "/srv/backups/rp-evidence-2026-08-28/payload.tar",
+    "archive_sha256": "d7dbf2622a0c458a320e7d33acedd2aac7b7260141e20eeb4542e7ca00d15c1c",
+    "member": "party-evidence.sqlite3",
+    "table": "service_call_log",
+    "id": 527,
+    "response_sha256": "f60bb8a8e22f8450a672979ecda1f2d61d501992442290bd8d89ead908d80fc8",
+    "prompt_sha256": "1dec4c6c58ee5861a62cdf01cef994865b2f8e317fb8c7420f5a6574dd18f95d",
+    "evidence_manifest": "roles/apps/files/rp-stack/docs/decisions/evidence/042-live-evidence-manifest.md",
+    "observed": {
+      "role": "gm_patch_draft",
+      "provider": "local",
+      "model": "gemma-4-26b-a4b-it-rp-q4",
+      "status": "completed",
+      "finish_reason": "stop",
+      "completion_tokens": 109,
+      "reasoning_tokens": null,
+      "content_characters": 293
+    }
+  },
+  "adaptation": "Decision 042 records an invented rule target. Rule names and after text below are invented, and the response is adapted to the inherited flat result contract. The exact historical body remains in the archive.",
+  "annotation_scope": "Input, response and expected_outcome are offline fixture data, not a new Gateway API schema. Texts and local IDs are invented; source hashes identify only the private original, not this reconstruction.",
+  "input": {
+    "instruction": "Уточни правило о времени работы моста.",
+    "candidates": [
+      {
+        "target_slot": "rule:bridge_hours",
+        "text": "Мост закрывают на ночь.",
+        "allowed_actions": [
+          "replace"
+        ]
+      }
+    ]
+  },
+  "provider_response": {
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": "{\"result\":\"draft\",\"target_slot\":\"rule:permanent_bridge_access\",\"action\":\"replace\",\"after\":\"Мост никогда не закрывают.\",\"forbidden_claims\":[]}"
+        },
+        "finish_reason": "stop"
+      }
+    ]
+  },
+  "expected_outcome": {
+    "draft_accepted": false,
+    "correction_applied": false,
+    "new_rule_created": false,
+    "game_or_memory_changed": false,
+    "explanation": "Valid JSON and finish_reason=stop do not authorize a target absent from candidates. Reject the draft; do not invent a catalog entry or relax exact matching. No public error-code spelling is fixed by this fixture."
+  }
+}
