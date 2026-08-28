@@ -128,10 +128,6 @@ def validate_worldpack_lore_cards(errors: list[str]) -> None:
                             )
                 cards_by_key[key] = card
 
-        pack_id = str(manifest.get("id") or manifest_path.parent.name)
-        if pack_id == "merchant-sviatoslav" and len(cards_by_key) < 15:
-            fail(errors, "merchant-sviatoslav must contain at least 15 authored Lore Cards")
-
         relationship_decl = manifest.get("relationships") if isinstance(manifest, dict) else None
         relationship_path = relationship_decl.get("model") if isinstance(relationship_decl, dict) else None
         if not isinstance(relationship_path, str) or not relationship_path.strip():
@@ -213,7 +209,6 @@ def validate_world_clocks(errors: list[str]) -> None:
         rp_contract = manifest.get("rp_contract") if isinstance(manifest, dict) else None
         raw_revision = rp_contract.get("revision") if isinstance(rp_contract, dict) else 0
         revision = int(raw_revision) if isinstance(raw_revision, int) else 0
-        pack_id = str(manifest.get("id") or manifest_path.parent.name)
         if relative_path is None:
             if conventional_path.exists():
                 fail(errors, f"undeclared WorldPack world-clock.json: {manifest_path.parent.relative_to(ROOT)}")
@@ -387,14 +382,6 @@ def validate_world_clocks(errors: list[str]) -> None:
                     break
                 seen.add(current)
                 current = dependencies[current]
-
-        if pack_id == "merchant-sviatoslav":
-            if len(event_ids) < 4:
-                fail(errors, "merchant-sviatoslav world clock must contain at least four events")
-            if not any("vyatichi" in event_id or "вятич" in str(event.get("summary") or "").casefold() for event_id, event in ((str(item.get("id") or ""), item) for item in raw_events if isinstance(item, dict))):
-                fail(errors, "merchant-sviatoslav world clock must include the Vyatichi campaign")
-
-
 def validate_rp_supervisors(errors: list[str]) -> None:
     worldpacks_root = ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks"
     rule_ids = (

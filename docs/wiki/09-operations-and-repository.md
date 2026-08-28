@@ -201,7 +201,7 @@ AGENTS.md                                      repository authority и delivery 
 .agents/plugins/marketplace.json              repo-scoped plugin catalog
 plugins/rp-stack-devkit/                      skill, read-only MCP/CLI, hooks, checklist
 plugins/rp-stack-devkit/.mcp.json             объявление read-only MCP rp-stack-ops
-scripts/ci.ps1                                единый локальный deterministic gate
+scripts/ci.ps1                                агрегатная локальная диагностика
 scripts/validate-adr-registry.py              readiness/oracle/causal registry guard
 scripts/run-rp-stack-evals.ps1                offline/provider/browser eval entrypoint
 .github/workflows/ci.yml                      GitHub Actions parity gate
@@ -231,11 +231,13 @@ Scheduled проверки также получают отдельный worktr
 они не merge/push/deploy/restore и не меняют живые Party без нового явного
 запроса.
 
-Локальный `scripts/ci.ps1` проверяет JSON, Wiki links/fences, AGENTS/hooks/plugin,
-state и training contracts, workflow scripts, Python syntax, JS syntax/tests и
-полный Gateway pytest. GitHub Actions повторяет эти контракты на чистом runner и
-добавляет `ansible-playbook --syntax-check`. Dependabot раз в неделю проверяет
-GitHub Actions и Gateway Python dependencies.
+Локальный `scripts/ci.ps1` агрегирует проверки JSON, Wiki links/fences,
+AGENTS/hooks/plugin, state и training contracts, workflow scripts, Python
+syntax, JS syntax/tests и полный Gateway pytest. Его запускают при изменении
+общего гейта, на integration/cutover и перед deployment, а обычный PR проверяет
+затронутый риск focused-командами. GitHub Actions повторяет контракты на чистом
+runner и добавляет `ansible-playbook --syntax-check`. Dependabot раз в неделю
+проверяет GitHub Actions и Gateway Python dependencies.
 
 `rp-stack-ops` — read-only интерфейс диагностики, а не альтернативный deploy
 path. Публикация и apply остаются намеренно отдельными действиями. Для ручного
@@ -503,7 +505,9 @@ python -m compileall rp-gateway/app
 pytest
 ```
 
-Единый local parity gate из корня репозитория:
+Агрегатная проверка из корня для изменения общего гейта, integration/cutover или
+перед deployment; semantic acceptance запускается при изменении игровой
+семантики:
 
 ```powershell
 powershell.exe -File scripts/ci.ps1

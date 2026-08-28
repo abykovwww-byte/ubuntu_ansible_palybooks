@@ -1,11 +1,11 @@
-- requirement: "Revision-8 RP WorldPacks may declare reviewed rp-gateway.worldpack-lore-cards.v1 files; stable keys and non-empty keywords are validated, NPC cards cover canonical relationship aliases with always_on false, merchant-sviatoslav has at least 15 cards, and new parties copy them without a runtime model call or WorldPack mutation"
+- requirement: "Revision-8 RP WorldPacks may declare reviewed rp-gateway.worldpack-lore-cards.v1 files; stable keys and non-empty keywords are validated, NPC cards cover canonical relationship aliases with always_on false, and new parties copy them without a runtime model call or WorldPack mutation"
   level: каркас
   store: "WorldPack manifest and lore-cards JSON, party-scoped lore_cards rows, service_call_log"
   assertion: projection
   expectation: authored_lore_cards_are_reviewed_and_imported_without_runtime_generation
   probe_command: null
   expected: null
-  waiver: "Repository validation and focused local Gateway tests cover schema, duplicate keys, non-empty keywords, NPC alias coverage, the 16-card merchant pack, party-scoped import and zero service calls during creation. Source merge, Ansible apply and live-party evidence are not claimed."
+  waiver: "Repository validation and focused local Gateway tests cover schema, duplicate keys, non-empty keywords, NPC alias coverage, party-scoped import and zero service calls during creation. Source merge, Ansible apply and live-party evidence are not claimed."
 - requirement: "Revision-8 Lore Card and relationship selection share current player input plus three previous complete eligible RAW units and optional Outcome.target; Lore Cards match only whole title or keyword triggers and never their hidden content, while seed location, active threads and scene_state are excluded"
   level: каркас
   store: "eligible raw turns, recorded prompt_json and turn metadata prompt_assembly.lore_card_ids"

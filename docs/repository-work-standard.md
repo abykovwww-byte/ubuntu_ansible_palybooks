@@ -58,10 +58,12 @@ detail.
   The PATH `python` launcher is not usable on this workstation (observed exit
   9009); `scripts/ci.ps1` resolves the bundled tools through `Resolve-Tool`.
 - CI has five jobs: `ansible-syntax`, `browser-clients`, `gateway`,
-  `repository-contracts`, and `rp-contracts`. Local parity is
-  `powershell.exe -File scripts/ci.ps1`. On its first Gateway test run, the
-  script restores the already declared `rp-gateway/requirements.txt` versions
-  into the ignored project-local `.test-deps/` directory.
+  `repository-contracts`, and `rp-contracts`. `powershell.exe -File
+  scripts/ci.ps1` is their aggregate local diagnostic, not a universal per-PR
+  prerequisite; use the focused/full triggers in `AGENTS.md`. On its first
+  Gateway test run, the script restores the already declared
+  `rp-gateway/requirements.txt` versions into the ignored project-local
+  `.test-deps/` directory.
 - The existing parent-workspace Graphify graph uses
   `..\graphify-out\.venv\Scripts\python.exe` and the pre-#1504 node-ID scheme.
   A future rebuild should run from this repository root and use the tracked
