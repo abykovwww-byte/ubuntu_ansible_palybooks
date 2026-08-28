@@ -1192,6 +1192,57 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     if collector_match is None or "\n  no_log: true\n" not in collector_match.group("body"):
         fail(errors, "token-auth Docker app results must stay hidden while collecting changed apps")
 
+    handoff_task_names = (
+        "Normalize changed Docker app list",
+        "Check pending Showroom port handoff",
+        "Resolve coordinated Showroom port handoff",
+        "Persist pending Showroom port handoff",
+        "Keep both Showroom owners in the handoff start set",
+        "Check legacy RP Showroom container before handoff",
+        "Stop legacy RP Showroom before handoff",
+        "Stop standalone Showroom before handoff",
+        "Start changed Docker apps",
+        "Clear completed Showroom port handoff",
+    )
+    handoff_positions = {
+        task_name: apps_tasks.find(f"- name: {task_name}\n")
+        for task_name in handoff_task_names
+    }
+    missing_handoff_tasks = [
+        task_name for task_name, position in handoff_positions.items() if position < 0
+    ]
+    if missing_handoff_tasks:
+        fail(errors, f"Showroom port handoff tasks missing: {', '.join(missing_handoff_tasks)}")
+    elif list(handoff_positions.values()) != sorted(handoff_positions.values()):
+        fail(errors, "Showroom port handoff must stop both UI owners before RP then standalone Compose startup")
+    else:
+        handoff_slice = apps_tasks[
+            handoff_positions["Check pending Showroom port handoff"]
+            : handoff_positions["Start changed Docker apps"]
+        ]
+        for marker in (
+            ".port-8011-handoff-pending",
+            "showroom_port_handoff_marker.stat.exists",
+            "'rp-stack' in (docker_app_changed_names | default([]))",
+            "'awareness-showroom' in (docker_app_changed_names | default([]))",
+            "docker_app_changed_names + ['rp-stack', 'awareness-showroom']",
+            "docker\n      - container\n      - inspect\n      - rp-stack-showcase-gui",
+            "docker\n      - stop\n      - rp-stack-showcase-gui",
+            "cmd: docker compose stop showroom",
+            "awareness_showroom_project_dir",
+        ):
+            if marker not in handoff_slice:
+                fail(errors, f"Showroom port handoff contract missing marker: {marker}")
+        if "docker compose down" in handoff_slice or " -v" in handoff_slice:
+            fail(errors, "Showroom port handoff must not remove gateways, networks, or volumes")
+
+        clear_task = apps_tasks[
+            handoff_positions["Clear completed Showroom port handoff"]
+            : apps_tasks.find("\n- name:", handoff_positions["Clear completed Showroom port handoff"] + 1)
+        ]
+        if ".port-8011-handoff-pending" not in clear_task or "state: absent" not in clear_task:
+            fail(errors, "Showroom port handoff marker must clear only after successful Compose startup")
+
     env_example_match = re.search(
         r"(?ms)^- name: Render Docker app example environment files\n(?P<body>.*?)(?=^- name:|\Z)",
         apps_tasks,
