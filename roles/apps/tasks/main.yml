@@ -184,6 +184,8 @@
       - -C
       - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
       - -c
+      - "safe.directory={{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+      - -c
       - "http.extraHeader=Authorization: Basic {{ ('x-access-token:' ~ app_repo_token) | b64encode }}"
       - fetch
       - origin
@@ -208,6 +210,8 @@
       - git
       - -C
       - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+      - -c
+      - "safe.directory={{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
       - reset
       - --hard
       - FETCH_HEAD
@@ -242,6 +246,24 @@
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   register: docker_app_public_repo
+  tags: [apps, source, git]
+
+- name: Normalize ownership for opt-in Docker app repositories
+  ansible.builtin.file:
+    path: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+    state: directory
+    owner: "{{ app.owner | default(docker_apps_default_owner) }}"
+    group: "{{ app.group | default(docker_apps_default_group) }}"
+    recurse: true
+    follow: false
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.repo_url is defined
+    - app.repo_normalize_ownership | default(false) | bool
   tags: [apps, source, git]
 
 - name: Copy Docker app source
@@ -329,6 +351,7 @@
     owner: "{{ app.owner | default(docker_apps_default_owner) }}"
     group: "{{ app.group | default(docker_apps_default_group) }}"
     mode: "0644"
+    force: "{{ app.env_example_force | default(true) }}"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app

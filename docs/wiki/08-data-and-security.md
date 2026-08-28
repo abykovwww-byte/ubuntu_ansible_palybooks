@@ -228,6 +228,30 @@ Showroom использует отдельные SQLite/state/covers/backup path
 runtime API между RP и training Gateway нет. Старые Showroom rows сохраняются в
 legacy RP SQLite, но новый training runtime их не читает.
 
+I1 shadow уже использует эти отдельные paths на loopback `:18011`, но
+cutover не выполнен. Пустая standalone SQLite и healthy containers доказывают
+только изоляцию топологии, а не training flow или restore.
+
+### Git-каталог Showroom
+
+Конфигурации опубликованных training-сценариев теперь являются
+версионируемым application source, а не переносом legacy SQLite.
+`SHOWROOM_CATALOG_PATH=/app/configs/showroom/scenarios.json` включает
+согласование при startup:
+
+- стабильный `key` адресует только строку `scenario_catalog_<key>` в
+  standalone SQLite;
+- profile выбирается только по exact `(provider, base_url, model)`, а не по
+  legacy ID; zero/multiple active matches закрывают startup;
+- `cover` явно задаёт относительный файл каталога либо `null`; файл повторно
+  пишется в persistent covers только при изменении bytes/MIME, а `null`
+  удаляет runtime drift для управляемого сценария;
+- undeclared DB-сценарии не удаляются, а runs, parties, turns, state,
+  visitors, sessions, users, provider keys, feedback и leaderboard rows не импортируются.
+
+Каталог создаёт новые scenario IDs и не даёт доступ к legacy results. После
+apply живые training runs и backups доказываются отдельно.
+
 `rp_story_memory_snapshots` всегда фильтруется по `state_campaign_id`. Updater получает NPC без поля `secrets`; в prompt narrator этот snapshot поступает только для RP-партии. Snapshot не имеет права менять canonical state и не создаётся для `training`.
 
 ## Безопасность training artifacts
@@ -379,6 +403,12 @@ Raw logs могут содержать личные данные, copyrighted te
 ## Backup и restore
 
 Backup содержит state, историю, диагностическую трассу, users, provider keys и dataset labels. Перед restore нужно проверить архив и точные target paths, остановить stack и только затем восстанавливать. Нельзя пересылать backup через публичные каналы.
+
+Awareness backup находится в `/srv/backups/awareness-showroom` и не
+смешивается с RP backup. До C1 test restore должен идти в отдельные
+временные target paths и доказать SQLite integrity, наличие реального run,
+scoring/debrief и resume data, не перезаписывая live data directory. Этот
+runtime gate ещё не пройден.
 
 ## Источники
 

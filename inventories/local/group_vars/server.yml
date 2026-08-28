@@ -240,7 +240,7 @@ rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 
 # Deploy only this exact merged application commit; do not replace it with a branch or tag.
-awareness_showroom_repo_version: "536444091195b2c0be2f0ef8b0a137a0ed7f8a56"
+awareness_showroom_repo_version: "2334b42905bc8c94fc292c3b6c984c1e7b9af82e"
 awareness_showroom_enabled: "{{ (awareness_showroom_repo_version | length) == 40 }}"
 awareness_showroom_repo_url: "https://github.com/abykovwww-byte/tavern-awareness-showroom.git"
 # Required for this private repository; set only in /etc/ansible/local-overrides.yml.
@@ -595,12 +595,14 @@ docker_apps:
     repo_token_var: awareness_showroom_github_token
     repo_token_required: true
     repo_recreate_if_not_git: true
+    repo_normalize_ownership: true
     project_dir: "{{ awareness_showroom_project_dir }}"
     owner: abykov
     group: abykov
     directory_mode: "0750"
     env_template: awareness-showroom.env.j2
     env_example_template: awareness-showroom.env.example.j2
+    env_example_force: false
     env_mode: "0600"
     compose_up: true
     compose_remove_orphans: true

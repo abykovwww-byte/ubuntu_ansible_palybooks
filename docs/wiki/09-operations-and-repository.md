@@ -292,8 +292,8 @@ curl -fsS http://192.168.1.88:8011/health
 
 ### Migration Decision 018
 
-До cutover команда выше проверяет единый RP Stack. Новое приложение сначала
-разворачивается в shadow на `:18011` из полного commit SHA private repository:
+До cutover команда выше проверяет единый RP Stack. I1 shadow на
+`:18011` уже применён из полного commit SHA private repository:
 
 ```text
 /srv/apps/awareness-showroom
@@ -302,6 +302,37 @@ curl -fsS http://192.168.1.88:8011/health
 /srv/app-data/awareness-showroom/showroom-covers
 /srv/backups/awareness-showroom
 ```
+
+В следующей поставке application image несёт Git-каталог
+`/app/configs/showroom/scenarios.json`, а runtime `.env` включает его через
+`SHOWROOM_CATALOG_PATH`. Gateway при startup идемпотентно согласует
+только объявленные training configs и covers. Он не импортирует legacy
+runs/users/sessions/keys и не удаляет посторонние DB-строки. Сценарии становятся
+видимыми только после application PR, IaC pin, apply и успешного startup.
+
+External checkout — единственный явно opt-in ownership exception Apps role:
+
+- root Git fetch/reset получают exact per-command
+  `safe.directory=/srv/apps/awareness-showroom`;
+- сразу после reset checkout и `.git` рекурсивно приводятся к
+  `abykov:abykov`, чтобы операторский Git не получал `dubious ownership`;
+- ownership-only change не входит в collector Compose restarts;
+- tracked `.env.example` остаётся source-owned и не перезаписывается
+  Ansible; server-only секреты по-прежнему рендерятся только в `.env`.
+
+После apply эти границы проверяются отдельно:
+
+```bash
+cd /srv/apps/awareness-showroom
+git status --short
+stat -c '%U:%G %n' . .git .env.example
+docker compose exec -T awareness-gateway printenv SHOWROOM_CATALOG_PATH
+curl -fsS http://127.0.0.1:18011/api/showroom/scenarios
+```
+
+`git status --short` должен быть пустым, путь каталога — точным, а owner
+трёх проверяемых paths — `abykov:abykov`. Это ещё не доказывает
+provider-turn, scoring, debrief, resume или backup/restore.
 
 Только после полного training acceptance IaC переводит `:8011` на новый
 Showroom, а старый Compose становится RP-only. `:8010` не меняется. Проекты не
