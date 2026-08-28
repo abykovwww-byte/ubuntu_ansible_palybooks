@@ -407,6 +407,74 @@
     docker_app_changed_names: "{{ docker_app_changed_names | default([]) | unique | list }}"
   tags: [apps, compose]
 
+- name: Check pending Showroom port handoff
+  ansible.builtin.stat:
+    path: "{{ awareness_showroom_data_dir | default('/srv/app-data/awareness-showroom') }}/.port-8011-handoff-pending"
+  register: showroom_port_handoff_marker
+  tags: [apps, compose]
+
+- name: Resolve coordinated Showroom port handoff
+  ansible.builtin.set_fact:
+    showroom_port_handoff_required: >-
+      {{
+        showroom_port_handoff_marker.stat.exists | default(false)
+        or (
+          'rp-stack' in (docker_app_changed_names | default([]))
+          and 'awareness-showroom' in (docker_app_changed_names | default([]))
+        )
+      }}
+  tags: [apps, compose]
+
+- name: Persist pending Showroom port handoff
+  ansible.builtin.file:
+    path: "{{ awareness_showroom_data_dir | default('/srv/app-data/awareness-showroom') }}/.port-8011-handoff-pending"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose]
+
+- name: Keep both Showroom owners in the handoff start set
+  ansible.builtin.set_fact:
+    docker_app_changed_names: >-
+      {{ (docker_app_changed_names + ['rp-stack', 'awareness-showroom']) | unique | list }}
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose]
+
+- name: Check legacy RP Showroom container before handoff
+  ansible.builtin.command:
+    argv:
+      - docker
+      - container
+      - inspect
+      - rp-stack-showcase-gui
+  register: legacy_rp_showroom_container
+  changed_when: false
+  failed_when: false
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose]
+
+- name: Stop legacy RP Showroom before handoff
+  ansible.builtin.command:
+    argv:
+      - docker
+      - stop
+      - rp-stack-showcase-gui
+  when:
+    - showroom_port_handoff_required | bool
+    - legacy_rp_showroom_container.rc == 0
+  changed_when: true
+  tags: [apps, compose]
+
+- name: Stop standalone Showroom before handoff
+  ansible.builtin.command:
+    cmd: docker compose stop showroom
+    chdir: "{{ awareness_showroom_project_dir | default(app_deploy_base_dir ~ '/awareness-showroom') }}"
+  when: showroom_port_handoff_required | bool
+  changed_when: true
+  tags: [apps, compose]
+
 - name: Start changed Docker apps
   ansible.builtin.command:
     cmd: >-
@@ -429,6 +497,13 @@
   delay: "{{ app.compose_retry_delay | default(docker_apps_compose_retry_delay) }}"
   until: docker_app_start.rc == 0
   changed_when: true
+  tags: [apps, compose]
+
+- name: Clear completed Showroom port handoff
+  ansible.builtin.file:
+    path: "{{ awareness_showroom_data_dir | default('/srv/app-data/awareness-showroom') }}/.port-8011-handoff-pending"
+    state: absent
+  when: showroom_port_handoff_required | bool
   tags: [apps, compose]
 
 - name: Configure Beszel monitoring agent
