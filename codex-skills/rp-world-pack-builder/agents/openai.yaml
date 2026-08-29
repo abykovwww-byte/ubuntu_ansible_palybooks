@@ -1,6 +1,6 @@
 interface:
-  display_name: "Gateway World Pack Builder"
-  short_description: "Build RP worlds for Light GUI"
-  default_prompt: "Use $rp-world-pack-builder to create a validated RP world pack for the SillyTavern/rp-gateway/Light GUI stack. Route deterministic training scenarios to $training-world-pack-builder and preserve the RP-only living story-memory boundary. If live deployment is needed, follow $abykovserv-iac-deploy for abykovserv."
+  display_name: "RP World And Scenario Builder"
+  short_description: "Author Decision 043 RP source"
+  default_prompt: "Use $rp-world-pack-builder to update the validated Decision 043 World/Scenario source for day-watch-moscow-v2. Treat the production loader/schema as executable truth, route deterministic training to $training-world-pack-builder, and do not claim the new format is deployed or visible."
 policy:
   allow_implicit_invocation: true

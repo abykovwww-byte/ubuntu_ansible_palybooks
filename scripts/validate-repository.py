@@ -17,10 +17,6 @@ LINK_RE = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
 SSH_COMMAND_RE = re.compile(
     r"(?i)(?:^|[\\/\s])ssh(?:\.exe)?\s+(?:-[A-Za-z]|[A-Za-z0-9._-]+@[A-Za-z0-9])"
 )
-RP_CONTRACT_DECLARATION_RE = re.compile(
-    r'"rp_contract"\s*:\s*\{\s*"schema_version"\s*:\s*"rp-core\.v2"\s*,'
-    r'\s*"revision"\s*:\s*([0-9]+)'
-)
 RP_CONTRACT_SOURCE_MAX_REVISION = 11
 RP_VARIANT_ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
@@ -1318,60 +1314,6 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         fail(errors, "commit-pinned Docker apps require a server-side full-SHA preflight")
 
 
-def validate_rp_world_pack_builder_contract(errors: list[str]) -> None:
-    inventory = ROOT / "inventories" / "local" / "group_vars" / "server.yml"
-    if not inventory.is_file():
-        return
-    observed_revisions = re.findall(
-        r"(?m)^rp_stack_gateway_rp_contract_observed_revision:\s*([0-9]+)\s*(?:#.*)?$",
-        inventory.read_text(encoding="utf-8"),
-    )
-    if len(observed_revisions) != 1:
-        return
-    expected_revisions = {10, RP_CONTRACT_SOURCE_MAX_REVISION}
-    contract_files = (
-        ROOT / "codex-skills" / "rp-world-pack-builder" / "SKILL.md",
-        ROOT / "codex-skills" / "rp-world-pack-builder" / "references" / "world-pack-contract.md",
-    )
-    combined = ""
-    for path in contract_files:
-        if not path.is_file():
-            fail(errors, f"missing RP WorldPack builder contract: {path.relative_to(ROOT)}")
-            continue
-        text = path.read_text(encoding="utf-8")
-        combined += "\n" + text
-        declared_revisions = [
-            int(value) for value in RP_CONTRACT_DECLARATION_RE.findall(text)
-        ]
-        if set(declared_revisions) != expected_revisions:
-            fail(
-                errors,
-                "RP WorldPack builder contract must document the observed default and "
-                f"candidate revisions {sorted(expected_revisions)}: {path.relative_to(ROOT)}",
-            )
-
-    required_markers = (
-        "PROMPT_AUTHORITY_HIERARCHY",
-        "stable_affiliations",
-        "scene_claims",
-        "scene_delta",
-        "story_memory_canonical=false",
-        "rp-gateway.worldpack-lore-cards.v1",
-        "rp-gateway.world-clock.v1",
-        "rp-gateway.rp-supervisor.v1",
-        '"presets_default"',
-        '"openings_default"',
-        "prompts/openings/<id>/state-seed.json",
-        "Примета:",
-        "Манера речи:",
-    )
-    for marker in required_markers:
-        if marker not in combined:
-            fail(errors, f"RP WorldPack builder contract missing compatibility marker: {marker}")
-    if not re.search(r"(?i)force[- ]refresh", combined):
-        fail(errors, "RP WorldPack builder contract missing revision-7 compatibility force-refresh rule")
-
-
 def main() -> int:
     errors: list[str] = []
     validate_json(errors)
@@ -1384,13 +1326,12 @@ def main() -> int:
     validate_plugin(errors)
     validate_environment_contracts(errors)
     validate_awareness_showroom_iac(errors)
-    validate_rp_world_pack_builder_contract(errors)
     if errors:
         print("Repository validation failed:")
         for error in errors:
             print(f"- {error}")
         return 1
-    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks/RP supervisors/narrative variants, Wiki, AGENTS, plugin, environment, Awareness Showroom IaC, RP builder, SSH, policy, and Graphify guards.")
+    print("Repository contracts valid: JSON, WorldPack Lore Cards/world clocks/RP supervisors/narrative variants, Wiki, AGENTS, plugin, environment, Awareness Showroom IaC, SSH, policy, and Graphify guards.")
     return 0
 
 

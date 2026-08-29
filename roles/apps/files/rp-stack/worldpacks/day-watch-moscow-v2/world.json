@@ -1,0 +1,17 @@
+{
+  "schema_version": "rp-world.v1",
+  "id": "day-watch-moscow-v2",
+  "title": "Дневной Дозор: Москва — четыре начала",
+  "language": "ru",
+  "premise": "Книжная Москва в начале событий «Дневного Дозора»: Светлые и Тёмные Иные живут под Великим Договором, Ночной и Дневной Дозоры контролируют противоположные стороны, а Инквизиция сохраняет равновесие.",
+  "canon_files": [
+    "campaign-bible.md",
+    "world-info/index.md"
+  ],
+  "setting_rules_file": "rules/checks.md",
+  "characters_file": "characters/index.md",
+  "relationship_ontology_file": "relationships/model.json",
+  "lore_card_files": [
+    "lore-cards/core.json"
+  ]
+}

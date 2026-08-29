@@ -7,6 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from app.rp.content import (
+    SCENARIO_SNAPSHOT_SCHEMA_VERSION,
+    WORLD_SNAPSHOT_SCHEMA_VERSION,
+    ScenarioSnapshot,
+    WorldSnapshot,
+)
 from app.rp.schema import RP_DATABASE_APPLICATION_ID, RP_SCHEMA_VERSION, RPSchemaError
 from app.rp.turn_engine import (
     RPIdempotencyConflict,
@@ -16,10 +22,52 @@ from app.rp.turn_engine import (
 )
 
 
+def _party_source() -> dict[str, WorldSnapshot | ScenarioSnapshot]:
+    world = WorldSnapshot(
+        schema_version=WORLD_SNAPSHOT_SCHEMA_VERSION,
+        world_id="day-watch-moscow-v2",
+        title="Дневной Дозор",
+        language="ru",
+        premise="Москва после Великого договора.",
+        canon=("Канон мира.",),
+        setting_rules="Законы мира.",
+        characters="npc-one: Базовый NPC.",
+        relationship_ontology={"axes": ["trust"]},
+        seed_lore_cards=({"cards": [{"id": "world-card"}]},),
+    )
+    scenario = ScenarioSnapshot(
+        schema_version=SCENARIO_SNAPSHOT_SCHEMA_VERSION,
+        scenario_id="test-scenario",
+        title="Тестовый сценарий",
+        world_id=world.world_id,
+        source="preset",
+        player_role="Новый сотрудник.",
+        style="book",
+        format="plain_scene_text",
+        difficulty=None,
+        detail_level="default",
+        narrator_system="Веди сцену.",
+        narrator_note="Сохраняй агентность игрока.",
+        opening="Начинается смена.",
+        initial_state={
+            "player": {},
+            "characters": {"npc-one": {}},
+            "factions": {},
+            "locations": {},
+            "relationships": {},
+        },
+        active_character_ids=("npc-one",),
+        starting_relationships={},
+    )
+    return {"world_snapshot": world, "scenario_snapshot": scenario}
+
+
 def test_fresh_database_is_clean_and_reopens_without_legacy_tables(tmp_path: Path) -> None:
     database = tmp_path / "rp-clean.db"
     engine = RPTurnEngine(database)
-    created = engine.create_party(owner_user_id="owner-one", party_id="party-one")
+    created = engine.create_party(
+        owner_user_id="owner-one", party_id="party-one", **_party_source()
+    )
 
     with sqlite3.connect(database) as connection:
         tables = {
@@ -45,8 +93,12 @@ def test_fresh_database_is_clean_and_reopens_without_legacy_tables(tmp_path: Pat
 def test_turns_preserve_exact_raw_text_and_are_isolated_by_party(tmp_path: Path) -> None:
     database = tmp_path / "rp-clean.db"
     engine = RPTurnEngine(database)
-    engine.create_party(owner_user_id="owner-one", party_id="party-one")
-    engine.create_party(owner_user_id="owner-one", party_id="party-two")
+    engine.create_party(
+        owner_user_id="owner-one", party_id="party-one", **_party_source()
+    )
+    engine.create_party(
+        owner_user_id="owner-one", party_id="party-two", **_party_source()
+    )
 
     first = engine.commit_turn(
         owner_user_id="owner-one",
@@ -92,7 +144,9 @@ def test_turns_preserve_exact_raw_text_and_are_isolated_by_party(tmp_path: Path)
 
 def test_exact_retry_returns_one_turn_and_changed_payload_conflicts(tmp_path: Path) -> None:
     engine = RPTurnEngine(tmp_path / "rp-clean.db")
-    engine.create_party(owner_user_id="owner-one", party_id="party-one")
+    engine.create_party(
+        owner_user_id="owner-one", party_id="party-one", **_party_source()
+    )
     arguments = {
         "owner_user_id": "owner-one",
         "party_id": "party-one",
@@ -128,7 +182,9 @@ def test_exact_retry_returns_one_turn_and_changed_payload_conflicts(tmp_path: Pa
 
 def test_stale_party_version_does_not_create_a_turn(tmp_path: Path) -> None:
     engine = RPTurnEngine(tmp_path / "rp-clean.db")
-    engine.create_party(owner_user_id="owner-one", party_id="party-one")
+    engine.create_party(
+        owner_user_id="owner-one", party_id="party-one", **_party_source()
+    )
 
     with pytest.raises(RPPartyVersionConflict):
         engine.commit_turn(
@@ -148,7 +204,9 @@ def test_stale_party_version_does_not_create_a_turn(tmp_path: Path) -> None:
 def test_failed_atomic_commit_keeps_turn_and_counter_unchanged(tmp_path: Path) -> None:
     database = tmp_path / "rp-clean.db"
     engine = RPTurnEngine(database)
-    engine.create_party(owner_user_id="owner-one", party_id="party-one")
+    engine.create_party(
+        owner_user_id="owner-one", party_id="party-one", **_party_source()
+    )
     with sqlite3.connect(database) as connection:
         connection.executescript(
             """
@@ -207,6 +265,21 @@ def test_database_with_foreign_application_marker_is_rejected_without_mutation(
     assert database.read_bytes() == before
 
 
+def test_previous_clean_schema_is_rejected_without_migration(tmp_path: Path) -> None:
+    database = tmp_path / "rp-schema-v1.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(f"PRAGMA application_id = {RP_DATABASE_APPLICATION_ID}")
+        connection.execute("PRAGMA user_version = 1")
+        connection.execute("CREATE TABLE rp_parties(id TEXT PRIMARY KEY)")
+        connection.execute("CREATE TABLE rp_turns(id INTEGER PRIMARY KEY)")
+    before = database.read_bytes()
+
+    with pytest.raises(RPSchemaError, match="unsupported RP schema version 1"):
+        RPTurnEngine(database)
+
+    assert database.read_bytes() == before
+
+
 def test_concurrent_schema_initialization_and_turn_commit_are_serialized(
     tmp_path: Path,
 ) -> None:
@@ -220,7 +293,9 @@ def test_concurrent_schema_initialization_and_turn_commit_are_serialized(
     with ThreadPoolExecutor(max_workers=8) as pool:
         engines = list(pool.map(lambda _: construct_engine(), range(8)))
 
-    engines[0].create_party(owner_user_id="owner-one", party_id="party-one")
+    engines[0].create_party(
+        owner_user_id="owner-one", party_id="party-one", **_party_source()
+    )
     commit_barrier = threading.Barrier(2)
 
     def commit(engine: RPTurnEngine, suffix: str) -> object:
@@ -256,7 +331,9 @@ def test_deferred_commit_failure_rolls_back_raw_turn_and_party_version(
 ) -> None:
     database = tmp_path / "rp-clean.db"
     engine = RPTurnEngine(database)
-    engine.create_party(owner_user_id="owner-one", party_id="party-one")
+    engine.create_party(
+        owner_user_id="owner-one", party_id="party-one", **_party_source()
+    )
     with sqlite3.connect(database) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(

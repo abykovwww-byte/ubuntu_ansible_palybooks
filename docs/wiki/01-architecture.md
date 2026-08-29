@@ -73,12 +73,14 @@ flowchart LR
 identity начинается заново. Между Gateway нет runtime-вызовов, общей БД или
 dual-write.
 
-### Срез 2 Decision 043: offline-граница
+### Срезы 2–3 Decision 043: offline-граница
 
-Шаг 5 добавляет только исходный `каркас` нового RP-контура. Пакет `app/rp`
-создаёт собственную чистую SQLite и выполняет один offline atomic turn. Он не
-импортируется `main.py`, не получает запросы FastAPI, не вызывает provider и не
-открывает legacy DB. Между двумя контурами нет runtime edge или dual-write:
+Шаг 5 добавил чистую SQLite и offline atomic turn. Шаг 6 добавляет
+production loader/schema, в котором World владеет общим каноном и
+статикой, а Scenario — игроком, стартом, активными NPC, стартовыми
+отношениями и настройками опыта. Loader материализует их в два
+независимых immutable snapshot с SHA-256 и только потом создаёт
+offline-партию:
 
 ```mermaid
 flowchart LR
@@ -88,14 +90,21 @@ flowchart LR
         Adj --> Legacy[("legacy rp_gateway.db")]
     end
 
-    subgraph Offline["Decision 043, срез 2 — каркас"]
-        Test["Focused module test"] --> Engine["app/rp RPTurnEngine"]
+    subgraph Offline["Decision 043, срез 3 — каркас"]
+        World["world.json\nWorldDefinition"] --> Loader["production loader/schema"]
+        Scenario["scenario-presets/*.json\nScenarioPresetDefinition"] --> Loader
+        Loader --> Snap["WorldSnapshot + ScenarioSnapshot\nотдельные SHA-256"]
+        Snap --> Engine["app/rp RPTurnEngine"]
         Engine --> Clean[("clean SQLite")]
     end
 ```
 
-Действующий тракт временно сохраняется до шага 12 Decision 043. Диаграммы
-контейнеров и сетей выше описывают именно его и этим срезом не меняются.
+В offline-контур перенесён только `day-watch-moscow-v2`. `app/rp` не
+импортируется `main.py`, не получает запросы FastAPI, не вызывает provider и
+не открывает legacy DB. Между двумя контурами нет runtime edge или
+dual-write. Manifest-based runtime временно остаётся пользовательским
+трактом до шага 12. Поэтому диаграммы контейнеров и сетей выше этим
+срезом не меняются; apply, deploy и live proof не выполнялись.
 
 ## Ответственность компонентов
 

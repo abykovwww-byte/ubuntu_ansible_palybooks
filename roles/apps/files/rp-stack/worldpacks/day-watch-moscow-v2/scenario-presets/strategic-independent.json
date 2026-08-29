@@ -1,0 +1,29 @@
+{
+  "schema_version": "rp-scenario-preset.v1",
+  "id": "strategic-independent",
+  "title": "Стратегический: Независимый старт",
+  "world_id": "day-watch-moscow-v2",
+  "player_role": "Независимый зарегистрированный Иной. Имя, сторона, уровень силы, способности, биография, связи и личные ограничения задаются в карточке персонажа.",
+  "style": "strategic",
+  "format": "plain_scene_text",
+  "difficulty": null,
+  "detail_level": "default",
+  "world_system_prompt_file": "presets/strategic/gm-system.md",
+  "world_authors_note_file": "presets/strategic/authors-note.md",
+  "opening_file": "prompts/openings/independent/opening-scene.md",
+  "initial_state_file": "prompts/openings/independent/state-seed.json",
+  "active_character_ids": [
+    "zabulon",
+    "gesser",
+    "alisa-donnikova",
+    "edgar",
+    "anton-gorodetsky",
+    "svetlana-nazarova",
+    "igor-teplov",
+    "olga",
+    "tiger-cub",
+    "maxim",
+    "anna-tikhonovna"
+  ],
+  "local_overrides": {}
+}

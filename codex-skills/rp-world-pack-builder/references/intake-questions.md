@@ -1,92 +1,67 @@
 # Intake Questions
 
-Ask no more than 3 questions at a time. If the user wants speed, make reasonable assumptions and record them in the world pack manifest.
+Ask no more than three questions at a time. Skip answers already present in the
+request or committed source.
 
-## Mandatory New World Intake
+## Current Executable Boundary
 
-Do not create a new non-test world pack until these three questions are answered
-in the current thread, discoverable local context, or explicit user-provided
-brief:
+The current Decision 043 loader supports only `day-watch-moscow-v2`. For changes
+to that World, ask only what affects the requested source:
 
-1. Название мира / кампании: как должен называться мир?
-2. Суть и источник мира: о чем мир, и он оригинальный, основан на реальном мире/истории, или на существующем лоре/IP?
-3. Персонаж игрока: кто игрок на старте, каков его статус/уровень силы и начальные ограничения?
+1. What reusable World fact changes: canon, rule, faction, place, base NPC,
+   relationship ontology, or seed lore?
+2. What Scenario dimension changes: player start, style, format, difficulty,
+   detail, opening, initial state, active NPCs, or local deviation?
+3. Which existing World/Scenario combinations must remain unchanged?
 
-Ask them together, in Russian when the user is using Russian:
+When the user wants speed, make only assumptions that remain within the
+existing closed schema and report them explicitly in the task/PR description.
+Do not add an undeclared `assumptions` field to `world.json` or a preset.
 
-```text
-Перед созданием мира уточню три вещи:
-1. Как называется мир/кампания?
-2. В чем суть мира: оригинальный, реальный/исторический или по существующему лору/IP?
-3. Кто персонаж игрока на старте: роль, статус/сила, ограничения?
-```
+## Requests For Another World
 
-Only skip this intake when the user explicitly says to create a test/smoke world
-or to proceed on assumptions. In that case, record the assumptions in
-`manifest.json` and label the pack as draft/test.
+If the user asks for a different executable World, gather a brief but do not
+write a source definition that the current loader will reject. Ask:
 
-If the user references a "neighboring thread" or prior conversation but its
-details are not available locally, ask for the mandatory intake again instead
-of inventing it.
+1. What is the World name and premise/source: original, historical, or existing
+   IP?
+2. Which reusable canon, factions, places, NPCs, and relationship model define
+   it?
+3. Which starting player role and first Scenario are required?
 
-## Minimum Viable Intake
-
-Use these when the user gives only a short premise:
-
-1. Player role: who is the player at the start?
-2. Canon mode: canon-faithful, canon-divergent, or original inspired-by?
-3. Tone and boundaries: power fantasy, intrigue, survival, comedy, grimdark; any hard limits?
+Record the result as a proposal or later-slice requirement. Do not work around
+the single-World guard through `manifest.json`.
 
 ## Optional Questions
 
-Use only when they matter:
+Use only when they materially affect authored source:
 
-- Language for play: Russian, English, bilingual.
-- Starting scale: village, city, kingdom, empire, multiverse.
-- Power level: weak survivor, competent adventurer, faction leader, monster, ruler.
-- Relationship style: solo protagonist, party, harem, political court, guild/team.
-- Mechanics taste: light checks, crunchy checks, mostly narrative.
-- Lore density: compact, medium, encyclopedic.
-- Spoiler policy for fandom worlds: avoid spoilers, use all canon, user-provided canon only.
-- NSFW/romance policy: absent, fade-to-black, explicit only if allowed by the broader system and user.
-- Automation: draft only, install locally, deploy to server.
-- Creation path: quick Light GUI prompt-world, reviewable Git worldpack, or both.
-- Play surface: Light GUI first, SillyTavern compatibility, or legacy SillyTavern-only.
+- language of play;
+- canon-faithful versus canon-divergent treatment;
+- hard tone/content boundaries;
+- intended narrator style and output format;
+- difficulty and detail level;
+- active NPC subset;
+- whether a change is reusable World canon or a Scenario-local override;
+- which of the twelve approved style/start combinations change.
 
-## Existing IP Handling
+For deterministic scoring, curriculum, typed browser-event assessment, or a
+debrief-driven learning scenario, stop and route to
+`training-world-pack-builder`.
 
-When the user names an anime, game, book, or franchise:
+## Existing IP
 
-- Ask whether they want canon-faithful or inspired-by if not obvious.
-- Prefer original campaign situations inside the setting rather than reproducing scenes verbatim.
-- Keep entries concise. Do not paste long copyrighted passages.
-- If exact canon accuracy matters and facts may be uncertain, browse or ask the user to provide canon notes.
-- Preserve player agency: do not force the player to become the original protagonist unless requested.
+- Prefer original campaign situations inside the setting rather than copying
+  scenes verbatim.
+- Keep entries concise; do not paste long copyrighted passages.
+- If exact canon matters and local evidence is insufficient, verify against an
+  authoritative source or ask the user for canon notes.
+- Preserve player agency; do not force the player to become the original
+  protagonist unless requested.
 
-## Assumption Block
+## Runtime Expectation
 
-If proceeding without answers, include a manifest section like:
-
-```json
-{
-  "assumptions": [
-    "Canon-divergent fan campaign.",
-    "Russian prose and UI labels.",
-    "Player starts as a newly awakened minor power with limited local knowledge."
-  ]
-}
-```
-
-## Light GUI Shortcut
-
-If the user wants to start playing quickly rather than create a reusable pack,
-offer the new Light GUI path:
-
-```text
-Можно быстро создать мир прямо в Light GUI через "Новая партия -> Мир -> Задать prompt".
-Это сохранит runtime prompt-world на сервере, но не создаст reviewable Git worldpack
-и не установит SillyTavern lorebook.
-```
-
-Use the full mandatory intake only when the user wants a reusable/deployable
-world pack, lorebook, character notes, or server-side Git/IaC artifact.
+The current source is offline-only. Do not offer Light GUI creation, server
+installation, or runtime visibility as a consequence of authoring it. A later
+integration/cutover task must connect the production loader to the product
+surface and prove real party play.
