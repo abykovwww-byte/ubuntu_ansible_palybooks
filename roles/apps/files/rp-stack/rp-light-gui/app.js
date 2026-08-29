@@ -189,7 +189,6 @@ const els = {
   datasetTurnDialogMeta: document.querySelector("#datasetTurnDialogMeta"),
   datasetTurnPlayerMessage: document.querySelector("#datasetTurnPlayerMessage"),
   datasetTurnAssistantMessage: document.querySelector("#datasetTurnAssistantMessage"),
-  datasetTurnInteractionEvidence: document.querySelector("#datasetTurnInteractionEvidence"),
   datasetTurnAutoTags: document.querySelector("#datasetTurnAutoTags"),
   datasetTurnTags: document.querySelector("#datasetTurnTags"),
   datasetTurnNotes: document.querySelector("#datasetTurnNotes"),
@@ -2002,22 +2001,6 @@ function fillAdminDatasetTurnDialog(turn) {
   ].filter(Boolean).join("");
   els.datasetTurnPlayerMessage.textContent = turn.player_message || "Реплика игрока отсутствует.";
   els.datasetTurnAssistantMessage.textContent = turn.assistant_response || "Ответ LLM отсутствует.";
-  const eventLabels = {
-    link_opened: "Перешёл по ссылке",
-    form_submitted: "Отправил форму",
-    credentials_submitted: "Ввёл и отправил учётные данные",
-    reported: "Сообщил о подозрительном сообщении",
-  };
-  const evidenceItems = Array.isArray(turn.interaction_evidence) ? turn.interaction_evidence : [];
-  els.datasetTurnInteractionEvidence.textContent = evidenceItems.length
-    ? evidenceItems.map((item) => {
-      const result = item.decision_result === "pass"
-        ? "успех"
-        : item.decision_result === "fail" ? "ошибка" : "без оценки";
-      const label = eventLabels[item.event_type] || item.event_type || "Действие";
-      return `${label} — ${result}${item.evidence ? ` (${item.evidence})` : ""}`;
-    }).join("\n")
-    : "За этот ход действий в учебном сайте не зафиксировано.";
   els.datasetTurnAutoTags.innerHTML = (turn.auto_tags || []).length
     ? turn.auto_tags.map((tag) => `<span class="dataset-tag">${escapeHtml(tag)}</span>`).join("")
     : `<span class="dataset-tag dataset-tag-muted">Нет</span>`;
@@ -2214,7 +2197,7 @@ function closePartyDialog() {
 
 function renderDialogOptions() {
   document.querySelectorAll("input[name='scenarioType']").forEach((input) => {
-    input.checked = false;
+    input.checked = input.value === "rp";
   });
   renderWorldOptions();
   renderProviderOptions(els.modelProviderSelect, "openrouter");

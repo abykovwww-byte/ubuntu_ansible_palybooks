@@ -541,10 +541,14 @@ runtime retry, gameplay quality или живую партию.
 
 ## Обычный ход
 
+После C1 это логическая схема двух mode-matched процессов, а не общего
+Gateway: Light GUI вызывает только RP Gateway, Showroom — только standalone
+Training Gateway. В каждой ветви исполняется только её режимная часть.
+
 ```mermaid
 sequenceDiagram
-    participant UI as Light GUI / Showroom
-    participant API as Gateway API
+    participant UI as Light GUI или Showroom
+    participant API as Соответствующий RP или Training Gateway
     participant Store as StateStore
     participant Rules as Intent + Scenario resolver
     participant Runtime as TrainingRuntimeService
@@ -825,11 +829,17 @@ Extraction читает оба номера из уже записанного �
 
 ## Интерактивное действие между ходами
 
-Открытие сайта, отправка формы и сообщение о подозрении не запускают narrator и не продвигают authored turn. UI отправляет idempotent event в party- или showroom-scoped endpoint; Gateway проверяет владельца, artifact, разрешённый тип действия и сохраняет только типизированный факт. При следующем игровом ходе неиспользованные события становятся evidence для RuleEngine и потребляются атомарно вместе с turn commit.
+Открытие сайта, отправка формы и сообщение о подозрении не запускают narrator и
+не продвигают authored turn. Standalone Showroom отправляет idempotent event в
+run-scoped endpoint; Training Gateway разрешает внутреннюю party, проверяет
+visitor, artifact и тип действия и сохраняет только типизированный факт. При
+следующем ходе неиспользованные события становятся evidence для RuleEngine и
+потребляются атомарно вместе с turn commit. RP Gateway эти routes не публикует.
 
 ### Capability gate и рабочие файлы
 
-> Ступень готовности: `подключено` в Gateway и Showroom; live-статус зависит от применённой ревизии.
+> Ступень готовности: `подключено` в standalone Training Gateway и Showroom;
+> live-статус зависит от применённой ревизии.
 
 Перед сборкой narrator prompt Gateway читает два флага из run snapshot.
 Выключенная capability не добавляет prompt contract, не создаёт public snapshot,
@@ -955,8 +965,8 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [RP story memory](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
 - [Revision-8 history selection](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_history.py)
 - [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
-- [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
-- [Training runtime](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_runtime.py)
+- [Активный standalone Training Gateway](https://github.com/abykovwww-byte/tavern-awareness-showroom)
+- Legacy-копии `training_artifacts.py` и `training_runtime.py` в RP source сохранены только до явной очистки O2 и после C1 не исполняются.
 - [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)

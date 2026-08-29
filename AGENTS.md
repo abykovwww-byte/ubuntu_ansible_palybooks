@@ -2,8 +2,8 @@
 
 ## Scope and authority
 
-- This repository is the durable authority for `abykovserv`. Do not hot-edit `/srv/apps/rp-stack` as a normal implementation path.
-- `rp-gateway` owns canonical party state, turn commits, scoring, memory, provider policy, and training evidence. Light GUI and Showroom are presentation clients and must not become authorities for canonical data.
+- This repository is the durable IaC authority for `abykovserv` and the source authority for the RP application. The separate `tavern-awareness-showroom` repository is the source authority for Showroom and Training. Do not hot-edit `/srv/apps/rp-stack` or `/srv/apps/awareness-showroom` as a normal implementation path.
+- `rp-gateway` owns canonical RP party state, turn commits, memory, and RP provider policy. The standalone Training Gateway owns training state, scoring, evidence, and provider policy; Showroom is its presentation client. The two applications must not share runtime authority or SQLite data.
 - Keep delivery states distinct: local edit, tested, committed, pushed, Ansible-applied, container-tested, HTTP-verified, and browser-verified.
 - Never read, print, copy, or commit `/etc/ansible/local-overrides.yml`, `.env` values, API keys, cookies, passwords, PATs, or monitoring credentials.
 
@@ -13,7 +13,7 @@
 - For RP Stack architecture or significant player/operator behavior changes, use `codex-skills/rp-stack-wiki/SKILL.md`; update the Wiki only when deployed architecture, an external contract, or an operator workflow changes.
 - For `abykovserv` deployment, use `codex-skills/abykovserv-iac-deploy/SKILL.md`. Deployment is `commit -> push the working branch -> non-draft PR -> green CI -> merge into main -> ansible-local-apply.service -> runtime verification`.
 - For RP WorldPacks, use `codex-skills/rp-world-pack-builder/SKILL.md`.
-- For deterministic training WorldPacks, use `codex-skills/training-world-pack-builder/SKILL.md`.
+- For deterministic training WorldPacks, use `codex-skills/training-world-pack-builder/SKILL.md` and make application changes in `tavern-awareness-showroom`. This repository only owns its exact deployment pin and Ansible topology.
 - For architecture and relationship questions, query the repository Graphify graph first when `graphify-out/` is present, then confirm decisive claims against source.
 
 ## Development discipline

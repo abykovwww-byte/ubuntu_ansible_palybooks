@@ -187,6 +187,12 @@ retention policy. Она существует только как source/module-
 /srv/app-data/rp-stack/gateway/rp_gateway.db
 /srv/app-data/rp-stack/models      локальные model artifacts
 /srv/backups/rp-stack              backups
+
+/srv/apps/awareness-showroom                 standalone training source
+/srv/app-data/awareness-showroom/gateway     training Gateway data и SQLite
+/srv/app-data/awareness-showroom/state       training party state
+/srv/app-data/awareness-showroom/showroom-covers
+/srv/backups/awareness-showroom              отдельные training backups
 ```
 
 SQLite используется несколькими service stores, но scope задаётся явными IDs и owner filters.
@@ -202,28 +208,26 @@ SQLite используется несколькими service stores, но scop
 | Reliability | `turn_requests`, `memory_checkpoints`, `party_branches`, `autotest_runs` |
 | RP supervision | `rp_supervisor_evaluations` (typed, 30-day TTL, no raw prompt/response) |
 | Dataset | `dataset_turn_labels`, `turn_feedback` |
-| Showroom | `showroom_scenarios`, `showroom_visitors`, `showroom_runs` |
-| Training artifacts | `training_artifacts`, `training_artifact_events` |
+| Showroom | Активные `showroom_scenarios`, `showroom_visitors`, `showroom_runs` находятся в standalone SQLite; старые RP-строки остаются нетронутыми и скрытыми |
+| Training artifacts | Активные `training_artifacts`, `training_artifact_events` принадлежат standalone SQLite; старые RP-строки сохраняются до O2 |
 | Diagnostics | `turn_trace_events`, `turn_state_mutations`, `turn_phase_annotations`, `service_call_log` |
 | Provider access | `provider_api_keys` |
 
 ## Изоляция пользователей и партий
 
 ```mermaid
-flowchart TB
-    U["Gateway User"] --> PC["Player Characters"]
-    U --> P["Parties"]
-    P --> K["Party BYOK"]
-    P --> NS["Narrator settings"]
-    P --> C["state_campaign_id"]
-    C --> T["Turns / checks / chapters / legacy journal"]
-    C --> RPS["RP-only story-memory snapshots"]
-    C --> B["Branch campaign IDs"]
-    C --> TA["Training artifact snapshots / events"]
-    C --> DT["Trace events / mutations / annotations / service log"]
+flowchart LR
+    subgraph RP["RP Gateway + RP SQLite"]
+        U["Gateway User"] --> P["RP Parties"]
+        P --> C["state_campaign_id"]
+        C --> T["Turns / state / memory / trace"]
+    end
 
-    AV["Anonymous visitor"] --> SR["ShowroomRun"]
-    SR --> IP["Internal Party"]
+    subgraph Training["Training Gateway + Awareness SQLite"]
+        AV["Anonymous visitor"] --> SR["ShowroomRun"]
+        SR --> IP["Internal training Party"]
+        IP --> TA["Training artifacts / workspace / events"]
+    end
 ```
 
 Обычный API получает owner из Gateway session. `PartyStore` фильтрует parties и characters по `owner_user_id`; `StateStore` — по `state_campaign_id`. Admin role даёт административные операции, но сама игра всё равно адресуется конкретной Party.
@@ -236,16 +240,20 @@ service settings. Миграция существующей базы добав�
 
 Showroom использует отдельный visitor token. Run доступен только cookie-владельцу; raw party ID не возвращается клиенту.
 
-После cutover Decision 018 это становится физической границей данных: Awareness
-Showroom использует отдельные SQLite/state/covers/backup paths и cookies
+После C1 apply это становится физической границей данных: Awareness Showroom
+использует отдельные SQLite/state/covers/backup paths и cookies
 `awareness_gateway_session` / `awareness_showroom_visitor`. Порты `8010` и
 `8011` сами по себе cookies не изолируют. Общих writable volumes, dual-write и
 runtime API между RP и training Gateway нет. Старые Showroom rows сохраняются в
 legacy RP SQLite, но новый training runtime их не читает.
 
-I1 shadow уже использует эти отдельные paths на loopback `:18011`, но
-cutover не выполнен. Пустая standalone SQLite и healthy containers доказывают
-только изоляцию топологии, а не training flow или restore.
+C1 source закрепляет exact application commit
+`b72c481d616d6b8d654dc198d4973dce4e3e123c` и LAN-only
+`192.168.1.88:8011`, но apply ещё не выполнен. Live I1 shadow продолжает
+использовать отдельные paths на loopback `:18011`, а старый Showroom занимает
+`:8011`. Старая RP SQLite не мигрируется и не изменяется; её training rows не
+являются blocker по явному решению владельца. Полный training flow и restore
+после C1 apply ещё не доказаны.
 
 ### Git-каталог Showroom
 
@@ -348,12 +356,13 @@ Party BYOK:
 
 ## Сетевая поверхность
 
-| Сервис | Host binding | Комментарий |
+| Сервис | Live до C1 apply | C1 source после apply |
 |---|---|---|
-| Light GUI | LAN + Tailscale, `8010` | Gateway auth обязателен |
-| Showroom | LAN + Tailscale, `8011` | Публичная витрина с visitor cookie |
-| Gateway | Нет host port | Доступ только из `rp-stack` network |
-| Local LLM | Нет host port, internal network | Доступ только Gateway |
+| Light GUI | LAN + Tailscale, `8010` | Без изменений, RP Gateway auth обязателен |
+| Showroom | Старый Showroom, LAN + Tailscale, `8011` | Standalone, LAN-only `192.168.1.88:8011`, visitor cookie |
+| RP Gateway | Нет host port, общий legacy runtime | Нет host port, только `rp-stack` network и `scenario_type=rp` |
+| Training Gateway | Shadow loopback `127.0.0.1:18011` | Нет отдельного host port; доступ только через standalone Showroom network |
+| Local LLM | Нет host port, internal network | Без изменений; C1 не объединяет Docker networks |
 
 Наличие Tailscale binding не делает Showroom или Light GUI интернет-публичными само по себе, но security зависит от ACL и настроек tailnet.
 
@@ -419,18 +428,19 @@ Raw logs могут содержать личные данные, copyrighted te
 
 Backup содержит state, историю, диагностическую трассу, users, provider keys и dataset labels. Перед restore нужно проверить архив и точные target paths, остановить stack и только затем восстанавливать. Нельзя пересылать backup через публичные каналы.
 
-Awareness backup находится в `/srv/backups/awareness-showroom` и не
-смешивается с RP backup. До C1 test restore должен идти в отдельные
-временные target paths и доказать SQLite integrity, наличие реального run,
-scoring/debrief и resume data, не перезаписывая live data directory. Этот
-runtime gate ещё не пройден.
+Awareness backup находится в `/srv/backups/awareness-showroom` и не смешивается
+с RP backup. После C1 apply test restore должен идти в отдельные временные target
+paths и доказать SQLite integrity, наличие реального run, scoring/debrief и
+resume data, не перезаписывая live data directory. Этот runtime gate ещё не
+пройден. C1 не удаляет и не восстанавливает старую RP SQLite; её физическая
+training-очистка ждёт явной команды O2.
 
 ## Источники
 
 - [AuthStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/auth_store.py)
 - [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
-- [ShowroomStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/showroom.py)
-- [TrainingArtifactService](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
+- [Активный standalone Awareness Showroom](https://github.com/abykovwww-byte/tavern-awareness-showroom)
+- Legacy-копии `showroom.py` и `training_artifacts.py` в RP source сохранены только до явной очистки O2 и после C1 не обслуживают API.
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)

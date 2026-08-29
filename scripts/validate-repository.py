@@ -1028,12 +1028,24 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     example_env_path = ROOT / "roles" / "apps" / "templates" / "awareness-showroom.env.example.j2"
     apps_tasks_path = ROOT / "roles" / "apps" / "tasks" / "main.yml"
     work_standard_path = ROOT / "docs" / "repository-work-standard.md"
+    rp_compose_path = ROOT / "roles" / "apps" / "templates" / "rp-stack.compose.yml.j2"
+    rp_env_path = ROOT / "roles" / "apps" / "templates" / "rp-stack.env.j2"
+    rp_example_env_path = ROOT / "roles" / "apps" / "templates" / "rp-stack.env.example.j2"
+    rp_light_gui_path = ROOT / "roles" / "apps" / "files" / "rp-stack" / "rp-light-gui" / "index.html"
+    incident_manifest_path = (
+        ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks" / "incident-50" / "manifest.json"
+    )
     required_paths = (
         inventory_path,
         production_env_path,
         example_env_path,
         apps_tasks_path,
         work_standard_path,
+        rp_compose_path,
+        rp_env_path,
+        rp_example_env_path,
+        rp_light_gui_path,
+        incident_manifest_path,
     )
     for path in required_paths:
         if not path.is_file():
@@ -1046,6 +1058,11 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     example_env = example_env_path.read_text(encoding="utf-8")
     apps_tasks = apps_tasks_path.read_text(encoding="utf-8")
     work_standard = work_standard_path.read_text(encoding="utf-8")
+    rp_compose = rp_compose_path.read_text(encoding="utf-8")
+    rp_env = rp_env_path.read_text(encoding="utf-8")
+    rp_example_env = rp_example_env_path.read_text(encoding="utf-8")
+    rp_light_gui = rp_light_gui_path.read_text(encoding="utf-8")
+    incident_manifest = json.loads(incident_manifest_path.read_text(encoding="utf-8"))
     placeholder = "_".join(("ROOT", "FINAL", "PIN"))
 
     pin_values = re.findall(
@@ -1070,8 +1087,8 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         'awareness_showroom_data_dir: "{{ app_data_base_dir }}/awareness-showroom"',
         'awareness_showroom_cover_dir: "{{ awareness_showroom_data_dir }}/showroom-covers"',
         'awareness_showroom_backup_dir: "{{ app_backup_base_dir }}/awareness-showroom"',
-        'awareness_showroom_bind_host: "127.0.0.1"',
-        "awareness_showroom_host_port: 18011",
+        'awareness_showroom_bind_host: "192.168.1.88"',
+        "awareness_showroom_host_port: 8011",
         'awareness_showroom_gateway_database_url: "sqlite:////data/awareness_gateway.db"',
         "awareness_showroom_gateway_session_cookie_name: awareness_gateway_session",
         "awareness_showroom_visitor_cookie_name: awareness_showroom_visitor",
@@ -1171,6 +1188,18 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     for marker in example_markers:
         if marker not in example_env:
             fail(errors, f"Awareness Showroom example env missing marker: {marker}")
+
+    if "rp-showcase-gui:" in rp_compose:
+        fail(errors, "RP Stack Compose must not publish the retired in-stack Showroom after C1")
+    for path, content in ((rp_env_path, rp_env), (rp_example_env_path, rp_example_env)):
+        if "SCENARIO_TYPE=rp" not in content:
+            fail(errors, f"RP-only Gateway env missing SCENARIO_TYPE=rp: {path.relative_to(ROOT)}")
+    if 'name="scenarioType" value="training"' in rp_light_gui:
+        fail(errors, "RP Light GUI must not offer training party creation after C1")
+    if 'name="scenarioType" value="rp" required checked' not in rp_light_gui:
+        fail(errors, "RP Light GUI must select the sole RP scenario type by default")
+    if incident_manifest.get("scenario_types") != {"recommended": "rp", "supported": ["rp"]}:
+        fail(errors, "incident-50 must be RP-only after C1")
 
     collector_match = re.search(
         r"(?ms)^- name: Collect changed Docker apps from app-level tasks\n(?P<body>.*?)(?=^- name:|\Z)",

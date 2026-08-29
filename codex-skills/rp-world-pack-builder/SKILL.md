@@ -35,7 +35,7 @@ semantics.
 - Windows is only for Git/IaC editing and local validation. Never install worldpacks, lorebooks, state, or `/srv/...` runtime files on Windows.
 - Do not manually copy generated files into `/opt` or `/srv` on the server as a permanent fix. Use the GitHub + Ansible route from `abykovserv-iac-deploy`.
 - Do not hard-code a model into a world pack. Model selection belongs to the party/model profile.
-- Do not infer or silently select the party scenario type. Light GUI users choose `rp` or `training` explicitly when creating a party.
+- RP Light GUI creates only `rp` parties. Do not add a training choice or route training content through RP Gateway; use `training-world-pack-builder` and `tavern-awareness-showroom`.
 - Keep world content separate from Gateway mechanics. World prompts may supplement the selected scenario contract but must not re-enable mechanics forbidden by it.
 - Route a deterministic, scored, or debrief-driven learning world to `training-world-pack-builder`. Do not create it as a decorative RP pack.
 - Keep secrets and provider keys out of all world-pack and IaC files.
@@ -92,7 +92,7 @@ For the revision-10 world-clock contract:
 
 Across revisions:
 
-- For `training`, omit the RP story layer and its reserve while preserving its existing path. Treat provider cache telemetry as an observed value, not a promise.
+- Treat provider cache telemetry as an observed value, not a promise. The RP process must reject `training`; retained compatibility code is not an active authoring path.
 - Keep human-facing journal recaps separate from narrator memory.
 - Test RP activation, the negative `training` case, covered-turn exclusion, chronological coverage, party/branch isolation, archive retrieval isolation, secret exclusion, context budget, and a manual memory rebuild before deployment.
 
@@ -162,7 +162,7 @@ it must be declared as `manifest.files.lore_cards` and follow
 World-pack requirements:
 
 - Put the starting player role in `manifest.player_role`; Light GUI uses it as the default player character description.
-- Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`. This metadata filters incompatible combinations but never auto-selects the party type.
+- Put `scenario_types.recommended` and `scenario_types.supported` in `manifest.json`; both must resolve to `rp` for this application.
 - For a new pack supporting `rp`, declare `"rp_contract": {"schema_version": "rp-core.v2", "revision": 11}` and author the required presets/openings contract below. This is the maximum contract understood by the pack, not a migration flag: ordinary parties are capped by Gateway's observed revision, and existing packs and parties remain pinned until an explicit compatible update. Do not blanket-migrate them or author a new RP pack against the legacy mechanical v1 contract.
 - Revision 10 remains valid for existing compatible packs and does not require
   presets/openings; its declaration remains `"rp_contract": {"schema_version":

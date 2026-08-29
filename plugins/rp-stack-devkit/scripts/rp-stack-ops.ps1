@@ -2,9 +2,9 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateSet("local_revision", "server_revision", "ansible_status", "compose_status", "http_smoke", "gateway_test", "recent_logs", "provider_summary", "request_trace", "loop_probe", "causal_probe", "service_llm_trace", "backup_status")]
     [string]$Action,
-    [ValidateSet("smoke", "training", "full")]
+    [ValidateSet("smoke", "full")]
     [string]$Scope = "smoke",
-    [ValidateSet("rp-gateway", "rp-light-gui", "rp-showcase-gui")]
+    [ValidateSet("rp-gateway", "rp-light-gui")]
     [string]$Service = "rp-gateway",
     [ValidateRange(1, 500)]
     [int]$Lines = 100,

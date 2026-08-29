@@ -1,18 +1,20 @@
 ---
 name: training-world-pack-builder
-description: Build or update deterministic scored learning world packs for the SillyTavern/rp-gateway/Light GUI stack, including independently optional interactive links and department workspaces with static or dynamic files, LLM-filled visible slots, and typed browser-event scoring. Use when Codex needs to create a simulation, scenario-based exercise, awareness course, assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, training site, phishing file, workspace, output-validator contract, or training landing-page interaction. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
+description: Build or update deterministic scored learning world packs for the standalone training-only tavern-awareness-showroom application, including independently optional interactive links and department workspaces with static or dynamic files, LLM-filled visible slots, and typed browser-event scoring. Use when Codex needs to create a simulation, scenario-based exercise, Awareness course, Showroom assessment world, role-based training, deterministic curriculum, scoring rubric, debrief, training site, phishing file, workspace, output-validator contract, or training landing-page interaction. For live deployment to abykovserv / 192.168.1.88, also use abykovserv-iac-deploy.
 ---
 
 # Training World Pack Builder
 
-Create reviewable, playable training world packs for the local RP Stack. This
-skill owns authored learning design and pack artifacts; it does not change
-Gateway mechanics or deploy directly.
+Create reviewable, playable training world packs in the private
+`tavern-awareness-showroom` application repository. This skill owns authored
+learning design and pack artifacts; it does not deploy directly. Do not edit the
+retained training copies under `ubuntu_ansible_palybooks/roles/apps/files/rp-stack`;
+they are inactive rollback material until O2.
 
 ## Hard Boundaries
 
-- Create `scenario_types: { recommended: "training", supported: ["training"] }`. The party creator still selects `training`; a world pack must never silently select or change it.
-- Treat Gateway canonical party state as authority. Light GUI creates isolated state from `state-seed.json`; never overwrite `state/current.json` for normal play.
+- Create `scenario_types: { recommended: "training", supported: ["training"] }`. The standalone application is training-only and must never expose or accept `rp`.
+- Treat the standalone Training Gateway canonical party state as authority. Showroom creates isolated state from `state-seed.json`; never overwrite `state/current.json` for normal play.
 - Use deterministic authored progression only: no dice, random outcomes, `/check`, or hidden model adjudication of correctness.
 - Resolve only player actions explicitly stated in the current turn. Advance exactly one scheduled scenario turn after each response.
 - Treat site actions as immutable sub-turn events: recording `link_opened`, submit, report, or close must not call an LLM or advance the authored schedule. Consume pending events atomically with the next committed learner turn.
@@ -34,10 +36,10 @@ Gateway mechanics or deploy directly.
 - Keep the pack defensive, fictionalized, and safety-bounded for security, medical, legal, or other high-stakes topics. Escalate any need for real policy or regulated content to the user.
 - Use `abykovserv-iac-deploy` for GitHub + Ansible deployment; never make durable `/srv` or `/opt` edits by hand.
 
-The implemented Gateway authority lives in `app/services/training_runtime.py`,
+The implemented standalone Gateway authority lives in `rp-gateway/app/services/training_runtime.py`,
 `training_capabilities.py`, `training_artifacts.py`, and
 `training_workspace.py`. Showroom persists both
-scenario flags and immutable run snapshots in `app/services/showroom.py`.
+scenario flags and immutable run snapshots in `rp-gateway/app/services/showroom.py`.
 `worldpacks/awareness/` and `worldpacks/awareness-one-day/` are executable
 examples containing both contracts, a party-start policy resource, a dynamic
 turn file, hidden event policy, and capability-off-compatible chat paths.
@@ -66,19 +68,21 @@ policy, score threshold, or safe procedure.
 
 ## Discover
 
-Before editing, inspect the actual nested IaC repo and read:
+Before editing, inspect the actual `tavern-awareness-showroom` repository and read:
 
 - the existing training pack `worldpacks/awareness/` as the working example;
 - `docs/decisions/007-light-gui-party-memory.md`, `009-long-context-memory-policy.md`, `010-party-scenario-types.md`, and the negative Training boundary in `016-rp-living-story-memory.md`;
 - `references/training-contract.md` when authoring or reviewing the deterministic schedule, scoring, memory, and debrief contracts;
 - `references/site-artifacts-contract.md` when the world contains links that open simulated sites;
 - `references/workspace-artifacts-contract.md` when the world contains a department workspace or scored files;
-- the state schema, existing manifests, and `inventories/local/group_vars/server.yml`.
+- the state schema and existing manifests. Inspect
+  `ubuntu_ansible_palybooks/inventories/local/group_vars/server.yml` only when
+  preparing the exact deployment pin.
 
 Verify paths with `rg --files`. Default source location:
 
 ```text
-ubuntu_ansible_palybooks/roles/apps/files/rp-stack/worldpacks/<slug>/
+tavern-awareness-showroom/worldpacks/<slug>/
 ```
 
 Use lowercase ASCII slugs with letters, digits, and hyphens. Preserve unrelated
@@ -246,7 +250,7 @@ the normalization layer.
 - Run the same IaC preflight used before deployment:
 
 ```powershell
-python roles\apps\files\rp-stack\scripts\validate-training-runtime.py --worldpacks roles\apps\files\rp-stack\worldpacks
+python scripts\validate-training-runtime.py --worldpacks worldpacks
 ```
 
 - Verify `training_runtime` files cannot escape the pack root; turns are contiguous; all regexes compile; every detector reference, effect, aggregate, debrief score and fallback resource resolves to the state seed.
@@ -304,22 +308,23 @@ python scripts\validate-state.py --state worldpacks\<slug>\state-seed.json --sch
 
 ## IaC and Delivery
 
-For a playable pack, add the SillyTavern lorebook to `runtime_source_files` in
-`inventories/local/group_vars/server.yml` with `force: false`. Then follow:
+Publish application changes in `tavern-awareness-showroom` first. After its PR
+is merged, update only the exact `awareness_showroom_repo_version` pin in
+`ubuntu_ansible_palybooks/inventories/local/group_vars/server.yml`. Then follow:
 
 ```text
-local validation on a codex/ branch or in an isolated worktree -> commit
--> push the working branch -> open a non-draft PR -> wait for green CI
--> Codex merges the PR into main -> server pull-based Ansible apply
--> runtime verification
+standalone app validation on a codex/ branch -> app non-draft PR -> green CI -> app merge
+-> IaC pin branch -> IaC non-draft PR -> green CI -> IaC merge
+-> server pull-based Ansible apply -> runtime verification
 ```
 
 Direct pushes to `main` are prohibited; do not leave merge-ready work on the
 working branch.
 
-After deployment, verify the manifest is listed by `/api/worldpacks`, the
-party can be created explicitly as `training`, its isolated state starts at
-turn one, and the lorebook exists under the managed SillyTavern worlds path.
+After deployment, verify the manifest is listed by the standalone
+`http://192.168.1.88:8011/api/worldpacks`, the Showroom run creates a training
+party whose isolated state starts at turn one, and the RP endpoint on port 8010
+does not list or resume it.
 For interactive sites, run the focused Gateway artifact tests inside the rebuilt
 container, then perform one synthetic end-to-end path through artifact open,
 submit or report, and the following scoring turn. Inspect typed evidence and

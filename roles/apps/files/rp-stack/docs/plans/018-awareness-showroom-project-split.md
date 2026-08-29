@@ -1,6 +1,7 @@
 # Plan 018: вынести Awareness и Showroom в training-only project
 
-Date: 2026-08-27 · Owner decision: accepted · Runtime status: I1 shadow applied, not cut over.
+Date: 2026-08-27 · Owner decision: accepted · Delivery status: C1 source
+prepared, Ansible apply and live acceptance pending.
 
 ## Результат
 
@@ -35,12 +36,13 @@ commit pin нового private application repository. Код нового пр
   RP story memory, Turn Trace и RP evals;
 - server IaC, ports, local overrides, backup orchestration и commit pin нового
   project;
-- исторические Showroom/training строки старой SQLite как read-only legacy data
-  на rollback window.
+- существующая RP SQLite без переписывания: старые Showroom/training строки
+  остаются нетронутыми, но production RP Gateway их не публикует и не исполняет.
 
-После подтверждённого cutover из активного RP source удаляются Showroom UI,
-Awareness WorldPacks и training-only runtime/API/tests. Таблицы не удаляются и
-история не переписывается.
+После подтверждённого cutover отдельной командой O2 из RP source удаляются
+Showroom UI, Awareness WorldPacks и training-only runtime/API/tests. C1 этого
+физического удаления не выполняет: таблицы не удаляются, старая БД и история не
+переписываются.
 
 ## Git migration
 
@@ -159,21 +161,32 @@ source/delivery contract.
 config с Git-каталогом. Любой delta идёт обычным application PR; runtime
 admin mutation не становится authority.
 
+Владелец явно снял перенос истории, visitors/runs и ожидание старых активных
+прохождений как блокеры C1. Поэтому drain и migration не выполняются: новый
+project начинает с собственной БД, а старая RP SQLite остаётся нетронутой.
+
 ### C1 — cutover
 
 Переключить `8011` на новый project, сделать старый Gateway RP-only, убрать
 старый Showroom из активного Compose. `8010` остаётся RP Light GUI. Никакого
 dual-write или proxy между Gateway.
 
+C1 source подготовлен с exact application pin
+`b72c481d616d6b8d654dc198d4973dce4e3e123c`: новый Showroom должен занять
+LAN-only `192.168.1.88:8011`, старый RP Gateway — запускаться только с
+`SCENARIO_TYPE=rp`, а `rp-showcase-gui` — исчезнуть из активного RP Compose.
+Это состояние после merge, но до apply: живой `:8011`, backup/restore и
+сквозная training/RP приёмка ещё не подтверждены.
+
 ### O2 — cleanup
 
-После rollback window удалить из активного RP source training/Showroom code и
-data mounts. Legacy DB/backup сохраняются согласно существующей retention
+Только после явной команды владельца удалить из RP source training/Showroom
+code и data mounts. Legacy DB/backup сохраняются согласно существующей retention
 policy; destructive SQL migration не выполняется.
 
 ## Acceptance
 
-До cutover обязательны:
+После C1 apply и до команды O2 обязательны:
 
 - оба Awareness курса пройдены через Showroom до authored debrief;
 - хотя бы один реальный narrator provider call подтверждён отдельно от
@@ -191,9 +204,9 @@ policy; destructive SQL migration не выполняется.
 - source merge, Ansible apply и live verification сообщаются как отдельные
   стадии.
 
-Rollback до окончания окна: вернуть IaC pin/topology на предыдущий RP Stack
-revision и снова опубликовать старый Showroom на `8011`. Новую БД не сливать со
-старой; после решения о rollback она остаётся отдельным forensic snapshot.
+Rollback до O2: вернуть IaC pin/topology на предыдущий RP Stack revision и снова
+опубликовать старый Showroom на `8011`. Новую БД не сливать со старой; после
+решения о rollback она остаётся отдельным forensic snapshot.
 
 ## Сознательно не входит
 

@@ -101,30 +101,6 @@ services:
     networks:
       - rp-stack
 
-  rp-showcase-gui:
-    build:
-      context: .
-      dockerfile: rp-showcase-gui/Dockerfile
-    container_name: rp-stack-showcase-gui
-    restart: unless-stopped
-    depends_on:
-      rp-gateway:
-        condition: service_healthy
-    ports:
-{% for bind_host in rp_stack_bind_hosts | default([rp_stack_bind_host]) %}
-      - "{{ bind_host }}:{{ rp_stack_showcase_gui_host_port }}:80"
-{% endfor %}
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 15s
-      retries: 3
-    networks:
-      - rp-stack
-
 networks:
   rp-stack:
     name: rp-stack

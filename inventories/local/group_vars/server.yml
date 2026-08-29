@@ -240,7 +240,7 @@ rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 
 # Deploy only this exact merged application commit; do not replace it with a branch or tag.
-awareness_showroom_repo_version: "45221fddbc88629295a7d01349a5ab8edadf5abe"
+awareness_showroom_repo_version: "b72c481d616d6b8d654dc198d4973dce4e3e123c"
 awareness_showroom_enabled: "{{ (awareness_showroom_repo_version | length) == 40 }}"
 awareness_showroom_repo_url: "https://github.com/abykovwww-byte/tavern-awareness-showroom.git"
 # Required for this private repository; set only in /etc/ansible/local-overrides.yml.
@@ -251,8 +251,8 @@ awareness_showroom_gateway_data_dir: "{{ awareness_showroom_data_dir }}/gateway"
 awareness_showroom_state_dir: "{{ awareness_showroom_data_dir }}/state"
 awareness_showroom_cover_dir: "{{ awareness_showroom_data_dir }}/showroom-covers"
 awareness_showroom_backup_dir: "{{ app_backup_base_dir }}/awareness-showroom"
-awareness_showroom_bind_host: "127.0.0.1"
-awareness_showroom_host_port: 18011
+awareness_showroom_bind_host: "192.168.1.88"
+awareness_showroom_host_port: 8011
 awareness_showroom_gateway_port: 8088
 awareness_showroom_gateway_database_url: "sqlite:////data/awareness_gateway.db"
 awareness_showroom_gateway_log_level: INFO

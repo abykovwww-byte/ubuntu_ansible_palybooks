@@ -4,7 +4,12 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
 const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+const dockerfile = fs.readFileSync(require.resolve("./Dockerfile"), "utf8");
 const plain = (value) => JSON.parse(JSON.stringify(value));
+
+assert.doesNotMatch(html, /training-artifacts\.(?:js|css)/, "RP Light GUI must not load training resources");
+assert.doesNotMatch(dockerfile, /training-artifacts\.(?:js|css)/, "RP Light GUI image must not publish training resources");
+assert.doesNotMatch(html, /datasetTurnInteractionEvidence|Действия в учебном сайте/, "RP dataset review must not expose training evidence");
 
 function sourceBetween(startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -31,6 +36,13 @@ assert.equal(radioContext.selectedRadioValue("worldSource"), "ready");
 selected = { value: "training" };
 assert.equal(radioContext.selectedRadioValue("scenarioType", ""), "training");
 assert.equal((source.match(/selectedRadioValue\("scenarioType", ""\)/g) || []).length, 4);
+
+const renderDialogOptionsSource = sourceBetween("function renderDialogOptions", "function renderDialogModelOptions");
+assert.match(
+  renderDialogOptionsSource,
+  /input\.checked = input\.value === "rp"/,
+  "opening the RP-only dialog must keep the sole RP scenario selected",
+);
 
 const worldPosition = html.indexOf('id="worldSelect"');
 const presetPosition = html.indexOf('id="partyPresetSelect"');

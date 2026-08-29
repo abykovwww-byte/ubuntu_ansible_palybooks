@@ -94,7 +94,7 @@ class Adjudicator:
         self.store = store
         self.intent_parser = IntentParser()
         self.rule_engine = RuleEngine()
-        self.validator = OutputValidator()
+        self.validator = None if settings.scenario_type == "rp" else OutputValidator()
         self.narrative = NarrativeClient(settings, trace_recorder=store.record_narrative_attempt)
         self.memory = MemorySummarizer(settings, store)
         self.rp_story_memory = RPStoryMemoryUpdater(settings, store) if settings.scenario_type == "rp" else None
@@ -356,7 +356,6 @@ class Adjudicator:
                 if scene_bundle_revision
                 else None
             )
-            bundle_received = False
             fallback_noncanonical = False
             try:
                 relationship_projection_before = self.trace_projection_snapshot()
@@ -643,7 +642,6 @@ class Adjudicator:
                     supervisor_advisory=supervisor_advisory,
                 )
                 prompt_cache_response = raw
-                bundle_received = True
                 if scene_bundle_revision:
                     scene_result = materialize_scene_bundle(
                         raw,
@@ -691,9 +689,7 @@ class Adjudicator:
                         request_id,
                     )
                     raise RuntimeError("Narrative provider returned an invalid response")
-                validation = None if (
-                    self.settings.scenario_type == "rp" and self.settings.rp_contract_revision < 3
-                ) else self.validator.validate(
+                validation = None if self.settings.scenario_type == "rp" else self.validator.validate(
                     text,
                     outcome,
                     narrative_state,
@@ -736,13 +732,11 @@ class Adjudicator:
                     )
                 training_runtime_enabled = bool(self.training_runtime and self.training_runtime.enabled)
                 repair_attempts = (
-                    1
-                    if revision_seven
-                    else (
-                        self.settings.training_repair_attempts
-                        if training_runtime_enabled
-                        else self.settings.max_repair_attempts
-                    )
+                    0
+                    if self.settings.scenario_type == "rp"
+                    else self.settings.training_repair_attempts
+                    if training_runtime_enabled
+                    else self.settings.max_repair_attempts
                 )
                 training_repair_allowed = True
                 if training_runtime_enabled and self.training_runtime:
@@ -935,9 +929,7 @@ class Adjudicator:
                     {"request_id": request_id, "model": self.settings.narrative_model, "status": status},
                     request_id,
                 )
-                if revision_seven and bundle_received:
-                    raise
-                if self.settings.scenario_type == "rp" and not revision_seven:
+                if self.settings.scenario_type == "rp":
                     raise RuntimeError(f"Narrative provider HTTP {status}") from exc
                 if not allow_gateway_fallback:
                     raise
@@ -950,9 +942,7 @@ class Adjudicator:
                 fallback_noncanonical = revision_seven
             except httpx.TimeoutException as exc:
                 self.store.audit("llm_timeout", {"request_id": request_id, "model": self.settings.narrative_model}, request_id)
-                if revision_seven and bundle_received:
-                    raise
-                if self.settings.scenario_type == "rp" and not revision_seven:
+                if self.settings.scenario_type == "rp":
                     raise RuntimeError("Narrative provider timed out") from exc
                 if not allow_gateway_fallback:
                     raise
@@ -965,9 +955,7 @@ class Adjudicator:
                 fallback_noncanonical = revision_seven
             except ProviderRateLimitError as exc:
                 self.store.audit("llm_rate_limited", {"request_id": request_id, **exc.details}, request_id)
-                if revision_seven and bundle_received:
-                    raise
-                if self.settings.scenario_type == "rp" and not revision_seven:
+                if self.settings.scenario_type == "rp":
                     raise
                 if not allow_gateway_fallback:
                     raise
@@ -988,9 +976,7 @@ class Adjudicator:
                     },
                     request_id,
                 )
-                if revision_seven and bundle_received:
-                    raise
-                if self.settings.scenario_type == "rp" and not revision_seven:
+                if self.settings.scenario_type == "rp":
                     raise RuntimeError("Narrative provider request failed") from exc
                 if not allow_gateway_fallback:
                     raise
@@ -1069,9 +1055,7 @@ class Adjudicator:
                     )
                 )
             projected_state = self.preview_applied_state(patch)
-            final_validation = None if (
-                self.settings.scenario_type == "rp" and self.settings.rp_contract_revision < 3
-            ) else self.validator.validate(
+            final_validation = None if self.settings.scenario_type == "rp" else self.validator.validate(
                 text,
                 outcome,
                 projected_state,

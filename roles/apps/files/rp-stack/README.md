@@ -1,7 +1,6 @@
 # RP Stack
 
-RP Stack is the LAN-only roleplay and training application managed by this IaC
-repository.
+RP Stack is the LAN-only roleplay application managed by this IaC repository.
 
 ```text
 Browser
@@ -11,12 +10,18 @@ Browser
   -> provider APIs or the optional local model runner
 ```
 
-Gateway owns authentication, world packs, player characters, model profiles,
-party state, history, memory chapters, deterministic checks, and training
-runtime execution. Training subject logic, schedule, assessment and fallback
-belong to the versioned WorldPack contract; Gateway interprets and snapshots it
-without campaign-specific branches. The browser stores only its active session
-and party preference.
+Gateway owns RP authentication, world packs, player characters, model profiles,
+party state, history, memory chapters, and deterministic RP checks. It starts in
+`SCENARIO_TYPE=rp`, exposes only RP WorldPacks and parties, and rejects training
+creation or resumption. The browser stores only its active session and party
+preference.
+
+Showroom and Awareness training run as the separate training-only
+`tavern-awareness-showroom` application on `http://192.168.1.88:8011`, with its
+own Gateway, WorldPacks, database, backup, and provider path. This repository
+pins and deploys that application but is not its application-source authority.
+The retained training source below `rp-stack/` is inactive rollback material
+until the explicit O2 deletion.
 
 **Service model / Служебная модель** is the single administrator-selected LLM
 for the whole RP Stack. It serves long-term memory, world-state change drafts,

@@ -4,7 +4,8 @@ Date: 2026-08-08 · Переоформлено 2026-08-09 в формат ADR + 
 
 ## Status
 
-Accepted 2026-08-27; implementation in progress.
+Accepted 2026-08-27; C1 source prepared, Ansible apply and live acceptance
+pending.
 
 Decision 019 выполнил подготовительный этап: предметный legacy Awareness удалён
 из общего Gateway, а training contract стал WorldPack-owned. Владелец принял
@@ -17,17 +18,24 @@ Decision 019 выполнил подготовительный этап: пре�
 - исходный RP Stack после cutover обслуживает только `scenario_type=rp` и
   сохраняет Light GUI на порту `8010`;
 - новый Showroom после cutover сохраняет пользовательский адрес на порту
-  `8011`; shadow-проверка выполняется на временном порту `18011`;
-- конфигурация Showroom-сценариев и covers переносится через публичные
-  admin/API-контракты, а runs, visitors, sessions, BYOK и история прохождений не
-  мигрируются;
+  `8011`; до C1 apply применённый shadow остаётся на временном порту `18011`;
+- конфигурация Showroom-сценариев и covers поставляется Git-каталогом нового
+  project, а runs, visitors, sessions, BYOK и история прохождений не мигрируются;
 - общая SQLite, dual-write, runtime-вызовы между проектами и общий Python
   package не создаются.
 
-Текущий production runtime на момент принятия решения всё ещё использует один
-`rp-gateway` и одну SQLite. Порядок реализации, cutover и rollback зафиксирован
-в [Plan 018](../plans/018-awareness-showroom-project-split.md). До завершения
-cutover этот раздел описывает цель, а не live-состояние.
+Текущий production runtime до C1 apply всё ещё использует старый Showroom на
+`:8011`; I1 shadow доступен только на loopback `:18011`. Source C1 уже фиксирует
+standalone commit `b72c481d616d6b8d654dc198d4973dce4e3e123c`, целевой LAN-only
+bind `192.168.1.88:8011`, RP-only старый Gateway и отсутствие старого Showroom в
+активном Compose. Это source/delivery state, а не live-доказательство. Порядок
+apply, acceptance, cutover и rollback зафиксирован в
+[Plan 018](../plans/018-awareness-showroom-project-split.md).
+
+Владелец явно отказался от переноса истории и снял старые visitors/runs/active
+sessions как блокер переключения. Старая RP SQLite при этом не очищается и не
+переписывается. Физическое удаление training/Showroom source выполняется только
+после отдельной явной команды O2.
 
 ## Контекст
 

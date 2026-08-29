@@ -56,7 +56,12 @@ header/question и no-link marker. Мягкое нарушение полей/п
 training-repair; hard shape/identity/URL/attachment/score и повторная ошибка
 уходят в authored fallback.
 
-Live acceptance на `awareness-one-day` подтвердил полный путь: authored ход создал письмо и `corporate-sso` snapshot, Showroom открыл credential-form, Gateway принял `link_opened`, `credentials_submitted` и `site_closed`, а следующий ход атомарно пометил события consumed и добавил UI-evidence в canonical scoring. В тестовом fail-пути увеличились `credential-exposure`, `suspicious-artifacts-opened` и `unsafe-actions`; решение принял RuleEngine, не narrator.
+Исторический live acceptance на старом общем Gateway подтвердил полный путь
+`awareness-one-day`: authored ход создал письмо и `corporate-sso` snapshot,
+Showroom открыл credential-form, Gateway принял `link_opened`,
+`credentials_submitted` и `site_closed`, а следующий ход атомарно пометил
+события consumed и добавил UI-evidence в canonical scoring. Это не является
+приёмкой нового standalone runtime: после C1 apply тот же путь проверяется заново.
 
 В `awareness-one-day` итоговая модель оценки разделена на безопасность, ролевую уместность и деловую коммуникацию. Основание начисления сохраняется по конкретному ходу, а итоговые категории сверяются с canonical state, чтобы narrator не мог придумать красивое, но ложное объяснение баллов.
 
@@ -66,22 +71,23 @@ Live acceptance на `awareness-one-day` подтвердил полный пу�
 правильность решения, а отключённая links capability использует тот же
 WorldPack-authored no-link fallback.
 
-Недельный `awareness` сохраняет прежний `player.resources.awareness-score` и
-legacy compatibility resolver до отдельной миграции его программы. Сайты
-появляются на ходах 1, 3, 5, 7, 8 и 9. Новую предметную логику в legacy-ветку
-не добавляют: новые и мигрированные курсы используют `training_runtime`.
+Недельный `awareness` использует WorldPack-owned runtime v3 и сохраняет
+`player.resources.awareness-score` как authored canonical result. Сайты
+появляются на ходах 1, 3, 5, 7, 8 и 9. Campaign-specific resolver в Gateway
+удалён: schedule, scoring, debrief и fallbacks принадлежат training WorldPack.
 
 ## Showroom и результат
 
 WorldPack сам связывает публичный результат с numeric state path через `manifest.showroom_result`. Showroom scenario может включить leaderboard, но не выбирает, откуда взять score. Это сохраняет ownership оценки у authored training world.
 
-После cutover Decision 018 этот контракт исполняется отдельным training-only
-Gateway. Он начинает с новой SQLite: настройки опубликованных сценариев и covers
-воссоздаются через admin API, а visitors, runs, parties, turns, feedback,
-leaderboard, sessions и BYOK не переносятся. Поэтому `Мои прохождения` и рейтинг
-начинаются с нуля; старые результаты остаются только в legacy snapshot/backup RP
-Stack. `manifest.showroom_result` остаётся authority и не заменяется полем
-миграции.
+C1 source закрепляет этот контракт за отдельным training-only Gateway exact
+commit `b72c481d616d6b8d654dc198d4973dce4e3e123c`. Он начинает с собственной
+SQLite: настройки опубликованных сценариев и covers создаются из Git-каталога,
+а visitors, runs, parties, turns, feedback, leaderboard, sessions и BYOK не
+переносятся. Владелец явно снял старую историю как blocker, поэтому `Мои
+прохождения` и рейтинг начинаются с нуля. Старая RP SQLite остаётся нетронутой.
+Apply, оба полных курса, provider-turn, scoring/debrief, resume и backup/restore
+нового runtime ещё должны быть подтверждены отдельно.
 
 Corporate portal — только presentational snapshot. Он не содержит schedule, rubric или скрытые ответы.
 
@@ -229,6 +235,11 @@ Train/validation/test делятся по `metadata.group_id` целыми campa
 
 ## API
 
+После C1 apply Showroom/artifact/workspace routes ниже принадлежат standalone
+Training Gateway. Production RP Gateway их не публикует; branch/autotest и
+dataset routes RP Stack остаются на RP стороне. До apply live endpoints ещё
+обслуживает старый общий Gateway.
+
 ```text
 GET/POST  /api/admin/autotests...
 GET/POST  /api/parties/{party_id}/branches...
@@ -254,4 +265,5 @@ PUT       /api/showroom/runs/{run_id}/turns/{turn_id}/feedback
 - [Interactive artifact ADR](../../roles/apps/files/rp-stack/docs/decisions/014-interactive-training-site-artifacts.md)
 - [Training capability ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
 - [WorldPack training runtime ADR](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
-- [Training runtime tests](../../roles/apps/files/rp-stack/rp-gateway/tests/test_training_runtime.py)
+- [Активный standalone training runtime и его тесты](https://github.com/abykovwww-byte/tavern-awareness-showroom)
+- Legacy `rp-gateway/tests/test_training_runtime.py` сохранён в RP source только до O2 и не является active runtime authority после C1.

@@ -49,6 +49,12 @@ $causalTool = Get-RpStackToolDefinitions | Where-Object { $_.name -eq "causal_pr
 $toolExpectations = @($causalTool.inputSchema.properties.expectation.enum | Sort-Object)
 $expectedToolExpectations = @($registeredCausalExpectations | Sort-Object)
 Assert-True (($toolExpectations -join "|") -eq ($expectedToolExpectations -join "|")) "causal_probe MCP enum differs from implemented expectations."
+$gatewayTestTool = Get-RpStackToolDefinitions | Where-Object { $_.name -eq "gateway_test" }
+$gatewayTestScopes = @($gatewayTestTool.inputSchema.properties.scope.enum | Sort-Object)
+Assert-True (($gatewayTestScopes -join "|") -eq "full|smoke") "gateway_test must expose RP-only scopes."
+$recentLogsTool = Get-RpStackToolDefinitions | Where-Object { $_.name -eq "recent_logs" }
+$recentLogServices = @($recentLogsTool.inputSchema.properties.service.enum | Sort-Object)
+Assert-True (($recentLogServices -join "|") -eq "rp-gateway|rp-light-gui") "recent_logs must expose RP-only services."
 $rootOpsWrapper = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "scripts\rp-stack-ops.ps1")
 foreach ($parameter in @("PartyId", "Expectation", "Turn")) {
     Assert-True ($rootOpsWrapper -match (('-' + $parameter + '\s+\$' + $parameter))) "Root rp-stack-ops wrapper does not forward $parameter."
