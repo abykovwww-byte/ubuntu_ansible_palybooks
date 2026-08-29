@@ -73,6 +73,30 @@ flowchart LR
 identity начинается заново. Между Gateway нет runtime-вызовов, общей БД или
 dual-write.
 
+### Срез 2 Decision 043: offline-граница
+
+Шаг 5 добавляет только исходный `каркас` нового RP-контура. Пакет `app/rp`
+создаёт собственную чистую SQLite и выполняет один offline atomic turn. Он не
+импортируется `main.py`, не получает запросы FastAPI, не вызывает provider и не
+открывает legacy DB. Между двумя контурами нет runtime edge или dual-write:
+
+```mermaid
+flowchart LR
+    subgraph Current["Действующий runtime"]
+        UI["Light GUI / Showroom"] --> API["Gateway API"]
+        API --> Adj["Adjudicator"]
+        Adj --> Legacy[("legacy rp_gateway.db")]
+    end
+
+    subgraph Offline["Decision 043, срез 2 — каркас"]
+        Test["Focused module test"] --> Engine["app/rp RPTurnEngine"]
+        Engine --> Clean[("clean SQLite")]
+    end
+```
+
+Действующий тракт временно сохраняется до шага 12 Decision 043. Диаграммы
+контейнеров и сетей выше описывают именно его и этим срезом не меняются.
+
 ## Ответственность компонентов
 
 | Компонент | Отвечает за | Не отвечает за |

@@ -195,9 +195,11 @@ endurance для более высоких ступеней не заявлен�
 принимает полный ребилд RP-контура вокруг World / Scenario / Party, трёх
 раздельных модельных ролей и единственного мира `day-watch-moscow-v2`. Decision
 043 вытесняет staged revision 8–12 rollout из 042; старый `Adjudicator` ради него
-не расширяется. Оба решения **Accepted, но не реализованы**: текущая Wiki ниже
-продолжает описывать действующий runtime до отдельных source, merge, apply и
-live-verification поставок; новый уровень готовности не заявляется.
+не расширяется. Срез 2 Decision 043 поставляет только уровень `каркас`:
+изолированный `app/rp` с clean SQLite и offline atomic `RPTurnEngine`. Он не
+подключён к `main.py`, API, runtime, provider или legacy DB. Поэтому текущая Wiki
+ниже продолжает описывать действующий runtime на старом `Adjudicator`; UX,
+deployment и live readiness этим срезом не меняются.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги
