@@ -162,6 +162,21 @@ party удаляет их до turns. Они не входят в canonical stat
 dataset и не используются как authority локации. `observe` никогда не создаёт
 narrator advisory.
 
+## Decision 043, срез 2: clean RP SQLite
+
+Inert-пакет `app/rp` владеет отдельной чистой SQLite для offline
+`RPTurnEngine`. Хранилище начинается без старых партий и не читает, не мигрирует
+и не меняет `rp_gateway.db`. В нём нет account/session/provider-key таблиц или
+секретов; `owner_user_id` сохраняется только как owner scope партии. В базе нет
+revision 0–11 или общего state-file mirror. Одна успешная offline-операция
+сохраняет RAW-пару и продвигает версию партии одной транзакцией; ошибка или
+конфликт не оставляют частичного RAW/version commit.
+
+Для этой базы ещё не назначены production path, volume, backup, restore или
+retention policy. Она существует только как source/module-test `каркас` и не
+меняет перечисленные ниже серверные пути. Называть новую production DB пустой
+или изолированной до подключения и отдельной runtime-проверки нельзя.
+
 ## Где находятся данные
 
 ```text

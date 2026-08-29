@@ -453,6 +453,7 @@ ubuntu_ansible_palybooks/
 | `services/service_models.py` | Глобальный service-model catalog/runtime |
 | `services/service_model_client.py` | Exact redacted service-model log, request/attempt metadata и retention |
 | `services/turn_trace.py` | Request/branch/revision-aware trace read model и аннотации |
+| `app/rp/` | Inert clean-schema storage и offline atomic `RPTurnEngine`; не подключён к Gateway runtime |
 
 Gateway запускает восстановление через единый FastAPI `lifespan`, а не через
 устаревшие `startup`/`shutdown` handlers. До приёма запросов он согласует
@@ -465,6 +466,7 @@ Gateway запускает восстановление через единый 
 |---|---|
 | Новый endpoint | `rp-gateway/app/main.py`, schemas и tests |
 | Изменить обработку хода | `adjudicator.py`, `rule_engine.py`, `validator.py` |
+| Изменить offline-каркас Decision 043 | `app/rp/` и `tests/test_rp_turn_engine.py`; не подключать через `main.py` до отдельного среза |
 | Изменить prompt/memory | `narrative.py`, `memory.py`, `rp_story_memory.py`, `rp_history.py`, `context_budget.py`, `state_store.py` |
 | Изменить Light GUI | `rp-light-gui/index.html`, `app.js`, `styles.css` |
 | Изменить Turn Trace Workbench | `turn_trace.py`, `state_store.py`, `narrative.py`, `service_model_client.py`, `main.py`, Light GUI trace assets и tests |
@@ -504,6 +506,16 @@ git diff --check
 python -m compileall rp-gateway/app
 pytest
 ```
+
+Для offline-каркаса Decision 043 из каталога `rp-gateway`:
+
+```bash
+python -m pytest -q tests/test_rp_turn_engine.py
+```
+
+Этот focused-прогон доказывает только `каркас`: clean SQLite и атомарную
+module-boundary. Он не является проверкой API, provider, deployment или живой
+партии и не повышает readiness до `подключено`.
 
 Агрегатная проверка из корня для изменения общего гейта, integration/cutover или
 перед deployment; semantic acceptance запускается при изменении игровой

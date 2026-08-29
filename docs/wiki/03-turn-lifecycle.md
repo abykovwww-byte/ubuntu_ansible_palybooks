@@ -509,6 +509,36 @@ memory и усечения. Ошибка остаётся typed `error/unchecked
 author note/current action; repair собирает тот же порядок. Supervisor не
 вычисляет и не исправляет локацию действия.
 
+## Decision 043, срез 2: offline atomic turn
+
+Новый `RPTurnEngine` пока существует только внутри inert-пакета `app/rp`. Он
+принимает подготовленные offline-входы и атомарно сохраняет одну RAW-пару в
+чистой SQLite. Provider, HTTP/API, FastAPI lifespan и действующие
+`PartyStore`/`StateStore`/`Adjudicator` в этот путь не входят.
+
+```mermaid
+sequenceDiagram
+    participant Test as Focused module test
+    participant Engine as app/rp RPTurnEngine
+    participant DB as Clean SQLite
+
+    Test->>Engine: offline turn input
+    Engine->>DB: BEGIN IMMEDIATE + owner / idempotency / version checks
+    alt вход и версия допустимы
+        Engine->>DB: player RAW + narrator RAW + новая party version
+        Engine->>DB: COMMIT
+        DB-->>Engine: committed result
+    else ошибка или конфликт
+        Engine->>DB: ROLLBACK
+        DB-->>Engine: no partial RAW/version commit
+    end
+    Engine-->>Test: result or explicit error
+```
+
+Это уровень `каркас`, а не `подключено`: действующий player turn по-прежнему
+проходит через последовательность ниже. Срез не доказывает provider failure,
+runtime retry, gameplay quality или живую партию.
+
 ## Обычный ход
 
 ```mermaid
