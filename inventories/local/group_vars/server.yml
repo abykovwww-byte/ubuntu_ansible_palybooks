@@ -240,7 +240,7 @@ rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 
 # Deploy only this exact merged application commit; do not replace it with a branch or tag.
-awareness_showroom_repo_version: "dd4a9027bde698cfec4e38ecb8dc09cd3baf6f8b"
+awareness_showroom_repo_version: "85a2a02a7736a9b67b558327e804188dbac75f12"
 awareness_showroom_enabled: "{{ (awareness_showroom_repo_version | length) == 40 }}"
 awareness_showroom_repo_url: "https://github.com/abykovwww-byte/tavern-awareness-showroom.git"
 # Required for this private repository; set only in /etc/ansible/local-overrides.yml.
