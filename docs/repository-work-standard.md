@@ -34,7 +34,7 @@ detail.
   password.
 - The external checkout `/srv/apps/awareness-showroom` is an explicit ownership
   exception: after each pinned reset the apps role recursively normalizes it to
-  `abykov:abykov`. Root-run Git uses only the per-command exact
+  `abykov:abykov`. Root-run Git uses only a process-scoped exact
   `safe.directory=/srv/apps/awareness-showroom`; no wildcard or persistent
   system/global exception is created. Its tracked `.env.example` stays owned by
   the application repository, while Ansible continues to render only the

@@ -16,9 +16,9 @@ flowchart LR
     DATA["/srv/app-data/rp-stack"] --> RT
 ```
 
-Репозиторий приватный. Сервер читает его по SSH с отдельным read-only deploy key;
-приватная часть ключа хранится только на `abykovserv`, не попадает в Git и не
-используется для push.
+Репозиторий публичный. Существующий server checkout читает его по SSH с отдельным
+read-only deploy key; ключ хранится только на `abykovserv`, не попадает в Git и
+не используется для push. Public visibility не добавляет серверу права записи.
 
 Обычный цикл:
 
@@ -295,7 +295,7 @@ curl -fsS http://192.168.1.88:8011/health
 ### Migration Decision 018
 
 До cutover команда выше проверяет единый RP Stack. I1 shadow на
-`:18011` уже применён из полного commit SHA private repository:
+`:18011` уже применён из полного commit SHA public repository:
 
 ```text
 /srv/apps/awareness-showroom
@@ -314,13 +314,15 @@ runs/users/sessions/keys и не удаляет посторонние DB-стр
 
 External checkout — единственный явно opt-in ownership exception Apps role:
 
-- root Git fetch/reset получают exact per-command
+- root Git clone/update получают process-scoped exact
   `safe.directory=/srv/apps/awareness-showroom`;
 - сразу после reset checkout и `.git` рекурсивно приводятся к
   `abykov:abykov`, чтобы операторский Git не получал `dubious ownership`;
 - ownership-only change не входит в collector Compose restarts;
 - tracked `.env.example` остаётся source-owned и не перезаписывается
   Ansible; server-only секреты по-прежнему рендерятся только в `.env`.
+- repository token для Awareness не используется и не требуется; provider keys
+  остаются только в `/etc/ansible/local-overrides.yml`.
 
 После apply эти границы проверяются отдельно:
 

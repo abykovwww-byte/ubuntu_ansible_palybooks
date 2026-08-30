@@ -25,8 +25,9 @@ local repo changes on a codex/ branch or in an isolated worktree -> commit
 server -> read-only deploy key -> git pull --ff-only -> Ansible against localhost -> Docker Compose apps
 ```
 
-GitHub does not connect to the server. The server reads the private repository
-with a server-only read-only deploy key and applies Ansible locally.
+GitHub does not connect to the server. The existing server checkout reads the
+public repository with a server-only read-only deploy key and applies Ansible
+locally; public visibility does not grant the server write access.
 
 ## First Rules
 

@@ -235,6 +235,10 @@
     version: "{{ app.repo_version | default('main') }}"
     force: "{{ app.repo_force | default(false) }}"
     update: true
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app

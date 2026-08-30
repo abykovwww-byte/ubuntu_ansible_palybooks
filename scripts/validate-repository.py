@@ -1094,8 +1094,7 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
             'repo_url: "{{ awareness_showroom_repo_url }}"',
             'repo_version: "{{ awareness_showroom_repo_version }}"',
             "repo_version_is_commit: true",
-            "repo_token_var: awareness_showroom_github_token",
-            "repo_token_required: true",
+            "repo_token_required: false",
             "repo_normalize_ownership: true",
             'project_dir: "{{ awareness_showroom_project_dir }}"',
             "env_template: awareness-showroom.env.j2",
@@ -1110,7 +1109,13 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         for marker in app_markers:
             if marker not in app_body:
                 fail(errors, f"Awareness Showroom docker_apps contract missing marker: {marker}")
-        for forbidden in ("source_dir:", "compose_template:"):
+        for forbidden in (
+            "source_dir:",
+            "compose_template:",
+            "repo_token_var:",
+            "repo_token_required: true",
+            "repo_recreate_if_not_git:",
+        ):
             if forbidden in app_body:
                 fail(errors, f"Awareness Showroom source/Compose must remain owned by its repository: {forbidden}")
 
@@ -1281,6 +1286,22 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         )
         if marker not in task_body:
             fail(errors, f"{task_name} missing exact -c/safe.directory argv pair")
+
+    public_git_match = re.search(
+        r"(?ms)^- name: Clone public Docker app repositories\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if public_git_match is None:
+        fail(errors, "missing public Docker app Git task")
+    else:
+        public_git_body = public_git_match.group("body")
+        for marker in (
+            'GIT_CONFIG_COUNT: "1"',
+            "GIT_CONFIG_KEY_0: safe.directory",
+            'GIT_CONFIG_VALUE_0: "{{ app.project_dir | default(app_deploy_base_dir ~ \'/\' ~ app.name) }}"',
+        ):
+            if marker not in public_git_body:
+                fail(errors, f"public repository Git task missing process-scoped safe.directory marker: {marker}")
 
     if "safe.directory=*" in apps_tasks:
         fail(errors, "Docker app Git tasks must not use a wildcard safe.directory")

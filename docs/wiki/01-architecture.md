@@ -64,7 +64,7 @@ flowchart LR
     T --> TDB[("Awareness SQLite + state")]
 
     I["ubuntu_ansible_palybooks\nIaC"] --> R
-    I -->|"exact private repo commit"| T
+    I -->|"exact public repo commit"| T
 ```
 
 Порт не является security boundary для cookie, поэтому новый project использует

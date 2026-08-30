@@ -20,11 +20,11 @@ Hostname observed: abykovserv
 The server uses a pull-based self-hosted Ansible model:
 
 ```text
-Ubuntu server -> private GitHub repository over SSH with a read-only deploy key
+Ubuntu server -> public GitHub repository over SSH with its existing read-only deploy key
 Ubuntu server -> applies Ansible playbooks to localhost
 ```
 
-GitHub does not connect to the server. The server pulls the private repository with a server-only read-only deploy key and runs Ansible locally.
+GitHub does not connect to the server. The server pulls the public repository with its server-only read-only deploy key and runs Ansible locally; public visibility does not grant write access.
 
 ## Repository On Server
 

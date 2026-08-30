@@ -45,7 +45,7 @@ apply, а existing parties не мигрировались автоматиче�
 
 Цель принята, но ещё не применена. После cutover RP WorldPacks остаются в
 `ubuntu_ansible_palybooks`, а `awareness` и `awareness-one-day` становятся
-source-owned private project `tavern-awareness-showroom`. Один и тот же активный
+source-owned public project `tavern-awareness-showroom`. Один и тот же активный
 WorldPack не поддерживается одновременно в двух repositories.
 
 Новый project публикует только packs с
