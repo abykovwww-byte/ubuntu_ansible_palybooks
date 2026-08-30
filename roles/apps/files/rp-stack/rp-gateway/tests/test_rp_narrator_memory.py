@@ -56,16 +56,14 @@ class RecordingNarrator:
 class RacingNarrator:
     def __init__(self):
         self.calls = 0
-        self.second_call_started = asyncio.Event()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
 
     async def complete(self, prompt: RPNarratorPrompt) -> str:
         self.calls += 1
-        call = self.calls
-        if call == 1:
-            await self.second_call_started.wait()
-        else:
-            self.second_call_started.set()
-        return f"Конкурирующий ответ {call}."
+        self.started.set()
+        await self.release.wait()
+        return "Единственный конкурентный ответ."
 
 
 def _party_source() -> dict[str, WorldSnapshot | ScenarioSnapshot]:
@@ -239,7 +237,8 @@ def test_provider_failure_and_blank_output_leave_no_raw_and_retry_once(
 def test_concurrent_exact_retry_returns_the_single_committed_turn(tmp_path: Path) -> None:
     engine = _create_engine(tmp_path)
     narrator = RacingNarrator()
-    service = RPNarratorService(engine, narrator)
+    first_service = RPNarratorService(engine, narrator)
+    second_service = RPNarratorService(RPTurnEngine(engine.sqlite_path), narrator)
     arguments = {
         "owner_user_id": "owner-one",
         "party_id": "party-one",
@@ -250,15 +249,17 @@ def test_concurrent_exact_retry_returns_the_single_committed_turn(tmp_path: Path
     }
 
     async def race() -> tuple[RPTurn, RPTurn]:
-        first, second = await asyncio.gather(
-            service.narrate_turn(**arguments),
-            service.narrate_turn(**arguments),
-        )
+        first_task = asyncio.create_task(first_service.narrate_turn(**arguments))
+        await narrator.started.wait()
+        second_task = asyncio.create_task(second_service.narrate_turn(**arguments))
+        await asyncio.sleep(0.02)
+        narrator.release.set()
+        first, second = await asyncio.gather(first_task, second_task)
         return first, second
 
     first, second = asyncio.run(race())
 
-    assert narrator.calls == 2
+    assert narrator.calls == 1
     assert first == second
     assert engine.list_turns(owner_user_id="owner-one", party_id="party-one") == (
         first,
@@ -572,6 +573,7 @@ def test_raw_anchor_safe_coverage_stable_prefix_and_source_ownership(
         "world_rules",
         "memory",
         "lore",
+        "relationships",
         "narrator_note",
         "opening",
     ),
@@ -589,10 +591,11 @@ def test_each_protected_prompt_layer_fails_closed_before_provider_or_commit(
             snapshot=_snapshot(0, 0),
         )
     narrator = RecordingNarrator("Этот ответ не должен быть вызван.")
+    limit_field = "relationship" if layer == "relationships" else layer
     service = RPNarratorService(
         engine,
         narrator,
-        RPNarratorPromptBuilder(RPPromptLimits(**{f"{layer}_chars": 1})),
+        RPNarratorPromptBuilder(RPPromptLimits(**{f"{limit_field}_chars": 1})),
     )
 
     with pytest.raises(RPPromptBudgetExceeded) as overflow:

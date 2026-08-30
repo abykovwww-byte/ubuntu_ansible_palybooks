@@ -8,34 +8,43 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении, срез 4. Шаг 7 поставляет уровень `каркас`:
-каждое выполнение offline narrator use case делает не больше одного plain-text
-вызова через выделенную границу клиента и только после успеха атомарно сохраняет
-opening либо RAW-пару. Prompt
-собирается из immutable World/Scenario snapshots, complete Party RAW и последнего
-валидного пятисекционного memory snapshot; safe coverage, `W/A` RAW-tail,
-hard input budget и cache-stable prefix вычисляются без legacy `Adjudicator`.
-Новый контур по-прежнему не подключён к `main.py`, API, runtime или реальному
-provider; автоматического обновления памяти, jobs, runner и пользовательского UX
-в этом срезе нет. До сохраняемого claim шага 8 два одновременных exact duplicate
-могут сделать два provider-вызова, но сохраняют и возвращают один победивший ход.
+**Delivery status:** в исполнении, срез 5. Шаг 8 поставляет offline-core уровня
+`каркас` поверх clean RP schema v4. Persisted narration claim создаётся до
+provider boundary, поэтому concurrent exact duplicates делают ровно один вызов
+и получают один committed turn. Успешный opening/turn одним transaction сохраняет
+RAW и ставит три role-specific service job (`story_memory`, `relationships`,
+`runtime_lore`) и отдельный Administrator job. Relationships, typed runtime Lore
+и Administrator proposal с ручным `accept/reject` проходят разными сохраняемыми
+маршрутами; принятая guidance применяет versioned CAS и попадает в следующий
+offline prompt.
 
-Состав среза 4:
+Новый runner владеет recovery, startup, cancel, await и shutdown двух отдельных
+worker loops. Claims сериализуются SQLite-предикатом; restart и shutdown
+возвращают незавершённые job в `pending` без расхода attempts, а попытка растёт
+только после фактического отказа. Детерминированно отвергнутый model output
+терминален после одной попытки и не повторяется без corrective context.
 
-- **добавлено:** assistant-only opening unit, одновызовный narrator orchestration,
-  history-first prompt, пять строгих memory sections и append-only party-scoped
-  memory snapshots с optimistic base;
-- **не добавлено:** fallback/repair/semantic prose validator, background memory
-  execution, `service_jobs`, attempts, queue или универсальный dispatcher ролей;
+Состав среза 5:
+
+- **добавлено:** persisted narration claims, три фиксированных service job,
+  отдельная Administrator queue, typed role handlers, source-order по партии,
+  provenance для runtime Lore, независимая проверка relationship candidates и
+  versioned manual proposal-flow;
+- **не добавлено:** универсальная queue-платформа, новые сервисы, fallback/repair,
+  ожидание derived jobs следующим реальным API-ходом или multi-replica lease;
 - **временно оставлено:** действующий `Adjudicator`, ревизии 0–11, legacy
   SQLite и manifest-based WorldPack runtime. Они остаются активным
   пользовательским трактом до переключения и удаляются вместе с
   монолитом на шаге 12.
 
-### Проверяемый бриф среза 5 / шага 8
+Новый контур по-прежнему не подключён к `main.py`, API, runtime, реальному
+provider или Light GUI. Модели в проверках — offline boundary doubles;
+пользовательский UX, apply и live runtime не изменены. Поэтому срез 5 не является
+приёмкой раздела 6 или шага 9.
 
-Как только появляются сохраняемые jobs и runner, срез обязан доказать все четыре
-исхода непосредственно тестами и restart-проверкой:
+### Проверенные исходы среза 5 / шага 8
+
+Срез непосредственно тестами и restart-проверкой доказывает все четыре исхода:
 
 1. переход `pending → running` атомарен, с предикатом статуса в самом `UPDATE`;
 2. попытка считается **по фактическому отказу**, а не по захвату: перезапуск
@@ -43,8 +52,9 @@ provider; автоматического обновления памяти, jobs
 3. startup и shutdown принадлежат runner'у, включая cancel и await;
 4. у администратора и у атомарной служебной модели разные роли и обработчики.
 
-Отдельный removal gate временного ограничения среза 4: concurrent exact
-duplicates выполняют ровно один provider call и возвращают один committed turn.
+Отдельный removal gate временного ограничения среза 4 также проверен: concurrent
+exact duplicates выполняют ровно один provider call и возвращают один committed
+turn.
 
 Универсальная queue-платформа не создаётся. Wiki и skills в срезе 5 и каждом
 следующем срезе меняются только при изменении внешнего пользовательского,
@@ -93,6 +103,28 @@ Semantic Acceptance — PASS. Production loader и временная чиста
 а provider был offline boundary double. Поэтому это доказательство сборки prompt,
 fail-closed commit и хранения, но не seeded acceptance шага 9, не реальный
 provider/runner и не live UX.
+
+Срез 5 начат от `origin/main @ 56b02c2`
+(`56b02c2aec47b7e9dca19218895652ed0c86667e`) и перед публикацией
+ребазирован на `origin/main @ bf704a5`
+(`bf704a5429295bb83270bce826c416ef9d0622ff`); промежуточные commits меняли
+только Awareness-контур. Локальное evidence:
+`test_claims_are_atomic_role_specific_and_do_not_spend_attempts` проверяет
+атомарный role-specific claim без расхода attempts;
+`test_restart_recovery_is_free_and_only_actual_failures_spend_attempts` —
+бесплатное восстановление после restart и инкремент только при фактическом
+отказе; `test_runner_stop_cancels_awaits_and_requeues_claimed_work` — владение
+shutdown, cancel и await самим runner'ом;
+`test_administrator_uses_separate_handler_and_manual_owner_scoped_decisions` —
+отдельные роль, очередь и handler Administrator;
+`test_concurrent_exact_retry_returns_the_single_committed_turn` — ровно один
+provider call и один committed turn для concurrent exact duplicates. Focused
+source/storage/runner boundary — `54 passed`; полный Gateway suite —
+`720 passed`; repository gates и сохранённый Semantic Acceptance — PASS. Это
+offline
+evidence на boundary doubles: `main.py`, API, реальный provider, Light GUI,
+apply и live runtime этим срезом не подключены и не проверены; Wiki и skills не
+изменялись.
 
 ## Context
 
