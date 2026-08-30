@@ -777,10 +777,6 @@ def materialize_scene_bundle(
         stable_affiliations=stable,
         character_aliases=allowance.character_aliases,
     )
-    role_violations = _stable_affiliation_violations(text, state, effective_allowance)
-    if role_violations:
-        return SceneMaterialization(text=text, valid=False, violations=role_violations, claims=claims)
-
     base = _projection(state, current)
     candidate = copy.deepcopy(base)
     seen_targets: set[tuple[str, str]] = set()

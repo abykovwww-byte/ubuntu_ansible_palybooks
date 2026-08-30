@@ -17,9 +17,10 @@ production-трактом до отдельной activation.
 
 [Decision 036](../../roles/apps/files/rp-stack/docs/decisions/036-retire-novel-and-nvidia.md)
 выводит из активного контракта режим совместного романа и NVIDIA provider.
-Новые Party и ShowroomScenario принимают только `rp` или `training`; старые
-записи выведенного режима архивируются и остаются доступны для list/read, Turn
-Trace и dataset export. Активные cloud providers — Gemini и OpenRouter, а
+Новые Party старого Gateway принимают только `rp`, а standalone
+ShowroomScenario — только `training`. Архивные Novel-записи сохраняют прежние
+list/read, Turn Trace и dataset export; старые training-строки RP SQLite после
+C1 скрыты до отдельной очистки O2. Активные cloud providers — Gemini и OpenRouter, а
 служебные роли явно выбирают local или OpenRouter без смены provider при отказе
 local runner. PR
 [#68](https://github.com/abykovwww-byte/ubuntu_ansible_palybooks/pull/68)
@@ -229,23 +230,30 @@ core, но не является runtime authority, readiness oracle или за
 
 ## Главное за минуту
 
+Ниже показана C1-топология, уже подготовленная в source. До интерактивного
+Ansible apply живой сервер сохраняет прежний общий Gateway и старый Showroom на
+`:8011`; target-схема ещё не является runtime-доказательством.
+
 ```mermaid
 flowchart LR
     P["Игрок или автор"] --> L["Light GUI :8010"]
     V["Анонимный посетитель"] --> S["Showroom :8011"]
-    L -->|"scene / GM correction API"| G["RP Gateway :8088"]
-    S -->|"/api"| G
-    G --> DB[("SQLite")]
-    G --> FS["Party state и WorldPacks"]
-    G --> C["Gemini / OpenRouter"]
-    G --> M["Локальная Gemma через Vulkan"]
+    L -->|"scene / GM correction API"| R["RP-only Gateway :8088"]
+    S -->|"/api"| T["Training-only Gateway :8088"]
+    R --> RDB[("RP SQLite + state")]
+    T --> TDB[("Awareness SQLite + state")]
+    R --> C["Gemini / OpenRouter"]
+    T --> C
+    R --> M["Локальная Gemma через Vulkan"]
 ```
 
-- **Gateway — сервер игры.** Это не тонкий LLM-прокси: он владеет партиями, canonical state, ходами, памятью, совместимыми legacy-проверками, ветками, пользователями, моделями, Showroom и датасетами.
+- **Gateway — authority своего процесса.** RP Gateway владеет только RP-партиями,
+  а standalone Training Gateway — Showroom runs, scoring и training state; общей
+  SQLite и runtime-вызовов между ними нет.
 - **Party — единица изоляции.** `Party = WorldPack + PlayerCharacter + ModelProfile + NarratorSettings + ScenarioType + State + TurnHistory`.
 - **LLM не определяет факты мира.** В `rp-core.v2` Gateway передаёт нейтральное продолжение сцены, активный state, абсолютные правила и relationship pressure, а затем проверяет ответ до commit; `training` по-прежнему получает детерминированный `AUTHORITATIVE_OUTCOME`.
 - **Режим выбирается явно.** `rp` и `training` имеют разные runtime-контракты; WorldPack лишь объявляет совместимость. Выведенные записи старого режима доступны только как архивная история.
-- **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, Gateway хранит snapshot и события, а оба UI используют общий DOM-renderer.
+- **Учебные сайты — типизированные artifacts.** WorldPack задаёт безопасный шаблон, narrator заполняет только разрешённые текстовые поля, standalone Training Gateway хранит snapshot и события, а Showroom собирает безопасный DOM без загрузки training renderer в RP Light GUI.
 - **История не равна памяти.** Сырые ходы хранятся постоянно, старые сцены сжимаются в эпизодические главы, а RP-партии дополнительно получают bounded living story memory. State остаётся отдельным авторитетным слоем; для `training` новый RP-слой полностью отключён.
 - **Revision 7 включена для новых ordinary RP-партий.** Pull-based apply и stamp proof подтвердили effective observed `7`; все registry-строки DC1–DC4 остаются на уровне `подключено`. Semantic continuity, уровень `наблюдается` и миграция старых партий не заявляются.
 - **Revision 10 активирована на уровне capability WorldPack.** «Купец» прошёл первый 60-turn production endurance как authored-clock canary; `day-watch-moscow` объявляет revision `10` без календаря. Текущий closure ещё не применён, а старые партии автоматически не мигрируют.
@@ -261,6 +269,8 @@ flowchart LR
 
 ## Текущие сервисы
 
+Таблица ниже описывает фактический live runtime **до C1 apply**:
+
 | Компонент | Доступ | Роль |
 |---|---|---|
 | Light GUI | `http://192.168.1.88:8010` и адрес Tailscale | Основной авторизованный интерфейс игры и администрирования |
@@ -268,10 +278,14 @@ flowchart LR
 | RP Gateway | Только внутренняя Docker-сеть, порт `8088` | API, правила, state, история, LLM-вызовы и хранение |
 | Local LLM | Только внутренняя сеть `rp-llm`, порт `8080` | Gemma 4 26B A4B Q4 для служебных задач и опционального автотестового игрока |
 
-> **I1 shadow применён, cutover ещё не выполнен:** private
-> `tavern-awareness-showroom` уже развёрнут с отдельным training-only Gateway и
-> SQLite. После cutover `:8010` остаётся RP Light GUI, а `:8011` обслуживается
-> новым project. Текущая таблица выше описывает live topology до cutover.
+> **C1 source подготовлен, apply ещё не выполнен:** private
+> `tavern-awareness-showroom` закреплён exact commit
+> `b72c481d616d6b8d654dc198d4973dce4e3e123c`. После apply `:8010` остаётся RP
+> Light GUI, LAN-only `192.168.1.88:8011` обслуживается новым project, старый
+> Showroom исчезает из активного RP Compose, а старый Gateway принимает только
+> `rp`. Backup/restore и сквозная live-приёмка остаются отдельными проверками.
+> Старую RP SQLite C1 не изменяет; физическое удаление Awareness ждёт явной
+> команды O2.
 
 SillyTavern не входит в текущий Compose RP Stack. Lorebook JSON и совместимый `/v1/chat/completions` сохранены как legacy/compatibility-контур, но поддерживаемые браузерные пути — Light GUI и Showroom.
 

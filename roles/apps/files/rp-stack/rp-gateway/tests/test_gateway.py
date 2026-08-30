@@ -1361,7 +1361,7 @@ def test_rp_validator_rejects_observed_first_person_player_takeover(
     ]
 
 
-def test_rp_core_v2_repeated_absolute_rule_violation_never_commits(
+def test_rp_core_v2_provider_response_commits_without_training_repair(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1405,14 +1405,15 @@ def test_rp_core_v2_repeated_absolute_rule_violation_never_commits(
         json={"content": "Use the power.", "idempotency_key": "absolute-rule-failure"},
     )
 
-    assert response.status_code == 502
-    assert response.json()["detail"] == "LLM response failed narrative validation"
-    assert llm_calls == 2
-    assert store.current_version() == version_before
-    assert c.get(f"/api/parties/{party['id']}/history").json()["turns"] == []
+    assert response.status_code == 200, response.text
+    assert llm_calls == 1
+    assert int(store.current_version() or 0) > int(version_before or 0)
+    history = c.get(f"/api/parties/{party['id']}/history").json()["turns"]
+    assert len(history) == 1
+    assert history[0]["narrative_response"] == "The power fails on living matter."
 
 
-def test_rp_opening_scene_repeated_absolute_rule_violation_never_commits(
+def test_rp_opening_scene_provider_response_commits_without_training_repair(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1449,18 +1450,17 @@ def test_rp_opening_scene_repeated_absolute_rule_violation_never_commits(
     ]
     state["meta"]["state_version"] = int(store.current_version() or 0) + 1
     store.insert_state_version(state, "test:opening-absolute-rule")
-    version_before = store.current_version()
 
     response = c.post(
         f"/api/parties/{party['id']}/start",
         json={"idempotency_key": "opening-absolute-rule-failure"},
     )
 
-    assert response.status_code == 502
-    assert response.json()["detail"] == "LLM response failed narrative validation"
-    assert calls == 2
-    assert store.current_version() == version_before
-    assert store.turn_history() == []
+    assert response.status_code == 200, response.text
+    assert calls == 1
+    history = store.turn_history()
+    assert len(history) == 1
+    assert history[0]["narrative_response"] == "The power fails on living matter."
 
 
 def test_provider_payload_contains_relationship_pressure_on_first_attempt(
@@ -2205,9 +2205,14 @@ def test_rp_party_after_turn_10_keeps_narrator_response(tmp_path: Path):
 
 
 def test_legacy_novel_party_is_archived_readable_and_terminal(tmp_path: Path):
-    write_worldpack(tmp_path)
-    c = client(tmp_path)
+    write_worldpack(tmp_path, supported_modes=["rp"])
+    c = client(tmp_path, app_env="production")
     party = create_demo_party(c, title="Legacy Novel", scenario_type="rp")
+    turn = c.post(
+        f"/api/parties/{party['id']}/messages",
+        json={"content": "Preserve this legacy turn.", "idempotency_key": "legacy-novel-history"},
+    )
+    assert turn.status_code == 200, turn.text
     with sqlite3.connect(tmp_path / "rp_gateway.db") as connection:
         connection.execute(
             "UPDATE parties SET scenario_type = 'novel', status = 'active' WHERE id = ?",
@@ -2223,6 +2228,9 @@ def test_legacy_novel_party_is_archived_readable_and_terminal(tmp_path: Path):
     assert stored.json()["party"]["status"] == "archived"
     listed = migrated.get("/api/parties").json()["parties"]
     assert any(item["id"] == party["id"] and item["scenario_type"] == "novel" for item in listed)
+    history = migrated.get(f"/api/parties/{party['id']}/history")
+    assert history.status_code == 200, history.text
+    assert history.json()["turns"][-1]["player_message"] == "Preserve this legacy turn."
 
     activated = migrated.post(f"/api/parties/{party['id']}/activate")
     started = migrated.post(
@@ -2546,7 +2554,7 @@ def test_admin_rp_autotest_ignores_semantic_validator_without_fallback(
     assert metadata["transport_status"] == "ok"
 
 
-def test_admin_revision_six_rp_autotest_does_not_commit_validation_fallback(
+def test_admin_revision_six_rp_autotest_bypasses_training_services_and_validator(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -2570,15 +2578,20 @@ def test_admin_revision_six_rp_autotest_does_not_commit_validation_fallback(
     async def next_action(*args: object, **kwargs: object) -> str:
         return "I take the next action."
 
-    def reject_narrative(*args: object, **kwargs: object) -> SimpleNamespace:
-        return SimpleNamespace(
-            valid=False,
-            violations=["forced repeated absolute-rule violation"],
-            repair_instruction="Respect the absolute rule.",
-        )
+    def unexpected_training_constructor(*args: object, **kwargs: object) -> object:
+        pytest.fail("RP autotest must not construct training services or OutputValidator")
 
     monkeypatch.setattr("app.main.AutoPlayerClient.next_action", next_action)
-    monkeypatch.setattr("app.services.adjudicator.OutputValidator.validate", reject_narrative)
+    for attribute in (
+        "TrainingRuntimeService",
+        "TrainingArtifactService",
+        "TrainingWorkspaceService",
+    ):
+        monkeypatch.setattr(f"app.main.{attribute}", unexpected_training_constructor)
+    monkeypatch.setattr(
+        "app.services.adjudicator.OutputValidator",
+        unexpected_training_constructor,
+    )
     source_party = create_demo_party(admin, title="Revision 6 invalid autotest")
     assert source_party["rp_contract_revision"] == 6
     local_profile = next(
@@ -2610,15 +2623,21 @@ def test_admin_revision_six_rp_autotest_does_not_commit_validation_fallback(
             break
         time.sleep(0.02)
 
-    assert run["status"] == "failed", run
-    assert run["completed_turns"] == 0
+    assert run["status"] == "completed", run
+    assert run["completed_turns"] == 1
     assert run["fallback_turns"] == 0
     branch_store = admin.app.state.party_store.store_for_branch(
         source_party["id"],
         run["branch_id"],
         owner_user_id=run["owner_user_id"],
     )
-    assert branch_store.turn_history(limit=10) == []
+    history = branch_store.turn_history(limit=10)
+    assert len(history) == 1
+    metadata = latest_turn_metadata(branch_store)
+    assert metadata["validator_valid"] is None
+    assert metadata["repaired"] is False
+    assert metadata["fallback"] is False
+    assert metadata["llm_calls"] == 1
 
 
 def test_party_byok_is_scoped_to_current_party(tmp_path: Path):
@@ -4243,88 +4262,70 @@ def test_revision10_party_start_includes_and_consumes_world_clock_without_clock_
             request=httpx.Request("POST", "https://provider.example/v1/chat/completions"),
         )
 
-    fallback_opening = create_demo_party(c, title="World Clock Opening Fallback")
+    failed_opening = create_demo_party(c, title="World Clock Opening Provider Failure")
     confirmed = c.post(
-        f"/api/parties/{fallback_opening['id']}/world-clock/markers/demo.opening-ready/confirm",
-        json={"idempotency_key": "confirm-fallback-opening-event"},
+        f"/api/parties/{failed_opening['id']}/world-clock/markers/demo.opening-ready/confirm",
+        json={"idempotency_key": "confirm-failed-opening-event"},
     )
     assert confirmed.status_code == 200, confirmed.text
+    failed_opening_store = c.app.state.party_store.store_for_party(str(failed_opening["id"]))
+    failed_opening_state = failed_opening_store.get_state()
     monkeypatch.setattr(NarrativeClient, "complete", unavailable_narrator)
     started = c.post(
-        f"/api/parties/{fallback_opening['id']}/start",
-        json={"idempotency_key": "world-clock-opening-fallback"},
+        f"/api/parties/{failed_opening['id']}/start",
+        json={"idempotency_key": "world-clock-opening-provider-failure"},
     )
-    assert started.status_code == 200, started.text
-
-    fallback_store = c.app.state.party_store.store_for_party(str(fallback_opening["id"]))
-    fallback_turn = fallback_store.latest_turn(include_prompt=True)
-    fallback_record = fallback_store.turn_record(int(fallback_turn["id"]))
-    assert fallback_record is not None
-    assert fallback_record["excluded_from_memory"] is True
-    assert "world_clock_events" not in fallback_record["metadata"]
-    assert any(
-        message["content"].startswith("СОБЫТИЯ МИРА")
-        and "Стартовое событие произошло." in message["content"]
-        for message in json.loads(fallback_turn["prompt_json"])
-    )
-    fallback_state = fallback_store.get_state()
+    assert started.status_code == 502, started.text
+    assert started.json()["detail"] == "Narrative provider request failed"
+    assert failed_opening_store.turn_history() == []
+    assert failed_opening_store.get_state() == failed_opening_state
     assert [
         item["id"]
-        for item in fallback_state["world_clock"]["pending_announcements"]
+        for item in failed_opening_state["world_clock"]["pending_announcements"]
     ] == ["demo.opening-event"]
-    assert fallback_state["world_clock"]["event_statuses"]["demo.opening-event"].get(
+    assert failed_opening_state["world_clock"]["event_statuses"]["demo.opening-event"].get(
         "announced_party_turn"
     ) is None
 
     monkeypatch.setattr(NarrativeClient, "complete", original_complete)
-    fallback_turn_party = create_demo_party(c, title="World Clock Turn Fallback")
+    failed_turn_party = create_demo_party(c, title="World Clock Turn Provider Failure")
     started = c.post(
-        f"/api/parties/{fallback_turn_party['id']}/start",
-        json={"idempotency_key": "world-clock-before-turn-fallback"},
+        f"/api/parties/{failed_turn_party['id']}/start",
+        json={"idempotency_key": "world-clock-before-turn-failure"},
     )
     assert started.status_code == 200, started.text
     confirmed = c.post(
-        f"/api/parties/{fallback_turn_party['id']}/world-clock/markers/demo.opening-ready/confirm",
-        json={"idempotency_key": "confirm-turn-fallback-event"},
+        f"/api/parties/{failed_turn_party['id']}/world-clock/markers/demo.opening-ready/confirm",
+        json={"idempotency_key": "confirm-turn-failure-event"},
     )
     assert confirmed.status_code == 200, confirmed.text
+    failed_turn_store = c.app.state.party_store.store_for_party(str(failed_turn_party["id"]))
+    failed_turn_state = failed_turn_store.get_state()
+    failed_turn_history = failed_turn_store.turn_history()
     monkeypatch.setattr(NarrativeClient, "complete", unavailable_narrator)
     message = c.post(
-        f"/api/parties/{fallback_turn_party['id']}/messages",
+        f"/api/parties/{failed_turn_party['id']}/messages",
         json={
             "content": "Осматриваю двор.",
             "channel": "scene",
-            "idempotency_key": "world-clock-turn-fallback",
+            "idempotency_key": "world-clock-turn-provider-failure",
         },
     )
-    assert message.status_code == 200, message.text
-    assert message.json().get("status") != "route_required"
-
-    fallback_turn_store = c.app.state.party_store.store_for_party(
-        str(fallback_turn_party["id"])
-    )
-    fallback_message = fallback_turn_store.latest_turn(include_prompt=True)
-    fallback_message_record = fallback_turn_store.turn_record(int(fallback_message["id"]))
-    assert fallback_message_record is not None
-    assert fallback_message_record["excluded_from_memory"] is True
-    assert "world_clock_events" not in fallback_message_record["metadata"]
-    assert any(
-        message["content"].startswith("СОБЫТИЯ МИРА")
-        and "Стартовое событие произошло." in message["content"]
-        for message in json.loads(fallback_message["prompt_json"])
-    )
-    fallback_turn_state = fallback_turn_store.get_state()
-    assert fallback_turn_state["world_clock"]["date"] == "0964-04-18T09:00:00Z"
+    assert message.status_code == 502, message.text
+    assert message.json()["detail"] == "Narrative provider request failed"
+    assert failed_turn_store.turn_history() == failed_turn_history
+    assert failed_turn_store.get_state() == failed_turn_state
+    assert failed_turn_state["world_clock"]["date"] == "0964-04-18T09:00:00Z"
     assert [
         item["id"]
-        for item in fallback_turn_state["world_clock"]["pending_announcements"]
+        for item in failed_turn_state["world_clock"]["pending_announcements"]
     ] == ["demo.opening-event"]
-    assert fallback_turn_state["world_clock"]["event_statuses"]["demo.opening-event"].get(
+    assert failed_turn_state["world_clock"]["event_statuses"]["demo.opening-event"].get(
         "announced_party_turn"
     ) is None
     assert all(
         job["job_type"] != "world_clock"
-        for job in fallback_turn_store.service_jobs(limit=20)
+        for job in failed_turn_store.service_jobs(limit=20)
     )
 
 
@@ -5779,6 +5780,13 @@ def test_party_message_provider_http_error_fails_without_gateway_fallback(tmp_pa
     write_worldpack(tmp_path)
     c = client(tmp_path, mode="http-503")
     party = create_demo_party(c)
+    store = c.app.state.party_store.store_for_party(party["id"])
+    version_before = store.current_version()
+    with sqlite3.connect(tmp_path / "rp_gateway.db") as connection:
+        state_versions_before = connection.execute(
+            "SELECT COUNT(*) FROM state_versions WHERE campaign_id = ?",
+            (party["id"],),
+        ).fetchone()[0]
 
     response = c.post(
         f"/api/parties/{party['id']}/messages",
@@ -5790,9 +5798,21 @@ def test_party_message_provider_http_error_fails_without_gateway_fallback(tmp_pa
     assert response.json()["detail"] == "Narrative provider HTTP 503"
     history = c.get(f"/api/parties/{party['id']}/history").json()
     assert history["turns"] == []
+    assert store.current_version() == version_before
     status = c.get(f"/api/parties/{party['id']}/requests/req_party_http_503").json()
     assert status["status"] == "failed"
     assert "Narrative provider HTTP 503" in status["error"]
+    with sqlite3.connect(tmp_path / "rp_gateway.db") as connection:
+        state_versions_after = connection.execute(
+            "SELECT COUNT(*) FROM state_versions WHERE campaign_id = ?",
+            (party["id"],),
+        ).fetchone()[0]
+        fallback_audits = connection.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE campaign_id = ? AND event_type = 'llm_safe_fallback'",
+            (party["id"],),
+        ).fetchone()[0]
+    assert state_versions_after == state_versions_before
+    assert fallback_audits == 0
 
 
 @pytest.mark.parametrize("operation", ["start", "message"])

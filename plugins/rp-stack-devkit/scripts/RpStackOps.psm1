@@ -566,8 +566,8 @@ function Get-RpStackToolDefinitions {
         [ordered]@{ name = "ansible_status"; description = "Read ansible-local-apply service status and its latest journal lines."; inputSchema = @{ type = "object"; properties = @{}; additionalProperties = $false } },
         [ordered]@{ name = "compose_status"; description = "Read RP Stack Docker Compose service status."; inputSchema = @{ type = "object"; properties = @{}; additionalProperties = $false } },
         [ordered]@{ name = "http_smoke"; description = "Run read-only Gateway, WorldPack, and Showroom HTTP health checks on the server."; inputSchema = @{ type = "object"; properties = @{}; additionalProperties = $false } },
-        [ordered]@{ name = "gateway_test"; description = "Run an isolated Gateway pytest scope in a disposable Compose container."; inputSchema = @{ type = "object"; properties = @{ scope = @{ type = "string"; enum = @("smoke", "training", "full"); default = "smoke" } }; additionalProperties = $false } },
-        [ordered]@{ name = "recent_logs"; description = "Read a bounded number of recent container log lines with probable credentials redacted."; inputSchema = @{ type = "object"; properties = @{ service = @{ type = "string"; enum = @("rp-gateway", "rp-light-gui", "rp-showcase-gui"); default = "rp-gateway" }; lines = @{ type = "integer"; minimum = 1; maximum = 500; default = 100 } }; additionalProperties = $false } },
+        [ordered]@{ name = "gateway_test"; description = "Run an isolated RP Gateway pytest scope in a disposable Compose container."; inputSchema = @{ type = "object"; properties = @{ scope = @{ type = "string"; enum = @("smoke", "full"); default = "smoke" } }; additionalProperties = $false } },
+        [ordered]@{ name = "recent_logs"; description = "Read a bounded number of recent RP container log lines with probable credentials redacted."; inputSchema = @{ type = "object"; properties = @{ service = @{ type = "string"; enum = @("rp-gateway", "rp-light-gui"); default = "rp-gateway" }; lines = @{ type = "integer"; minimum = 1; maximum = 500; default = 100 } }; additionalProperties = $false } },
         [ordered]@{ name = "provider_summary"; description = "Read a bounded Gateway log summary for provider attempts, fallbacks, timeouts, and validation failures."; inputSchema = @{ type = "object"; properties = @{ lines = @{ type = "integer"; minimum = 1; maximum = 500; default = 100 } }; additionalProperties = $false } },
         [ordered]@{ name = "request_trace"; description = "Find bounded Gateway log lines for one validated request ID."; inputSchema = @{ type = "object"; properties = @{ request_id = @{ type = "string"; minLength = 1; maxLength = 80 }; lines = @{ type = "integer"; minimum = 1; maximum = 500; default = 100 } }; required = @("request_id"); additionalProperties = $false } },
         [ordered]@{ name = "loop_probe"; description = "Read diagnostic party-loop counters; these counters are necessary but not sufficient evidence."; inputSchema = @{ type = "object"; properties = @{ party_id = @{ type = "string"; minLength = 1; maxLength = 80; pattern = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$" } }; required = @("party_id"); additionalProperties = $false } },
@@ -589,8 +589,8 @@ function Invoke-RpStackOperation {
     }
 
     $scope = [string](Get-RpArgument -Arguments $Arguments -Name "scope" -Default "smoke")
-    if ($scope -notin @("smoke", "training", "full")) {
-        throw "scope must be smoke, training, or full"
+    if ($scope -notin @("smoke", "full")) {
+        throw "scope must be smoke or full"
     }
 
     $lines = [int](Get-RpArgument -Arguments $Arguments -Name "lines" -Default 100)
@@ -599,7 +599,7 @@ function Invoke-RpStackOperation {
     }
 
     $service = [string](Get-RpArgument -Arguments $Arguments -Name "service" -Default "rp-gateway")
-    if ($service -notin @("rp-gateway", "rp-light-gui", "rp-showcase-gui")) {
+    if ($service -notin @("rp-gateway", "rp-light-gui")) {
         throw "service is not allowlisted"
     }
 
@@ -654,8 +654,6 @@ function Invoke-RpStackOperation {
         "gateway_test" {
             if ($scope -eq "full") {
                 $testArgs = "pytest -q"
-            } elseif ($scope -eq "training") {
-                $testArgs = "pytest -q tests/test_training_runtime.py tests/test_training_capabilities.py tests/test_training_artifacts.py tests/test_awareness_one_day.py"
             } else {
                 $testArgs = "pytest -q tests/test_gateway.py"
             }

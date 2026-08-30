@@ -11,11 +11,18 @@ import pytest
 
 from app.core.config import Settings
 from app.main import party_chat_request
-from app.models.schemas import ChatCompletionRequest, ChatMessage, PartyMessageRequest
-from app.services.narrative import NarrativeClient, response_text
+from app.models.schemas import (
+    ChatCompletionRequest,
+    ChatMessage,
+    PartyMessageRequest,
+    PatchOperation,
+    StatePatch,
+)
+from app.services.narrative import NarrativeClient
 from app.services.adjudicator import Adjudicator
 from app.services.relationship_extraction import RelationshipExtractionService
 from app.services.rp_story_memory import RPStoryMemoryUpdater
+from app.services.scene_state import fallback_scene_state
 from app.services.state_store import StateStore
 from test_gateway import client, create_demo_party
 from test_revision7_commit_boundaries import revision_seven_worldpack
@@ -57,7 +64,59 @@ def latest_turn_row(store: StateStore) -> dict[str, Any]:
     return result
 
 
-def test_prebundle_transport_failure_commits_visible_noncanonical_stale_turn(
+def seed_legacy_noncanonical_fallback(
+    store: StateStore,
+    player_text: str,
+    fallback_text: str = "Legacy safe fallback text that must remain noncanonical.",
+) -> dict[str, Any]:
+    state = store.get_state()
+    party_turn = int(state["meta"]["turn"]) + 1
+    idempotency_key = f"legacy-fallback-{store.campaign_id}"
+    request_id = f"req-{idempotency_key}"
+    scene_after = fallback_scene_state(state)
+    store.begin_turn_request(idempotency_key, request_id)
+    store.commit_turn(
+        StatePatch(
+            turn=party_turn,
+            check_id=f"legacy-fallback:{store.campaign_id}",
+            source="legacy-test-fixture",
+            patch=[
+                PatchOperation(
+                    op="replace" if "scene_state" in state else "add",
+                    path="/scene_state",
+                    value=scene_after,
+                    reason="Preserve a historical noncanonical fallback row for compatibility coverage.",
+                    turn=party_turn,
+                )
+            ],
+        ),
+        reason=f"legacy-fallback:{request_id}",
+        idempotency_key=idempotency_key,
+        request_id=request_id,
+        player_message=player_text,
+        narrative_response=fallback_text,
+        response_json={
+            "choices": [
+                {"message": {"role": "assistant", "content": fallback_text}}
+            ]
+        },
+        expected_state_version=int(state["meta"]["state_version"]),
+        prompt_messages=[{"role": "user", "content": player_text}],
+        metadata={
+            "schema_version": "rp-gateway.turn.v1",
+            "fallback": True,
+            "fallback_reason": "timeout",
+            "story_memory_canonical": False,
+            "scene_state_stale": True,
+            "scene_state_after": scene_after,
+        },
+        party_turn=party_turn,
+        excluded_from_memory=True,
+    )
+    return latest_turn_row(store)
+
+
+def test_prebundle_transport_failure_is_explicit_and_commits_nothing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -93,52 +152,37 @@ def test_prebundle_transport_failure_commits_visible_noncanonical_stale_turn(
     before = authoritative_counts(store)
     before_state = store.get_state()
 
-    result = asyncio.run(
-        adjudicator.handle_chat(
-            ChatCompletionRequest(
-                model="mock-narrator",
-                messages=[ChatMessage(role="user", content="Я остаюсь во дворе и жду помощи.")],
-            ),
-            authorization=None,
-            idempotency_key="committed-safe-fallback",
-            request_id="req-committed-safe-fallback",
-            allow_gateway_fallback=True,
+    with pytest.raises(RuntimeError, match="Narrative provider timed out"):
+        asyncio.run(
+            adjudicator.handle_chat(
+                ChatCompletionRequest(
+                    model="mock-narrator",
+                    messages=[ChatMessage(role="user", content="Я остаюсь во дворе и жду помощи.")],
+                ),
+                authorization=None,
+                idempotency_key="committed-safe-fallback",
+                request_id="req-committed-safe-fallback",
+                allow_gateway_fallback=True,
+            )
         )
-    )
 
-    fallback_text = response_text(result)
     assert provider_calls == 1
-    assert result["gateway_fallback"] == {"reason": "timeout"}
     assert relationship_advance_calls == 0
-    assert fallback_text
-    assert {
-        table: authoritative_counts(store)[table] - before[table]
-        for table in ("state_versions", "state_patches", "turns")
-    } == {"state_versions": 1, "state_patches": 1, "turns": 1}
-    current = store.get_state()
-    assert current["timeline"] == before_state["timeline"]
-    assert current["player"]["resources"] == before_state["player"]["resources"]
-    assert current["meta"]["turn"] == 15
-    assert current["scene_state"]["location_id"] == "yard"
-    assert current["scene_state"]["present_character_ids"] == ["gorazd"]
-    assert current["scene_state"]["as_of_state_version"] == 1
-    assert current["scene_state"]["as_of_party_turn"] == 14
-    assert current["scene_state"]["stale"] is True
-    assert current["scene_state"]["stale_reason"] == "safe_fallback"
-
-    turn = latest_turn_row(store)
-    metadata = turn["metadata"]
-    assert metadata["fallback"] is True
-    assert metadata["fallback_reason"] == "timeout"
-    assert metadata["story_memory_canonical"] is False
-    assert metadata["scene_state_stale"] is True
-    assert metadata["scene_state_after"] == current["scene_state"]
+    assert authoritative_counts(store) == before
+    assert store.get_state() == before_state
     saved_request = store.get_turn_request("req-committed-safe-fallback")
     assert saved_request is not None
-    assert saved_request["status"] == "completed"
+    assert saved_request["status"] == "failed"
+    with store.connect() as connection:
+        fallback_count = connection.execute(
+            "SELECT COUNT(*) FROM audit_events "
+            "WHERE campaign_id = ? AND request_id = ? AND event_type = 'llm_safe_fallback'",
+            (store.campaign_id, "req-committed-safe-fallback"),
+        ).fetchone()[0]
+    assert fallback_count == 0
 
 
-def test_prebundle_connect_error_uses_bounded_public_and_private_reasons(
+def test_prebundle_connect_error_uses_bounded_public_reason_and_commits_nothing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -156,54 +200,37 @@ def test_prebundle_connect_error_uses_bounded_public_and_private_reasons(
 
     monkeypatch.setattr(adjudicator.narrative, "complete", transport_connect_error)
     monkeypatch.setattr(adjudicator, "after_turn_recorded", skip_post_turn_helpers)
-    result = asyncio.run(
-        adjudicator.handle_chat(
-            ChatCompletionRequest(
-                model="mock-narrator",
-                messages=[ChatMessage(role="user", content="Я жду у ворот.")],
-            ),
-            authorization=None,
-            idempotency_key="connect-error-fallback",
-            request_id="req-connect-error-fallback",
-            allow_gateway_fallback=True,
+    before = authoritative_counts(store)
+    before_state = store.get_state()
+    with pytest.raises(RuntimeError, match="Narrative provider request failed") as error:
+        asyncio.run(
+            adjudicator.handle_chat(
+                ChatCompletionRequest(
+                    model="mock-narrator",
+                    messages=[ChatMessage(role="user", content="Я жду у ворот.")],
+                ),
+                authorization=None,
+                idempotency_key="connect-error-fallback",
+                request_id="req-connect-error-fallback",
+                allow_gateway_fallback=True,
+            )
         )
-    )
 
-    assert result["gateway_fallback"] == {"reason": "http_error"}
-    assert private_error_text not in json.dumps(result, ensure_ascii=False)
-    turn = latest_turn_row(store)
-    assert turn["metadata"]["fallback_reason"] == "network_error"
-    assert turn["metadata"]["story_memory_canonical"] is False
+    assert private_error_text not in str(error.value)
+    assert authoritative_counts(store) == before
+    assert store.get_state() == before_state
+    saved_request = store.get_turn_request("req-connect-error-fallback")
+    assert saved_request is not None
+    assert saved_request["status"] == "failed"
+    assert private_error_text not in str(saved_request.get("error") or "")
 
 
-def test_rollback_removes_noncanonical_marker_and_snapshot_coverage(
+def test_rollback_removes_historical_noncanonical_marker_and_snapshot_coverage(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adjudicator, store = revision_seven_adjudicator(tmp_path, "fallback-rollback")
+    _, store = revision_seven_adjudicator(tmp_path, "fallback-rollback")
     player_text = "Я жду у ворот и не подтверждаю исход."
-
-    async def transport_timeout(*args: object, **kwargs: object) -> dict[str, Any]:
-        raise httpx.TimeoutException("transport exhausted before bundle")
-
-    async def skip_post_turn_helpers(*args: object, **kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(adjudicator.narrative, "complete", transport_timeout)
-    monkeypatch.setattr(adjudicator, "after_turn_recorded", skip_post_turn_helpers)
-    asyncio.run(
-        adjudicator.handle_chat(
-            ChatCompletionRequest(
-                model="mock-narrator",
-                messages=[ChatMessage(role="user", content=player_text)],
-            ),
-            authorization=None,
-            idempotency_key="fallback-before-rollback",
-            request_id="req-fallback-before-rollback",
-            allow_gateway_fallback=True,
-        )
-    )
-    fallback_turn = latest_turn_row(store)
+    fallback_turn = seed_legacy_noncanonical_fallback(store, player_text)
     updater = RPStoryMemoryUpdater(fallback_memory_settings(), store)
     updated = asyncio.run(updater.update(None, force=True, fail_open=False))
     assert updated["story_memory"]["to_turn_id"] == fallback_turn["id"]
@@ -241,35 +268,18 @@ def test_rollback_removes_noncanonical_marker_and_snapshot_coverage(
     assert branch.turns_for_memory(include_noncanonical_fallback=True) == []
 
 
-def test_noncanonical_fallback_keeps_player_marker_but_never_fallback_prose_in_canon(
+def test_historical_noncanonical_fallback_keeps_player_marker_but_never_prose_in_canon(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adjudicator, store = revision_seven_adjudicator(tmp_path, "fallback-canon-boundary")
     player_text = "Я остаюсь во дворе и жду помощи."
-
-    async def transport_timeout(*args: object, **kwargs: object) -> dict[str, Any]:
-        raise httpx.TimeoutException("transport exhausted before bundle")
-
-    async def skip_post_turn_helpers(*args: object, **kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(adjudicator.narrative, "complete", transport_timeout)
-    monkeypatch.setattr(adjudicator, "after_turn_recorded", skip_post_turn_helpers)
-    response = asyncio.run(
-        adjudicator.handle_chat(
-            ChatCompletionRequest(
-                model="mock-narrator",
-                messages=[ChatMessage(role="user", content=player_text)],
-            ),
-            authorization=None,
-            idempotency_key="fallback-canon-boundary",
-            request_id="req-fallback-canon-boundary",
-            allow_gateway_fallback=True,
-        )
+    forbidden_fallback_text = "Legacy safe fallback prose must not become canon."
+    turn = seed_legacy_noncanonical_fallback(
+        store,
+        player_text,
+        forbidden_fallback_text,
     )
-    forbidden_fallback_text = response_text(response)
-    turn = latest_turn_row(store)
 
     updater = RPStoryMemoryUpdater(fallback_memory_settings(), store)
     plan, reason = updater.build_plan(force=True)
@@ -380,7 +390,7 @@ def test_noncanonical_fallback_keeps_player_marker_but_never_fallback_prose_in_c
     assert "NON_CANONICAL_SAFE_FALLBACK" not in reanchored_rendered
 
 
-def test_fallback_authoritative_write_failure_rolls_back_noncanonical_turn_and_stale_state(
+def test_provider_failure_does_not_attempt_a_fallback_authoritative_write(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -403,7 +413,7 @@ def test_fallback_authoritative_write_failure_rolls_back_noncanonical_turn_and_s
             """
         )
 
-    with pytest.raises(sqlite3.IntegrityError, match="forced fallback turn failure"):
+    with pytest.raises(RuntimeError, match="Narrative provider timed out"):
         asyncio.run(
             adjudicator.handle_chat(
                 ChatCompletionRequest(
@@ -424,7 +434,7 @@ def test_fallback_authoritative_write_failure_rolls_back_noncanonical_turn_and_s
     assert saved_request["status"] == "failed"
 
 
-def test_opening_prebundle_transport_failure_commits_one_noncanonical_seed_boundary(
+def test_opening_prebundle_transport_failure_is_explicit_and_commits_nothing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -439,38 +449,34 @@ def test_opening_prebundle_transport_failure_commits_one_noncanonical_seed_bound
         raise httpx.TimeoutException("opening transport exhausted before bundle")
 
     monkeypatch.setattr(NarrativeClient, "complete", transport_timeout)
+    store = api.app.state.party_store.store_for_party(str(party["id"]))
+    before = authoritative_counts(store)
+    before_state = store.get_state()
     started = api.post(
         f"/api/parties/{party['id']}/start",
         json={"idempotency_key": "opening-safe-fallback"},
         headers={"X-Request-ID": "req-opening-safe-fallback"},
     )
 
-    assert started.status_code == 200, started.text
+    assert started.status_code == 504, started.text
     assert calls == 1
-    assert started.json()["gateway_fallback"] == {"reason": "timeout"}
-    store = api.app.state.party_store.store_for_party(str(party["id"]))
-    assert len(store.turn_history()) == 1
-    current = store.get_state()
-    assert current["scene_state"]["location_id"] == "court"
-    assert current["scene_state"]["present_character_ids"] == ["advisor"]
-    assert current["scene_state"]["as_of_party_turn"] == 0
-    assert current["scene_state"]["stale"] is True
-    assert current["scene_state"]["stale_reason"] == "safe_fallback"
-    turn = latest_turn_row(store)
-    assert turn["metadata"]["story_memory_canonical"] is False
-    assert turn["metadata"]["scene_state_stale"] is True
+    assert authoritative_counts(store) == before
+    assert store.get_state() == before_state
+    assert store.turn_history() == []
 
     retried = api.post(
         f"/api/parties/{party['id']}/start",
         json={"idempotency_key": "opening-safe-fallback"},
         headers={"X-Request-ID": "req-opening-safe-fallback"},
     )
-    assert retried.status_code == 200
-    assert calls == 1
-    assert len(store.turn_history()) == 1
+    assert retried.status_code == 504
+    assert calls == 2
+    assert authoritative_counts(store) == before
+    assert store.get_state() == before_state
+    assert store.turn_history() == []
 
 
-def test_opening_connect_error_uses_bounded_public_reason(
+def test_opening_connect_error_uses_bounded_public_reason_and_commits_nothing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -486,19 +492,21 @@ def test_opening_connect_error_uses_bounded_public_reason(
         )
 
     monkeypatch.setattr(NarrativeClient, "complete", transport_connect_error)
+    store = api.app.state.party_store.store_for_party(str(party["id"]))
+    before = authoritative_counts(store)
+    before_state = store.get_state()
     started = api.post(
         f"/api/parties/{party['id']}/start",
         json={"idempotency_key": "opening-connect-error"},
         headers={"X-Request-ID": "req-opening-connect-error"},
     )
 
-    assert started.status_code == 200, started.text
-    assert started.json()["gateway_fallback"] == {"reason": "http_error"}
+    assert started.status_code == 502, started.text
+    assert started.json()["detail"] == "Narrative provider request failed"
     assert private_error_text not in started.text
-    store = api.app.state.party_store.store_for_party(str(party["id"]))
-    turn = latest_turn_row(store)
-    assert turn["metadata"]["fallback_reason"] == "network_error"
-    assert turn["metadata"]["story_memory_canonical"] is False
+    assert authoritative_counts(store) == before
+    assert store.get_state() == before_state
+    assert store.turn_history() == []
 
 
 def test_revision_six_story_memory_keeps_existing_fallback_behavior(tmp_path: Path) -> None:

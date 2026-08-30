@@ -151,7 +151,7 @@ def test_internal_pre_provider_error_cannot_be_misclassified_as_safe_fallback(
     assert fallback_count == 0
 
 
-def test_transport_failure_during_hard_repair_never_commits_safe_fallback(
+def test_hard_bundle_violation_does_not_repair_or_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -163,17 +163,17 @@ def test_transport_failure_during_hard_repair_never_commits_safe_fallback(
     )
     calls = 0
 
-    async def invalid_then_timeout(*args: object, **kwargs: object) -> dict[str, Any]:
+    async def invalid_then_unexpected_second_call(*args: object, **kwargs: object) -> dict[str, Any]:
         nonlocal calls
         calls += 1
         if calls == 1:
             return invalid
-        raise httpx.TimeoutException("repair provider timeout")
+        raise AssertionError("RP must not call the repair provider")
 
-    monkeypatch.setattr(adjudicator.narrative, "complete", invalid_then_timeout)
+    monkeypatch.setattr(adjudicator.narrative, "complete", invalid_then_unexpected_second_call)
     before = authoritative_counts(store)
 
-    with pytest.raises((httpx.TimeoutException, RuntimeError), match="repair provider timeout"):
+    with pytest.raises(SceneContinuityError, match="present_character_ids mismatch"):
         asyncio.run(
             adjudicator.handle_chat(
                 ChatCompletionRequest(
@@ -186,7 +186,7 @@ def test_transport_failure_during_hard_repair_never_commits_safe_fallback(
             )
         )
 
-    assert calls == 2
+    assert calls == 1
     assert authoritative_counts(store) == before
     saved_request = store.get_turn_request("req-repair-transport-error")
     assert saved_request is not None
@@ -200,7 +200,7 @@ def test_transport_failure_during_hard_repair_never_commits_safe_fallback(
     assert fallback_count == 0
 
 
-def test_state_change_after_initial_bundle_skips_repair_provider(
+def test_state_change_after_invalid_bundle_does_not_trigger_repair_provider(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -238,7 +238,7 @@ def test_state_change_after_initial_bundle_skips_repair_provider(
     monkeypatch.setattr(adjudicator.narrative, "complete", mutate_state_then_return_invalid)
     before = authoritative_counts(store)
 
-    with pytest.raises(StateVersionConflict):
+    with pytest.raises(SceneContinuityError, match="present_character_ids mismatch"):
         asyncio.run(
             adjudicator.handle_chat(
                 ChatCompletionRequest(
@@ -260,7 +260,7 @@ def test_state_change_after_initial_bundle_skips_repair_provider(
     assert saved_request["status"] == "failed"
 
 
-def test_invalid_narrative_after_valid_bundle_never_commits_safe_fallback(
+def test_valid_bundle_bypasses_output_validator_and_commits_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -272,41 +272,39 @@ def test_invalid_narrative_after_valid_bundle_never_commits_safe_fallback(
         calls += 1
         return provider_response(scene_bundle())
 
-    def reject_narrative(*args: object, **kwargs: object) -> SimpleNamespace:
-        return SimpleNamespace(
-            valid=False,
-            violations=["narrative continuity violation"],
-            repair_instruction="Исправь нарушение непрерывности.",
-        )
-
     monkeypatch.setattr(adjudicator.narrative, "complete", valid_bundle)
-    monkeypatch.setattr(adjudicator.validator, "validate", reject_narrative)
+    assert adjudicator.validator is None
     before = authoritative_counts(store)
 
-    with pytest.raises(RuntimeError, match="failed narrative validation after bundle"):
-        asyncio.run(
-            adjudicator.handle_chat(
-                ChatCompletionRequest(
-                    model="mock-narrator",
-                    messages=[ChatMessage(role="user", content="Я отвечаю Горазду.")],
-                ),
-                authorization=None,
-                idempotency_key="bundle-validation-error",
-                request_id="req-bundle-validation-error",
-            )
+    result = asyncio.run(
+        adjudicator.handle_chat(
+            ChatCompletionRequest(
+                model="mock-narrator",
+                messages=[ChatMessage(role="user", content="Я отвечаю Горазду.")],
+            ),
+            authorization=None,
+            idempotency_key="bundle-without-narrative-validator",
+            request_id="req-bundle-without-narrative-validator",
         )
+    )
 
-    assert calls == 2
-    assert authoritative_counts(store) == before
-    assert store.get_state()["meta"]["turn"] == 14
-    saved_request = store.get_turn_request("req-bundle-validation-error")
+    assert response_text(result) == scene_bundle()["narrative_text"]
+    assert calls == 1
+    after = authoritative_counts(store)
+    assert {table: after[table] - before[table] for table in after} == {
+        "state_versions": 1,
+        "state_patches": 1,
+        "turns": 1,
+    }
+    assert store.get_state()["meta"]["turn"] == 15
+    saved_request = store.get_turn_request("req-bundle-without-narrative-validator")
     assert saved_request is not None
-    assert saved_request["status"] == "failed"
+    assert saved_request["status"] == "completed"
     with store.connect() as connection:
         fallback_count = connection.execute(
             "SELECT COUNT(*) FROM audit_events "
             "WHERE campaign_id = ? AND request_id = ? AND event_type = 'llm_safe_fallback'",
-            (store.campaign_id, "req-bundle-validation-error"),
+            (store.campaign_id, "req-bundle-without-narrative-validator"),
         ).fetchone()[0]
     assert fallback_count == 0
 
@@ -442,7 +440,7 @@ def test_scene_adjudication_value_and_evidence_survive_trace_failure(
         assert isinstance(dropped["reason"], str) and dropped["reason"].startswith("unanchored")
 
 
-def test_opening_uses_role_guard_repairs_once_and_commits_one_atomic_opening(
+def test_opening_prose_conflict_is_returned_once_without_semantic_repair(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -450,17 +448,18 @@ def test_opening_uses_role_guard_repairs_once_and_commits_one_atomic_opening(
     api = client(tmp_path, rp_contract_observed_revision=7, post_turn_helpers_inline=False)
     party = create_demo_party(api)
     calls = 0
+    conflicting_text = "The Advisor now belongs to the Realm and no longer serves the Crown."
 
     async def conflict_then_valid(*args: object, **kwargs: object) -> dict[str, Any]:
         nonlocal calls
         calls += 1
         if calls == 1:
-            return provider_response(
-                opening_bundle("The Advisor now belongs to the Realm and no longer serves the Crown.")
-            )
+            return provider_response(opening_bundle(conflicting_text))
         return provider_response(opening_bundle())
 
     monkeypatch.setattr(NarrativeClient, "complete", conflict_then_valid)
+    store = api.app.state.party_store.store_for_party(str(party["id"]))
+    before = authoritative_counts(store)
 
     started = api.post(
         f"/api/parties/{party['id']}/start",
@@ -469,21 +468,23 @@ def test_opening_uses_role_guard_repairs_once_and_commits_one_atomic_opening(
     )
 
     assert started.status_code == 200, started.text
-    assert calls == 2
-    store = api.app.state.party_store.store_for_party(str(party["id"]))
-    assert len(store.turn_history()) == 1
-    current = store.get_state()
-    assert current["meta"]["turn"] == 1
-    assert current["scene_state"] == {
-        "schema_version": "rp-gateway.scene-state.v1",
-        "location_id": "court",
-        "present_character_ids": ["advisor"],
-        "stable_affiliations": {"advisor": "crown", "king": "realm"},
-        "as_of_state_version": current["meta"]["state_version"],
-        "as_of_party_turn": 1,
-        "stale": False,
-        "stale_reason": None,
+    assert started.json()["message"]["content"] == conflicting_text
+    assert calls == 1
+    after = authoritative_counts(store)
+    assert {table: after[table] - before[table] for table in after} == {
+        "state_versions": 1,
+        "state_patches": 1,
+        "turns": 1,
     }
+    current = store.get_state()
+    assert current["scene_state"]["stable_affiliations"] == {
+        "advisor": "crown",
+        "king": "realm",
+    }
+    assert len(store.turn_history()) == 1
+    saved_request = store.get_turn_request("req-opening-role-repair")
+    assert saved_request is not None
+    assert saved_request["status"] == "completed"
     with store.connect() as connection:
         row = connection.execute(
             "SELECT metadata_json FROM turns WHERE campaign_id = ?",
@@ -491,12 +492,10 @@ def test_opening_uses_role_guard_repairs_once_and_commits_one_atomic_opening(
         ).fetchone()
     assert row is not None
     metadata = json.loads(row["metadata_json"])
-    assert metadata["repaired"] is True
-    assert metadata["scene_claims"] == {
-        "location_id": "court",
-        "present_character_ids": ["advisor"],
-    }
-    assert metadata["prompt_assembly"]["schema_version"] == "rp-gateway.prompt-assembly.v1"
+    assert metadata["validator_valid"] is None
+    assert metadata["repaired"] is False
+    assert metadata["fallback"] is False
+    assert metadata["llm_calls"] == 1
 
 
 def test_opening_postcommit_trace_failure_keeps_completed_atomic_opening(
@@ -535,7 +534,7 @@ def test_opening_postcommit_trace_failure_keeps_completed_atomic_opening(
     assert saved_request["status"] == "completed"
 
 
-def test_second_opening_scene_mismatch_has_no_partial_opening_commit(
+def test_opening_scene_mismatch_has_no_repair_or_partial_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -567,7 +566,7 @@ def test_second_opening_scene_mismatch_has_no_partial_opening_commit(
     )
 
     assert started.status_code == 502, started.text
-    assert calls == 2
+    assert calls == 1
     assert authoritative_counts(store) == before
     assert store.get_state() == before_state
     assert store.turn_history() == []

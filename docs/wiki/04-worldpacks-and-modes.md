@@ -43,10 +43,12 @@ apply, а existing parties не мигрировались автоматиче�
 
 ## Git ownership после Decision 018
 
-Цель принята, но ещё не применена. После cutover RP WorldPacks остаются в
-`ubuntu_ansible_palybooks`, а `awareness` и `awareness-one-day` становятся
-source-owned private project `tavern-awareness-showroom`. Один и тот же активный
-WorldPack не поддерживается одновременно в двух repositories.
+C1 source подготовлен, но ещё не применён. RP WorldPacks остаются в
+`ubuntu_ansible_palybooks`, а активными source-owned копиями `awareness` и
+`awareness-one-day` владеет private project `tavern-awareness-showroom` на exact
+commit `b72c481d616d6b8d654dc198d4973dce4e3e123c`. Старые копии в RP repository
+не удаляются этим переключением, но RP-only Gateway их не публикует и не
+исполняет. Физическая очистка ждёт отдельной команды O2.
 
 Новый project публикует только packs с
 `scenario_types: {recommended: training, supported: [training]}` и не разрешает
@@ -355,14 +357,17 @@ Revision `10` сама по себе не требует календаря. Sou
 обычная новая партия получит S4 только после отдельного Ansible apply; прежние
 партии останутся на закреплённой revision.
 
-## Два активных режима
+## Два активных режима в разных процессах
 
 | Режим | Для чего | Механика Gateway | Что запрещено |
 |---|---|---|---|
 | `rp` | Ролевая игра и совместная проза | Нейтральное продолжение сцены без скрытой механики, canonical state, absolute-rule validation/repair, relationship pressure и correction-aware living memory | D20, DC, skills, score, success/failure, механический `/check`, нарушение agency или абсолютного правила |
 | `training` | Учебная симуляция и оценивание | Универсальный interpreter + WorldPack program/assessment/fallback, явные actions, deterministic score и debrief gate; прежний memory path без RP story memory | Случайность, `/check`, предметная логика в Gateway, подсказки и score до debrief |
 
-Пользователь выбирает режим явно при создании Party. WorldPack объявляет только:
+После C1 process mode не выбирается между двумя значениями внутри одного
+Gateway: Light GUI создаёт только `rp`, Showroom — только `training`. Каждый
+Gateway fail-closed отклоняет чужой режим до state/provider writes. WorldPack
+объявляет совместимость:
 
 ```json
 {
@@ -375,10 +380,10 @@ Revision `10` сама по себе не требует календаря. Sou
 
 Gateway отклоняет несовместимую комбинацию, но не меняет режим автоматически. Prompt мира не может снова включить механику, запрещённую контрактом режима.
 
-Сохранённые Party и ShowroomScenario выведенного режима не конвертируются в
-`rp`: startup migration идемпотентно переводит их в `archived`. Они остаются
-читаемыми как исторические агрегаты, но их нельзя активировать, запускать,
-публиковать или продолжать сообщениями.
+Сохранённые training Party и ShowroomScenario старой RP SQLite не конвертируются
+и не копируются в standalone project. Владелец снял их перенос и завершение как
+блокер C1. Сама старая БД остаётся нетронутой, а production RP Gateway скрывает
+эти resources; физическое удаление возможно только отдельной командой O2.
 
 ## Executable training runtime
 
@@ -423,18 +428,19 @@ pack обязан объявить `training_runtime` и хранить расп
 
 | Slug | Название | Рекомендуемый режим | Поддержка | Особенности |
 |---|---|---|---|---|
-| `awareness` | Awareness | `training` | `training` | WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; предметной логики в Gateway нет |
-| `awareness-one-day` | Awareness. One day | `training` | `training` | WorldPack-owned runtime, 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
+| `awareness` | Awareness | `training` | `training` | Активный authority — standalone project; WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; старая RP-копия скрыта до O2 |
+| `awareness-one-day` | Awareness. One day | `training` | `training` | Активный authority — standalone project; 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10; старая RP-копия скрыта до O2 |
 | `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Revision 10 без authored-календаря: свободный персонаж, точка входа из PlayerCharacter, authored Lore Cards и закрытые мотивации NPC |
 | `day-watch-moscow-v2` | Дневной Дозор: Москва — четыре начала | `rp` | `rp` | Revision 11: presets `book/action/strategic`, четыре независимых opening seeds, 20 Lore Cards и те же 11 активных NPC; world clock не добавлен |
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
-| `incident-50` | Инцидент-50 | `training` | `training`, `rp` | Киберинцидент, может играться как обучение или RP |
+| `incident-50` | Инцидент-50 | `rp` | `rp` | Киберинцидент остаётся в RP project как ролевая партия |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |
 | `merchant-sviatoslav` | Купец | `rp` | `rp` | Торговая и политическая кампания; первый authored-clock canary, 16 authored Lore Cards, GM corrections и authored world clock |
 | `smoke-gate-borderland` | Предел Дымных Врат | `rp` | `rp` | Пограничное расследование; manifest не задаёт явный status |
 | `starosta` | Староста | `rp` | `rp` | Деревенская ролевая кампания |
 
-Таблица описывает source. Фактическая видимость может дополнительно меняться администратором в Gateway DB.
+Таблица описывает C1 source ownership. До Ansible apply live-каталог остаётся
+старым; после apply каждый Gateway показывает только packs своего process mode.
 
 ## Public и private
 
@@ -449,14 +455,16 @@ Default — `public`, чтобы старые миры сохранили пов
 
 ```mermaid
 flowchart LR
-    W["WorldPack\nмир + seed + prompts"] --> P1["Обычная Party"]
+    W["Training WorldPack\nмир + seed + prompts"] --> P1["Внутренняя training Party"]
     W --> SS1["ShowroomScenario A\nназвание + модель + обложка"]
     W --> SS2["ShowroomScenario B\nдругой режим/описание"]
     SS1 --> R1["Anonymous Run -> Party"]
     SS2 --> R2["Anonymous Run -> Party"]
 ```
 
-ShowroomScenario — storefront aggregate, а не копия мира. Это позволяет одному WorldPack иметь несколько публичных подач и leaderboard policies.
+ShowroomScenario — storefront aggregate, а не копия мира. Это позволяет одному
+training WorldPack иметь несколько публичных подач и leaderboard policies внутри
+standalone project; RP Gateway этот aggregate не публикует.
 
 Для training-публикации WorldPack может содержать:
 

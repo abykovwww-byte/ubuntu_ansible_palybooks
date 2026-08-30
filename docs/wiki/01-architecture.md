@@ -21,6 +21,9 @@ Party = WorldPack
 
 ## Контейнеры и сети
 
+Следующая схема описывает живой runtime до C1 apply. В source переключение уже
+подготовлено, но apply и live verification ещё не выполнены.
+
 ```mermaid
 flowchart TB
     subgraph Clients["Клиенты"]
@@ -47,11 +50,13 @@ flowchart TB
 
 Gateway не публикует host port. Снаружи доступны только nginx-контейнеры Light GUI и Showroom. Local LLM находится в отдельной internal-сети и не принимает запросы с LAN.
 
-### Принятая целевая граница
+### Подготовленная C1-граница
 
-Decision 018 принят, но эта схема ещё не является live. После shadow-проверки
-и cutover Showroom и Awareness переходят в отдельный application repository и
-не используют RP SQLite, state root, cookies или Docker network:
+Source C1 закрепляет standalone application exact commit
+`b72c481d616d6b8d654dc198d4973dce4e3e123c`, целевой LAN-only адрес
+`192.168.1.88:8011`, RP-only старый Gateway и Compose без старого Showroom. Эта
+схема ещё не является live: до Ansible apply применённый shadow остаётся на
+loopback `:18011`, а старый Showroom — на `:8011`.
 
 ```mermaid
 flowchart LR
@@ -69,9 +74,10 @@ flowchart LR
 
 Порт не является security boundary для cookie, поэтому новый project использует
 собственные `awareness_gateway_session` и `awareness_showroom_visitor`. На
-миграции переносится только configuration сценариев и covers; run/history/auth
-identity начинается заново. Между Gateway нет runtime-вызовов, общей БД или
-dual-write.
+новой стороне Git-каталог создаёт только конфигурацию сценариев и covers;
+run/history/auth identity начинается заново. Владелец явно снял перенос старой
+истории как блокер, но старая RP SQLite остаётся нетронутой. Между Gateway нет
+runtime-вызовов, общей БД или dual-write.
 
 ### Срез 6 Decision 043: clean RP за cutover-флагом
 
@@ -113,7 +119,7 @@ activation, браузерный UX и live proof ещё не выполнены
 
 | Компонент | Отвечает за | Не отвечает за |
 |---|---|---|
-| Light GUI | Чат, создание партии, GM-инструменты, Prompt Inspector, admin-only Turn Trace Workbench, админка, безопасный рендеринг training artifacts | Правила, state, ключи провайдеров, долговременную память |
+| Light GUI | RP-чат, создание партии, GM-инструменты, Prompt Inspector, admin-only Turn Trace Workbench и RP-админка | Правила, state, ключи провайдеров, долговременную память и training UI |
 | Showroom | Витрина, анонимный запуск, минимальный чат, portal, training artifacts, рейтинг | Прямой доступ к party ID, внутреннюю turn trace, скрытый scoring, администрирование без Gateway role |
 | Gateway | Auth, party scope, state, history, универсальные интерпретаторы правил, LLM routing, диагностическую trace read model, snapshots и события artifacts, branches, datasets | Предметную программу обучения, верстку интерфейсов и ручное хранение секретов в браузере |
 | WorldPack | Неизменяемый замысел мира, seed, prompts, executable training program/assessment/fallbacks, site/workspace blueprints и interaction policy | Выбор модели, party owner, runtime state конкретного прохождения |
@@ -229,11 +235,15 @@ SQLite/JSON-операцией без LLM. Отдельный фоновый wor
 
 ## Основные границы совместимости
 
-Текущий Compose содержит `rp-gateway`, `rp-light-gui`, `rp-showcase-gui` и опциональный `rp-local-llm`. SillyTavern-контейнера в нём нет.
+Живой Compose до C1 apply содержит `rp-gateway`, `rp-light-gui`,
+`rp-showcase-gui` и опциональный `rp-local-llm`. SillyTavern-контейнера в нём
+нет.
 
-Это описание остаётся верным до cutover Decision 018. Целевой RP Compose не
-содержит `rp-showcase-gui` и training WorldPacks; Awareness Showroom поставляется
-отдельным commit-pinned application через IaC.
+Подготовленный C1 source удаляет `rp-showcase-gui` из активного RP Compose и
+поставляет Awareness Showroom отдельным commit-pinned application через IaC.
+RP Gateway скрывает training WorldPacks, партии и API и принимает только `rp`.
+Сами старые training-файлы и строки БД остаются до отдельной явной команды O2;
+source C1 их физически не удаляет.
 
 При этом сохранены:
 

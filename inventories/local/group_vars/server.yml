@@ -259,8 +259,8 @@ awareness_showroom_gateway_data_dir: "{{ awareness_showroom_data_dir }}/gateway"
 awareness_showroom_state_dir: "{{ awareness_showroom_data_dir }}/state"
 awareness_showroom_cover_dir: "{{ awareness_showroom_data_dir }}/showroom-covers"
 awareness_showroom_backup_dir: "{{ app_backup_base_dir }}/awareness-showroom"
-awareness_showroom_bind_host: "127.0.0.1"
-awareness_showroom_host_port: 18011
+awareness_showroom_bind_host: "192.168.1.88"
+awareness_showroom_host_port: 8011
 awareness_showroom_gateway_port: 8088
 awareness_showroom_gateway_database_url: "sqlite:////data/awareness_gateway.db"
 awareness_showroom_gateway_log_level: INFO

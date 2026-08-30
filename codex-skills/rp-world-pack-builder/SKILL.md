@@ -59,6 +59,10 @@ the new format.
 - Keep stable World, Scenario, character, faction, and location IDs. Never infer
   IDs from display labels at runtime.
 - Do not hard-code provider or model selection into World or Scenario source.
+- RP Light GUI and RP Gateway own only `rp`: Light GUI must not offer `training`,
+  and the RP process must reject it. Route deterministic training content through
+  `training-world-pack-builder` and `tavern-awareness-showroom`; retained
+  compatibility code is not an active authoring path.
 - Keep secrets and provider keys out of all authored files.
 - Do not write directly to party SQLite from the builder. Party creation owns
   immutable materialized World and Scenario snapshots and their hashes.
@@ -67,7 +71,9 @@ the new format.
   registry or table.
 - Existing `manifest.json` and legacy root aliases may remain in the pack until
   cutover, but they are not inputs to the Decision 043 loader. Do not edit them
-  as a substitute for `world.json` or `scenario-presets/*.json`.
+  as a substitute for `world.json` or `scenario-presets/*.json`. If a legacy
+  manifest is maintained during coexistence, both `scenario_types.recommended`
+  and `scenario_types.supported` must resolve only to `rp`.
 - Do not add marker or prose checks for this format to
   `scripts/validate-repository.py`. Executable validation belongs to the
   production loader/schema and focused tests.

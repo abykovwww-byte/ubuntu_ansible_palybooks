@@ -11,9 +11,12 @@ flowchart LR
     W["Windows workspace"] -->|"commit + push branch"| BR["GitHub codex/*"]
     BR -->|"non-draft PR + green CI + merge"| GH["GitHub main"]
     GH -->|"read-only deploy key + git pull --ff-only"| CO["/opt/ubuntu_ansible_palybooks"]
-    CO -->|"Ansible localhost"| APP["/srv/apps/rp-stack"]
-    APP -->|"docker compose up"| RT["Running containers"]
-    DATA["/srv/app-data/rp-stack"] --> RT
+    CO -->|"Ansible localhost"| RP["/srv/apps/rp-stack"]
+    CO -->|"exact private repo pin"| TR["/srv/apps/awareness-showroom"]
+    RP -->|"docker compose up"| RRT["RP containers"]
+    TR -->|"docker compose up"| TRT["Training containers"]
+    RPD["/srv/app-data/rp-stack"] --> RRT
+    TRD["/srv/app-data/awareness-showroom"] --> TRT
 ```
 
 Репозиторий приватный. Сервер читает его по SSH с отдельным read-only deploy key;
@@ -280,7 +283,7 @@ sudo systemctl status ansible-local-apply.service --no-pager -l
 sudo journalctl -u ansible-local-apply.service -n 100 --no-pager
 ```
 
-Проверка RP Stack:
+Проверка live RP Stack до C1 apply:
 
 ```bash
 cd /srv/apps/rp-stack
@@ -292,10 +295,14 @@ curl -fsS http://192.168.1.88:8010/api/worldpacks
 curl -fsS http://192.168.1.88:8011/health
 ```
 
-### Migration Decision 018
+### C1 Decision 018: source готов, apply ожидается
 
-До cutover команда выше проверяет единый RP Stack. I1 shadow на
-`:18011` уже применён из полного commit SHA private repository:
+Живой runtime пока остаётся прежним: старый Showroom занимает `:8011`, а I1
+shadow доступен только на loopback `:18011`. C1 source уже закрепляет exact
+standalone commit `b72c481d616d6b8d654dc198d4973dce4e3e123c`, LAN-only
+`192.168.1.88:8011`, production `SCENARIO_TYPE=rp` для старого Gateway и RP
+Compose без `rp-showcase-gui`. Ни одно из этих переключений не считается
+применённым до интерактивного Ansible apply.
 
 ```text
 /srv/apps/awareness-showroom
@@ -305,12 +312,12 @@ curl -fsS http://192.168.1.88:8011/health
 /srv/backups/awareness-showroom
 ```
 
-В следующей поставке application image несёт Git-каталог
+Закреплённый application commit несёт Git-каталог
 `/app/configs/showroom/scenarios.json`, а runtime `.env` включает его через
 `SHOWROOM_CATALOG_PATH`. Gateway при startup идемпотентно согласует
 только объявленные training configs и covers. Он не импортирует legacy
 runs/users/sessions/keys и не удаляет посторонние DB-строки. Сценарии становятся
-видимыми только после application PR, IaC pin, apply и успешного startup.
+видимыми на production `:8011` только после apply и успешного startup.
 
 External checkout — единственный явно opt-in ownership exception Apps role:
 
@@ -322,27 +329,35 @@ External checkout — единственный явно opt-in ownership excepti
 - tracked `.env.example` остаётся source-owned и не перезаписывается
   Ansible; server-only секреты по-прежнему рендерятся только в `.env`.
 
-После apply эти границы проверяются отдельно:
+После C1 apply эти границы проверяются отдельно:
 
 ```bash
 cd /srv/apps/awareness-showroom
 git status --short
 stat -c '%U:%G %n' . .git .env.example
 docker compose exec -T awareness-gateway printenv SHOWROOM_CATALOG_PATH
-curl -fsS http://127.0.0.1:18011/api/showroom/scenarios
+test "$(git rev-parse HEAD)" = "b72c481d616d6b8d654dc198d4973dce4e3e123c"
+curl -fsS http://192.168.1.88:8011/api/showroom/scenarios
 ```
 
-`git status --short` должен быть пустым, путь каталога — точным, а owner
-трёх проверяемых paths — `abykov:abykov`. Это ещё не доказывает
-provider-turn, scoring, debrief, resume или backup/restore.
+`git status --short` должен быть пустым, путь каталога и exact pin — точными, а
+owner трёх проверяемых paths — `abykov:abykov`. Отдельно в
+`/srv/apps/rp-stack` проверяются отсутствие `rp-showcase-gui` в active Compose,
+`SCENARIO_TYPE=rp`, HTTP `:8010` и отказ training payload до DB/provider write.
+Эти shape checks ещё не доказывают provider-turn, scoring, debrief, resume или
+backup/restore.
 
-Только после полного training acceptance IaC переводит `:8011` на новый
-Showroom, а старый Compose становится RP-only. `:8010` не меняется. Проекты не
-разделяют SQLite/state/cookies/network и не вызывают Gateway друг друга.
+C1 apply переводит `:8011` на новый Showroom, а старый Compose становится
+RP-only. `:8010` не меняется. Проекты не разделяют SQLite/state/cookies/network и
+не вызывают Gateway друг друга. После apply обязательны оба полных Awareness
+курса, реальный provider-turn, artifact/workspace scoring, debrief, resume,
+browser check, SQLite integrity и backup/test-restore.
 
-До конца rollback window старый Showroom и legacy data не удаляются. Rollback
-возвращает предыдущий IaC topology/pin; новую SQLite не сливают обратно. Полный
-порядок и acceptance matrix: [Plan 018](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md).
+Владелец явно снял перенос истории, visitors/runs и ожидание legacy sessions как
+блокеры C1. Старая RP SQLite остаётся нетронутой. Старый Showroom/training source
+физически не удаляется до отдельной команды O2; до неё rollback возвращает
+предыдущий IaC topology/pin, а новую SQLite не сливают обратно. Полный порядок и
+acceptance matrix: [Plan 018](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md).
 
 Gateway строится из корня `rp-stack`: образ получает приложение и тесты из
 `rp-gateway`, а также `/evals`, `/scripts` и `/worldpacks`, которые нужны полному
@@ -464,8 +479,8 @@ ubuntu_ansible_palybooks/
 | `services/character_retrieval.py` | Выбор релевантных NPC без embeddings |
 | `services/world_instructor.py` | Draft/preview/apply контракт изменения мира |
 | `services/auth_store.py` | Users, sessions, provider keys, global settings |
-| `services/showroom.py` | Scenarios, visitors, runs, portal snapshots, leaderboard |
-| `services/training_artifacts.py` | Blueprint validation, party snapshots, idempotent events и public views |
+| `services/showroom.py` | Legacy-копия до O2; после C1 routes отсутствуют в RP Gateway |
+| `services/training_artifacts.py` | Legacy-копия до O2; active training artifacts принадлежат standalone project |
 | `services/autotest.py` | Ограниченный auto-player client |
 | `services/service_models.py` | Глобальный service-model catalog/runtime |
 | `services/service_model_client.py` | Exact redacted service-model log, request/attempt metadata и retention |
@@ -488,16 +503,17 @@ await обоих loops. Legacy Training/Showroom recovery остаётся от�
 | Изменить prompt/memory | `narrative.py`, `memory.py`, `rp_story_memory.py`, `rp_history.py`, `context_budget.py`, `state_store.py` |
 | Изменить Light GUI | `rp-light-gui/index.html`, `app.js`, `styles.css` |
 | Изменить Turn Trace Workbench | `turn_trace.py`, `state_store.py`, `narrative.py`, `service_model_client.py`, `main.py`, Light GUI trace assets и tests |
-| Изменить Showroom | `rp-showcase-gui/` и `showroom.py` |
-| Изменить training artifacts | `training_artifacts.py`, `ui-shared/`, оба UI и WorldPack contract |
+| Изменить Showroom | `tavern-awareness-showroom` (`rp-showcase-gui/` и training Gateway) |
+| Изменить training artifacts | `tavern-awareness-showroom`: `training_artifacts.py`, `ui-shared/`, Showroom и training WorldPack contract |
 | Новый RP мир | `worldpacks/<slug>/` и `rp-world-pack-builder` |
-| Новый training мир | `worldpacks/<slug>/` и `training-world-pack-builder` |
+| Новый training мир | `tavern-awareness-showroom/worldpacks/<slug>/` и `training-world-pack-builder` |
 | Runtime/env/ports | `server.yml`, Compose/env templates |
 
 ### Зависимость training workspace
 
-Decision 015 не добавляет новый контейнер, но runtime-файлы доставляются обычным
-Ansible apply. Реализация двух capability-флагов затрагивает Gateway schemas/ShowroomStore,
+Decision 015 не добавляет новый контейнер, но active runtime-файлы теперь живут
+в `tavern-awareness-showroom` и доставляются обычным Ansible apply. Реализация
+двух capability-флагов затрагивает training Gateway schemas/ShowroomStore,
 snapshot run, `TrainingArtifactService`, логический
 `TrainingWorkspaceService`, StateStore, Showroom UI, shared safe renderers,
 training builder contract и четыре комбинации тестов.

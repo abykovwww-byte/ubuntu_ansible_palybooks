@@ -6,6 +6,7 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
 const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+const dockerfile = fs.readFileSync(require.resolve("./Dockerfile"), "utf8");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function functionSource(name) {
@@ -50,6 +51,50 @@ function functionSource(name) {
   assert.fail(`${name} source is incomplete`);
 }
 
+assert.doesNotMatch(html, /training-artifacts\.(?:js|css)/, "RP Light GUI must not load training resources");
+assert.doesNotMatch(dockerfile, /training-artifacts\.(?:js|css)/, "RP Light GUI image must not publish training resources");
+assert.doesNotMatch(html, /datasetTurnInteractionEvidence|Действия в учебном сайте/, "RP dataset review must not expose training evidence");
+
+function sourceBetween(startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, `${startMarker} must remain testable`);
+  return source.slice(start, end);
+}
+
+const selectedRadioSource = source.match(/function selectedRadioValue[\s\S]*?\n}/)?.[0];
+assert.ok(selectedRadioSource, "selectedRadioValue must remain testable");
+
+let selected = null;
+const radioContext = {
+  document: {
+    querySelector() {
+      return selected;
+    },
+  },
+};
+vm.runInNewContext(selectedRadioSource, radioContext);
+
+assert.equal(radioContext.selectedRadioValue("scenarioType", ""), "");
+assert.equal(radioContext.selectedRadioValue("worldSource"), "ready");
+selected = { value: "training" };
+assert.equal(radioContext.selectedRadioValue("scenarioType", ""), "training");
+assert.equal((source.match(/selectedRadioValue\("scenarioType", ""\)/g) || []).length, 7);
+
+const renderDialogOptionsSource = sourceBetween("function renderDialogOptions", "function renderDialogModelOptions");
+assert.match(
+  renderDialogOptionsSource,
+  /input\.checked = input\.value === "rp"/,
+  "opening the RP-only dialog must keep the sole RP scenario selected",
+);
+
+const worldPosition = html.indexOf('id="worldSelect"');
+const presetPosition = html.indexOf('id="partyPresetSelect"');
+const openingPosition = html.indexOf('id="partyOpeningSelect"');
+const characterPosition = html.indexOf("<legend>Персонаж</legend>");
+assert.ok(worldPosition >= 0 && worldPosition < presetPosition, "preset selector must follow the world selector");
+assert.ok(presetPosition < openingPosition, "opening selector must follow the preset selector");
+assert.ok(openingPosition < characterPosition, "revision-11 choices must precede character creation");
 function element(value = "") {
   return {
     value,

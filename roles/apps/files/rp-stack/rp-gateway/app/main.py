@@ -182,10 +182,13 @@ RP_ANONYMOUS_OWNER = "anonymous"
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    enforce_rp_mode = settings.app_env != "test"
+    if enforce_rp_mode and settings.scenario_type != "rp":
+        raise RuntimeError("RP gateway requires SCENARIO_TYPE=rp")
     store = StateStore(settings.sqlite_path, settings.campaign_id, settings.world_state_path)
     auth_store = AuthStore(settings)
     party_store = PartyStore(settings, default_owner_user_id=auth_store.default_owner_user_id())
-    showroom_store = ShowroomStore(settings, party_store)
+    showroom_store = None if enforce_rp_mode else ShowroomStore(settings, party_store)
     rp_engine: RPTurnEngine | None = None
     rp_runner: RPRunner | None = None
 
@@ -193,7 +196,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return (
             not settings.rp_rebuild_enabled
             or party.scenario_type != "rp"
-            or showroom_store.capabilities_for_party(party.id) is not None
+            or (
+                showroom_store is not None
+                and showroom_store.capabilities_for_party(party.id) is not None
+            )
         )
 
     @asynccontextmanager
@@ -265,6 +271,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.autotest_tasks = {}
     app.state.rp_engine = None
     app.state.rp_runner = None
+
+    def is_retired_training_path(path: str) -> bool:
+        if path == "/api/showroom" or path.startswith("/api/showroom/"):
+            return True
+        if path == "/api/admin/showroom" or path.startswith("/api/admin/showroom/"):
+            return True
+        return bool(
+            re.fullmatch(
+                r"/api/parties/[^/]+/(?:artifact-events|workspace|workspace-events|workspace/files/[^/]+/content)",
+                path,
+            )
+        )
 
     def settings_with_global_service_model(base: Settings) -> Settings:
         choice_id = auth_store.get_global_setting(SERVICE_MODEL_SETTING_KEY, base.service_model_choice)
@@ -421,7 +439,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         party: Any,
         party_state_store: StateStore,
     ) -> tuple[TrainingRuntimeService, TrainingArtifactService, TrainingWorkspaceService]:
-        run_capabilities = showroom_store.capabilities_for_party(party.id)
+        run_capabilities = (
+            showroom_store.capabilities_for_party(party.id)
+            if showroom_store is not None
+            else None
+        )
         links_enabled = run_capabilities is None or run_capabilities["interactive_links_enabled"]
         workspace_enabled = run_capabilities is None or run_capabilities["interactive_workspace_enabled"]
         return (
@@ -515,10 +537,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     provider=narrator_profile.provider,
                     narrator_settings=party.narrator_settings,
                 )
-                runtime_service, artifact_service, workspace_service = training_services_for_party(
-                    party,
-                    party_state_store,
-                )
+                runtime_service = None
+                artifact_service = None
+                workspace_service = None
+                if party.scenario_type == "training":
+                    runtime_service, artifact_service, workspace_service = training_services_for_party(
+                        party,
+                        party_state_store,
+                    )
                 narrator_response = await Adjudicator(
                     party_settings,
                     party_state_store,
@@ -537,13 +563,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     authorization=None,
                     idempotency_key=f"autotest:{run_id}:turn:{turn_number}",
                     request_id=f"{request_id}_narrator",
-                    allow_gateway_fallback=(
-                        (
-                            party.scenario_type == "rp"
-                            and party_settings.rp_contract_revision >= 7
-                        )
-                        or (party.scenario_type == "training" and runtime_service.enabled)
-                    ),
+                    allow_gateway_fallback=bool(runtime_service is not None and runtime_service.enabled),
                 )
                 fallback_turns = int(run.get("fallback_turns") or 0)
                 choices = narrator_response.get("choices") or []
@@ -909,11 +929,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
+        if enforce_rp_mode and is_retired_training_path(path):
+            return JSONResponse({"detail": "not found"}, status_code=404)
         if settings.auth_enabled and path.startswith("/api/"):
             auth_exempt = (
                 path.startswith("/api/auth/")
-                or path == "/api/showroom"
-                or path.startswith("/api/showroom/")
+                or (
+                    not enforce_rp_mode
+                    and (
+                        path == "/api/showroom"
+                        or path.startswith("/api/showroom/")
+                    )
+                )
             )
             if not auth_exempt:
                 token = request.cookies.get(settings.auth_session_cookie_name)
@@ -1104,7 +1131,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise ValueError("user still owns rebuilt RP parties")
             if payload.delete_data:
                 party_store.delete_user_data(user_id)
-            elif party_store.list_parties(owner_user_id=user_id) or party_store.list_player_characters(owner_user_id=user_id):
+            elif party_store.has_retired_non_rp_user_data(user_id):
+                raise ValueError("user owns retired non-RP data; cleanup requires explicit O2")
+            elif party_store.list_parties(owner_user_id=user_id) or party_store.list_player_characters(
+                owner_user_id=user_id
+            ):
                 raise ValueError("user still owns parties or characters")
             auth_store.delete_user(user_id)
         except ValueError as exc:
@@ -1247,8 +1278,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         include_branches: bool = True,
     ) -> StreamingResponse:
         admin = require_admin(request)
-        if scenario_type and scenario_type not in {"rp", "novel", "training"}:
-            raise HTTPException(status_code=400, detail="scenario_type must be rp, novel, or training")
+        if scenario_type and scenario_type not in {"rp", "novel"}:
+            raise HTTPException(status_code=400, detail="scenario_type must be rp or novel")
         retained_party_ids = None
         if settings.rp_rebuild_enabled:
             retained_party_ids = {
@@ -1554,7 +1585,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             return {"party": rp_party_payload(party)}
         if rebuilt_rp_request(request):
-            if payload.scenario_type != "training":
+            if enforce_rp_mode or payload.scenario_type != "training":
                 raise HTTPException(
                     status_code=422,
                     detail="legacy ordinary RP party creation is unavailable",
@@ -1563,6 +1594,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=422, detail="rebuilt RP runtime is not active"
             )
+        if enforce_rp_mode and payload.scenario_type != "rp":
+            raise HTTPException(status_code=422, detail="RP gateway accepts only scenario_type=rp")
         try:
             if rebuilt_rp_request(request):
                 accessible_retained_training_worldpack(request, payload.worldpack_id)
@@ -1584,7 +1617,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=404, detail="party not found") from exc
             return {"party": rp_party_payload(party)}
         try:
-            party = party_store.get_party(party_id, owner_user_id=owner_user_id(request))
+            party = party_store.get_party(
+                party_id,
+                owner_user_id=owner_user_id(request),
+                allow_retired_read=True,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"party": party.model_dump(mode="json")}
@@ -1702,7 +1739,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/parties/{party_id}/activate")
     def activate_party(request: Request, party_id: str) -> dict[str, Any]:
         try:
-            existing = party_store.get_party(party_id, owner_user_id=owner_user_id(request))
+            existing = party_store.get_party(
+                party_id,
+                owner_user_id=owner_user_id(request),
+                allow_retired_read=True,
+            )
             ensure_party_playable(existing)
             party = party_store.activate_party(party_id, owner_user_id=owner_user_id(request))
         except ValueError as exc:
@@ -1751,8 +1792,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/parties/{party_id}/state")
     def get_party_state(request: Request, party_id: str) -> dict[str, Any]:
         try:
-            party = party_store.get_party(party_id, owner_user_id=owner_user_id(request))
-            party_state = party_store.store_for_party(party_id, owner_user_id=owner_user_id(request)).get_state()
+            party = party_store.get_party(
+                party_id,
+                owner_user_id=owner_user_id(request),
+                allow_retired_read=True,
+            )
+            party_state = party_store.store_for_party(
+                party_id,
+                owner_user_id=owner_user_id(request),
+                allow_retired_read=True,
+            ).get_state()
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"party_id": party.id, "state_campaign_id": party.state_campaign_id, "state": party_state}
@@ -1772,8 +1821,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "turns": [rp_turn_payload(turn) for turn in turns[-bounded_limit:]],
             }
         try:
-            party_store.get_party(party_id, owner_user_id=owner_user_id(request))
-            party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(request))
+            party_store.get_party(
+                party_id,
+                owner_user_id=owner_user_id(request),
+                allow_retired_read=True,
+            )
+            party_state_store = party_store.store_for_party(
+                party_id,
+                owner_user_id=owner_user_id(request),
+                allow_retired_read=True,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {
@@ -2837,7 +2894,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "turn": rp_turn_payload(turn),
             }
         try:
-            party = party_store.get_party(party_id, owner_user_id=owner_user_id(http_request))
+            party = party_store.get_party(
+                party_id,
+                owner_user_id=owner_user_id(http_request),
+                allow_retired_read=True,
+            )
             ensure_party_playable(party)
             party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(http_request))
             party_settings = runtime_settings_for_party(party)
@@ -2960,10 +3021,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 and party_settings.rp_contract_revision == 7
             )
             expected_state_version = int(state.get("meta", {}).get("state_version") or 0)
-            runtime_service, artifact_service, workspace_service = training_services_for_party(party, party_state_store)
+            runtime_service = None
+            artifact_service = None
+            workspace_service = None
+            if party.scenario_type == "training":
+                runtime_service, artifact_service, workspace_service = training_services_for_party(
+                    party,
+                    party_state_store,
+                )
             start_patch = (
                 runtime_service.start_patch(state, party_id)
-                if party.scenario_type == "training" and runtime_service.enabled
+                if runtime_service is not None and runtime_service.enabled
                 else party_start_state_patch(state, party_id, party.worldpack_id, party.scenario_type)
             )
             narrative_state = party_start_narrative_state(state, start_patch)
@@ -3027,8 +3095,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if adjudicator.rp_story_memory is not None
                 else None
             )
-            artifact_contract = artifact_service.contract_for_state(narrative_state)
-            workspace_contract = workspace_service.contract_for_state(narrative_state, party_start=True)
+            artifact_contract = (
+                artifact_service.contract_for_state(narrative_state)
+                if artifact_service is not None
+                else None
+            )
+            workspace_contract = (
+                workspace_service.contract_for_state(narrative_state, party_start=True)
+                if workspace_service is not None
+                else None
+            )
             interaction_contract = (
                 {"site": artifact_contract, "workspace": workspace_contract}
                 if artifact_contract or workspace_contract
@@ -3036,7 +3112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             training_turn_contract = (
                 runtime_service.prompt_contract(narrative_state, interaction_contract)
-                if runtime_service.enabled
+                if runtime_service is not None and runtime_service.enabled
                 else None
             )
             world_clock_projection = (
@@ -3167,38 +3243,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else:
                     fallback_reason = "runtime_error"
                     transport_status = "provider_error"
-                revision_seven_transport = revision_seven and isinstance(
-                    exc,
-                    (
-                        httpx.HTTPStatusError,
-                        httpx.TimeoutException,
-                        ProviderRateLimitError,
-                        httpx.RequestError,
-                    ),
-                )
-                if not revision_seven_transport and (
-                    party.scenario_type != "training" or not runtime_service.enabled
-                ):
+                if party.scenario_type == "rp":
                     raise
-                text = (
-                    safe_fallback(
-                        start_outcome,
-                        narrative_state,
-                        "",
-                        party.worldpack_id,
-                        party.scenario_type,
-                    )
-                    if revision_seven_transport
-                    else runtime_service.fallback_text(narrative_state, interaction_contract)
-                )
+                if runtime_service is None or not runtime_service.enabled:
+                    raise
+                text = runtime_service.fallback_text(narrative_state, interaction_contract)
                 raw = adjudicator.provider_fallback_response(
                     start_outcome,
                     text,
                     fallback_reason,
                     request_id,
-                    audit=not revision_seven_transport,
                 )
-                fallback_noncanonical = revision_seven_transport
             if scene_bundle_revision and not fallback_noncanonical:
                 scene_result = materialize_scene_bundle(
                     raw,
@@ -3243,23 +3298,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     request_id,
                 )
                 raise RuntimeError("Narrative provider returned an invalid response")
-            if fallback_reason is None:
-                artifact_result = artifact_service.materialize_response(response, artifact_contract)
-                workspace_result = workspace_service.materialize_response(response, workspace_contract)
-                if artifact_result.valid:
+            artifact_result = None
+            workspace_result = None
+            if artifact_service is not None and workspace_service is not None and fallback_reason is None:
+                artifact_result = (
+                    artifact_service.materialize_response(response, artifact_contract)
+                    if artifact_service is not None
+                    else None
+                )
+                workspace_result = (
+                    workspace_service.materialize_response(response, workspace_contract)
+                    if workspace_service is not None
+                    else None
+                )
+                if artifact_result is not None and artifact_result.valid:
                     text = artifact_result.text
-                if workspace_result.valid:
+                if workspace_result is not None and workspace_result.valid:
                     text = workspace_result.text
-                if artifact_result.valid and workspace_result.valid:
+                if (
+                    artifact_result is not None
+                    and workspace_result is not None
+                    and artifact_result.valid
+                    and workspace_result.valid
+                ):
                     response = Adjudicator.merge_interaction_response(response, text, artifact_result, workspace_result)
-            else:
+            elif artifact_service is not None and workspace_service is not None:
                 artifact_result = artifact_service.fallback_materialization(response, text, artifact_contract)
                 text = artifact_result.text
                 workspace_result = workspace_service.fallback_materialization(workspace_contract, text)
-            validator = OutputValidator()
-            validation = None if (
-                party.scenario_type == "rp" and party_settings.rp_contract_revision < 3
-            ) else validator.validate(
+            validator = None if party.scenario_type == "rp" else OutputValidator()
+            validation = None if party.scenario_type == "rp" else validator.validate(
                 text,
                 start_outcome,
                 narrative_state,
@@ -3272,8 +3340,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 initial_violations = [
                     *validation.violations,
                     *(scene_result.violations if scene_result else []),
-                    *artifact_result.violations,
-                    *workspace_result.violations,
+                    *(artifact_result.violations if artifact_result else []),
+                    *(workspace_result.violations if workspace_result else []),
                 ]
                 adjudicator.record_trace_event(
                     request_id=request_id,
@@ -3289,18 +3357,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     },
                     party_turn=expected_party_turn,
                 )
-            training_runtime_enabled = runtime_service.enabled
+            training_runtime_enabled = bool(runtime_service is not None and runtime_service.enabled)
             repair_attempts = (
-                1
-                if revision_seven
-                else (
-                    party_settings.training_repair_attempts
-                    if training_runtime_enabled
-                    else party_settings.max_repair_attempts
-                )
+                0
+                if party.scenario_type == "rp"
+                else party_settings.training_repair_attempts
+                if training_runtime_enabled
+                else party_settings.max_repair_attempts
             )
             training_repair_allowed = True
-            if training_runtime_enabled:
+            if training_runtime_enabled and runtime_service is not None:
                 runtime_violations = runtime_service.validate_narrative(
                     text, narrative_state, interaction_contract
                 )
@@ -3313,27 +3379,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if validation is not None and (
                 not validation.valid
                 or (scene_result is not None and not scene_result.valid)
-                or not artifact_result.valid
-                or not workspace_result.valid
+                or (artifact_result is not None and not artifact_result.valid)
+                or (workspace_result is not None and not workspace_result.valid)
             ) and repair_attempts > 0 and training_repair_allowed:
                 repaired = True
                 repair_instruction = (
                     runtime_service.repair_instruction(text, narrative_state, interaction_contract)
-                    if training_runtime_enabled
+                    if training_runtime_enabled and runtime_service is not None
                     else validation.repair_instruction
                 )
                 if scene_result is not None and not scene_result.valid:
                     repair_instruction = " ".join(
                         [repair_instruction, scene_result.repair_instruction]
                     ).strip()
-                if not artifact_result.valid:
+                if artifact_result is not None and not artifact_result.valid:
                     repair_instruction = " ".join(
                         [
                             repair_instruction,
                             "Return a valid narrative bundle: " + "; ".join(artifact_result.violations),
                         ]
                     ).strip()
-                if not workspace_result.valid:
+                if workspace_result is not None and not workspace_result.valid:
                     repair_instruction = " ".join(
                         [
                             repair_instruction,
@@ -3395,13 +3461,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         )
                 response = adjudicator.normalize_response(raw, model_profile.model)
                 text = scene_result.text if scene_result is not None else response_text(response)
-                artifact_result = artifact_service.materialize_response(response, artifact_contract)
-                workspace_result = workspace_service.materialize_response(response, workspace_contract)
-                if artifact_result.valid:
+                artifact_result = (
+                    artifact_service.materialize_response(response, artifact_contract)
+                    if artifact_service is not None
+                    else None
+                )
+                workspace_result = (
+                    workspace_service.materialize_response(response, workspace_contract)
+                    if workspace_service is not None
+                    else None
+                )
+                if artifact_result is not None and artifact_result.valid:
                     text = artifact_result.text
-                if workspace_result.valid:
+                if workspace_result is not None and workspace_result.valid:
                     text = workspace_result.text
-                if artifact_result.valid and workspace_result.valid:
+                if (
+                    artifact_result is not None
+                    and workspace_result is not None
+                    and artifact_result.valid
+                    and workspace_result.valid
+                ):
                     response = Adjudicator.merge_interaction_response(response, text, artifact_result, workspace_result)
                 validation = validator.validate(
                     text,
@@ -3415,8 +3494,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 repair_violations = [
                     *validation.violations,
                     *(scene_result.violations if scene_result else []),
-                    *artifact_result.violations,
-                    *workspace_result.violations,
+                    *(artifact_result.violations if artifact_result else []),
+                    *(workspace_result.violations if workspace_result else []),
                 ]
                 adjudicator.record_trace_event(
                     request_id=request_id,
@@ -3435,7 +3514,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if scene_result is not None and not scene_result.valid:
                 raise SceneContinuityError("; ".join(scene_result.violations))
             if validation is not None and (
-                not validation.valid or not artifact_result.valid or not workspace_result.valid
+                not validation.valid
+                or (artifact_result is not None and not artifact_result.valid)
+                or (workspace_result is not None and not workspace_result.valid)
             ):
                 fallback_reason = fallback_reason or "validation_failed"
                 transport_status = "invalid_response"
@@ -3446,8 +3527,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "model": model_profile.model,
                         "violations": [
                             *validation.violations,
-                            *artifact_result.violations,
-                            *workspace_result.violations,
+                            *(artifact_result.violations if artifact_result else []),
+                            *(workspace_result.violations if workspace_result else []),
                         ],
                     },
                     request_id,
@@ -3455,6 +3536,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 allow_safe_fallback = (not revision_seven) and (
                     getattr(http_request.state, "showroom_party_access", False) or (
                     party.scenario_type == "training"
+                    and runtime_service is not None
                     and runtime_service.enabled
                     )
                 )
@@ -3462,7 +3544,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     raise RuntimeError("LLM response failed narrative validation")
                 text = (
                     runtime_service.fallback_text(narrative_state, interaction_contract)
-                    if runtime_service.enabled
+                    if runtime_service is not None and runtime_service.enabled
                     else safe_fallback(
                         start_outcome,
                         narrative_state,
@@ -3477,13 +3559,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     fallback_reason,
                     request_id,
                 )
-                artifact_result = artifact_service.fallback_materialization(response, text, artifact_contract)
-                text = artifact_result.text
-                workspace_result = workspace_service.fallback_materialization(workspace_contract, text)
+                if artifact_service is not None and workspace_service is not None:
+                    artifact_result = artifact_service.fallback_materialization(response, text, artifact_contract)
+                    text = artifact_result.text
+                    workspace_result = workspace_service.fallback_materialization(workspace_contract, text)
             response = Adjudicator.merge_interaction_response(response, text, artifact_result, workspace_result)
-            final_validation = None if (
-                party.scenario_type == "rp" and party_settings.rp_contract_revision < 3
-            ) else validator.validate(
+            final_validation = None if party.scenario_type == "rp" else validator.validate(
                 text,
                 start_outcome,
                 narrative_state,
@@ -3494,8 +3575,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             final_violations = [
                 *(final_validation.violations if final_validation is not None else []),
-                *artifact_result.violations,
-                *workspace_result.violations,
+                *(artifact_result.violations if artifact_result else []),
+                *(workspace_result.violations if workspace_result else []),
             ]
             adjudicator.record_trace_event(
                 request_id=request_id,
@@ -3532,11 +3613,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "fallback_reason": fallback_reason,
                 "transport_status": transport_status,
                 "llm_calls": 2 if repaired else 1,
-                "training_runtime_contract_hash": runtime_service.contract_hash,
+                "training_runtime_contract_hash": (
+                    runtime_service.contract_hash
+                    if runtime_service is not None and runtime_service.enabled
+                    else None
+                ),
                 "outcome": start_outcome.model_dump(mode="json"),
                 "training_capabilities": {
-                    "interactive_links_enabled": artifact_service.enabled,
-                    "interactive_workspace_enabled": workspace_service.enabled,
+                    "interactive_links_enabled": bool(artifact_service and artifact_service.enabled),
+                    "interactive_workspace_enabled": bool(workspace_service and workspace_service.enabled),
                 },
             }
             if opening_prompt_assembly is not None:
@@ -3669,8 +3754,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     expected_state_version=expected_state_version,
                     prompt_messages=prompt_messages,
                     metadata=turn_metadata,
-                    artifacts=artifact_result.persistence_records,
-                    workspace_files=workspace_result.persistence_records,
+                    artifacts=artifact_result.persistence_records if artifact_result else [],
+                    workspace_files=workspace_result.persistence_records if workspace_result else [],
                     consumed_world_clock_event_ids=(
                         list(world_clock_projection["event_ids"])
                         if world_clock_projection is not None and not fallback_noncanonical
@@ -3694,8 +3779,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     state_version,
                     prompt_messages,
                     turn_metadata,
-                    artifacts=artifact_result.persistence_records,
-                    workspace_files=workspace_result.persistence_records,
+                    artifacts=artifact_result.persistence_records if artifact_result else [],
+                    workspace_files=workspace_result.persistence_records if workspace_result else [],
                     party_turn=int(state["meta"]["turn"]),
                 )
             try:
@@ -3755,6 +3840,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             trace_start_failure(exc)
             party_state_store.audit("party_start_rate_limited", {"request_id": request_id, **exc.details}, request_id)
             raise HTTPException(status_code=429, detail=exc.public_detail()) from exc
+        except httpx.RequestError as exc:
+            party_state_store.fail_turn_request(idempotency_key, f"{type(exc).__name__}: {exc}")
+            trace_start_failure(exc)
+            raise HTTPException(status_code=502, detail="Narrative provider request failed") from exc
         except RuntimeError as exc:
             party_state_store.fail_turn_request(idempotency_key, f"{type(exc).__name__}: {exc}")
             trace_start_failure(exc)
@@ -3869,7 +3958,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "turn": rp_turn_payload(turn),
             }
         try:
-            party = party_store.get_party(party_id, owner_user_id=owner_user_id(http_request))
+            party = party_store.get_party(
+                party_id,
+                owner_user_id=owner_user_id(http_request),
+                allow_retired_read=True,
+            )
             ensure_party_playable(party)
             party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(http_request))
             party_settings = runtime_settings_for_party(party)
@@ -3918,7 +4011,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider=model_profile.provider,
                 narrator_settings=party.narrator_settings,
             )
-            runtime_service, artifact_service, workspace_service = training_services_for_party(party, party_state_store)
+            runtime_service = None
+            artifact_service = None
+            workspace_service = None
+            if party.scenario_type == "training":
+                runtime_service, artifact_service, workspace_service = training_services_for_party(
+                    party,
+                    party_state_store,
+                )
             response = await Adjudicator(
                 party_settings,
                 party_state_store,
@@ -3937,16 +4037,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 authorization,
                 request.idempotency_key,
                 request_id,
-                allow_gateway_fallback=(
-                    (
-                        party.scenario_type == "rp"
-                        and party_settings.rp_contract_revision >= 7
-                    )
-                    or (
-                        party.scenario_type == "training"
-                        and runtime_service.enabled
-                    )
-                ),
+                allow_gateway_fallback=bool(runtime_service is not None and runtime_service.enabled),
                 story_memory_corrections=[
                     correction.model_dump(mode="json", exclude_none=True)
                     for correction in request.story_memory_corrections
@@ -4827,6 +4918,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return StreamingResponse(stream_openai_response(response), media_type="text/event-stream")
         return JSONResponse(response)
 
+    if enforce_rp_mode:
+        app.router.routes = [
+            route
+            for route in app.router.routes
+            if not is_retired_training_path(str(getattr(route, "path", "")))
+        ]
+
     return app
 
 
@@ -4836,6 +4934,10 @@ def settings_for_party(
     *,
     effective_revision: int | None = None,
 ) -> Settings:
+    if settings.app_env != "test" and (
+        settings.scenario_type != "rp" or getattr(party, "scenario_type", None) != "rp"
+    ):
+        raise ValueError("RP gateway accepts only scenario_type=rp")
     model_profile = party.model_profile
     revision = (
         int(effective_revision)
