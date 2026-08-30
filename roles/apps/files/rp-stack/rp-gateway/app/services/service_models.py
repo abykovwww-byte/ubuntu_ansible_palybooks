@@ -31,6 +31,17 @@ OPENROUTER_SERVICE_MODELS: tuple[dict[str, Any], ...] = (
     {"id": "or-gemma-3-12b", "model": "google/gemma-3-12b-it", "title": "Gemma 3 12B", "input_price": 0.05, "output_price": 0.15, "context_tokens": 131_072},
 )
 
+# These catalog models accept an explicit reasoning off switch. The remaining
+# choices either have no reasoning control or require reasoning.
+OPENROUTER_OPTIONAL_REASONING_MODELS = frozenset(
+    {
+        "qwen/qwen3.5-flash-02-23",
+        "qwen/qwen3.7-flash",
+        "google/gemini-2.5-flash-lite",
+        "deepseek/deepseek-v3.2-exp",
+    }
+)
+
 
 def service_model_choices(settings: Settings) -> list[dict[str, Any]]:
     local = {
