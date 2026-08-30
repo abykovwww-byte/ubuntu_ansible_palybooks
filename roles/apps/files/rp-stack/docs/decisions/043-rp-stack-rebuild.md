@@ -8,19 +8,25 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении, срез 2. Шаг 5 поставляет уровень `каркас`:
-изолированный пакет `app/rp` с чистой SQLite и offline `RPTurnEngine`, который
-атомарно сохраняет одну RAW-пару. Новый контур не подключён к `main.py`, API,
-runtime, provider или legacy DB; пользовательский UX не изменён.
+**Delivery status:** в исполнении, срез 3. Шаг 6 поставляет уровень `каркас`:
+offline production loader/schema разделяет `WorldDefinition` и
+`ScenarioPresetDefinition`, а `RPTurnEngine` сохраняет их независимые
+immutable snapshots и SHA-256 в чистой RP SQLite. Новый контур не
+подключён к `main.py`, API, runtime или provider; пользовательский UX не
+изменён.
 
-Состав среза 2:
+Состав среза 3:
 
-- **добавлено:** inert `app/rp`, clean-schema storage, offline atomic turn path,
-  focused module tests и соответствующая документация;
-- **удалено:** ничего;
+- **добавлено:** production `World`/`Scenario` loader/schema,
+  авторский контракт и материализация только
+  `day-watch-moscow-v2`, независимые snapshots/hashes партии и
+  boundary-проверки;
+- **удалено:** противоречащие новому контракту правила из
+  `rp-world-pack-builder` и его дублирующая проверка в repository validator;
 - **временно оставлено:** действующий `Adjudicator`, ревизии 0–11, legacy
-  SQLite, их runtime и тесты. Они остаются активным пользовательским трактом до
-  переключения и удаляются вместе с монолитом на шаге 12.
+  SQLite и manifest-based WorldPack runtime. Они остаются активным
+  пользовательским трактом до переключения и удаляются вместе с
+  монолитом на шаге 12.
 
 Это решение — единственный анкер ребилда. Отдельные ADR на слои, роли и приёмку
 не заводятся: дробление на срезы было одной из причин накопления легаси.
@@ -40,6 +46,16 @@ runtime, provider или legacy DB; пользовательский UX не и�
 и способ его получения фиксируются в теле PR среза 1. Live-счётчики раздела
 Context остаются историческими read-only наблюдениями на применённом
 `e069670` 28 августа 2026 года, а не проверкой нового движка.
+Срез 3 начат от `origin/main @ 5c87f2b`
+(`5c87f2b5621c67d4bcbc77646d1e7e4be882c4f3`); merge, apply и live-проверка
+этого среза фиксируются как разные состояния.
+
+Локальное evidence среза 3: production loader материализует committed V2 World
+и все 12 Scenario (четыре старта × три стиля), focused boundary — `20 passed`,
+полный Gateway suite — `686 passed`, остальные локальные repository gates —
+PASS. В отдельной временной SQLite подтверждены независимые hashes, сохранение
+старого snapshot после изменения копии source и fail-closed перепривязка party
+ID. Это offline-доказательство нового source/storage boundary, не runtime proof.
 
 ## Context
 

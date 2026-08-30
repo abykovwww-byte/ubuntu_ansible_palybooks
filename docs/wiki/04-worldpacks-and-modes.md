@@ -2,6 +2,11 @@
 
 [← Жизненный цикл хода](03-turn-lifecycle.md) · [Главная](README.md) · [Далее: память и retrieval →](05-memory-and-retrieval.md)
 
+> Срез 3 Decision 043 добавил новый World/Scenario контракт только в
+> offline-контур. Разделы о manifest и revisions 0–11 ниже описывают
+> временно действующий runtime до шага 12; они не являются
+> compatibility-слоем нового loader.
+
 ## RP contract в manifest
 
 Текущая максимальная declared revision RP WorldPack — `11`; revisions `0..10`
@@ -46,6 +51,30 @@ WorldPack не поддерживается одновременно в двух
 prompt-generated worlds. `incident-50` остаётся RP-only в исходном project.
 Training runtime по-прежнему остаётся generic interpreter: предметная программа,
 score и debrief принадлежат WorldPack, а не Gateway.
+
+## Decision 043, срез 3: World и Scenario
+
+Новый авторский source разделён по владельцам:
+
+- `world.json` → `WorldDefinition`: законы и канон мира, фракции, места,
+  базовые NPC, онтология отношений и seed lore;
+- `scenario-presets/*.json` → отдельные `ScenarioPresetDefinition`:
+  игрок и его способности, старт и initial state, активные NPC, стартовые
+  отношения, стиль, формат, сложность, opening и локальные отклонения.
+
+`WorldDefinition` не принимает `player_role`, `openings`, `presets`, `state_seed`
+или `rp_supervisor`. Production loader/schema в `app/rp` — единственный
+исполняемый владелец нового формата; `validate-repository.py` его не
+дублирует. Loader закрывается на неизвестном ID, выходе пути за каталог
+и несовпадении `world_id`.
+
+В этом срезе перенесён только `day-watch-moscow-v2`: его канон,
+персонажи и lore, четыре старта и три стиля. Пресет и свободно
+собранный Scenario материализуются одинаково: партия хранит
+отдельные `WorldSnapshot` / `ScenarioSnapshot` и SHA-256, поэтому
+последующее изменение source не переписывает её стартовый контракт.
+Эта материализация пока только offline: API, UI, provider и runtime не
+переключены, deploy и live-проверка не выполнялись.
 
 ## Что такое WorldPack
 
@@ -476,7 +505,11 @@ resource revision со стабильным `folder_id`, а run фиксируе
 - `rp-world-pack-builder` — для `rp`;
 - `training-world-pack-builder` — для детерминированных учебных миров.
 
-Оба требуют state schema validation, изоляцию party state и доставку через IaC. Training builder дополнительно требует authored decision surfaces, наблюдаемые score fields и отдельный debrief.
+`rp-world-pack-builder` для нового RP-контура создаёт World и отдельные
+Scenario по production loader/schema, но до переключения не выдаёт offline-
+материализацию за играбельный live-мир. Training builder сохраняет
+свой текущий контракт: state schema validation, authored decision surfaces,
+наблюдаемые score fields и отдельный debrief.
 
 ## Generated prompt worlds
 

@@ -8,7 +8,15 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.rp.schema import initialize_schema
+from pydantic import ValidationError
+
+from app.rp.content import (
+    ScenarioSnapshot,
+    WorldSnapshot,
+    canonical_snapshot_json,
+    snapshot_hash,
+)
+from app.rp.schema import RPSchemaError, initialize_schema
 
 
 class RPPartyNotFound(LookupError):
@@ -23,10 +31,18 @@ class RPPartyVersionConflict(RuntimeError):
     """The turn was based on an older or future party version."""
 
 
+class RPPartySnapshotConflict(RuntimeError):
+    """A party identifier was reused with different immutable source snapshots."""
+
+
 @dataclass(frozen=True, slots=True)
 class RPParty:
     id: str
     owner_user_id: str
+    world_snapshot: WorldSnapshot
+    world_hash: str
+    scenario_snapshot: ScenarioSnapshot
+    scenario_hash: str
     current_version: int
     created_at: int
     updated_at: int
@@ -54,9 +70,22 @@ class RPTurnEngine:
         with closing(self._connect()) as connection:
             initialize_schema(connection)
 
-    def create_party(self, *, owner_user_id: str, party_id: str) -> RPParty:
+    def create_party(
+        self,
+        *,
+        owner_user_id: str,
+        party_id: str,
+        world_snapshot: WorldSnapshot,
+        scenario_snapshot: ScenarioSnapshot,
+    ) -> RPParty:
         owner_user_id = _required_text(owner_user_id, "owner_user_id")
         party_id = _required_text(party_id, "party_id")
+        if world_snapshot.world_id != scenario_snapshot.world_id:
+            raise ValueError("World and Scenario snapshots must target the same World")
+        world_snapshot_json = canonical_snapshot_json(world_snapshot)
+        world_snapshot_hash = snapshot_hash(world_snapshot)
+        scenario_snapshot_json = canonical_snapshot_json(scenario_snapshot)
+        scenario_snapshot_hash = snapshot_hash(scenario_snapshot)
         timestamp = time.time_ns()
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -64,17 +93,37 @@ class RPTurnEngine:
                 connection.execute(
                     """
                     INSERT INTO rp_parties(
-                        id, owner_user_id, current_version, created_at, updated_at
-                    ) VALUES(?, ?, 0, ?, ?)
+                        id, owner_user_id,
+                        world_snapshot_json, world_hash,
+                        scenario_snapshot_json, scenario_hash,
+                        current_version, created_at, updated_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?)
                     ON CONFLICT(id) DO NOTHING
                     """,
-                    (party_id, owner_user_id, timestamp, timestamp),
+                    (
+                        party_id,
+                        owner_user_id,
+                        world_snapshot_json,
+                        world_snapshot_hash,
+                        scenario_snapshot_json,
+                        scenario_snapshot_hash,
+                        timestamp,
+                        timestamp,
+                    ),
                 )
-                party = _owned_party(connection, owner_user_id, party_id)
-                if party is None:
+                party_row = _owned_party(connection, owner_user_id, party_id)
+                if party_row is None:
                     raise RPPartyNotFound(party_id)
+                party = _party_from_row(party_row)
+                if (
+                    party.world_snapshot != world_snapshot
+                    or party.scenario_snapshot != scenario_snapshot
+                ):
+                    raise RPPartySnapshotConflict(
+                        f"party {party_id!r} already owns different source snapshots"
+                    )
                 connection.commit()
-                return _party_from_row(party)
+                return party
             except Exception:
                 connection.rollback()
                 raise
@@ -241,9 +290,32 @@ def _owned_party(
 
 
 def _party_from_row(row: sqlite3.Row) -> RPParty:
+    world_snapshot_json = str(row["world_snapshot_json"])
+    scenario_snapshot_json = str(row["scenario_snapshot_json"])
+    try:
+        world_snapshot = WorldSnapshot.model_validate_json(world_snapshot_json)
+        scenario_snapshot = ScenarioSnapshot.model_validate_json(scenario_snapshot_json)
+    except ValidationError as exc:
+        raise RPSchemaError("stored RP source snapshot is invalid") from exc
+    world_snapshot_hash = str(row["world_hash"])
+    scenario_snapshot_hash = str(row["scenario_hash"])
+    if (
+        canonical_snapshot_json(world_snapshot) != world_snapshot_json
+        or snapshot_hash(world_snapshot) != world_snapshot_hash
+    ):
+        raise RPSchemaError("stored World snapshot does not match its hash")
+    if (
+        canonical_snapshot_json(scenario_snapshot) != scenario_snapshot_json
+        or snapshot_hash(scenario_snapshot) != scenario_snapshot_hash
+    ):
+        raise RPSchemaError("stored Scenario snapshot does not match its hash")
     return RPParty(
         id=str(row["id"]),
         owner_user_id=str(row["owner_user_id"]),
+        world_snapshot=world_snapshot,
+        world_hash=world_snapshot_hash,
+        scenario_snapshot=scenario_snapshot,
+        scenario_hash=scenario_snapshot_hash,
         current_version=int(row["current_version"]),
         created_at=int(row["created_at"]),
         updated_at=int(row["updated_at"]),

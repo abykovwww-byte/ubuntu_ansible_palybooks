@@ -1,0 +1,29 @@
+{
+  "schema_version": "rp-scenario-preset.v1",
+  "id": "book-inquisition-observer",
+  "title": "Книжный: Наблюдатель Инквизиции",
+  "world_id": "day-watch-moscow-v2",
+  "player_role": "Младший наблюдатель российского бюро Инквизиции. Имя, природа, сторона, уровень силы, специализация, биография и личные ограничения задаются в карточке персонажа.",
+  "style": "book",
+  "format": "plain_scene_text",
+  "difficulty": null,
+  "detail_level": "default",
+  "world_system_prompt_file": "presets/book/gm-system.md",
+  "world_authors_note_file": "presets/book/authors-note.md",
+  "opening_file": "prompts/openings/inquisition-observer/opening-scene.md",
+  "initial_state_file": "prompts/openings/inquisition-observer/state-seed.json",
+  "active_character_ids": [
+    "zabulon",
+    "gesser",
+    "alisa-donnikova",
+    "edgar",
+    "anton-gorodetsky",
+    "svetlana-nazarova",
+    "igor-teplov",
+    "olga",
+    "tiger-cub",
+    "maxim",
+    "anna-tikhonovna"
+  ],
+  "local_overrides": {}
+}

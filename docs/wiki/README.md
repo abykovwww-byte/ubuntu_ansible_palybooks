@@ -2,10 +2,18 @@
 
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
-Эта Wiki проверена 27 августа 2026 года и отделяет source revision от фактического
+Эта Wiki проверена 29 августа 2026 года и отделяет source revision от фактического
 runtime. RP-only living story memory реализована в исходном коде и описана в
 [Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
 но статус push, Ansible apply и live verification всегда сообщается отдельно.
+
+Срез 3 [Decision 043](../../roles/apps/files/rp-stack/docs/decisions/043-rp-stack-rebuild.md)
+добавляет только offline production loader/schema нового RP-контура:
+World и Scenario стали разными авторскими объектами, а новая партия
+в чистой RP SQLite получает их независимые immutable snapshots и
+SHA-256. Перенесён только `day-watch-moscow-v2`. API, provider, UI,
+deploy и live runtime не переключены; manifest-based WorldPack остаётся
+действующим трактом до шага 12.
 
 [Decision 036](../../roles/apps/files/rp-stack/docs/decisions/036-retire-novel-and-nvidia.md)
 выводит из активного контракта режим совместного романа и NVIDIA provider.
@@ -270,7 +278,7 @@ SillyTavern не входит в текущий Compose RP Stack. Lorebook JSON 
 1. [Архитектура и границы](01-architecture.md) — компоненты, authority и потоки данных.
 2. [Интерфейсы](02-interfaces.md) — Light GUI, Showroom, админка и compatibility API.
 3. [Жизненный цикл хода](03-turn-lifecycle.md) — от сообщения игрока до state, валидации и фоновых задач.
-4. [WorldPacks и режимы](04-worldpacks-and-modes.md) — структура миров, `rp` / `training`, публичность и архивная граница.
+4. [WorldPacks и режимы](04-worldpacks-and-modes.md) — новые World/Scenario, legacy WorldPacks, `rp` / `training`, публичность и архивная граница.
 5. [Память, контекст и retrieval](05-memory-and-retrieval.md) — RP story memory, главы, raw history, бюджеты, lore, NPC и отсутствие embeddings.
 6. [Модели и провайдеры](06-models-and-providers.md) — narrator, служебная модель, BYOK и local Gemma.
 7. [Обучение, автотесты и датасеты](07-training-autotests-datasets.md) — детерминированный scoring, ветки и SFT JSONL.
@@ -298,6 +306,7 @@ SillyTavern не входит в текущий Compose RP Stack. Lorebook JSON 
 
 - [Compose RP Stack](../../roles/apps/templates/rp-stack.compose.yml.j2)
 - [Gateway API](../../roles/apps/files/rp-stack/rp-gateway/app/main.py)
+- [World/Scenario loader/schema](../../roles/apps/files/rp-stack/rp-gateway/app/rp/content.py)
 - [Архитектурные решения](../../roles/apps/files/rp-stack/docs/decisions)
 - [WorldPacks](../../roles/apps/files/rp-stack/worldpacks)
 - [Ansible-переменные](../../inventories/local/group_vars/server.yml)
