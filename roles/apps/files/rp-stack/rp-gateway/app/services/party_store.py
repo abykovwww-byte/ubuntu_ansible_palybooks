@@ -67,6 +67,10 @@ class PartyStore:
         self.init_db()
         self.seed_model_profiles()
 
+    @property
+    def enforce_rp_mode(self) -> bool:
+        return self.settings.app_env != "test"
+
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.settings.sqlite_path)
@@ -815,6 +819,8 @@ class PartyStore:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
+            if self.enforce_rp_mode and not self.is_rp_worldpack_manifest(manifest):
+                continue
             pack_dir = manifest_path.parent
             pack_id = str(manifest.get("id") or pack_dir.name)
             files = manifest.get("files", {}) if isinstance(manifest.get("files"), dict) else {}
@@ -839,6 +845,91 @@ class PartyStore:
             packs.append(summary)
             self.upsert_worldpack(summary)
         return packs
+
+    @staticmethod
+    def is_rp_worldpack_manifest(manifest: Any) -> bool:
+        if not isinstance(manifest, dict):
+            return False
+        scenario_types = manifest.get("scenario_types")
+        if isinstance(scenario_types, dict):
+            supported = scenario_types.get("supported")
+            return isinstance(supported, list) and "rp" in supported
+        return scenario_types is None and (
+            isinstance(manifest.get("rp_contract"), dict)
+            or manifest.get("mode") == "prompt world"
+        )
+
+    def is_active_rp_party_row(self, connection: sqlite3.Connection, row: sqlite3.Row) -> bool:
+        if str(row["scenario_type"]) != "rp":
+            return False
+        has_showroom_runs = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'showroom_runs'"
+        ).fetchone()
+        if has_showroom_runs and connection.execute(
+            "SELECT 1 FROM showroom_runs WHERE party_id = ? LIMIT 1",
+            (row["id"],),
+        ).fetchone():
+            return False
+        worldpack_row = connection.execute(
+            "SELECT manifest_json FROM worldpacks WHERE id = ?",
+            (row["worldpack_id"],),
+        ).fetchone()
+        if worldpack_row is None:
+            return False
+        try:
+            manifest = json.loads(worldpack_row["manifest_json"] or "null")
+        except (TypeError, json.JSONDecodeError):
+            return False
+        if not self.is_rp_worldpack_manifest(manifest):
+            return False
+        character_row = connection.execute(
+            "SELECT worldpack_id FROM player_characters WHERE id = ?",
+            (row["player_character_id"],),
+        ).fetchone()
+        return character_row is not None and str(character_row["worldpack_id"]) == str(row["worldpack_id"])
+
+    def is_readable_rp_party_row(self, connection: sqlite3.Connection, row: sqlite3.Row) -> bool:
+        if str(row["scenario_type"]) == "novel":
+            has_showroom_runs = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'showroom_runs'"
+            ).fetchone()
+            if has_showroom_runs and connection.execute(
+                "SELECT 1 FROM showroom_runs WHERE party_id = ? LIMIT 1",
+                (row["id"],),
+            ).fetchone():
+                return False
+            return str(row["status"]) == "archived"
+        return self.is_active_rp_party_row(connection, row)
+
+    def is_active_rp_autotest_row(self, connection: sqlite3.Connection, row: sqlite3.Row) -> bool:
+        owner_user_id = row["owner_user_id"]
+        source_party = connection.execute(
+            "SELECT * FROM parties WHERE id = ?",
+            (row["source_party_id"],),
+        ).fetchone()
+        if (
+            source_party is None
+            or (owner_user_id is not None and source_party["owner_user_id"] != owner_user_id)
+            or not self.is_active_rp_party_row(connection, source_party)
+        ):
+            return False
+        if row["branch_id"] is not None:
+            branch = connection.execute(
+                "SELECT * FROM party_branches WHERE id = ? AND party_id = ?",
+                (row["branch_id"], row["source_party_id"]),
+            ).fetchone()
+            return branch is not None and (
+                owner_user_id is None or branch["owner_user_id"] == owner_user_id
+            )
+        test_party = connection.execute(
+            "SELECT * FROM parties WHERE id = ?",
+            (row["test_party_id"],),
+        ).fetchone()
+        return (
+            test_party is not None
+            and (owner_user_id is None or test_party["owner_user_id"] == owner_user_id)
+            and self.is_active_rp_party_row(connection, test_party)
+        )
 
     def upsert_worldpack(self, pack: WorldPackSummary, owner_user_id: str | None = None) -> None:
         timestamp = now_iso()
@@ -1018,7 +1109,10 @@ class PartyStore:
         sql += " ORDER BY title"
         with self.connect() as connection:
             rows = connection.execute(sql, tuple(params)).fetchall()
-        return [self.worldpack_from_row(row) for row in rows]
+        packs = [self.worldpack_from_row(row) for row in rows]
+        if self.enforce_rp_mode:
+            return [pack for pack in packs if self.is_rp_worldpack_manifest(pack.manifest)]
+        return packs
 
     def get_worldpack(
         self,
@@ -1039,12 +1133,15 @@ class PartyStore:
             row = connection.execute(sql, tuple(params)).fetchone()
         if row is None:
             raise ValueError(f"worldpack not found: {worldpack_id}")
-        return self.worldpack_from_row(row)
+        pack = self.worldpack_from_row(row)
+        if self.enforce_rp_mode and not self.is_rp_worldpack_manifest(pack.manifest):
+            raise ValueError(f"worldpack not found: {worldpack_id}")
+        return pack
 
     def set_worldpack_visibility(self, worldpack_id: str, visibility: str) -> WorldPackSummary:
         if visibility not in {"public", "private"}:
             raise ValueError("visibility must be public or private")
-        self.scan_worldpacks()
+        self.get_worldpack(worldpack_id)
         with self.connect() as connection:
             updated = connection.execute(
                 "UPDATE worldpacks SET visibility = ?, updated_at = ? WHERE id = ?",
@@ -1204,7 +1301,17 @@ class PartyStore:
         sql += " ORDER BY updated_at DESC"
         with self.connect() as connection:
             rows = connection.execute(sql, tuple(params)).fetchall()
-        return [self.character_from_row(row) for row in rows]
+        characters = [self.character_from_row(row) for row in rows]
+        if not self.enforce_rp_mode:
+            return characters
+        visible: list[PlayerCharacterSummary] = []
+        for character in characters:
+            try:
+                self.get_worldpack(character.worldpack_id)
+            except ValueError:
+                continue
+            visible.append(character)
+        return visible
 
     def create_player_character(self, request: PlayerCharacterCreate, owner_user_id: str | None = None) -> PlayerCharacterSummary:
         pack = self.get_worldpack(request.worldpack_id, owner_user_id=owner_user_id)
@@ -1252,9 +1359,17 @@ class PartyStore:
             row = connection.execute(sql, tuple(params)).fetchone()
         if row is None:
             raise ValueError(f"player character not found: {character_id}")
-        return self.character_from_row(row)
+        character = self.character_from_row(row)
+        if self.enforce_rp_mode:
+            try:
+                self.get_worldpack(character.worldpack_id)
+            except ValueError as exc:
+                raise ValueError(f"player character not found: {character_id}") from exc
+        return character
 
     def delete_player_character(self, character_id: str, owner_user_id: str | None = None) -> None:
+        if self.enforce_rp_mode:
+            self.get_player_character(character_id, owner_user_id=owner_user_id)
         sql = "DELETE FROM player_characters WHERE id = ?"
         params: list[Any] = [character_id]
         if owner_user_id:
@@ -1387,15 +1502,21 @@ class PartyStore:
         self.scan_worldpacks()
         sql = "SELECT * FROM parties WHERE id NOT IN (SELECT test_party_id FROM autotest_runs WHERE branch_id IS NULL)"
         params: tuple[Any, ...] = ()
+        if self.enforce_rp_mode:
+            sql += " AND scenario_type IN ('rp', 'novel')"
         if owner_user_id:
             sql += " AND owner_user_id = ?"
             params = (owner_user_id,)
         sql += " ORDER BY updated_at DESC"
         with self.connect() as connection:
             rows = connection.execute(sql, params).fetchall()
+            if self.enforce_rp_mode:
+                rows = [row for row in rows if self.is_readable_rp_party_row(connection, row)]
         return [self.party_from_row(row, include_related=True) for row in rows]
 
     def create_party(self, request: PartyCreate, owner_user_id: str | None = None) -> PartySummary:
+        if self.enforce_rp_mode and request.scenario_type != "rp":
+            raise ValueError("RP gateway accepts only scenario_type=rp")
         pack = self.get_worldpack(request.worldpack_id, owner_user_id=owner_user_id)
         scenario_types = pack.manifest.get("scenario_types") if isinstance(pack.manifest, dict) else None
         supported = scenario_types.get("supported") if isinstance(scenario_types, dict) else None
@@ -1502,15 +1623,43 @@ class PartyStore:
             )
         return self.get_party(party_id, owner_user_id=owner_user_id)
 
-    def get_party(self, party_id: str, owner_user_id: str | None = None) -> PartySummary:
+    def get_party(
+        self,
+        party_id: str,
+        owner_user_id: str | None = None,
+        *,
+        allow_retired_read: bool = False,
+    ) -> PartySummary:
         sql = "SELECT * FROM parties WHERE id = ?"
         params: list[Any] = [party_id]
+        if self.enforce_rp_mode:
+            sql += " AND scenario_type IN ('rp', 'novel')" if allow_retired_read else " AND scenario_type = 'rp'"
         if owner_user_id:
             sql += " AND owner_user_id = ?"
             params.append(owner_user_id)
+        if self.enforce_rp_mode:
+            with self.connect() as connection:
+                candidate = connection.execute(sql, tuple(params)).fetchone()
+                if candidate is None:
+                    candidate_visible = False
+                elif allow_retired_read:
+                    candidate_visible = self.is_readable_rp_party_row(connection, candidate)
+                else:
+                    candidate_visible = self.is_active_rp_party_row(connection, candidate)
+            if not candidate_visible:
+                raise ValueError(f"party not found: {party_id}")
+        self.scan_worldpacks()
         with self.connect() as connection:
             row = connection.execute(sql, tuple(params)).fetchone()
-        if row is None:
+            if row is None:
+                visible = False
+            elif not self.enforce_rp_mode:
+                visible = True
+            elif allow_retired_read:
+                visible = self.is_readable_rp_party_row(connection, row)
+            else:
+                visible = self.is_active_rp_party_row(connection, row)
+        if row is None or not visible:
             raise ValueError(f"party not found: {party_id}")
         return self.party_from_row(row, include_related=True)
 
@@ -1624,10 +1773,27 @@ class PartyStore:
         party_id: str,
         branch_id: str | None,
         owner_user_id: str | None,
+        *,
+        allow_retired_read: bool = False,
     ) -> tuple[PartySummary, str]:
-        party = self.get_party(party_id, owner_user_id=owner_user_id)
+        party = self.get_party(
+            party_id,
+            owner_user_id=owner_user_id,
+            allow_retired_read=allow_retired_read,
+        )
         if not branch_id:
             return party, party.state_campaign_id
+        if allow_retired_read:
+            sql = "SELECT state_campaign_id FROM party_branches WHERE id = ? AND party_id = ?"
+            params: list[Any] = [branch_id, party_id]
+            if owner_user_id:
+                sql += " AND owner_user_id = ?"
+                params.append(owner_user_id)
+            with self.connect() as connection:
+                branch = connection.execute(sql, tuple(params)).fetchone()
+            if branch is None:
+                raise ValueError(f"party branch not found: {branch_id}")
+            return party, str(branch["state_campaign_id"])
         branch = self.get_party_branch(party_id, branch_id, owner_user_id=owner_user_id)
         return party, str(branch["state_campaign_id"])
 
@@ -1705,8 +1871,14 @@ class PartyStore:
         branch_id: str | None = None,
         owner_user_id: str | None = None,
         limit: int | None = 500,
+        allow_retired_read: bool = False,
     ) -> list[dict[str, Any]]:
-        party, campaign_id = self.dataset_campaign_id(party_id, branch_id, owner_user_id)
+        party, campaign_id = self.dataset_campaign_id(
+            party_id,
+            branch_id,
+            owner_user_id,
+            allow_retired_read=allow_retired_read,
+        )
         limit_sql = " LIMIT ?" if limit is not None else ""
         params: tuple[Any, ...] = (
             (campaign_id, min(max(limit, 1), 5000)) if limit is not None else (campaign_id,)
@@ -1752,6 +1924,7 @@ class PartyStore:
                     party.id,
                     owner_user_id=owner_user_id,
                     limit=None,
+                    allow_retired_read=True,
                 )
                 if turn["review_status"] == "approved"
             )
@@ -1770,6 +1943,7 @@ class PartyStore:
                             branch_id=branch["id"],
                             owner_user_id=owner_user_id,
                             limit=None,
+                            allow_retired_read=True,
                         )
                         if turn["review_status"] == "approved"
                     )
@@ -1810,78 +1984,7 @@ class PartyStore:
             auto_tags.append("player-liked")
         if int(row["player_rating_value"]) == -1:
             auto_tags.append("player-disliked")
-        capabilities = metadata.get("training_capabilities") if isinstance(metadata, dict) else None
-        if isinstance(capabilities, dict):
-            auto_tags.append("interactive-links" if capabilities.get("interactive_links_enabled") else "noninteractive-links")
-            auto_tags.append("interactive-workspace" if capabilities.get("interactive_workspace_enabled") else "noninteractive-workspace")
         player_rating = {1: "positive", -1: "negative"}.get(int(row["player_rating_value"]), "none")
-        with self.connect() as connection:
-            artifact_rows = connection.execute(
-                """
-                SELECT public_json FROM training_artifacts
-                WHERE campaign_id = ? AND turn_id = ?
-                ORDER BY artifact_key ASC
-                """,
-                (row["campaign_id"], int(row["id"])),
-            ).fetchall()
-            evidence_rows = connection.execute(
-                """
-                SELECT e.id, e.event_id, e.artifact_id, e.event_type, e.evidence_json, e.created_at
-                FROM training_artifact_events e
-                WHERE e.campaign_id = ? AND e.consumed_turn_id = ?
-                ORDER BY e.id ASC
-                """,
-                (row["campaign_id"], int(row["id"])),
-            ).fetchall()
-            workspace_rows = connection.execute(
-                """
-                SELECT public_json FROM training_workspace_files
-                WHERE campaign_id = ? AND turn_id = ?
-                ORDER BY file_key ASC
-                """,
-                (row["campaign_id"], int(row["id"])),
-            ).fetchall()
-            workspace_evidence_rows = connection.execute(
-                """
-                SELECT e.id, e.event_id, e.file_id, e.event_type, e.evidence_json, e.created_at
-                FROM training_workspace_events e
-                WHERE e.campaign_id = ? AND e.consumed_turn_id = ?
-                ORDER BY e.id ASC
-                """,
-                (row["campaign_id"], int(row["id"])),
-            ).fetchall()
-        artifacts = [json.loads(item["public_json"]) for item in artifact_rows]
-        workspace_files = [json.loads(item["public_json"]) for item in workspace_rows]
-        interaction_evidence = []
-        for item in evidence_rows:
-            evidence = json.loads(item["evidence_json"] or "{}")
-            interaction_evidence.append(
-                {
-                    "event_sequence": int(item["id"]),
-                    "event_id": item["event_id"],
-                    "artifact_id": item["artifact_id"],
-                    "event_type": item["event_type"],
-                    "evidence": str(evidence.get("evidence") or ""),
-                    "score_rule_id": str(evidence.get("score_rule_id") or ""),
-                    "decision_result": str(evidence.get("decision_result") or "neutral"),
-                    "created_at": int(item["created_at"]),
-                }
-            )
-        workspace_interaction_evidence = []
-        for item in workspace_evidence_rows:
-            evidence = json.loads(item["evidence_json"] or "{}")
-            workspace_interaction_evidence.append(
-                {
-                    "event_sequence": int(item["id"]),
-                    "event_id": item["event_id"],
-                    "file_id": item["file_id"],
-                    "event_type": item["event_type"],
-                    "evidence": str(evidence.get("evidence") or ""),
-                    "score_rule_id": str(evidence.get("score_rule_id") or ""),
-                    "decision_result": str(evidence.get("decision_result") or "neutral"),
-                    "created_at": int(item["created_at"]),
-                }
-            )
         return {
             "schema_version": "rp-gateway.dataset-candidate.v1",
             "party_id": party.id,
@@ -1899,10 +2002,6 @@ class PartyStore:
             "notes": row["notes"] or "",
             "prompt_messages": prompt_messages,
             "assistant_response": row["narrative_response"],
-            "artifacts": artifacts,
-            "interaction_evidence": interaction_evidence,
-            "workspace_files": workspace_files,
-            "workspace_interaction_evidence": workspace_interaction_evidence,
             "player_feedback": {
                 "rating": player_rating,
                 "liked": bool(row["player_liked"]),
@@ -1939,11 +2038,6 @@ class PartyStore:
                 "player_feedback": turn["player_feedback"],
                 "state_version": turn["state_version"],
                 "source": turn["metadata"],
-                "artifacts": turn.get("artifacts") or [],
-                "interaction_evidence": turn.get("interaction_evidence") or [],
-                "training_capabilities": turn["metadata"].get("training_capabilities") or {},
-                "workspace_files": turn.get("workspace_files") or [],
-                "workspace_interaction_evidence": turn.get("workspace_interaction_evidence") or [],
             },
         }
 
@@ -1979,7 +2073,6 @@ class PartyStore:
                     "lore_cards",
                     "memory_checkpoints",
                     "service_jobs",
-                    "training_runtime_snapshots",
                 ):
                     connection.execute(f"DELETE FROM {table} WHERE campaign_id = ?", (campaign_id,))
                 connection.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
@@ -1995,20 +2088,77 @@ class PartyStore:
         if target.exists():
             shutil.rmtree(target)
 
-    def delete_user_data(self, owner_user_id: str) -> None:
+    def has_retired_non_rp_user_data(self, owner_user_id: str) -> bool:
+        if not self.enforce_rp_mode:
+            return False
         with self.connect() as connection:
+            party_rows = connection.execute(
+                "SELECT * FROM parties WHERE owner_user_id = ?",
+                (owner_user_id,),
+            ).fetchall()
+            if any(not self.is_active_rp_party_row(connection, row) for row in party_rows):
+                return True
+            character_rows = connection.execute(
+                """
+                SELECT worldpacks.manifest_json
+                FROM player_characters
+                LEFT JOIN worldpacks ON worldpacks.id = player_characters.worldpack_id
+                WHERE player_characters.owner_user_id = ?
+                """,
+                (owner_user_id,),
+            ).fetchall()
+            for row in character_rows:
+                try:
+                    manifest = json.loads(row["manifest_json"] or "null")
+                except json.JSONDecodeError:
+                    return True
+                if not self.is_rp_worldpack_manifest(manifest):
+                    return True
+            autotest_rows = connection.execute(
+                "SELECT * FROM autotest_runs WHERE owner_user_id = ?",
+                (owner_user_id,),
+            ).fetchall()
+            for autotest_row in autotest_rows:
+                if not self.is_active_rp_autotest_row(connection, autotest_row):
+                    return True
+            return False
+
+    def delete_user_data(self, owner_user_id: str) -> None:
+        if self.has_retired_non_rp_user_data(owner_user_id):
+            raise ValueError("user owns retired non-RP data; cleanup requires explicit O2")
+        character_ids = (
+            [character.id for character in self.list_player_characters(owner_user_id=owner_user_id)]
+            if self.enforce_rp_mode
+            else []
+        )
+        with self.connect() as connection:
+            scenario_filter = " AND scenario_type = 'rp'" if self.enforce_rp_mode else ""
             party_ids = [
                 row["id"]
                 for row in connection.execute(
-                    "SELECT id FROM parties WHERE owner_user_id = ? ORDER BY created_at ASC",
+                    f"SELECT id FROM parties WHERE owner_user_id = ?{scenario_filter} ORDER BY created_at ASC",
                     (owner_user_id,),
                 ).fetchall()
             ]
+            if self.enforce_rp_mode and party_ids:
+                placeholders = ", ".join("?" for _ in party_ids)
+                connection.execute(
+                    f"DELETE FROM autotest_runs WHERE owner_user_id = ? AND source_party_id IN ({placeholders})",
+                    (owner_user_id, *party_ids),
+                )
         for party_id in party_ids:
             self.delete_party(party_id, owner_user_id=owner_user_id)
         with self.connect() as connection:
-            connection.execute("DELETE FROM autotest_runs WHERE owner_user_id = ?", (owner_user_id,))
-            connection.execute("DELETE FROM player_characters WHERE owner_user_id = ?", (owner_user_id,))
+            if self.enforce_rp_mode:
+                if character_ids:
+                    placeholders = ", ".join("?" for _ in character_ids)
+                    connection.execute(
+                        f"DELETE FROM player_characters WHERE owner_user_id = ? AND id IN ({placeholders})",
+                        (owner_user_id, *character_ids),
+                    )
+            else:
+                connection.execute("DELETE FROM autotest_runs WHERE owner_user_id = ?", (owner_user_id,))
+                connection.execute("DELETE FROM player_characters WHERE owner_user_id = ?", (owner_user_id,))
 
     def create_party_branch(
         self,
@@ -2099,6 +2249,8 @@ class PartyStore:
         branch_id: str,
         owner_user_id: str | None = None,
     ) -> dict[str, Any]:
+        if self.enforce_rp_mode:
+            self.get_party(party_id, owner_user_id=owner_user_id)
         sql = "SELECT * FROM party_branches WHERE id = ? AND party_id = ?"
         params: list[Any] = [branch_id, party_id]
         if owner_user_id:
@@ -2131,7 +2283,16 @@ class PartyStore:
     def list_all_party_branches(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute("SELECT * FROM party_branches ORDER BY created_at ASC").fetchall()
-        return [dict(row) for row in rows]
+        if not self.enforce_rp_mode:
+            return [dict(row) for row in rows]
+        branches: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                self.get_party(str(row["party_id"]))
+            except ValueError:
+                continue
+            branches.append(dict(row))
+        return branches
 
     def store_for_branch(
         self,
@@ -2162,6 +2323,9 @@ class PartyStore:
     ) -> dict[str, Any]:
         if not 1 <= requested_turns <= 30:
             raise ValueError("autotest turn count must be between 1 and 30")
+        if self.enforce_rp_mode:
+            self.get_party(source_party_id, owner_user_id=owner_user_id)
+            self.get_party_branch(source_party_id, branch_id, owner_user_id=owner_user_id)
         run_id = f"autotest_{uuid.uuid4().hex[:12]}"
         timestamp = now_iso()
         with self.connect() as connection:
@@ -2197,7 +2361,10 @@ class PartyStore:
     def get_autotest_run(self, run_id: str) -> dict[str, Any]:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM autotest_runs WHERE id = ?", (run_id,)).fetchone()
-        if row is None:
+            visible = row is not None and (
+                not self.enforce_rp_mode or self.is_active_rp_autotest_row(connection, row)
+            )
+        if row is None or not visible:
             raise ValueError(f"autotest run not found: {run_id}")
         return self.autotest_run_from_row(row)
 
@@ -2215,6 +2382,8 @@ class PartyStore:
                 f"SELECT * FROM autotest_runs {where} ORDER BY created_at DESC LIMIT ?",
                 parameters,
             ).fetchall()
+            if self.enforce_rp_mode:
+                rows = [row for row in rows if self.is_active_rp_autotest_row(connection, row)]
         return [self.autotest_run_from_row(row) for row in rows]
 
     def resumable_autotest_runs(self) -> list[dict[str, Any]]:
@@ -2222,6 +2391,8 @@ class PartyStore:
             rows = connection.execute(
                 "SELECT * FROM autotest_runs WHERE status IN ('running', 'stopping') ORDER BY created_at ASC"
             ).fetchall()
+            if self.enforce_rp_mode:
+                rows = [row for row in rows if self.is_active_rp_autotest_row(connection, row)]
         return [self.autotest_run_from_row(row) for row in rows]
 
     def active_autotest_for_party(self, party_id: str) -> dict[str, Any] | None:
@@ -2234,9 +2405,13 @@ class PartyStore:
                 """,
                 (party_id,),
             ).fetchone()
+            if row and self.enforce_rp_mode and not self.is_active_rp_autotest_row(connection, row):
+                row = None
         return self.autotest_run_from_row(row) if row else None
 
     def update_autotest_run(self, run_id: str, **updates: Any) -> dict[str, Any]:
+        if self.enforce_rp_mode:
+            self.get_autotest_run(run_id)
         allowed = {
             "completed_turns",
             "fallback_turns",
@@ -2527,8 +2702,18 @@ class PartyStore:
         if errors:
             raise ValueError("invalid revision-11 initialized state: " + "; ".join(errors))
 
-    def store_for_party(self, party_id: str, owner_user_id: str | None = None) -> StateStore:
-        party = self.get_party(party_id, owner_user_id=owner_user_id)
+    def store_for_party(
+        self,
+        party_id: str,
+        owner_user_id: str | None = None,
+        *,
+        allow_retired_read: bool = False,
+    ) -> StateStore:
+        party = self.get_party(
+            party_id,
+            owner_user_id=owner_user_id,
+            allow_retired_read=allow_retired_read,
+        )
         return StateStore(self.settings.sqlite_path, party.state_campaign_id, str(self.state_path_for(party.state_campaign_id)))
 
     def apply_starting_patch(self, state: dict[str, Any], patch_json: str | None) -> dict[str, Any]:

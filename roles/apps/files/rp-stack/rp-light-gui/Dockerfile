@@ -9,7 +9,4 @@ COPY rp-light-gui/app.js /usr/share/nginx/html/app.js
 COPY rp-light-gui/trace.html /usr/share/nginx/html/trace.html
 COPY rp-light-gui/trace.css /usr/share/nginx/html/trace.css
 COPY rp-light-gui/trace.js /usr/share/nginx/html/trace.js
-COPY ui-shared/training-artifacts.js /usr/share/nginx/html/training-artifacts.js
-COPY ui-shared/training-artifacts.css /usr/share/nginx/html/training-artifacts.css
-
 EXPOSE 80

@@ -51,9 +51,6 @@ from app.services.scene_state import (
     unresolved_noncanonical_fallback_turns,
 )
 from app.services.state_store import StateStore, StateVersionConflict
-from app.services.training_artifacts import ArtifactMaterialization, TrainingArtifactService
-from app.services.training_runtime import TrainingRuntimeService
-from app.services.training_workspace import TrainingWorkspaceService, WorkspaceMaterialization
 from app.services.trace_redaction import redact_trace_value
 from app.services.validator import OutputValidator, safe_fallback
 from app.services.world_instructor import WorldInstructor
@@ -82,9 +79,6 @@ class Adjudicator:
         self,
         settings: Settings,
         store: StateStore,
-        training_artifacts: TrainingArtifactService | None = None,
-        training_workspace: TrainingWorkspaceService | None = None,
-        training_runtime: TrainingRuntimeService | None = None,
         relationship_model: dict[str, Any] | None = None,
         scene_contract: dict[str, Any] | None = None,
         world_clock_contract: dict[str, Any] | None = None,
@@ -99,9 +93,6 @@ class Adjudicator:
         self.memory = MemorySummarizer(settings, store)
         self.rp_story_memory = RPStoryMemoryUpdater(settings, store) if settings.scenario_type == "rp" else None
         self.world = WorldInstructor(settings, store)
-        self.training_artifacts = training_artifacts
-        self.training_workspace = training_workspace
-        self.training_runtime = training_runtime
         self.relationship_model = relationship_model if settings.scenario_type == "rp" else None
         self.scene_contract = scene_contract if settings.scenario_type == "rp" else None
         self.world_clock = (
@@ -280,9 +271,6 @@ class Adjudicator:
                 and self.settings.rp_contract_revision >= 1
             )
             intent = self.intent_parser.parse(latest, mechanical=not rp_no_checks)
-            artifact_evidence = self.training_artifacts.pending_evidence() if self.training_artifacts else []
-            workspace_evidence = self.training_workspace.pending_evidence() if self.training_workspace else []
-            interaction_evidence = [*artifact_evidence, *workspace_evidence]
             outcome, patch = self.rule_engine.resolve(
                 state,
                 intent,
@@ -291,8 +279,6 @@ class Adjudicator:
                 scenario_type=self.settings.scenario_type,
                 rp_contract_version=self.settings.rp_contract_version,
                 rp_contract_revision=self.settings.rp_contract_revision,
-                interaction_evidence=interaction_evidence,
-                training_runtime=self.training_runtime,
                 character_aliases=(
                     normalized_aliases(self.relationship_model or {})
                     if self.settings.scenario_type == "rp"
@@ -301,27 +287,6 @@ class Adjudicator:
                 authored_stable_affiliations=self.authored_stable_affiliations(),
             )
             narrative_state = self.preview_applied_state(patch)
-            artifact_contract = (
-                self.training_artifacts.contract_for_state(narrative_state)
-                if self.training_artifacts
-                else None
-            )
-            workspace_contract = (
-                self.training_workspace.contract_for_state(narrative_state)
-                if self.training_workspace
-                else None
-            )
-            interaction_contract = (
-                {"site": artifact_contract, "workspace": workspace_contract}
-                if artifact_contract or workspace_contract
-                else None
-            )
-            training_turn_contract = (
-                self.training_runtime.prompt_contract(narrative_state, interaction_contract)
-                if self.training_runtime and self.training_runtime.enabled
-                else None
-            )
-
             llm_calls = 0
             repaired = False
             revision_seven = (
@@ -348,8 +313,6 @@ class Adjudicator:
             prompt_messages: list[dict[str, str]] | None = None
             prompt_assembly: dict[str, Any] | None = None
             prompt_cache_response: dict[str, Any] | None = None
-            artifact_result: ArtifactMaterialization | None = None
-            workspace_result: WorkspaceMaterialization | None = None
             scene_result: SceneMaterialization | None = None
             scene_before = (
                 initial_scene_state(state, self.authored_stable_affiliations())
@@ -408,8 +371,6 @@ class Adjudicator:
                         repair_instruction=None,
                         memory_summary=memory_summary,
                         rp_story_memory=rp_story_memory,
-                        artifact_contract=interaction_contract,
-                        training_turn_contract=training_turn_contract,
                         relationship_pressure=relationship_pressure,
                         world_events=world_events,
                         supervisor_advisory=supervisor_advisory,
@@ -591,8 +552,6 @@ class Adjudicator:
                     "message_count": len(prompt_messages),
                     "relationship_pressure_included": bool(relationship_pressure),
                     "world_events_included": bool(world_events),
-                    "training_turn_contract_included": bool(training_turn_contract),
-                    "interaction_contract_included": bool(interaction_contract),
                     "assembly_trace": self.prompt_assembly_trace(prompt_messages, latest),
                 }
                 if prompt_assembly is not None:
@@ -636,8 +595,6 @@ class Adjudicator:
                     memory_summary=memory_summary,
                     rp_story_memory=rp_story_memory,
                     request_id=request_id,
-                    artifact_contract=interaction_contract,
-                    training_turn_contract=training_turn_contract,
                     relationship_pressure=relationship_pressure,
                     world_events=world_events,
                     supervisor_advisory=supervisor_advisory,
@@ -664,18 +621,7 @@ class Adjudicator:
                         raw = with_text(raw, text)
                 else:
                     text = response_text(raw)
-                if self.training_artifacts:
-                    artifact_result = self.training_artifacts.materialize_response(raw, artifact_contract)
-                    if artifact_result.valid:
-                        text = artifact_result.text
-                if self.training_workspace:
-                    workspace_result = self.training_workspace.materialize_response(raw, workspace_contract)
-                    if workspace_result.valid:
-                        text = workspace_result.text
-                if self.training_runtime and self.training_runtime.enabled:
-                    text = self.training_runtime.normalize_narrative(text, narrative_state, interaction_contract)
-                if (artifact_result is None or artifact_result.valid) and (workspace_result is None or workspace_result.valid):
-                    raw = self.merge_interaction_response(raw, text, artifact_result, workspace_result)
+                raw = with_text(raw, text)
                 if (
                     self.settings.scenario_type == "rp"
                     and not text.strip()
@@ -691,20 +637,17 @@ class Adjudicator:
                         request_id,
                     )
                     raise RuntimeError("Narrative provider returned an invalid response")
-                validation = None if (
-                    self.settings.scenario_type == "rp" and self.settings.rp_contract_revision < 3
-                ) else self.validator.validate(
-                    text,
-                    outcome,
-                    narrative_state,
-                    campaign_id=self.settings.campaign_id,
-                    latest_user_message=latest,
-                    scenario_type=self.settings.scenario_type,
-                    training_runtime=self.training_runtime,
-                    interaction_contract=interaction_contract,
-                )
-                interaction_valid = (artifact_result.valid if artifact_result else True) and (
-                    workspace_result.valid if workspace_result else True
+                validation = (
+                    None
+                    if self.settings.rp_contract_revision < 3
+                    else self.validator.validate(
+                        text,
+                        outcome,
+                        narrative_state,
+                        campaign_id=self.settings.campaign_id,
+                        latest_user_message=latest,
+                        scenario_type=self.settings.scenario_type,
+                    )
                 )
                 scene_valid = scene_result.valid if scene_result is not None else True
                 if validation is not None:
@@ -714,75 +657,32 @@ class Adjudicator:
                         alignment_key="validation",
                         lane="main",
                         event_type="validation",
-                        status=(
-                            "completed"
-                            if validation.valid and interaction_valid and scene_valid
-                            else "failed"
-                        ),
+                        status="completed" if validation.valid and scene_valid else "failed",
                         payload={
                             "input": {"response": text},
                             "output": {
-                                "valid": validation.valid and interaction_valid,
+                                "valid": validation.valid,
                                 "violations": [
                                     *validation.violations,
                                     *(scene_result.violations if scene_result else []),
-                                    *(artifact_result.violations if artifact_result else []),
-                                    *(workspace_result.violations if workspace_result else []),
                                 ],
                             },
                             "metadata": {"repair": False},
                         },
                         party_turn=expected_party_turn,
                     )
-                training_runtime_enabled = bool(self.training_runtime and self.training_runtime.enabled)
                 repair_attempts = (
-                    1
-                    if revision_seven
-                    else (
-                        self.settings.training_repair_attempts
-                        if training_runtime_enabled
-                        else self.settings.max_repair_attempts
-                    )
+                    1 if revision_seven else self.settings.max_repair_attempts
                 )
-                training_repair_allowed = True
-                if training_runtime_enabled and self.training_runtime:
-                    runtime_violations = self.training_runtime.validate_narrative(
-                        text, narrative_state, interaction_contract
-                    )
-                    runtime_violation_set = set(runtime_violations)
-                    training_repair_allowed = not self.training_runtime.hard_violations(
-                        text, narrative_state, interaction_contract
-                    ) and not any(
-                        violation not in runtime_violation_set for violation in validation.violations
-                    )
                 if validation is not None and (
-                    (not validation.valid or not interaction_valid or not scene_valid)
+                    (not validation.valid or not scene_valid)
                     and repair_attempts > 0
-                    and training_repair_allowed
                 ):
                     repaired = True
-                    repair_instruction = (
-                        self.training_runtime.repair_instruction(text, narrative_state, interaction_contract)
-                        if training_runtime_enabled and self.training_runtime
-                        else validation.repair_instruction
-                    )
+                    repair_instruction = validation.repair_instruction
                     if scene_result is not None and not scene_result.valid:
                         repair_instruction = " ".join(
                             [repair_instruction, scene_result.repair_instruction]
-                        ).strip()
-                    if artifact_result and not artifact_result.valid:
-                        repair_instruction = " ".join(
-                            [
-                                repair_instruction,
-                                "Верни корректный JSON bundle: объект artifact должен содержать только разрешённые ключи и slots; fixed display_url оставь только в строке «Ссылки:» видимого narrative_text.",
-                            ]
-                        ).strip()
-                    if workspace_result and not workspace_result.valid:
-                        repair_instruction = " ".join(
-                            [
-                                repair_instruction,
-                                "Верни корректный workspace_files только с разрешёнными file_key, blueprint_id и строковыми slots.",
-                            ]
                         ).strip()
                     if revision_seven:
                         current_state_version = int(self.store.current_version() or 0)
@@ -812,8 +712,6 @@ class Adjudicator:
                         memory_summary=memory_summary,
                         rp_story_memory=rp_story_memory,
                         request_id=request_id,
-                        artifact_contract=interaction_contract,
-                        training_turn_contract=training_turn_contract,
                         relationship_pressure=relationship_pressure,
                         world_events=world_events,
                         supervisor_advisory=supervisor_advisory,
@@ -838,18 +736,7 @@ class Adjudicator:
                             raw = with_text(raw, text)
                     else:
                         text = response_text(raw)
-                    if self.training_artifacts:
-                        artifact_result = self.training_artifacts.materialize_response(raw, artifact_contract)
-                        if artifact_result.valid:
-                            text = artifact_result.text
-                    if self.training_workspace:
-                        workspace_result = self.training_workspace.materialize_response(raw, workspace_contract)
-                        if workspace_result.valid:
-                            text = workspace_result.text
-                    if self.training_runtime and self.training_runtime.enabled:
-                        text = self.training_runtime.normalize_narrative(text, narrative_state, interaction_contract)
-                    if (artifact_result is None or artifact_result.valid) and (workspace_result is None or workspace_result.valid):
-                        raw = self.merge_interaction_response(raw, text, artifact_result, workspace_result)
+                    raw = with_text(raw, text)
                     validation = self.validator.validate(
                         text,
                         outcome,
@@ -857,8 +744,6 @@ class Adjudicator:
                         campaign_id=self.settings.campaign_id,
                         latest_user_message=latest,
                         scenario_type=self.settings.scenario_type,
-                        training_runtime=self.training_runtime,
-                        interaction_contract=interaction_contract,
                     )
                     scene_valid = scene_result.valid if scene_result is not None else True
                     self.record_trace_event(
@@ -881,9 +766,6 @@ class Adjudicator:
                         },
                         party_turn=expected_party_turn,
                     )
-                interaction_valid = (artifact_result.valid if artifact_result else True) and (
-                    workspace_result.valid if workspace_result else True
-                )
                 if scene_result is not None and not scene_result.valid:
                     self.store.audit(
                         "scene_continuity_failed",
@@ -895,7 +777,7 @@ class Adjudicator:
                         request_id,
                     )
                     raise SceneContinuityError("; ".join(scene_result.violations))
-                if validation is not None and (not validation.valid or not interaction_valid):
+                if validation is not None and not validation.valid:
                     gateway_fallback_reason = "validation_failed"
                     transport_status = "invalid_response"
                     self.store.audit(
@@ -903,11 +785,7 @@ class Adjudicator:
                         {
                             "request_id": request_id,
                             "model": self.settings.narrative_model,
-                            "violations": [
-                                *validation.violations,
-                                *(artifact_result.violations if artifact_result else []),
-                                *(workspace_result.violations if workspace_result else []),
-                            ],
+                            "violations": validation.violations,
                         },
                         request_id,
                     )
@@ -919,7 +797,7 @@ class Adjudicator:
                         )
                     if not allow_gateway_fallback:
                         raise RuntimeError("LLM response failed narrative validation")
-                    text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
+                    text = self.safe_text(outcome, narrative_state, latest)
                     raw = self.provider_fallback_response(
                         outcome,
                         text,
@@ -943,7 +821,7 @@ class Adjudicator:
                     raise
                 provider_fallback_reason = f"http_{status}"
                 transport_status = "provider_error"
-                text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
+                text = self.safe_text(outcome, narrative_state, latest)
                 raw = self.provider_fallback_response(
                     outcome, text, provider_fallback_reason, request_id, audit=not revision_seven
                 )
@@ -958,7 +836,7 @@ class Adjudicator:
                     raise
                 provider_fallback_reason = "timeout"
                 transport_status = "provider_timeout"
-                text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
+                text = self.safe_text(outcome, narrative_state, latest)
                 raw = self.provider_fallback_response(
                     outcome, text, provider_fallback_reason, request_id, audit=not revision_seven
                 )
@@ -973,7 +851,7 @@ class Adjudicator:
                     raise
                 provider_fallback_reason = "rate_limited"
                 transport_status = "provider_error"
-                text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
+                text = self.safe_text(outcome, narrative_state, latest)
                 raw = self.provider_fallback_response(
                     outcome, text, provider_fallback_reason, request_id, audit=not revision_seven
                 )
@@ -996,7 +874,7 @@ class Adjudicator:
                     raise
                 provider_fallback_reason = "network_error"
                 transport_status = "provider_error"
-                text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
+                text = self.safe_text(outcome, narrative_state, latest)
                 raw = self.provider_fallback_response(
                     outcome, text, provider_fallback_reason, request_id, audit=not revision_seven
                 )
@@ -1011,28 +889,10 @@ class Adjudicator:
                     {"request_id": request_id, "model": self.settings.narrative_model, "error": str(exc)},
                     request_id,
                 )
-                text = self.safe_text(outcome, narrative_state, latest, interaction_contract)
+                text = self.safe_text(outcome, narrative_state, latest)
                 raw = self.provider_fallback_response(outcome, text, provider_fallback_reason, request_id)
 
-            if self.training_artifacts and artifact_contract:
-                if (
-                    artifact_result is None
-                    or not artifact_result.valid
-                    or provider_fallback_reason is not None
-                    or gateway_fallback_reason is not None
-                ):
-                    artifact_result = self.training_artifacts.fallback_materialization(raw, text, artifact_contract)
-                text = artifact_result.text
-            if self.training_workspace and workspace_contract:
-                if (
-                    workspace_result is None
-                    or not workspace_result.valid
-                    or provider_fallback_reason is not None
-                    or gateway_fallback_reason is not None
-                ):
-                    workspace_result = self.training_workspace.fallback_materialization(workspace_contract, text)
-                text = workspace_result.text
-            raw = self.merge_interaction_response(raw, text, artifact_result, workspace_result)
+            raw = with_text(raw, text)
 
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             response = self.normalize_response(raw, request.model or self.settings.narrative_model)
@@ -1069,17 +929,17 @@ class Adjudicator:
                     )
                 )
             projected_state = self.preview_applied_state(patch)
-            final_validation = None if (
-                self.settings.scenario_type == "rp" and self.settings.rp_contract_revision < 3
-            ) else self.validator.validate(
-                text,
-                outcome,
-                projected_state,
-                campaign_id=self.settings.campaign_id,
-                latest_user_message=latest,
-                scenario_type=self.settings.scenario_type,
-                training_runtime=self.training_runtime,
-                interaction_contract=interaction_contract,
+            final_validation = (
+                None
+                if self.settings.rp_contract_revision < 3
+                else self.validator.validate(
+                    text,
+                    outcome,
+                    projected_state,
+                    campaign_id=self.settings.campaign_id,
+                    latest_user_message=latest,
+                    scenario_type=self.settings.scenario_type,
+                )
             )
             if final_validation is not None and not final_validation.valid:
                 raise RuntimeError("final narrative validation changed before commit")
@@ -1117,7 +977,6 @@ class Adjudicator:
                 transport_status=transport_status,
                 outcome=outcome.model_dump(mode="json"),
                 llm_calls=llm_calls,
-                interaction_evidence=[item.model_dump(mode="json") for item in interaction_evidence],
                 story_memory_corrections=normalized_story_corrections,
             )
             if prompt_assembly is not None:
@@ -1215,10 +1074,6 @@ class Adjudicator:
                     expected_state_version=expected_state_version,
                     prompt_messages=prompt_messages,
                     metadata=turn_metadata,
-                    artifacts=artifact_result.persistence_records if artifact_result else [],
-                    consumed_artifact_event_ids=[item.event_sequence for item in artifact_evidence],
-                    workspace_files=workspace_result.persistence_records if workspace_result else [],
-                    consumed_workspace_event_ids=[item.event_sequence for item in workspace_evidence],
                     consumed_world_clock_event_ids=(
                         list(world_clock_projection["event_ids"])
                         if world_clock_projection is not None and not fallback_noncanonical
@@ -1250,10 +1105,6 @@ class Adjudicator:
                     version,
                     prompt_messages,
                     turn_metadata,
-                    artifacts=artifact_result.persistence_records if artifact_result else [],
-                    consumed_artifact_event_ids=[item.event_sequence for item in artifact_evidence],
-                    workspace_files=workspace_result.persistence_records if workspace_result else [],
-                    consumed_workspace_event_ids=[item.event_sequence for item in workspace_evidence],
                     party_turn=int(updated_state["meta"]["turn"]),
                 )
             try:
@@ -1362,7 +1213,6 @@ class Adjudicator:
         transport_status: str,
         outcome: dict[str, Any] | None = None,
         llm_calls: int = 0,
-        interaction_evidence: list[dict[str, Any]] | None = None,
         story_memory_corrections: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         metadata = {
@@ -1383,16 +1233,6 @@ class Adjudicator:
             "transport_status": transport_status,
             "llm_calls": llm_calls,
             "outcome": outcome,
-            "interaction_evidence": interaction_evidence or [],
-            "training_runtime_contract_hash": (
-                self.training_runtime.contract_hash
-                if self.training_runtime and self.training_runtime.enabled
-                else None
-            ),
-            "training_capabilities": {
-                "interactive_links_enabled": bool(self.training_artifacts and self.training_artifacts.enabled),
-                "interactive_workspace_enabled": bool(self.training_workspace and self.training_workspace.enabled),
-            },
         }
         if story_memory_corrections:
             metadata["story_memory_corrections"] = [dict(item) for item in story_memory_corrections]
@@ -1415,10 +1255,7 @@ class Adjudicator:
         outcome: Outcome,
         state: dict[str, Any],
         latest_user_message: str,
-        interaction_contract: dict[str, Any] | None,
     ) -> str:
-        if self.training_runtime and self.training_runtime.enabled:
-            return self.training_runtime.fallback_text(state, interaction_contract)
         return safe_fallback(
             outcome,
             state,
@@ -1869,8 +1706,6 @@ class Adjudicator:
             "ИСПРАВЛЕНИЯ ИГРОКА": "player_corrections",
             "RELATIONSHIP_PRESSURE": "relationship_pressure",
             "СОБЫТИЯ МИРА": "world_events",
-            "ACTIVE_TRAINING_TURN_CONTRACT": "training_turn_contract",
-            "TRAINING_INTERACTION_CONTRACT": "training_interaction_contract",
             "WORLD_ABSOLUTE_RULES": "world_absolute_rules",
         }
         result: list[dict[str, Any]] = []
@@ -2032,23 +1867,8 @@ class Adjudicator:
         return ""
 
     @staticmethod
-    def merge_interaction_response(
-        raw: dict[str, Any],
-        text: str,
-        artifact_result: ArtifactMaterialization | None,
-        workspace_result: WorkspaceMaterialization | None,
-    ) -> dict[str, Any]:
-        response = with_text(raw, text)
-        message = response.setdefault("choices", [{}])[0].setdefault("message", {})
-        if artifact_result and artifact_result.public_artifacts:
-            message["artifacts"] = artifact_result.public_artifacts
-        else:
-            message.pop("artifacts", None)
-        if workspace_result and workspace_result.public_files:
-            message["workspace_files"] = workspace_result.public_files
-        else:
-            message.pop("workspace_files", None)
-        return response
+    def with_narrative_text(raw: dict[str, Any], text: str) -> dict[str, Any]:
+        return with_text(raw, text)
 
     def normalize_response(self, raw: dict[str, Any], requested_model: str) -> dict[str, Any]:
         response = dict(raw)

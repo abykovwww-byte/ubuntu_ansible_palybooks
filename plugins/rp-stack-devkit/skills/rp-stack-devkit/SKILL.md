@@ -1,6 +1,6 @@
 ---
 name: rp-stack-devkit
-description: Develop, test, diagnose, publish, and verify the Tavern RP Stack through its GitHub IaC and abykovserv pull-based deployment workflow. Use for Gateway, Light GUI, Showroom, WorldPacks, provider canaries, live diagnostics, CI, Graphify, or RP Stack deployment work.
+description: Develop, test, diagnose, publish, and verify the Tavern RP application and its deployment boundary to the standalone Showroom/Training application through GitHub IaC and the abykovserv pull-based workflow. Use for RP Gateway, RP Light GUI, RP WorldPacks, provider canaries, live diagnostics, CI, Graphify, or cross-stack cutover work; route Showroom/Awareness application source changes to tavern-awareness-showroom.
 ---
 
 # RP Stack Devkit
@@ -14,13 +14,13 @@ description: Develop, test, diagnose, publish, and verify the Tavern RP Stack th
    - `codex-skills/abykovserv-iac-deploy/SKILL.md` for deployment or live verification;
    - `codex-skills/rp-stack-wiki/SKILL.md` for architecture or significant behavior;
    - `codex-skills/rp-world-pack-builder/SKILL.md` for RP worlds;
-   - `codex-skills/training-world-pack-builder/SKILL.md` for deterministic training.
+   - `codex-skills/training-world-pack-builder/SKILL.md` for deterministic training in `tavern-awareness-showroom`.
 4. Query Graphify first for architecture or relationship questions when `graphify-out/` exists, then confirm decisive claims in source.
 
 ## Development path
 
 1. Work in a `codex/` branch or isolated worktree and inspect the dirty tree before editing. Push only the working branch; direct pushes to `main` are prohibited.
-2. Preserve Gateway authority and keep UI changes presentation-only unless the API contract is deliberately changed.
+2. Preserve RP Gateway authority for RP only. The standalone Training Gateway owns training state, scoring, evidence, and provider calls; keep both SQLite databases and route surfaces isolated.
 3. Add focused checks only for a changed player-visible or safety boundary, and remove dedicated tests, fixtures, and guards with the mechanism they protected. Update the RP Stack Wiki only when deployed architecture, an external contract, or an operator workflow changes.
 4. Run the focused checks for the changed surface. Run `powershell.exe -File scripts/ci.ps1` only for shared-gate changes, cross-component integration/cutover, or before deployment.
 5. Use `scripts/run-rp-stack-evals.ps1 -Mode Offline` only when gameplay, prompt, extraction, or evaluation semantics can change.
@@ -31,7 +31,9 @@ description: Develop, test, diagnose, publish, and verify the Tavern RP Stack th
    requested; never request or capture the sudo password.
 8. After apply, run container, HTTP, and—when UI behavior changed—authenticated browser verification.
 
-These triggers do not waive Awareness/training deterministic contract and scoring checks when those surfaces change.
+Awareness/training source changes and their deterministic scoring checks run in
+`tavern-awareness-showroom`; this repository owns only RP behavior, the exact
+standalone application pin, and the cross-stack deployment boundary.
 
 ## Readiness evidence contract
 
@@ -79,7 +81,7 @@ environment setting.
 Use the `rp-stack-ops` MCP tools for read-only diagnostics:
 
 - `local_revision`, `server_revision`, `ansible_status`, `compose_status`;
-- `http_smoke`, `gateway_test`, `recent_logs`;
+- `http_smoke`, RP-only `gateway_test`, RP-only `recent_logs`;
 - `provider_summary`, `request_trace`, `backup_status`.
 
 `causal_probe` accepts the registered expectations

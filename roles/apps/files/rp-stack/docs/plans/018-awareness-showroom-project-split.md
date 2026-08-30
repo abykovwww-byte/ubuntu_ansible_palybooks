@@ -1,6 +1,11 @@
 # Plan 018: вынести Awareness и Showroom в training-only project
 
-Date: 2026-08-27 · Owner decision: accepted · Runtime status: I1 shadow applied, not cut over.
+Date: 2026-08-27 · Owner decision: accepted · Delivery status: zero-window
+C1/O2/N3 source prepared, Ansible apply and live acceptance pending.
+
+Rollback window: `0`. Владелец 2026-08-30 явно разрешил немедленное удаление
+legacy Showroom/training source без cold standby. SQLite rows/tables, state и
+backups этим разрешением не удаляются.
 
 ## Результат
 
@@ -12,8 +17,9 @@ Date: 2026-08-27 · Owner decision: accepted · Runtime status: I1 shadow applie
 | Awareness Showroom | `abykovwww-byte/tavern-awareness-showroom` | Showroom `:8011` | только `training` | `/srv/app-data/awareness-showroom` |
 
 `ubuntu_ansible_palybooks` остаётся authority для server topology и хранит
-commit pin отдельного public application repository. Код нового приложения живёт
-только в его repository. Ansible не копирует его source из старого дерева.
+полный commit pin отдельного public application repository. Ansible клонирует
+его анонимно по HTTPS без GitHub token; код нового приложения живёт только в
+его repository и не копируется из старого дерева.
 
 ## Владение компонентами
 
@@ -35,12 +41,12 @@ commit pin отдельного public application repository. Код новог
   RP story memory, Turn Trace и RP evals;
 - server IaC, ports, local overrides, backup orchestration и commit pin нового
   project;
-- исторические Showroom/training строки старой SQLite как read-only legacy data
-  на rollback window.
+- существующая RP SQLite без переписывания: старые Showroom/training строки
+  остаются нетронутыми, но production RP Gateway их не публикует и не исполняет.
 
-После подтверждённого cutover из активного RP source удаляются Showroom UI,
-Awareness WorldPacks и training-only runtime/API/tests. Таблицы не удаляются и
-история не переписывается.
+В одной zero-window поставке с C1 из RP source удаляются Showroom UI, Awareness
+WorldPacks и training-only runtime/API/tests. Таблицы не удаляются, старая БД,
+state и backups не переписываются.
 
 ## Git migration
 
@@ -51,7 +57,7 @@ Awareness WorldPacks и training-only runtime/API/tests. Таблицы не у�
    git subtree split --prefix=roles/apps/files/rp-stack <SOURCE_BASE_SHA>
    ```
 
-3. Создать `abykovwww-byte/tavern-awareness-showroom`, опубликовать
+3. Создать public `abykovwww-byte/tavern-awareness-showroom`, опубликовать
    split history и записать `SOURCE_BASE_SHA`/`SUBTREE_HEAD` в provenance.
 4. После bootstrap все изменения нового project идут только через
    `codex/* -> non-draft PR -> green CI -> merge`.
@@ -118,7 +124,7 @@ Cookie names разделены, потому что разные host ports н�
 
 ### N0/N1 — new repository bootstrap
 
-Создать отдельный project из subtree history. Добавить `AGENTS.md`, README,
+Создать standalone public project из subtree history. Добавить `AGENTS.md`, README,
 provenance, standalone Compose/env example, CI и migration documentation.
 Baseline должен собираться до удаления code.
 
@@ -129,13 +135,16 @@ training-only Showroom controls. Запустить focused Gateway/JS tests и 
 
 ### N3 — RP prune
 
-Удалить RP-only UI, WorldPacks, services, endpoints and tests. Сначала доказать
-отсутствие training consumer для каждого кандидата. Не переименовывать
-сохраняемые классы и каталоги только ради косметики.
+Это отдельный application PR до финализации IaC pin. Он удаляет RP-only UI,
+WorldPacks, services, endpoints и tests из нового training repository. После
+его green merge IaC закрепляет фактический merge SHA. Для каждого кандидата
+нужно доказать отсутствие training consumer; косметическое переименование
+сохраняемых классов и каталогов не требуется.
 
 ### I1 — shadow deploy
 
-IaC клонирует новый public repository на exact commit в
+IaC клонирует новый public repository анонимно по HTTPS без GitHub token на
+exact commit в
 `/srv/apps/awareness-showroom`, persistent data — в
 `/srv/app-data/awareness-showroom`, backup — в
 `/srv/backups/awareness-showroom`. Showroom временно публикуется на `18011`,
@@ -159,21 +168,72 @@ source/delivery contract.
 config с Git-каталогом. Любой delta идёт обычным application PR; runtime
 admin mutation не становится authority.
 
+Владелец явно снял перенос истории, visitors/runs и ожидание старых активных
+прохождений как блокеры C1. Поэтому drain и migration не выполняются: новый
+project начинает с собственной БД, а старая RP SQLite остаётся нетронутой.
+
 ### C1 — cutover
 
 Переключить `8011` на новый project, сделать старый Gateway RP-only, убрать
-старый Showroom из активного Compose. `8010` остаётся RP Light GUI. Никакого
-dual-write или proxy между Gateway.
+старый Showroom из RP Compose. `8010` остаётся RP Light GUI. Никакого cold
+standby, dual-write или proxy между Gateway.
+
+C1 source подготовлен с exact application pin
+`67244432659f6c25a268cbf788a8fa3af0f5b52f`: новый Showroom должен занять
+LAN-only `192.168.1.88:8011`, старый RP Gateway — запускаться только с
+`SCENARIO_TYPE=rp`, а `rp-showcase-gui` — отсутствовать. Это состояние после
+merge, но до apply: живой `:8011`, backup/restore и сквозная training/RP
+приёмка ещё не подтверждены.
 
 ### O2 — cleanup
 
-После rollback window удалить из активного RP source training/Showroom code и
-data mounts. Legacy DB/backup сохраняются согласно существующей retention
-policy; destructive SQL migration не выполняется.
+Выполняется в той же поставке, что C1: удалить из RP source training/Showroom
+code, старый service и неиспользуемые source declarations. Так как
+`ansible.builtin.copy` не удаляет stale-файлы, роль удаляет их точные source
+paths на сервере до
+финального `docker compose up -d --build`. Legacy DB, state и backups
+сохраняются согласно retention
+policy: O2 не удаляет SQLite rows/tables, не запускает `delete_user_data` и не
+выполняет destructive SQL migration.
+
+Cleanup allowlist относительно `/srv/apps/rp-stack` ограничен 15 paths:
+
+```text
+rp-showcase-gui
+worldpacks/awareness
+worldpacks/awareness-one-day
+ui-shared
+scripts/validate-training-runtime.py
+rp-gateway/app/services/showroom.py
+rp-gateway/app/services/training_artifacts.py
+rp-gateway/app/services/training_capabilities.py
+rp-gateway/app/services/training_runtime.py
+rp-gateway/app/services/training_workspace.py
+rp-gateway/tests/test_showroom_portal.py
+rp-gateway/tests/test_training_artifacts.py
+rp-gateway/tests/test_training_capabilities.py
+rp-gateway/tests/test_training_runtime.py
+rp-gateway/tests/test_awareness_one_day.py
+```
+
+После source copy Ansible read-only проверяет эти пути, добавляет `rp-stack` в
+coordinated handoff и сохраняет retry-marker. Предварительный build обоих
+проектов выполняется без изменения примонтированных legacy WorldPacks. Затем
+останавливаются оба владельца порта, выполняется `state: absent`, а финальный
+`docker compose up -d --build` собирает RP из уже очищенного source. Поэтому
+prebuild прогревает зависимости и проверяет общий build path, но не является
+сборкой exact финального RP context; при ошибке финальной clean-сборки действует
+только fix-forward/retry по сохранённому marker.
+
+Два ранее скопированных authored data artifacts
+`/srv/app-data/rp-stack/default-user/worlds/Awareness.json` и
+`/srv/app-data/rp-stack/default-user/worlds/Awareness. One day.json` также
+сохраняются. RP inventory больше не публикует их из source, а активный RP
+Gateway/Compose их не использует; это сохранённые данные, не cold standby.
 
 ## Acceptance
 
-До cutover обязательны:
+После C1/O2 apply обязательны:
 
 - оба Awareness курса пройдены через Showroom до authored debrief;
 - хотя бы один реальный narrator provider call подтверждён отдельно от
@@ -188,12 +248,27 @@ policy; destructive SQL migration не выполняется.
 - rejected wrong-mode requests не меняют DB и не вызывают provider;
 - реальная RP party на `:8010` продолжает ход после cutover;
 - `:8011` работает из нового commit pin, browser console чистая;
+- `rp-stack-showcase-gui`, старые source paths и shadow listener `:18011`
+  отсутствуют;
+- read-only логический snapshot legacy training/showroom rows в старой RP SQLite
+  (schema/table presence, counts и checksum выбранных строк) не меняется на всём
+  C1 acceptance; штатные записи новой RP-партии и file-level mtime/hash не
+  используются как критерий неизменности legacy данных;
 - source merge, Ansible apply и live verification сообщаются как отдельные
   стадии.
 
-Rollback до окончания окна: вернуть IaC pin/topology на предыдущий RP Stack
-revision и снова опубликовать старый Showroom на `8011`. Новую БД не сливать со
-старой; после решения о rollback она остаётся отдельным forensic snapshot.
+C1 acceptance требует полные прохождения обоих курсов на одном exact
+application revision с `fallback_turns == 0`. В committed turns и audit не
+допускаются `provider_fallback`/`llm_safe_fallback`; каждый provider-required
+ход должен иметь успешный completed provider call и committed response с
+`validator_valid=true`. `repaired=true` допустим только после успешного provider
+repair при `fallback=false`. Более мягкая агрегатная fallback-метрика может быть
+только post-acceptance SLO и не заменяет этот gate.
+
+Rollback window равен нулю. После apply оперативного возврата на legacy
+Showroom нет: ошибка устраняется новым application/IaC PR и повторным apply.
+Standalone DB не сливается со старой RP SQLite; обе базы, state и backups
+сохраняются как отдельные контуры данных.
 
 ## Сознательно не входит
 

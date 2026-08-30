@@ -1485,10 +1485,6 @@ button:disabled {
   gap: 8px;
 }
 
-.scenario-type-segmented {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .world-source-segmented {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -1811,8 +1807,7 @@ button:disabled {
   }
 
   .wizard-grid,
-  .segmented,
-  .scenario-type-segmented {
+  .segmented {
     grid-template-columns: 1fr;
   }
 

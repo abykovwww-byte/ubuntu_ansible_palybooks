@@ -557,15 +557,20 @@ Runner сохраняет четыре обязательных свойства
 фактического отказа, а не claim; startup/shutdown, cancel и await принадлежат
 runner; Administrator и атомарная служебная модель имеют разные очереди, роли и
 handlers. Restart/shutdown возвращает claimed job в `pending` без расхода
-attempt. Эта source-интеграция ещё не является живой игровой приёмкой: inventory
-выключен, Light GUI не переключён, seeded и live Party не пройдены.
+attempt. Эта source-интеграция ещё не является живой игровой приёмкой: Light GUI
+подключён в source, но inventory выключен, production не активирован, seeded и
+live Party не пройдены.
 
 ## Обычный ход
 
+После C1 это логическая схема двух mode-matched процессов, а не общего
+Gateway: Light GUI вызывает только RP Gateway, Showroom — только standalone
+Training Gateway. В каждой ветви исполняется только её режимная часть.
+
 ```mermaid
 sequenceDiagram
-    participant UI as Light GUI / Showroom
-    participant API as Gateway API
+    participant UI as Light GUI или Showroom
+    participant API as Соответствующий RP или Training Gateway
     participant Store as StateStore
     participant Rules as Intent + Scenario resolver
     participant Runtime as TrainingRuntimeService
@@ -763,7 +768,8 @@ provider завершает запрос контролируемой ошибк
 Legacy-партии `rp-core.v1` сохраняют прежний однопроходный контракт до явной
 миграции.
 
-WorldPack runtime использует `TRAINING_REPAIR_ATTEMPTS`: canonical
+Standalone WorldPack runtime использует принадлежащий training project
+`TRAINING_REPAIR_ATTEMPTS`: canonical
 header/question/no-link marker сначала чинятся без LLM, soft field/profile
 нарушение может получить один repair с русским списком реально проваленных
 ограничений, а hard identity/shape/URL/attachment/score или provider failure
@@ -846,11 +852,17 @@ Extraction читает оба номера из уже записанного �
 
 ## Интерактивное действие между ходами
 
-Открытие сайта, отправка формы и сообщение о подозрении не запускают narrator и не продвигают authored turn. UI отправляет idempotent event в party- или showroom-scoped endpoint; Gateway проверяет владельца, artifact, разрешённый тип действия и сохраняет только типизированный факт. При следующем игровом ходе неиспользованные события становятся evidence для RuleEngine и потребляются атомарно вместе с turn commit.
+Открытие сайта, отправка формы и сообщение о подозрении не запускают narrator и
+не продвигают authored turn. Standalone Showroom отправляет idempotent event в
+run-scoped endpoint; Training Gateway разрешает внутреннюю party, проверяет
+visitor, artifact и тип действия и сохраняет только типизированный факт. При
+следующем ходе неиспользованные события становятся evidence для RuleEngine и
+потребляются атомарно вместе с turn commit. RP Gateway эти routes не публикует.
 
 ### Capability gate и рабочие файлы
 
-> Ступень готовности: `подключено` в Gateway и Showroom; live-статус зависит от применённой ревизии.
+> Ступень готовности: `подключено` в standalone Training Gateway и Showroom;
+> live-статус зависит от применённой ревизии.
 
 Перед сборкой narrator prompt Gateway читает два флага из run snapshot.
 Выключенная capability не добавляет prompt contract, не создаёт public snapshot,
@@ -976,8 +988,9 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [RP story memory](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
 - [Revision-8 history selection](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_history.py)
 - [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
-- [Training artifacts](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_artifacts.py)
-- [Training runtime](../../roles/apps/files/rp-stack/rp-gateway/app/services/training_runtime.py)
+- [Standalone Training Gateway source](https://github.com/abykovwww-byte/tavern-awareness-showroom)
+- Legacy training modules удалены из RP source zero-window поставкой; старые
+  SQLite rows остаются только под read-only quarantine guards.
 - [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)

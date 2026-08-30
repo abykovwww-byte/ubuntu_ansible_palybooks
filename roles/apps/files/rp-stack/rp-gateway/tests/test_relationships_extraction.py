@@ -623,37 +623,3 @@ def test_missing_party_turn_is_a_named_technical_failure_with_audit(tmp_path: Pa
             "SELECT event_json FROM audit_events WHERE event_type = 'relationship_extraction_failed'"
         ).fetchone()
     assert json.loads(audit["event_json"])["error"] == "missing_party_turn"
-
-
-def test_training_guard_skips_model_and_writes_no_relationship_rows(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Proves service-level Training isolation runs before lookup/model work and writes nothing."""
-    store = make_store(tmp_path)
-    service = RelationshipExtractionService(settings(tmp_path, scenario_type="training"), store, MODEL)
-
-    async def forbidden_completion(*_args, **_kwargs):
-        raise AssertionError("training must not call the relationship model")
-
-    monkeypatch.setattr(service, "_complete", forbidden_completion)
-    result = asyncio.run(service.process_turn(999))
-
-    assert result == {
-        "processed": False,
-        "applied": False,
-        "turn_id": 999,
-        "reason": "scenario_not_rp",
-        "events": [],
-    }
-    with store.connect() as connection:
-        counts = {
-            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in (
-                "relationship_causes",
-                "character_badges",
-                "narrative_events",
-                "character_axis_state",
-            )
-        }
-    assert counts == {table: 0 for table in counts}

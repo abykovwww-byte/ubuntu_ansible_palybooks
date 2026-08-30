@@ -11,14 +11,20 @@ flowchart LR
     W["Windows workspace"] -->|"commit + push branch"| BR["GitHub codex/*"]
     BR -->|"non-draft PR + green CI + merge"| GH["GitHub main"]
     GH -->|"read-only deploy key + git pull --ff-only"| CO["/opt/ubuntu_ansible_palybooks"]
-    CO -->|"Ansible localhost"| APP["/srv/apps/rp-stack"]
-    APP -->|"docker compose up"| RT["Running containers"]
-    DATA["/srv/app-data/rp-stack"] --> RT
+    CO -->|"Ansible localhost"| RP["/srv/apps/rp-stack"]
+    CO -->|"exact public HTTPS commit"| TR["/srv/apps/awareness-showroom"]
+    RP -->|"docker compose up"| RRT["RP containers"]
+    TR -->|"docker compose up"| TRT["Training containers"]
+    RPD["/srv/app-data/rp-stack"] --> RRT
+    TRD["/srv/app-data/awareness-showroom"] --> TRT
 ```
 
-Репозиторий публичный. Существующий server checkout читает его по SSH с отдельным
-read-only deploy key; ключ хранится только на `abykovserv`, не попадает в Git и
-не используется для push. Public visibility не добавляет серверу права записи.
+Оба GitHub-репозитория публичные. Существующий IaC checkout читается
+сервером по SSH с отдельным read-only deploy key; приватная часть
+ключа хранится только на `abykovserv`, не попадает в Git и не даёт права
+push. Standalone application клонируется по HTTPS без GitHub token на
+exact commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Public visibility не
+добавляет серверу права записи.
 
 Обычный цикл:
 
@@ -232,8 +238,8 @@ Scheduled проверки также получают отдельный worktr
 запроса.
 
 Локальный `scripts/ci.ps1` агрегирует проверки JSON, Wiki links/fences,
-AGENTS/hooks/plugin, state и training contracts, workflow scripts, Python
-syntax, JS syntax/tests и полный Gateway pytest. Его запускают при изменении
+AGENTS/hooks/plugin, state и RP contracts, workflow scripts, Python syntax, JS
+syntax/tests и полный RP Gateway pytest. Его запускают при изменении
 общего гейта, на integration/cutover и перед deployment, а обычный PR проверяет
 затронутый риск focused-командами. GitHub Actions повторяет контракты на чистом
 runner и добавляет `ansible-playbook --syntax-check`. Dependabot раз в неделю
@@ -246,7 +252,7 @@ CLI:
 ```powershell
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action local_revision
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action compose_status
-powershell.exe -File scripts/rp-stack-ops.ps1 -Action gateway_test -Scope training
+powershell.exe -File scripts/rp-stack-ops.ps1 -Action gateway_test -Scope smoke
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action loop_probe -PartyId <party_id>
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action causal_probe -PartyId <party_id> -Expectation seed_trust_influences_plot
 powershell.exe -File scripts/rp-stack-ops.ps1 -Action service_llm_trace -PartyId <party_id> -Turn <party_turn>
@@ -280,7 +286,7 @@ sudo systemctl status ansible-local-apply.service --no-pager -l
 sudo journalctl -u ansible-local-apply.service -n 100 --no-pager
 ```
 
-Проверка RP Stack:
+Проверка live RP Stack до C1 apply:
 
 ```bash
 cd /srv/apps/rp-stack
@@ -292,10 +298,20 @@ curl -fsS http://192.168.1.88:8010/api/worldpacks
 curl -fsS http://192.168.1.88:8011/health
 ```
 
-### Migration Decision 018
+### Zero-window C1/O2 Decision 018: source готов, apply ожидается
 
-До cutover команда выше проверяет единый RP Stack. I1 shadow на
-`:18011` уже применён из полного commit SHA public repository:
+До production cutover старый Showroom остаётся на `:8011`, а I1 shadow
+на loopback `127.0.0.1:18011` уже применён из exact commit public
+repository `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Объединённый C1/O2
+source закрепляет тот же commit для LAN-only `192.168.1.88:8011`,
+`SCENARIO_TYPE=rp` для RP Gateway и RP Compose/source без
+`rp-showcase-gui`, Awareness WorldPacks и training runtime. Standalone принимает
+только `training`, RP Gateway — только `rp`.
+
+Production-переключение не считается применённым до интерактивного
+Ansible apply. Rollback window равен `0`: после cutover сбои исправляются
+fix-forward через application/IaC PR и повторный apply. Legacy RP SQLite
+rows/tables, state, backups и data artifacts сохраняются.
 
 ```text
 /srv/apps/awareness-showroom
@@ -305,12 +321,12 @@ curl -fsS http://192.168.1.88:8011/health
 /srv/backups/awareness-showroom
 ```
 
-В следующей поставке application image несёт Git-каталог
+Закреплённый application commit несёт Git-каталог
 `/app/configs/showroom/scenarios.json`, а runtime `.env` включает его через
 `SHOWROOM_CATALOG_PATH`. Gateway при startup идемпотентно согласует
 только объявленные training configs и covers. Он не импортирует legacy
 runs/users/sessions/keys и не удаляет посторонние DB-строки. Сценарии становятся
-видимыми только после application PR, IaC pin, apply и успешного startup.
+видимыми на production `:8011` только после apply и успешного startup.
 
 External checkout — единственный явно opt-in ownership exception Apps role:
 
@@ -324,27 +340,52 @@ External checkout — единственный явно opt-in ownership excepti
 - repository token для Awareness не используется и не требуется; provider keys
   остаются только в `/etc/ansible/local-overrides.yml`.
 
-После apply эти границы проверяются отдельно:
+После C1 apply эти границы проверяются отдельно:
 
 ```bash
 cd /srv/apps/awareness-showroom
 git status --short
 stat -c '%U:%G %n' . .git .env.example
 docker compose exec -T awareness-gateway printenv SHOWROOM_CATALOG_PATH
-curl -fsS http://127.0.0.1:18011/api/showroom/scenarios
+test "$(git rev-parse HEAD)" = "67244432659f6c25a268cbf788a8fa3af0f5b52f"
+curl -fsS http://192.168.1.88:8011/api/showroom/scenarios
+! ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:18011'
+cd /srv/apps/rp-stack
+! docker compose config --services | grep -qx rp-showcase-gui
+test -z "$(docker ps -aq --filter name=rp-stack-showcase-gui)"
+test ! -e rp-showcase-gui
+test ! -e worldpacks/awareness
+test ! -e worldpacks/awareness-one-day
 ```
 
-`git status --short` должен быть пустым, путь каталога — точным, а owner
-трёх проверяемых paths — `abykov:abykov`. Это ещё не доказывает
-provider-turn, scoring, debrief, resume или backup/restore.
+`git status --short` должен быть пустым, путь каталога и exact pin — точными, а
+owner трёх проверяемых paths — `abykov:abykov`. Отдельно в
+`/srv/apps/rp-stack` проверяются отсутствие legacy container/source и shadow
+listener `127.0.0.1:18011`, `SCENARIO_TYPE=rp`, HTTP `:8010`, отсутствие старых
+`/api/showroom/**` routes и отказ training payload до DB/provider write.
+Эти shape checks ещё не доказывают provider-turn, scoring, debrief, resume или
+backup/restore.
 
-Только после полного training acceptance IaC переводит `:8011` на новый
-Showroom, а старый Compose становится RP-only. `:8010` не меняется. Проекты не
-разделяют SQLite/state/cookies/network и не вызывают Gateway друг друга.
+C1 apply переводит `:8011` на новый Showroom, а старый Compose становится
+RP-only. `:8010` не меняется. Проекты не разделяют SQLite/state/cookies/network и
+не вызывают Gateway друг друга. После apply обязательны оба полных Awareness
+курса, реальный provider-turn, artifact/workspace scoring, debrief, resume,
+browser check, SQLite integrity и backup/test-restore.
 
-До конца rollback window старый Showroom и legacy data не удаляются. Rollback
-возвращает предыдущий IaC topology/pin; новую SQLite не сливают обратно. Полный
-порядок и acceptance matrix: [Plan 018](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md).
+Владелец явно снял перенос истории, visitors/runs и ожидание legacy sessions как
+блокеры C1. Старая RP SQLite остаётся нетронутой. Старый Showroom/training source
+удаляется тем же zero-window apply; O2 не удаляет SQLite rows/tables, state,
+backups и не вызывает `delete_user_data`. Оперативного возврата на legacy
+Showroom после apply нет: сбой исправляется новым PR/apply, а standalone SQLite
+не сливается обратно. Полный порядок и
+acceptance matrix: [Plan 018](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md).
+
+Два ранее скопированных файла
+`/srv/app-data/rp-stack/default-user/worlds/Awareness.json` и
+`/srv/app-data/rp-stack/default-user/worlds/Awareness. One day.json` остаются
+как legacy data artifacts. `runtime_source_files` больше ими не управляет, и
+активный RP Gateway/Compose их не читает; zero-window cleanup не удаляет эти
+файлы данных.
 
 Gateway строится из корня `rp-stack`: образ получает приложение и тесты из
 `rp-gateway`, а также `/evals`, `/scripts` и `/worldpacks`, которые нужны полному
@@ -386,17 +427,19 @@ Narrator/atomic/Administrator, model choice Administrator и интервалы 
 В committed server inventory `RP_REBUILD_ENABLED=false`: merge и обычный apply
 ещё не активируют clean ordinary RP.
 
-Перед включением отдельно проверяются: пустая clean DB, backup обоих SQLite,
+Перед включением отдельно проверяются: пустая clean DB, backup обоих RP SQLite,
 exact container env, health, один preset и один free API-flow, provider
 failure/retry без partial turn, restart с pending jobs без роста attempts,
 owner-scoped Administrator decision и отсутствие ordinary legacy RP в
-state/autotest/dataset/trace. Training и Showroom должны пройти свои retained
-smokes; Training smoke включает фильтрованный каталог WorldPack, template,
-draft/save персонажа и создание партии. После этого нужны authenticated Light
-GUI smoke и настоящая Party;
+state/autotest/dataset/trace. RP Gateway дополнительно должен доказать отсутствие
+Showroom routes и отказ training payload до DB/provider write. Внешний Awareness
+gate закрывается только после C1 apply и полного прохождения обоих курсов на
+standalone `192.168.1.88:8011`, включая provider-turn, scoring, debrief, resume и
+backup/test-restore. После этого нужны authenticated Light GUI smoke и настоящая
+RP Party;
 pytest, CI, healthy container и HTTP `200` не являются live gameplay proof.
 
-## Live verification интерактивных training artifacts
+## Историческое live evidence интерактивных training artifacts
 
 Snapshot от 31 июля 2026 года для revision `8b8a8fe`:
 
@@ -429,8 +472,6 @@ ubuntu_ansible_palybooks/
 │   └── files/rp-stack/
 │       ├── rp-gateway/
 │       ├── rp-light-gui/
-│       ├── rp-showcase-gui/
-│       ├── ui-shared/
 │       ├── worldpacks/
 │       ├── state/schema.json
 │       ├── docs/decisions/
@@ -459,15 +500,13 @@ ubuntu_ansible_palybooks/
 | `services/adjudicator.py` | Транзакционный pipeline хода и service jobs |
 | `services/rule_engine.py` | Детерминированные исходы для режимов |
 | `services/narrative.py` | Provider calls, prompt assembly, cache controls, model fallback |
-| `services/validator.py` | Проверка narration и training debrief |
+| `services/validator.py` | RP narration validation contracts, если они разрешены текущей revision |
 | `services/memory.py` | Immutable episodic chapters |
 | `services/rp_story_memory.py` | RP-only cumulative living-memory snapshots и service-model update |
 | `services/rp_history.py` | Revision-8 playable-unit eligibility, quantized RAW `50–57 + uncovered`, safe coverage и scan window |
 | `services/character_retrieval.py` | Выбор релевантных NPC без embeddings |
 | `services/world_instructor.py` | Draft/preview/apply контракт изменения мира |
 | `services/auth_store.py` | Users, sessions, provider keys, global settings |
-| `services/showroom.py` | Scenarios, visitors, runs, portal snapshots, leaderboard |
-| `services/training_artifacts.py` | Blueprint validation, party snapshots, idempotent events и public views |
 | `services/autotest.py` | Ограниченный auto-player client |
 | `services/service_models.py` | Глобальный service-model catalog/runtime |
 | `services/service_model_client.py` | Exact redacted service-model log, request/attempt metadata и retention |
@@ -477,8 +516,8 @@ ubuntu_ansible_palybooks/
 Gateway запускает восстановление через единый FastAPI `lifespan`, а не через
 устаревшие `startup`/`shutdown` handlers. Для clean RP тот же lifespan возвращает
 claimed job в `pending`, запускает два role loop, а на shutdown делает cancel и
-await обоих loops. Legacy Training/Showroom recovery остаётся отдельным
-ограниченным трактом.
+await обоих loops. Training/Showroom recovery в RP source больше нет: lifecycle
+standalone Gateway принадлежит `tavern-awareness-showroom`.
 
 ## Где менять типовые функции
 
@@ -490,16 +529,17 @@ await обоих loops. Legacy Training/Showroom recovery остаётся от�
 | Изменить prompt/memory | `narrative.py`, `memory.py`, `rp_story_memory.py`, `rp_history.py`, `context_budget.py`, `state_store.py` |
 | Изменить Light GUI | `rp-light-gui/index.html`, `app.js`, `styles.css` |
 | Изменить Turn Trace Workbench | `turn_trace.py`, `state_store.py`, `narrative.py`, `service_model_client.py`, `main.py`, Light GUI trace assets и tests |
-| Изменить Showroom | `rp-showcase-gui/` и `showroom.py` |
-| Изменить training artifacts | `training_artifacts.py`, `ui-shared/`, оба UI и WorldPack contract |
+| Изменить Showroom | `tavern-awareness-showroom` (`rp-showcase-gui/` и training Gateway) |
+| Изменить training artifacts | `tavern-awareness-showroom`: `training_artifacts.py`, `ui-shared/`, Showroom и training WorldPack contract |
 | Новый RP мир | `worldpacks/<slug>/` и `rp-world-pack-builder` |
-| Новый training мир | `worldpacks/<slug>/` и `training-world-pack-builder` |
+| Новый training мир | `tavern-awareness-showroom/worldpacks/<slug>/` и `training-world-pack-builder` |
 | Runtime/env/ports | `server.yml`, Compose/env templates |
 
 ### Зависимость training workspace
 
-Decision 015 не добавляет новый контейнер, но runtime-файлы доставляются обычным
-Ansible apply. Реализация двух capability-флагов затрагивает Gateway schemas/ShowroomStore,
+Decision 015 не добавляет новый контейнер, но active runtime-файлы теперь живут
+в `tavern-awareness-showroom` и доставляются обычным Ansible apply. Реализация
+двух capability-флагов затрагивает training Gateway schemas/ShowroomStore,
 snapshot run, `TrainingArtifactService`, логический
 `TrainingWorkspaceService`, StateStore, Showroom UI, shared safe renderers,
 training builder contract и четыре комбинации тестов.
@@ -534,8 +574,9 @@ python -m pytest -q tests/test_rp_turn_engine.py tests/test_rp_world_scenario.py
 ```
 
 Focused-прогон проверяет clean SQLite, HTTP contract, один provider boundary,
-runner lifecycle и изоляцию retained legacy paths. Он не доказывает доступность
-реального provider, качество прозы, apply, браузер или живую Party.
+runner lifecycle и RP-only изоляцию удалённых Training/Showroom paths. Он не
+доказывает доступность реального provider, качество прозы, apply, браузер или
+живую Party.
 
 Агрегатная проверка из корня для изменения общего гейта, integration/cutover или
 перед deployment; semantic acceptance запускается при изменении игровой
@@ -558,7 +599,6 @@ gates из Decision 032; локальный source test или revision stamp и
 node --check app.js
 node character-editor.test.js
 node structured-content.test.js
-node training-artifacts.test.js
 ```
 
 Windows может не иметь runtime dependencies. Авторитетный Python test run — внутри rebuilt `rp-gateway` container на сервере. Локальный `compileall` или JS syntax check не является live proof.
@@ -587,16 +627,18 @@ Host-specific и secret values находятся в:
 
 Файл не коммитится. Не нужно переносить постоянные исправления напрямую в `/srv/apps/rp-stack`: следующий IaC apply может их заменить. Emergency hotfix должен быть немедленно отражён в Git.
 
-Repair-лимиты разделены: `MAX_REPAIR_ATTEMPTS` сохраняет RP-поведение, а
-`TRAINING_REPAIR_ATTEMPTS` (IaC:
-`rp_stack_gateway_training_repair_attempts`, default `1`) разрешает не более
-одной коррекции только для мягкого нарушения `training_runtime`. Значение `0`
-возвращает training к немедленному authored fallback; hard violations и
-provider failures repair не получают при любом значении.
+`MAX_REPAIR_ATTEMPTS` относится только к RP Gateway. Training repair/fallback
+policy и её env принадлежат `tavern-awareness-showroom`; RP IaC больше не
+публикует `TRAINING_REPAIR_ATTEMPTS`.
 
 ## Rollback
 
 Код откатывается новым revert/fix commit и повторным Ansible apply. Игровые данные восстанавливаются отдельно из `/srv/backups/rp-stack` после остановки контейнеров и проверки target paths.
+
+Для Awareness rollback window равен `0`: после apply legacy Showroom/source уже
+удалены и немедленного topology rollback нет. Исправление идёт новым
+application/IaC PR и повторным apply. Standalone и RP SQLite остаются отдельными
+data/forensic snapshots и не сливаются.
 
 ## Базовые документы
 

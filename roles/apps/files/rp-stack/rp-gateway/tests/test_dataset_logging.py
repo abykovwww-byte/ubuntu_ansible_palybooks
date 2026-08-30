@@ -9,7 +9,7 @@ from test_gateway import client, create_demo_party, write_worldpack
 
 def test_dataset_export_requires_party_and_turn_approval(tmp_path):
     write_worldpack(tmp_path, supported_modes=["rp"])
-    c = client(tmp_path)
+    c = client(tmp_path, app_env="production")
     party = create_demo_party(c, scenario_type="rp")
 
     response = c.post(
@@ -18,18 +18,12 @@ def test_dataset_export_requires_party_and_turn_approval(tmp_path):
         headers={"Authorization": "Bearer test"},
     )
     assert response.status_code == 200, response.text
-    with sqlite3.connect(tmp_path / "rp_gateway.db") as connection:
-        connection.execute(
-            "UPDATE parties SET scenario_type = 'novel', status = 'archived' WHERE id = ?",
-            (party["id"],),
-        )
-
     candidates = c.get(f"/api/admin/datasets/parties/{party['id']}/turns").json()["turns"]
     assert len(candidates) == 1
     candidate = candidates[0]
-    assert candidate["scenario_type"] == "novel"
+    assert candidate["scenario_type"] == "rp"
     assert candidate["review_status"] == "review"
-    assert {"novel", "main"}.issubset(candidate["auto_tags"])
+    assert {"rp", "main"}.issubset(candidate["auto_tags"])
     assert candidate["metadata"]["schema_version"] == "rp-gateway.turn.v1"
     assert candidate["metadata"]["validator_valid"] is None
     assert candidate["prompt_messages"]
@@ -48,6 +42,12 @@ def test_dataset_export_requires_party_and_turn_approval(tmp_path):
         json={"review_status": "approved", "tags": ["continuity"], "notes": "Reviewed."},
     )
     assert approved_turn.status_code == 200, approved_turn.text
+
+    with sqlite3.connect(tmp_path / "rp_gateway.db") as connection:
+        connection.execute(
+            "UPDATE parties SET scenario_type = 'novel', status = 'archived' WHERE id = ?",
+            (party["id"],),
+        )
 
     export = c.get("/api/admin/datasets/export.jsonl?scenario_type=novel")
     assert export.status_code == 200
@@ -239,65 +239,3 @@ def test_player_rating_is_a_separate_audited_dataset_signal(tmp_path):
     candidate = c.get(f"/api/admin/datasets/parties/{party['id']}/turns").json()["turns"][0]
     assert "player-liked" not in candidate["auto_tags"]
     assert "player-disliked" not in candidate["auto_tags"]
-
-
-def test_showroom_rating_requires_the_visitor_owned_run(tmp_path):
-    write_worldpack(tmp_path, supported_modes=["rp"])
-    admin = client(tmp_path)
-    model_id = admin.get("/api/model-profiles").json()["model_profiles"][0]["id"]
-    scenario = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={
-            "title": "Feedback scenario",
-            "description": "A public feedback test.",
-            "status": "published",
-            "scenario_type": "rp",
-            "model_profile_id": model_id,
-            "world_source": "preset",
-            "worldpack_id": "demo-world",
-            "leaderboard_enabled": False,
-            "leaderboard_metric": "turn_count",
-            "leaderboard_state_path": "meta.turn",
-            "leaderboard_label": "Turns",
-        },
-    ).json()["scenario"]
-    visitor = TestClient(admin.app)
-    run = visitor.post(
-        f"/api/showroom/scenarios/{scenario['id']}/runs",
-        json={
-            "character_name": "Visitor Hero",
-            "character_prompt": "A careful participant.",
-            "leaderboard_opt_in": False,
-            "client_request_id": "feedback-run",
-        },
-    ).json()["run"]
-    player_turn = visitor.post(
-        f"/api/showroom/runs/{run['id']}/messages",
-        json={"content": "I ask the witness to clarify.", "idempotency_key": "showroom-liked-turn"},
-    )
-    assert player_turn.status_code == 200, player_turn.text
-    turn = visitor.get(f"/api/showroom/runs/{run['id']}/history").json()["turns"][0]
-
-    liked = visitor.put(
-        f"/api/showroom/runs/{run['id']}/turns/{turn['id']}/feedback",
-        json={"rating": "positive"},
-    )
-    assert liked.status_code == 200, liked.text
-    assert liked.json()["feedback"]["rating"] == "positive"
-    assert liked.json()["feedback"]["source_ui"] == "showroom"
-    history_turn = visitor.get(f"/api/showroom/runs/{run['id']}/history").json()["turns"][0]
-    assert history_turn["player_rating"] == "positive"
-
-    disliked = visitor.put(
-        f"/api/showroom/runs/{run['id']}/turns/{turn['id']}/feedback",
-        json={"rating": "negative"},
-    )
-    assert disliked.status_code == 200, disliked.text
-    assert disliked.json()["feedback"]["rating"] == "negative"
-
-    intruder = TestClient(admin.app)
-    forbidden = intruder.put(
-        f"/api/showroom/runs/{run['id']}/turns/{turn['id']}/feedback",
-        json={"rating": "negative"},
-    )
-    assert forbidden.status_code == 404

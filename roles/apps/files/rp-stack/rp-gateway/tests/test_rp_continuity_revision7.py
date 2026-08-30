@@ -38,10 +38,8 @@ def set_worldpack_revision(pack_dir: Path, revision: int) -> None:
         (6, 7, "rp", 6),
         (7, 7, "rp", 7),
         (7, 6, "rp", 6),
-        (7, 7, "training", 0),
         (8, 8, "rp", 8),
         (8, 7, "rp", 7),
-        (8, 8, "training", 0),
     ],
 )
 def test_revision_stamp_matches_api_sqlite_and_party_runtime(
@@ -51,7 +49,7 @@ def test_revision_stamp_matches_api_sqlite_and_party_runtime(
     scenario_type: str,
     expected_revision: int,
 ) -> None:
-    pack_dir = write_worldpack(tmp_path, supported_modes=["rp", "training"])
+    pack_dir = write_worldpack(tmp_path, supported_modes=["rp"])
     set_worldpack_revision(pack_dir, declared_revision)
     api = client(tmp_path, rp_contract_observed_revision=observed_revision)
 
@@ -75,6 +73,35 @@ def test_revision_stamp_matches_api_sqlite_and_party_runtime(
         ).fetchone()[0]
     assert sqlite_revision == expected_revision
     assert migrated_revision == expected_revision
+
+
+@pytest.mark.parametrize(("observed_revision", "declared_revision"), [(7, 7), (8, 8)])
+def test_revision_stamp_does_not_bypass_rp_only_mode_guard(
+    tmp_path: Path,
+    observed_revision: int,
+    declared_revision: int,
+) -> None:
+    pack_dir = write_worldpack(tmp_path, supported_modes=["rp"])
+    set_worldpack_revision(pack_dir, declared_revision)
+    api = client(tmp_path, rp_contract_observed_revision=observed_revision)
+
+    response = api.post(
+        "/api/parties",
+        json={
+            "title": "Retired training mode",
+            "scenario_type": "training",
+            "worldpack_id": "demo-world",
+            "player_character_id": "pc_missing",
+            "model_profile_id": "profile_missing",
+        },
+    )
+
+    assert response.status_code == 422
+    error_location = response.json()["detail"][0]["loc"]
+    assert error_location[0] == "body"
+    assert error_location[-1] == "scenario_type"
+    with api.app.state.party_store.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM parties").fetchone()[0] == 0
 
 
 def test_revision_seven_is_available_only_to_an_explicit_candidate_branch(tmp_path: Path) -> None:

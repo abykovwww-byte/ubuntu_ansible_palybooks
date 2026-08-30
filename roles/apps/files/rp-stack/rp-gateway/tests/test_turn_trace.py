@@ -86,7 +86,6 @@ def test_narrative_trace_captures_exact_policy_payload_and_raw_response(tmp_path
         world_state_path=str(tmp_path / "state.json"),
         party_state_root=str(tmp_path / "parties"),
         worldpacks_path=str(tmp_path / "worldpacks"),
-        showroom_cover_dir=str(tmp_path / "covers"),
         llm_api_base="mock://success",
         llm_api_key="trace-secret",
         narrative_model="deepseek/deepseek-v4-flash",
@@ -162,7 +161,6 @@ def test_trace_recorder_failure_does_not_change_turn_result(tmp_path: Path) -> N
         world_state_path=str(tmp_path / "state" / "party-trace" / "current.json"),
         party_state_root=str(tmp_path / "state"),
         worldpacks_path=str(tmp_path / "worldpacks"),
-        showroom_cover_dir=str(tmp_path / "covers"),
         llm_api_base="mock://success",
         llm_api_key="test-key",
         service_model_choice="or-qwen-3.5-flash",
@@ -203,7 +201,6 @@ def test_adr026_post_commit_relationship_mutation_is_captured(tmp_path: Path) ->
         world_state_path=str(tmp_path / "state" / "party-trace" / "current.json"),
         party_state_root=str(tmp_path / "state"),
         worldpacks_path=str(tmp_path / "worldpacks"),
-        showroom_cover_dir=str(tmp_path / "covers"),
         llm_api_base="mock://success",
         llm_api_key="test-key",
         service_model_choice="or-qwen-3.5-flash",
@@ -312,7 +309,6 @@ def test_adjudicator_redacts_bare_runtime_secret_from_input_and_assembly(tmp_pat
         world_state_path=str(tmp_path / "state" / "party-trace" / "current.json"),
         party_state_root=str(tmp_path / "state"),
         worldpacks_path=str(tmp_path / "worldpacks"),
-        showroom_cover_dir=str(tmp_path / "covers"),
         llm_api_base="mock://success",
         llm_api_key=secret,
         service_model_choice="or-qwen-3.5-flash",
@@ -991,7 +987,6 @@ def test_party_trace_api_round_trip_and_no_store(tmp_path: Path) -> None:
         database_url=f"sqlite:///{tmp_path / 'rp_gateway.db'}",
         world_state_path=str(state_path),
         party_state_root=str(tmp_path / "state" / "parties"),
-        showroom_cover_dir=str(tmp_path / "covers"),
         worldpacks_path=str(tmp_path / "worldpacks"),
         llm_provider="openrouter",
         llm_api_base="mock://success",
@@ -1067,7 +1062,6 @@ def test_trace_api_is_admin_only_when_auth_is_enabled(tmp_path: Path) -> None:
         database_url=f"sqlite:///{tmp_path / 'rp_gateway.db'}",
         world_state_path=str(tmp_path / "state" / "current.json"),
         party_state_root=str(tmp_path / "state" / "parties"),
-        showroom_cover_dir=str(tmp_path / "covers"),
         worldpacks_path=str(tmp_path / "worldpacks"),
         llm_provider="openrouter",
         llm_api_base="mock://success",
@@ -1180,16 +1174,5 @@ def test_trace_api_is_admin_only_when_auth_is_enabled(tmp_path: Path) -> None:
     operator_branches = admin.get(f"/api/turn-traces/parties/{party_id}/branches")
     assert branch["id"] in {item["id"] for item in operator_branches.json()["branches"]}
 
-    showroom = TestClient(app)
-    assert showroom.get("/api/showroom/scenarios").status_code == 200
-    for client in (anonymous, showroom):
-        for path in trace_paths:
-            assert client.get(path).status_code == 401
-    assert showroom.post(
-        annotation_url,
-        json={
-            "annotation_id": "annotation-showroom-denied",
-            "phase_key": phase_key,
-            "body": "must not be stored",
-        },
-    ).status_code == 401
+    for path in trace_paths:
+        assert anonymous.get(path).status_code == 401

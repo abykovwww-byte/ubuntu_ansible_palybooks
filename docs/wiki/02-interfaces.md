@@ -22,10 +22,9 @@ endpoint сохраняются. Пустое поле в админской ф�
 
 - `GET /api/worldpacks` возвращает ровно `day-watch-moscow-v2` и summaries
   пресетов; detail дополнительно возвращает валидный `free_scenario_seed`;
-- retained Training запрашивает только свои legacy WorldPack через
-  `GET /api/worldpacks?scenario_type=training`; detail, player templates,
-  draft/save/list персонажей разрешены только для WorldPack с `training` в
-  `scenario_types.supported`, а ordinary legacy RP по этим URL получает `410`;
+- training query/payload не является compatibility-веткой: после C1 RP Gateway
+  не публикует training WorldPacks/templates/player characters и отклоняет
+  `scenario_type=training` до DB/provider write;
 - `POST /api/parties` одним запросом принимает `world_id`, `scenario` типа
   `preset` или `free`, `model_profile_id` и опциональные narrator settings;
 - `POST /api/parties/{id}/start` принимает только `idempotency_key`;
@@ -45,9 +44,10 @@ Narrator profile фиксирует exact provider/base URL/model. Clean BYOK м
 
 Обычные legacy RP state/world/branch/autotest/dataset/trace операции при cutover
 не становятся compatibility-слоем: они возвращают `410` или фильтруют ordinary
-RP. Training и серверно подтверждённый Showroom продолжают использовать legacy
-контракт. Light GUI в source уже понимает clean API, но production-флаг
-выключен, поэтом live UX ещё не переключён и не проверен.
+RP. Training/Showroom не используют этот контракт: их единственный active source
+находится в standalone project с целевым LAN-only `192.168.1.88:8011`. Light GUI
+в source уже понимает clean API, но production-флаг выключен, поэтому live UX
+ещё не переключён и не проверен.
 
 ### Light GUI при clean cutover
 
@@ -61,30 +61,35 @@ RP. Training и серверно подтверждённый Showroom прод�
 - панель показывает три раздельные роли: Narrator, atomic service и Administrator;
 - предложения Administrator принимает или отклоняет владелец Party, а не только
   пользователь с глобальной ролью admin;
-- Training остаётся в том же Light GUI на retained legacy-маршруте до внешнего
-  cutover Plan 018.
+- training UI и routes в RP Light GUI отсутствуют; пользователь проходит курсы
+  через standalone Showroom на `:8011` после C1 apply.
 
 ## Light GUI
 
-Light GUI — основной интерфейс владельца партии. Это статические HTML/CSS/JavaScript, которые nginx отдаёт на `:8010` и проксирует `/api` в Gateway.
+Light GUI — основной интерфейс владельца RP-партии. Это статические
+HTML/CSS/JavaScript, которые nginx отдаёт на `:8010` и проксирует `/api` в RP
+Gateway. C1 source ограничивает production Gateway режимом `rp`; до Ansible
+apply живой сервер всё ещё использует прежний общий процесс.
 
 Основные возможности:
 
 - вход через Gateway-сессию;
 - список и создание партий;
-- явный выбор WorldPack, персонажа, `scenario_type`, provider и narrator model;
+- явный выбор RP WorldPack, персонажа, provider и narrator model; после C1 apply
+  training WorldPacks и создание `scenario_type=training` недоступны;
 - party-scoped параметры narrator во вкладке «Управление» для поддерживаемых OpenRouter Luna, Luna Pro и DeepSeek V4 Flash;
 - создание private generated WorldPack из короткого ручного prompt или загруженного `.md`: браузер читает Markdown как UTF-8-текст, показывает имя/размер/фрагмент и передаёт содержимое Gateway без HTML-rendering;
 - основной чат с восстановлением pending-запроса после refresh;
-- открытие валидированных training-сайтов и отправка накопленных событий перед следующим сообщением;
-- сценарно-зависимое редактирование персонажей вручную и генерация служебной моделью: в `rp` обычная форма показывает только имя, статус, локацию и текущую цель, не изменяя скрытые расширенные поля; в `training` сохраняется полный редактор;
+- редактирование RP-персонажей вручную и генерация служебной моделью: обычная форма показывает только имя, статус, локацию и текущую цель, не изменяя скрытые расширенные поля;
 - выбор party-scoped BYOK-ключа;
 - GM preview/apply/discard, state и rollback; отдельной RP-формы проверки нет;
-- Prompt Inspector, реальный размер последнего prompt, память и lore cards; для `rp` панель памяти отдельно показывает living story snapshot, его revision и покрытие, revisions 2..8 готовят legacy correction со следующим ходом, а rev9 открывает отдельный GM draft/confirm; для rev8+ под narrator response показываются Lore Cards, реально попавшие в его prompt, и явная кнопка draft из завершённого хода; для `training` этого UI нет;
+- Prompt Inspector, реальный размер последнего prompt, память и lore cards; панель памяти отдельно показывает living story snapshot, его revision и покрытие, revisions 2..8 готовят legacy correction со следующим ходом, а rev9 открывает отдельный GM draft/confirm; для rev8+ под narrator response показываются Lore Cards, реально попавшие в его prompt, и явная кнопка draft из завершённого хода;
 - request-centric Turn Trace Workbench с main/background lanes, narrator/service attempts, state mutation diff и аннотациями;
 - checkpoints, branches и история LLM-autotest;
 - 👍/👎 для полной пары «реплика игрока → ответ модели»;
-- admin-раздел: пользователи, глобальная служебная модель, видимость миров, Showroom, автотесты и dataset review.
+- admin-раздел RP Gateway: пользователи, глобальная служебная модель, видимость
+  RP-миров, RP-autotests и dataset review; Showroom administration после C1
+  принадлежит standalone training project.
 
 Light GUI не вызывает provider API напрямую. Даже если ключ введён пользователем, он сохраняется Gateway для конкретной партии и не возвращается в браузер целиком.
 
@@ -251,15 +256,24 @@ endpoint: пользовательская session, visitor cookie и `run_id` �
 Showroom — отдельная витрина на `:8011` для прохождения опубликованных сценариев без регистрации.
 
 Decision 018 сохраняет этот пользовательский адрес и публичный `run_id` API, но
-меняет deployment ownership: после cutover UI и API обслуживает private
-`tavern-awareness-showroom` с training-only Gateway. Выбор `rp` и создание мира
-по prompt исчезают из Showroom. До cutover текущий общий Gateway остаётся live.
+меняет deployment ownership: C1 source закрепляет public
+`tavern-awareness-showroom` exact commit
+`67244432659f6c25a268cbf788a8fa3af0f5b52f` с training-only Gateway и
+LAN-only bind `192.168.1.88:8011`. Выбор `rp` и создание мира по prompt в нём
+отсутствуют. До Ansible apply текущий старый Showroom на `:8011` и общий Gateway
+остаются live; source merge сам по себе не доказывает переключение.
+
+Публичные `/api/showroom/**` и `run_id` не меняются: browser обращается к тому
+же origin `:8011`, а Nginx нового Showroom проксирует `/api/*` только в свой
+standalone Training Gateway. В ответах Showroom по-прежнему нет `party_id`.
+Rollback window равен `0`: legacy UI и его RP source удаляются в той же
+поставке и второго training route после apply нет.
 
 ```mermaid
 sequenceDiagram
     participant Visitor as Посетитель
     participant UI as Showroom
-    participant GW as Gateway
+    participant GW as Training-only Gateway
     participant Party as Внутренняя Party
 
     Visitor->>UI: Открывает сценарий
@@ -289,7 +303,7 @@ sequenceDiagram
 - показывать immutable snapshot корпоративного портала до пяти персонажей;
 - материализовать динамическую должность из описания сотрудника;
 - отображать структурированные письма и чаты безопасными text nodes;
-- открывать валидированные учебные сайты общим с Light GUI DOM-renderer;
+- открывать валидированные учебные сайты безопасным DOM-renderer standalone UI;
 - собирать opt-in leaderboard по numeric state path или числу ходов;
 - хранить обратную связь 👍/👎 с проверкой владельца visitor cookie.
 
@@ -301,35 +315,40 @@ sequenceDiagram
 
 ## Административный контур
 
-Админка живёт в Light GUI и использует те же Gateway session/role проверки. Она управляет:
+После C1 граница администрирования совпадает с границей данных. Light GUI
+использует RP Gateway session/role и управляет:
 
 - пользователями и их статусами;
 - сменой паролей;
 - глобальной служебной моделью;
-- public/private видимостью WorldPacks;
-- Showroom-сценариями и обложками;
+- public/private видимостью RP WorldPacks;
 - party-scoped LLM-vs-LLM autotests;
 - review статусами партий и ходов;
 - JSONL-экспортом одобренных samples.
+
+Сценарии, обложки, посетители и прохождения Showroom принадлежат standalone
+Training Gateway. Опубликованный каталог поставляется из Git и не копируется из
+старой RP SQLite. Старые строки остаются нетронутыми, но после C1 не доступны
+через production RP Gateway. Живое разделение этой границы ожидает apply.
 
 Администратор не получает raw API key через публичный API: ответ содержит метаданные и последние четыре символа.
 
 ### Галки training-сценария
 
-> Статус: UI и Gateway API реализованы в IaC; live-статус зависит от применённой ревизии.
+> Статус: standalone UI/Gateway и Git-каталог закреплены C1 source; новый
+> `:8011`, backup/restore и browser flow ожидают Ansible apply и live-проверку.
 
-После выбора `Тип сценария = Training` редактор Showroom должен показывать две
-независимые галки:
+Standalone-редактор Showroom всегда создаёт `training` и не предлагает выбор
+`rp`. Он показывает две независимые галки:
 
 ```text
 [ ] Подключить интерактивные ссылки
 [ ] Подключить интерактивный диск
 ```
 
-Для `rp` они скрыты или заблокированы и всегда сохраняются как
-`false`. Gateway, а не браузер, проверяет поддержку выбранным WorldPack. Один
-сценарий хранит одну комбинацию; четыре копии мира и автоматические четыре
-карточки не создаются. Для сравнения режимов администратор может опубликовать
+Gateway, а не браузер, проверяет поддержку выбранным WorldPack. Один сценарий
+хранит одну комбинацию; четыре копии мира и автоматические четыре карточки не
+создаются. Для сравнения capability-комбинаций администратор может опубликовать
 несколько сценариев, ссылающихся на один WorldPack.
 
 При старте Gateway копирует `interactive_links_enabled` и
@@ -340,7 +359,10 @@ site snapshot только при включённом флаге.
 
 ## Compatibility API
 
-Gateway сохраняет OpenAI-compatible `/v1/chat/completions` и legacy single-campaign endpoints. Они нужны для интеграций и отладки, но не должны становиться основой новых функций.
+RP Gateway сохраняет OpenAI-compatible `/v1/chat/completions` и legacy
+single-campaign endpoints. Они нужны для интеграций и отладки, но не должны
+становиться основой новых функций. Training Gateway эти RP compatibility routes
+не публикует.
 
 Party-scoped `POST /api/parties/{party_id}/checks` также сохранён для старых
 клиентов. Для партии `rp-core.v2` он возвращает нейтральный narrative envelope,
@@ -358,7 +380,7 @@ Party-scoped `POST /api/parties/{party_id}/checks` также сохранён �
 ## Исходники
 
 - [Light GUI](../../roles/apps/files/rp-stack/rp-light-gui)
-- [Showroom до cutover](../../roles/apps/files/rp-stack/rp-showcase-gui)
+- [Standalone Awareness Showroom](https://github.com/abykovwww-byte/tavern-awareness-showroom)
 - [Showroom ADR](../../roles/apps/files/rp-stack/docs/decisions/012-public-showroom-scenarios.md)
 - [Project split plan](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md)
 - [Training capabilities ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)

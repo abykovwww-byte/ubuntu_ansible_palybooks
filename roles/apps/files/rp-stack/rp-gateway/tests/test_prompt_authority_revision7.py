@@ -29,8 +29,6 @@ from app.services.narrative import (
     rp_story_memory_block,
     scene_reanchor_prompt_block,
     scene_state_prompt_block,
-    training_artifact_prompt_block,
-    training_turn_prompt_block,
     uncompacted_archive_fallback_block,
     world_absolute_rules_block,
 )
@@ -364,8 +362,6 @@ def test_registered_prompt_block_ids_match_their_real_emitters(
         "world_system_prompt": world_system,
         "player_character": player_character_block(state),
         "world_authors_note": world_authors_note,
-        "training_turn_contract": training_turn_prompt_block({}),
-        "training_interaction_contract": training_artifact_prompt_block({}),
         "relevant_characters": relevant_characters_block([{"id": "advisor"}]),
         "retrieved_archive_scenes": archived_memory_retrieval_block(
             [{"id": 1, "player_message": "ask", "narrative_response": "answer"}],
@@ -776,30 +772,3 @@ def test_rp_revisions_zero_through_six_keep_legacy_prompt_layers(revision: int) 
     assert sum(content.startswith("LONG_TERM_PARTY_MEMORY") for content in contents) == 1
     if revision >= 2:
         assert sum(content.startswith("RP_STORY_MEMORY") for content in contents) == 1
-
-
-@pytest.mark.parametrize("scenario_type", ["training"])
-def test_training_mode_does_not_receive_revision_seven_prompt_authority(
-    scenario_type: str,
-) -> None:
-    settings = Settings(
-        scenario_type=scenario_type,
-        rp_contract_revision=7,
-        party_context_max_tokens=40_000,
-        party_context_limit_tokens=40_000,
-        party_context_completion_reserve_tokens=0,
-    )
-
-    messages = NarrativeClient(settings).narrative_messages(
-        narrative_request(),
-        base_state(),
-        neutral_outcome(),
-        repair_instruction=None,
-        memory_summary=legacy_memory_summary(),
-        rp_story_memory=story_snapshot(),
-    )
-    contents = [str(message.get("content") or "") for message in messages]
-
-    assert not any(content.startswith("PROMPT_AUTHORITY_HIERARCHY") for content in contents)
-    assert sum(content.startswith("LONG_TERM_PARTY_MEMORY") for content in contents) == 1
-    assert not any(content.startswith("RP_STORY_MEMORY") for content in contents)

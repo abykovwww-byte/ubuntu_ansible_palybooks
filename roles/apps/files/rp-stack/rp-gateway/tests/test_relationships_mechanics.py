@@ -1001,23 +1001,6 @@ def test_revisions_zero_through_six_ignore_scene_allowlist(
         assert due is not None and "Мария" in due
 
 
-@pytest.mark.parametrize("scenario_type", ["training"])
-def test_training_mode_keeps_relationship_pressure_disabled(
-    tmp_path: Path,
-    scenario_type: str,
-) -> None:
-    store = make_scene_store(tmp_path, f"non-rp-{scenario_type}")
-    adjudicator = Adjudicator(
-        Settings(scenario_type=scenario_type, rp_contract_revision=7),
-        store,
-        relationship_model=relationship_model(),
-    )
-
-    assert adjudicator.relationship_mechanics is None
-    assert adjudicator.relationship_pressure(
-        store.get_state(),
-        latest_player_message="Мария, ответь мне.",
-    ) is None
 
 
 def test_revision_seven_nullable_legacy_due_is_read_only_and_does_not_crash(

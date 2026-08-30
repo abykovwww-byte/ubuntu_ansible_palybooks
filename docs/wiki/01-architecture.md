@@ -21,6 +21,9 @@ Party = WorldPack
 
 ## Контейнеры и сети
 
+Следующая схема описывает живой runtime до C1 apply. В source переключение уже
+подготовлено, но apply и live verification ещё не выполнены.
+
 ```mermaid
 flowchart TB
     subgraph Clients["Клиенты"]
@@ -47,11 +50,14 @@ flowchart TB
 
 Gateway не публикует host port. Снаружи доступны только nginx-контейнеры Light GUI и Showroom. Local LLM находится в отдельной internal-сети и не принимает запросы с LAN.
 
-### Принятая целевая граница
+### Подготовленная C1-граница
 
-Decision 018 принят, но эта схема ещё не является live. После shadow-проверки
-и cutover Showroom и Awareness переходят в отдельный application repository и
-не используют RP SQLite, state root, cookies или Docker network:
+Source C1 закрепляет standalone application exact commit
+`67244432659f6c25a268cbf788a8fa3af0f5b52f`, целевой LAN-only адрес
+`192.168.1.88:8011`, RP-only старый Gateway и RP Compose без старого Showroom.
+Rollback window равен `0`. Эта схема ещё не является live: до Ansible apply
+применённый shadow остаётся на loopback `:18011`, а старый Showroom — на
+`:8011`.
 
 ```mermaid
 flowchart LR
@@ -64,14 +70,15 @@ flowchart LR
     T --> TDB[("Awareness SQLite + state")]
 
     I["ubuntu_ansible_palybooks\nIaC"] --> R
-    I -->|"exact public repo commit"| T
+    I -->|"exact public HTTPS commit"| T
 ```
 
 Порт не является security boundary для cookie, поэтому новый project использует
 собственные `awareness_gateway_session` и `awareness_showroom_visitor`. На
-миграции переносится только configuration сценариев и covers; run/history/auth
-identity начинается заново. Между Gateway нет runtime-вызовов, общей БД или
-dual-write.
+новой стороне Git-каталог создаёт только конфигурацию сценариев и covers;
+run/history/auth identity начинается заново. Владелец явно снял перенос старой
+истории как блокер, но старая RP SQLite остаётся нетронутой. Между Gateway нет
+runtime-вызовов, общей БД или dual-write.
 
 ### Срез 6 Decision 043: clean RP за cutover-флагом
 
@@ -90,8 +97,7 @@ flowchart LR
     Engine --> Narrator["exact Narrator route"]
     Engine --> Runner["atomic + Administrator runner"]
 
-    Flag -->|"false"| Adj["legacy Adjudicator"]
-    Flag -->|"Training / server-bound Showroom"| Adj
+    Flag -->|"ordinary RP: false"| Adj["legacy RP Adjudicator"]
     Adj --> Legacy[("rp_gateway.db")]
 
     subgraph Source["World / Scenario source"]
@@ -104,16 +110,17 @@ flowchart LR
 
 В clean-контур перенесён только `day-watch-moscow-v2`. Он не читает и не пишет
 legacy Party/state/turn tables; обычные legacy RP endpoints при включённом флаге
-возвращают `410`. Training и Showroom сохраняются только через проверенный
-серверный scope, а не по клиентскому параметру. Нового контейнера, порта или
-dual-write нет. В inventory флаг пока `false`: source интегрирован, но apply,
-activation, браузерный UX и live proof ещё не выполнены.
+возвращают `410`. После C1 RP source не содержит Training/Showroom exception:
+standalone project обслуживает training-only Gateway и Showroom на целевом
+`192.168.1.88:8011`. Нового RP-контейнера, порта или dual-write нет. В inventory
+RP-флаг пока `false`, а C1 apply не выполнен: source интегрирован, но activation,
+браузерный UX и live proof ещё не подтверждены.
 
 ## Ответственность компонентов
 
 | Компонент | Отвечает за | Не отвечает за |
 |---|---|---|
-| Light GUI | Чат, создание партии, GM-инструменты, Prompt Inspector, admin-only Turn Trace Workbench, админка, безопасный рендеринг training artifacts | Правила, state, ключи провайдеров, долговременную память |
+| Light GUI | RP-чат, создание партии, GM-инструменты, Prompt Inspector, admin-only Turn Trace Workbench и RP-админка | Правила, state, ключи провайдеров, долговременную память и training UI |
 | Showroom | Витрина, анонимный запуск, минимальный чат, portal, training artifacts, рейтинг | Прямой доступ к party ID, внутреннюю turn trace, скрытый scoring, администрирование без Gateway role |
 | Gateway | Auth, party scope, state, history, универсальные интерпретаторы правил, LLM routing, диагностическую trace read model, snapshots и события artifacts, branches, datasets | Предметную программу обучения, верстку интерфейсов и ручное хранение секретов в браузере |
 | WorldPack | Неизменяемый замысел мира, seed, prompts, executable training program/assessment/fallbacks, site/workspace blueprints и interaction policy | Выбор модели, party owner, runtime state конкретного прохождения |
@@ -155,7 +162,7 @@ flowchart LR
 - **Training artifact snapshot** — валидированный экземпляр шаблона с публичным текстом narrator; произвольный HTML модели не исполняется.
 - **Interaction event** — типизированное действие `opened`, `submitted` или `reported`, которое Gateway привязывает к партии и учитывает детерминированно.
 
-## Диагностический Turn Trace Workbench
+## Диагностический RP Turn Trace Workbench
 
 Workbench не добавляет контейнер или второй state store. Корень трассы —
 `(state_campaign_id, request_id)`, поэтому запрос остаётся видимым даже без
@@ -166,7 +173,7 @@ committed turn. Gateway объединяет существующие authoritat
 ```mermaid
 flowchart LR
     R["turn_requests\nrequest_id"] --> E["turn_trace_events"]
-    A["Авторитетные stores\nturns · state · memory · relationships · training"] --> V["Trace read model"]
+    A["Авторитетные RP stores\nturns · state · memory · relationships"] --> V["Trace read model"]
     E --> V
     M["turn_state_mutations"] --> V
     S["service_call_log"] --> V
@@ -180,26 +187,27 @@ flowchart LR
 изменить outcome, prompt, state patch, scoring или fallback. Workbench понимает
 фактическую `rp_contract_revision`, а для legacy-партий —
 `rp_contract_version`; незнакомые фазы остаются видимыми как generic nodes.
-Admin-only gate не позволяет обычному владельцу партии увидеть скрытые
-`AUTHORITATIVE_OUTCOME`, scoring или assessment-инструкции training runtime.
+Admin-only gate не позволяет обычному владельцу партии увидеть скрытые RP
+outcome, service prompts или операторские аннотации. Standalone training data и
+assessment-инструкции в RP Workbench не загружаются.
 
-## Почему Gateway — authority
+## Почему каждый Gateway — authority своего режима
 
-До LLM-вызова Gateway:
+До LLM-вызова RP Gateway определяет владельца и партию, загружает RP state и
+историю именно этой party/branch, интерпретирует реплику, выполняет RP Rule
+Engine, получает outcome и собирает ограниченный narrator prompt. После вызова
+он валидирует ответ, применяет patch и сохраняет turn, request status и audit.
+Training snapshot, scoring и artifact/workspace contracts этот процесс не
+загружает.
 
-1. определяет владельца и партию;
-2. загружает state и историю именно этой party/branch;
-3. загружает immutable training-runtime snapshot и неиспользованные типизированные события training artifacts/workspace;
-4. интерпретирует текущую реплику;
-5. выполняет режимный Rule Engine; для нового training-контракта он интерпретирует WorldPack assessment без знания предметной области;
-6. получает `Outcome` и предварительный state patch;
-7. собирает ограниченный prompt, sanitized `ACTIVE_TRAINING_TURN_CONTRACT` и контракты только включённых artifacts/workspace.
-
-После LLM-вызова Gateway валидирует текст, применяет patch и сохраняет turn,
-request status и audit. Обычные режимы могут использовать repair. Новый
-training runtime делает не более одного narrator-вызова и при нарушении
-переходит к fallback текущего WorldPack-хода. Поэтому модель может заново
-сформулировать сцену, но не заменить событие или score другим.
+Standalone Training Gateway отдельно загружает immutable training-runtime
+snapshot и неиспользованные типизированные события artifacts/workspace,
+интерпретирует WorldPack assessment, получает deterministic outcome/state patch
+и собирает sanitized `ACTIVE_TRAINING_TURN_CONTRACT`. Он делает один основной
+narrator-вызов; один bounded provider repair допустим только для soft validation
+failure. Ошибка provider или hard violation переводит ход в authored fallback
+текущего WorldPack. Поэтому модель может заново сформулировать сцену, но не
+заменить событие или score другим.
 
 ## Независимые training capabilities
 
@@ -229,11 +237,16 @@ SQLite/JSON-операцией без LLM. Отдельный фоновый wor
 
 ## Основные границы совместимости
 
-Текущий Compose содержит `rp-gateway`, `rp-light-gui`, `rp-showcase-gui` и опциональный `rp-local-llm`. SillyTavern-контейнера в нём нет.
+Живой Compose до C1 apply содержит `rp-gateway`, `rp-light-gui`,
+`rp-showcase-gui` и опциональный `rp-local-llm`. SillyTavern-контейнера в нём
+нет.
 
-Это описание остаётся верным до cutover Decision 018. Целевой RP Compose не
-содержит `rp-showcase-gui` и training WorldPacks; Awareness Showroom поставляется
-отдельным commit-pinned application через IaC.
+Подготовленный zero-window C1/O2 source удаляет `rp-showcase-gui`, Awareness
+WorldPacks и training runtime из RP checkout/Compose и поставляет Awareness
+Showroom отдельным commit-pinned application через IaC. RP Gateway скрывает
+старые training-партии и принимает только `rp`. Legacy training/Showroom строки
+БД, state и backups остаются сохранёнными, но исполняемого training source в RP
+контуре больше нет.
 
 При этом сохранены:
 

@@ -108,11 +108,6 @@ def offline_eval() -> dict[str, Any]:
         )
     commands.extend(
         [
-            (
-            "training-runtime",
-            [python, "scripts/validate-training-runtime.py", "--worldpacks", "worldpacks"],
-            RP_ROOT,
-            ),
             ("state-workflow", [python, "scripts/test-state-workflow.py"], RP_ROOT),
             ("check-workflow", [python, "scripts/test-check-workflow.py"], RP_ROOT),
             ("gateway-pytest", [python, "-m", "pytest", "-q"], RP_ROOT / "rp-gateway"),
@@ -121,8 +116,8 @@ def offline_eval() -> dict[str, Any]:
 
     node = resolve_node()
     if node:
-        for app_path in (RP_ROOT / "rp-light-gui" / "app.js", RP_ROOT / "rp-showcase-gui" / "app.js"):
-            commands.append((f"syntax:{app_path.parent.name}", [node, "--check", str(app_path)], REPO_ROOT))
+        app_path = RP_ROOT / "rp-light-gui" / "app.js"
+        commands.append((f"syntax:{app_path.parent.name}", [node, "--check", str(app_path)], REPO_ROOT))
         for test_path in sorted(RP_ROOT.rglob("*.test.js")):
             commands.append((f"js:{test_path.relative_to(RP_ROOT)}", [node, str(test_path)], REPO_ROOT))
     else:
@@ -304,8 +299,6 @@ def browser_report(path: Path) -> dict[str, Any]:
         "party_authority_verified",
         "exactly_once_turn_verified",
         "provider_evidence_verified",
-        "training_artifacts_verified",
-        "showroom_isolation_verified",
         "browser_error_count",
     }
     missing = sorted(required - evidence.keys())
@@ -317,8 +310,6 @@ def browser_report(path: Path) -> dict[str, Any]:
             "party_authority_verified",
             "exactly_once_turn_verified",
             "provider_evidence_verified",
-            "training_artifacts_verified",
-            "showroom_isolation_verified",
         )
     )
     passed = (

@@ -55,8 +55,6 @@ PROMPT_SYSTEM_BLOCK_IDS = (
     ("WORLD_SYSTEM_PROMPT", "world_system_prompt"),
     ("PLAYER_CHARACTER", "player_character"),
     ("WORLD_AUTHORS_NOTE", "world_authors_note"),
-    ("ACTIVE_TRAINING_TURN_CONTRACT", "training_turn_contract"),
-    ("TRAINING_INTERACTION_CONTRACT", "training_interaction_contract"),
     ("RELEVANT_CHARACTERS", "relevant_characters"),
     ("RETRIEVED_ARCHIVE_SCENES", "retrieved_archive_scenes"),
     ("UNCOMPACTED_ARCHIVE_FALLBACK", "uncompacted_archive_fallback"),
@@ -355,55 +353,6 @@ def scene_reanchor_prompt_block(state: dict[str, Any]) -> str | None:
     )
 
 
-def training_turn_prompt_block(contract: dict[str, Any]) -> str:
-    output_rules = [
-        "Return only the final visible narration: no analysis, preamble, commentary, or Markdown fences.",
-        "Write fresh natural wording for the visible surface body. Gateway applies the exact authored header and final question.",
-    ]
-    return "\n".join(
-        [
-            "ACTIVE_TRAINING_TURN_CONTRACT",
-            "This machine-readable WorldPack contract is authoritative for the current visible turn only.",
-            "Generate fresh natural wording with the LLM, but do not change its turn, sender, channel, required facts, attachment, URL policy, or player-role boundary.",
-            "Do not infer a different event from prior history and never expose hidden assessment rules.",
-            *output_rules,
-            json.dumps(contract, ensure_ascii=False, separators=(",", ":")),
-        ]
-    )
-
-
-def training_artifact_prompt_block(contract: dict[str, Any]) -> str:
-    site = contract.get("site") if "site" in contract or "workspace" in contract else contract
-    workspace = contract.get("workspace") if "site" in contract or "workspace" in contract else None
-    lines = ["TRAINING_INTERACTION_CONTRACT"]
-    if workspace:
-        lines.extend(
-            [
-                "Return exactly one JSON object with schema_version rp-gateway.narrative-bundle.v2, narrative_text, artifacts, and workspace_files.",
-                "For workspace_files emit exactly supplied file_key and blueprint_id values and fill only declared string slots.",
-            ]
-        )
-    else:
-        lines.append("Return exactly one JSON object with schema_version rp-gateway.narrative-bundle.v1, narrative_text, and artifacts.")
-    if site:
-        lines.extend(
-            [
-                "Emit exactly the supplied artifact_key and blueprint_id and fill only the declared string slots.",
-                "Put the exact fixed display_url only in the visible narrative_text field line 'Ссылки:'.",
-                "Do not emit display_url or any other fixed URL field inside an artifact object.",
-            ]
-        )
-    lines.extend(
-        [
-            "Put the complete visible surface body inside narrative_text; Gateway applies the exact authored header and final question.",
-            "Do not put any text before or after the JSON object. Do not wrap it in a Markdown code fence.",
-            "Never emit HTML, CSS, JavaScript, remote assets, credentials, paths, MIME types, file classification, answer keys, scoring, correctness, or remediation.",
-            json.dumps({"site": site, "workspace": workspace}, ensure_ascii=False, separators=(",", ":")),
-        ]
-    )
-    return "\n".join(lines)
-
-
 class ProviderRateLimitError(RuntimeError):
     def __init__(
         self,
@@ -457,8 +406,6 @@ class NarrativeClient:
         memory_summary: dict[str, Any] | list[dict[str, Any]] | None = None,
         rp_story_memory: dict[str, Any] | None = None,
         request_id: str | None = None,
-        artifact_contract: dict[str, Any] | None = None,
-        training_turn_contract: dict[str, Any] | None = None,
         relationship_pressure: str | None = None,
         world_events: str | None = None,
         supervisor_advisory: str | None = None,
@@ -486,8 +433,6 @@ class NarrativeClient:
                 outcome,
                 repair_instruction,
                 failed_response_text or "",
-                artifact_contract=artifact_contract,
-                training_turn_contract=training_turn_contract,
                 relationship_pressure=relationship_pressure,
                 world_events=world_events,
                 supervisor_advisory=supervisor_advisory,
@@ -502,8 +447,6 @@ class NarrativeClient:
                 repair_instruction=None,
                 memory_summary=memory_summary,
                 rp_story_memory=rp_story_memory,
-                artifact_contract=artifact_contract,
-                training_turn_contract=training_turn_contract,
                 relationship_pressure=relationship_pressure,
                 world_events=world_events,
                 supervisor_advisory=supervisor_advisory,
@@ -526,7 +469,7 @@ class NarrativeClient:
             )
             started = time.perf_counter()
             try:
-                data = self.mock_completion(outcome, repair_instruction, artifact_contract, state=state)
+                data = self.mock_completion(outcome, repair_instruction, state=state)
             except Exception as exc:
                 self.record_trace_attempt(
                     request_id=request_id,
@@ -889,8 +832,6 @@ class NarrativeClient:
         repair_instruction: str | None,
         memory_summary: dict[str, Any] | list[dict[str, Any]] | None = None,
         rp_story_memory: dict[str, Any] | None = None,
-        artifact_contract: dict[str, Any] | None = None,
-        training_turn_contract: dict[str, Any] | None = None,
         relationship_pressure: str | None = None,
         world_events: str | None = None,
         supervisor_advisory: str | None = None,
@@ -916,11 +857,6 @@ class NarrativeClient:
             )
         )
         player_state = state.get("player", {})
-        if training_turn_contract and isinstance(player_state, dict):
-            player_state = {
-                "name": player_state.get("name"),
-                "description": player_state.get("description"),
-            }
         state_summary = None
         if not revision_eight:
             state_summary = {
@@ -983,8 +919,6 @@ class NarrativeClient:
                     "content": f"WORLD_AUTHORS_NOTE\n{self.settings.world_authors_note}",
                 }
             )
-        if training_turn_contract:
-            messages.append({"role": "system", "content": training_turn_prompt_block(training_turn_contract)})
         request_messages = [message for message in request.messages if isinstance(message.content, str)]
         prior_request_messages = request_messages[:-1]
         volatile_request_messages: list[dict[str, str]] = []
@@ -1008,8 +942,6 @@ class NarrativeClient:
                     ),
                 }
             )
-        if artifact_contract:
-            messages.append({"role": "system", "content": training_artifact_prompt_block(artifact_contract)})
         if memory_summary and revision_eight:
             record_prompt_omission(
                 diagnostics,
@@ -1143,8 +1075,6 @@ class NarrativeClient:
         outcome: Outcome,
         repair_instruction: str,
         failed_response_text: str,
-        artifact_contract: dict[str, Any] | None = None,
-        training_turn_contract: dict[str, Any] | None = None,
         relationship_pressure: str | None = None,
         world_events: str | None = None,
         supervisor_advisory: str | None = None,
@@ -1182,10 +1112,6 @@ class NarrativeClient:
             if len(world_system_block) > 5_000:
                 raise ValueError("WORLD_SYSTEM_PROMPT exceeds the revision-8 5000 character limit")
             messages.append({"role": "system", "content": world_system_block})
-        if training_turn_contract:
-            messages.append({"role": "system", "content": training_turn_prompt_block(training_turn_contract)})
-        if artifact_contract:
-            messages.append({"role": "system", "content": training_artifact_prompt_block(artifact_contract)})
         if self.settings.scenario_type == "rp" and self.settings.rp_contract_revision >= 8:
             player_block = player_character_block(state)
             if player_block:
@@ -1247,16 +1173,6 @@ class NarrativeClient:
             "Treat current state as authoritative, do not invent missing resources, and never expose service JSON, "
             "analysis, recommendations, diagnostics, critique, outcome tags, or Gateway wording. "
         )
-        if self.settings.scenario_type == "training":
-            return common + (
-                "You are the runtime narrator for a deterministic training scenario. There are no random rolls or "
-                "skill checks. Follow the authored scenario structure, schedule, presentation templates, and completion "
-                "conditions exactly. Resolve only actions explicitly stated by the player and advance exactly one "
-                "scenario turn. Do not coach, hint, assess, explain best practice, reveal hidden scoring, or announce "
-                "whether an item is safe or suspicious unless the authored scenario explicitly schedules a final debrief. "
-                "If player.resources.current-turn-window is present, begin with that exact scheduled turn as a Russian "
-                "player-facing header and never remain in the previous time window."
-            )
         if self.settings.rp_contract_revision >= 1:
             rules = common + (
                 "You are the GM and narrator of a roleplaying game without mechanical checks. Treat the latest player "
@@ -1282,7 +1198,6 @@ class NarrativeClient:
         self,
         outcome: Outcome,
         repair_instruction: str | None,
-        artifact_contract: dict[str, Any] | None = None,
         state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         mode = self.settings.llm_api_base.removeprefix("mock://")
@@ -1311,43 +1226,7 @@ class NarrativeClient:
             content = "Despite the failure, the king still transfers command authority."
         else:
             content = "The scene shifts around the attempt, leaving the next opening clear without taking control from the player."
-        if artifact_contract:
-            site_contract = artifact_contract.get("site") if "site" in artifact_contract or "workspace" in artifact_contract else artifact_contract
-            workspace_contract = artifact_contract.get("workspace") if "site" in artifact_contract or "workspace" in artifact_contract else None
-            slot_values = {
-                slot_id: ("Продолжить" if slot_id.endswith("label") else "Учебная страница")
-                for slot_id in (site_contract or {}).get("slots", {})
-            }
-            workspace_files = []
-            for file_contract in (workspace_contract or {}).get("files", []):
-                workspace_files.append(
-                    {
-                        "file_key": file_contract["file_key"],
-                        "blueprint_id": file_contract["blueprint_id"],
-                        "slots": {slot_id: "Учебный документ" for slot_id in file_contract.get("slots", {})},
-                    }
-                )
-            narrative_text = content
-            artifacts = []
-            if site_contract:
-                narrative_text = f"{content}\n\nСсылка: {site_contract['display_url']}"
-                artifacts = [
-                    {
-                        "artifact_key": site_contract["artifact_key"],
-                        "blueprint_id": site_contract["blueprint_id"],
-                        "slots": slot_values,
-                    }
-                ]
-            content = json.dumps(
-                {
-                    "schema_version": "rp-gateway.narrative-bundle.v2" if workspace_contract else "rp-gateway.narrative-bundle.v1",
-                    "narrative_text": narrative_text,
-                    "artifacts": artifacts,
-                    **({"workspace_files": workspace_files} if workspace_contract else {}),
-                },
-                ensure_ascii=False,
-            )
-        elif self.settings.scenario_type == "rp" and self.settings.rp_contract_revision == 7:
+        if self.settings.scenario_type == "rp" and self.settings.rp_contract_revision == 7:
             scene = initial_scene_state(state or {})
             content = json.dumps(
                 {
