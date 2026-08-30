@@ -49,6 +49,14 @@ def test_committed_v2_world_and_all_scenarios_materialize() -> None:
         (style, start) for style in EXPECTED_STYLES for start in EXPECTED_STARTS
     }
 
+    scenarios = [loader.materialize_preset(preset.id) for preset in presets]
+    assert len({scenario.narrator_system for scenario in scenarios}) == len(EXPECTED_STYLES)
+    assert len({scenario.narrator_note for scenario in scenarios}) == len(EXPECTED_STYLES)
+    for style in EXPECTED_STYLES:
+        assert len(
+            {scenario.narrator_system for scenario in scenarios if scenario.style == style}
+        ) == 1
+
     for preset in presets:
         scenario = loader.materialize_preset(preset.id)
         assert scenario.world_id == world.world_id

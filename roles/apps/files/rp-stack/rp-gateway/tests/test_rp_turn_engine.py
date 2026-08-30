@@ -81,7 +81,7 @@ def test_fresh_database_is_clean_and_reopens_without_legacy_tables(tmp_path: Pat
         schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
         foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-    assert tables == {"rp_parties", "rp_turns"}
+    assert tables == {"rp_parties", "rp_turns", "rp_story_memory_snapshots"}
     assert application_id == RP_DATABASE_APPLICATION_ID
     assert schema_version == RP_SCHEMA_VERSION
     assert foreign_key_errors == []
@@ -140,6 +140,8 @@ def test_turns_preserve_exact_raw_text_and_are_isolated_by_party(tmp_path: Path)
                 "UPDATE rp_turns SET narrator_text = 'переписано' WHERE id = ?",
                 (first.id,),
             )
+        with pytest.raises(sqlite3.IntegrityError, match="cannot be deleted"):
+            connection.execute("DELETE FROM rp_turns WHERE id = ?", (first.id,))
 
 
 def test_exact_retry_returns_one_turn_and_changed_payload_conflicts(tmp_path: Path) -> None:
@@ -266,15 +268,15 @@ def test_database_with_foreign_application_marker_is_rejected_without_mutation(
 
 
 def test_previous_clean_schema_is_rejected_without_migration(tmp_path: Path) -> None:
-    database = tmp_path / "rp-schema-v1.db"
+    database = tmp_path / "rp-schema-v2.db"
     with sqlite3.connect(database) as connection:
         connection.execute(f"PRAGMA application_id = {RP_DATABASE_APPLICATION_ID}")
-        connection.execute("PRAGMA user_version = 1")
+        connection.execute("PRAGMA user_version = 2")
         connection.execute("CREATE TABLE rp_parties(id TEXT PRIMARY KEY)")
         connection.execute("CREATE TABLE rp_turns(id INTEGER PRIMARY KEY)")
     before = database.read_bytes()
 
-    with pytest.raises(RPSchemaError, match="unsupported RP schema version 1"):
+    with pytest.raises(RPSchemaError, match="unsupported RP schema version 2"):
         RPTurnEngine(database)
 
     assert database.read_bytes() == before

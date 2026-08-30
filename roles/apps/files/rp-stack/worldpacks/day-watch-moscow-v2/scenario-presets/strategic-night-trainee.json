@@ -8,8 +8,8 @@
   "format": "plain_scene_text",
   "difficulty": null,
   "detail_level": "default",
-  "world_system_prompt_file": "presets/strategic/gm-system.md",
-  "world_authors_note_file": "presets/strategic/authors-note.md",
+  "world_system_prompt_file": "scenario-experience/strategic-system.md",
+  "world_authors_note_file": "scenario-experience/strategic-note.md",
   "opening_file": "prompts/openings/night-trainee/opening-scene.md",
   "initial_state_file": "prompts/openings/night-trainee/state-seed.json",
   "active_character_ids": [

@@ -49,8 +49,8 @@ roles/apps/files/rp-stack/worldpacks/day-watch-moscow-v2/
   rules/checks.md
   relationships/model.json
   lore-cards/core.json
-  presets/<style>/gm-system.md
-  presets/<style>/authors-note.md
+  scenario-experience/<style>-system.md
+  scenario-experience/<style>-note.md
   prompts/openings/<start>/opening-scene.md
   prompts/openings/<start>/state-seed.json
 ```
@@ -62,7 +62,9 @@ place of files, and symlink escapes fail closed.
 
 Existing `manifest.json` and root aliases can coexist until later cutover, but
 the Decision 043 loader never reads them. They are not a fallback for missing or
-invalid new definitions.
+invalid new definitions. The still-active legacy runtime also reads
+`presets/**`; Decision 043 Scenario narrator assets live under
+`scenario-experience/` so offline authoring does not change that runtime.
 
 ## `world.json`
 
@@ -120,8 +122,8 @@ source:
   "format": "plain_scene_text",
   "difficulty": null,
   "detail_level": "default",
-  "world_system_prompt_file": "presets/book/gm-system.md",
-  "world_authors_note_file": "presets/book/authors-note.md",
+  "world_system_prompt_file": "scenario-experience/book-system.md",
+  "world_authors_note_file": "scenario-experience/book-note.md",
   "opening_file": "prompts/openings/independent/opening-scene.md",
   "initial_state_file": "prompts/openings/independent/state-seed.json",
   "active_character_ids": [

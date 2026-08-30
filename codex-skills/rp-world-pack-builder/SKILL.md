@@ -116,8 +116,8 @@ worldpacks/day-watch-moscow-v2/
   rules/checks.md
   relationships/model.json
   lore-cards/*.json
-  presets/<style>/gm-system.md
-  presets/<style>/authors-note.md
+  scenario-experience/<style>-system.md
+  scenario-experience/<style>-note.md
   prompts/openings/<start>/opening-scene.md
   prompts/openings/<start>/state-seed.json
 ```
@@ -142,6 +142,10 @@ configuration:
 - a non-empty, unique list of active character IDs;
 - bounded `local_overrides` when a Scenario deliberately deviates from World
   defaults.
+
+New Scenario narrator assets live under `scenario-experience/`. The legacy
+`presets/**` assets remain inputs of the still-active manifest runtime until
+cutover and must not be edited as the Decision 043 Scenario source.
 
 The preset filename stem must equal its ID. Preserve the committed cross-product
 of the three authored styles and four authored starts for
