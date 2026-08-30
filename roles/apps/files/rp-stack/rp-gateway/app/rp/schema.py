@@ -6,7 +6,7 @@ import sqlite3
 
 
 RP_DATABASE_APPLICATION_ID = 0x5250454E  # "RPEN"
-RP_SCHEMA_VERSION = 4
+RP_SCHEMA_VERSION = 7
 
 _EXPECTED_TABLES = frozenset(
     {
@@ -67,6 +67,14 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE rp_parties (
             id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
             owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+            title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+            narrator_profile_id TEXT NOT NULL CHECK(length(trim(narrator_profile_id)) > 0),
+            narrator_provider TEXT NOT NULL
+                CHECK(narrator_provider IN ('local', 'gemini', 'openrouter')),
+            narrator_base_url TEXT NOT NULL CHECK(length(trim(narrator_base_url)) > 0),
+            narrator_model TEXT NOT NULL CHECK(length(trim(narrator_model)) > 0),
+            narrator_settings_json TEXT NOT NULL
+                CHECK(length(trim(narrator_settings_json)) > 0),
             world_snapshot_json TEXT NOT NULL CHECK(length(trim(world_snapshot_json)) > 0),
             world_hash TEXT NOT NULL CHECK(length(world_hash) = 64),
             scenario_snapshot_json TEXT NOT NULL CHECK(length(trim(scenario_snapshot_json)) > 0),
@@ -258,11 +266,12 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             before_text TEXT NOT NULL,
             after_text TEXT NOT NULL CHECK(length(trim(after_text)) > 0),
             base_party_version INTEGER NOT NULL CHECK(base_party_version >= 0),
+            base_guidance_revision INTEGER NOT NULL CHECK(base_guidance_revision >= 0),
             evidence_versions_json TEXT NOT NULL CHECK(length(trim(evidence_versions_json)) > 0),
             window_hash TEXT NOT NULL CHECK(length(window_hash) = 64),
             status TEXT NOT NULL DEFAULT 'pending'
                 CHECK(status IN ('pending', 'accepted', 'rejected', 'stale')),
-            applied_party_version INTEGER CHECK(applied_party_version > base_party_version),
+            applied_party_version INTEGER CHECK(applied_party_version >= base_party_version),
             created_at INTEGER NOT NULL,
             decided_at INTEGER,
             CHECK(
@@ -283,8 +292,7 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             party_version INTEGER NOT NULL CHECK(party_version > 0),
             content TEXT NOT NULL CHECK(length(trim(content)) > 0),
             created_at INTEGER NOT NULL,
-            UNIQUE(party_id, revision),
-            UNIQUE(party_id, party_version)
+            UNIQUE(party_id, revision)
         ) STRICT
         """,
         """
@@ -297,6 +305,8 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         """
         CREATE TRIGGER rp_parties_snapshots_immutable
         BEFORE UPDATE OF
+            narrator_profile_id, narrator_provider, narrator_base_url,
+            narrator_model, narrator_settings_json,
             world_snapshot_json, world_hash, scenario_snapshot_json, scenario_hash
         ON rp_parties
         BEGIN

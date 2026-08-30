@@ -1736,10 +1736,13 @@ class PartyStore:
         owner_user_id: str | None,
         scenario_type: str | None = None,
         include_branches: bool = True,
+        party_ids: set[str] | None = None,
     ) -> dict[str, Any]:
         parties = self.list_parties(owner_user_id=owner_user_id)
         records: list[dict[str, Any]] = []
         for party in parties:
+            if party_ids is not None and party.id not in party_ids:
+                continue
             if party.dataset_review_status != "approved":
                 continue
             if scenario_type and party.scenario_type != scenario_type:

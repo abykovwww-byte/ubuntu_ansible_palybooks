@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -461,10 +462,10 @@ def test_administrator_uses_separate_handler_and_manual_owner_scoped_decisions(
     )
 
     assert accepted.status == repeated.status == "accepted"
-    assert accepted.applied_party_version == 2
-    assert accepted_party.current_version == 2
+    assert accepted.applied_party_version == 1
+    assert accepted_party.current_version == 1
     assert accepted_context.administrator_guidance is not None
-    assert accepted_context.administrator_guidance.party_version == 2
+    assert accepted_context.administrator_guidance.party_version == 1
     assert (
         accepted_context.administrator_guidance.content
         == proposals["party-accept"].after_text
@@ -503,7 +504,7 @@ def test_administrator_uses_separate_handler_and_manual_owner_scoped_decisions(
     assert rejected_context.administrator_guidance is None
 
 
-def test_administrator_review_cannot_rebase_itself_over_an_intervening_turn(
+def test_administrator_review_binds_to_current_version_after_intervening_turn(
     tmp_path: Path,
 ) -> None:
     engine = RPTurnEngine(tmp_path / "rp-clean.db")
@@ -534,16 +535,98 @@ def test_administrator_review_cannot_rebase_itself_over_an_intervening_turn(
         RPAdministratorHandler(engine, InterveningTurnModel()).handle(job)
     )
 
-    assert result == {"kind": "administrator", "result": "stale_review"}
+    assert isinstance(result, RPAdministratorProposal)
+    assert result.base_party_version == 2
+    assert result.evidence_versions == (1,)
     assert engine.list_administrator_proposals(
         owner_user_id="owner-one", party_id="party-race"
-    ) == ()
+    ) == (result,)
     assert engine.get_party(
         owner_user_id="owner-one", party_id="party-race"
     ).current_version == 2
 
 
-def test_administrator_does_not_review_an_expired_source_version(
+def test_two_administrator_guidance_revisions_can_share_party_version(
+    tmp_path: Path,
+) -> None:
+    engine = RPTurnEngine(tmp_path / "rp-clean.db")
+    party_id = "party-guidance-revisions"
+    _create_party(engine, party_id)
+    _commit_first_turn(engine, party_id)
+    first_job = engine.claim_administrator_job()
+    assert first_job is not None
+
+    engine.commit_turn(
+        owner_user_id="owner-one",
+        party_id=party_id,
+        request_id="request-two",
+        idempotency_key="key-two",
+        expected_version=1,
+        player_text="Я продолжаю, пока идёт первый разбор.",
+        narrator_text="Сцена продвигается ко второму решению.",
+    )
+
+    class RevisionModel:
+        def __init__(self) -> None:
+            self.revision = 0
+
+        async def review_party(self, **_: object) -> RPAdministratorResult:
+            self.revision += 1
+            return RPAdministratorResult(
+                result="suggest",
+                target_slot="narrator_guidance",
+                after=f"Рекомендация {self.revision}.",
+            )
+
+    model = RevisionModel()
+    handler = RPAdministratorHandler(engine, model, cadence_turns=1)
+    first_proposal = asyncio.run(handler.handle(first_job))
+    assert isinstance(first_proposal, RPAdministratorProposal)
+    assert first_job.claim_token is not None
+    engine.complete_administrator_job(
+        job_id=first_job.id, claim_token=first_job.claim_token
+    )
+    engine.decide_administrator_proposal(
+        owner_user_id="owner-one",
+        party_id=party_id,
+        proposal_id=first_proposal.id,
+        decision="accept",
+    )
+
+    second_job = engine.claim_administrator_job()
+    assert second_job is not None
+    second_proposal = asyncio.run(handler.handle(second_job))
+    assert isinstance(second_proposal, RPAdministratorProposal)
+    assert second_job.claim_token is not None
+    engine.complete_administrator_job(
+        job_id=second_job.id, claim_token=second_job.claim_token
+    )
+    accepted = engine.decide_administrator_proposal(
+        owner_user_id="owner-one",
+        party_id=party_id,
+        proposal_id=second_proposal.id,
+        decision="accept",
+    )
+
+    assert accepted.status == "accepted"
+    assert first_proposal.base_guidance_revision == 0
+    assert second_proposal.base_guidance_revision == 1
+    assert accepted.applied_party_version == 2
+    assert engine.get_party(
+        owner_user_id="owner-one", party_id=party_id
+    ).current_version == 2
+    with sqlite3.connect(engine.sqlite_path) as connection:
+        guidance = connection.execute(
+            """
+            SELECT revision, party_version FROM rp_administrator_guidance
+            WHERE party_id = ? ORDER BY revision
+            """,
+            (party_id,),
+        ).fetchall()
+    assert guidance == [(1, 2), (2, 2)]
+
+
+def test_administrator_reviews_immutable_window_after_party_version_advances(
     tmp_path: Path,
 ) -> None:
     engine = RPTurnEngine(tmp_path / "rp-clean.db")
@@ -563,20 +646,55 @@ def test_administrator_does_not_review_an_expired_source_version(
     assert job.source_version == 1
     assert RPTurnEngine(tmp_path / "rp-clean.db").claim_administrator_job() is None
 
-    class MustNotReview:
-        async def review_party(self, **_: object) -> RPAdministratorResult:
-            raise AssertionError("expired Administrator window reached the model")
+    class RecordingReview:
+        def __init__(self) -> None:
+            self.party_version: int | None = None
+            self.evidence_versions: tuple[int, ...] = ()
 
-    result = asyncio.run(RPAdministratorHandler(engine, MustNotReview()).handle(job))
+        async def review_party(
+            self, *, party: object, turns: tuple[object, ...], **_: object
+        ) -> RPAdministratorResult:
+            self.party_version = getattr(party, "current_version")
+            self.evidence_versions = tuple(
+                getattr(turn, "committed_version") for turn in turns
+            )
+            return RPAdministratorResult(
+                result="suggest",
+                target_slot="narrator_guidance",
+                after="Совет по неизменяемому окну первого хода.",
+            )
 
-    assert result == {
-        "kind": "administrator",
-        "result": "no_proposal",
-        "reason": "source_version_expired",
-    }
+    model = RecordingReview()
+    result = asyncio.run(RPAdministratorHandler(engine, model).handle(job))
+
+    assert isinstance(result, RPAdministratorProposal)
+    assert model.party_version == 2
+    assert model.evidence_versions == (1,)
+    assert result.base_party_version == 2
+    assert result.evidence_versions == (1,)
     assert engine.list_administrator_proposals(
         owner_user_id="owner-one", party_id="party-expired-review"
-    ) == ()
+    ) == (result,)
+    engine.commit_turn(
+        owner_user_id="owner-one",
+        party_id="party-expired-review",
+        request_id="request-after-proposal",
+        idempotency_key="key-after-proposal",
+        expected_version=2,
+        player_text="Я продолжаю, пока предложение ждёт решения.",
+        narrator_text="История снова продвигается.",
+    )
+    accepted = engine.decide_administrator_proposal(
+        owner_user_id="owner-one",
+        party_id="party-expired-review",
+        proposal_id=result.id,
+        decision="accept",
+    )
+    assert accepted.status == "accepted"
+    assert accepted.applied_party_version == 3
+    assert engine.get_party(
+        owner_user_id="owner-one", party_id="party-expired-review"
+    ).current_version == 3
 
 
 def test_administrator_does_not_version_bump_for_unchanged_guidance(
@@ -608,7 +726,7 @@ def test_administrator_does_not_version_bump_for_unchanged_guidance(
         party_id="party-noop-guidance",
         request_id="request-after-guidance",
         idempotency_key="key-after-guidance",
-        expected_version=2,
+        expected_version=1,
         player_text="Продолжаю после принятой рекомендации.",
         narrator_text="Сцена продолжается.",
     )
@@ -642,7 +760,7 @@ def test_administrator_does_not_version_bump_for_unchanged_guidance(
     }
     assert engine.get_party(
         owner_user_id="owner-one", party_id="party-noop-guidance"
-    ).current_version == 3
+    ).current_version == 2
     assert len(
         engine.list_administrator_proposals(
             owner_user_id="owner-one", party_id="party-noop-guidance"

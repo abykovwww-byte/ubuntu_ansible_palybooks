@@ -7,13 +7,13 @@ runtime. RP-only living story memory реализована в исходном 
 [Decision 016](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md),
 но статус push, Ansible apply и live verification всегда сообщается отдельно.
 
-Срез 3 [Decision 043](../../roles/apps/files/rp-stack/docs/decisions/043-rp-stack-rebuild.md)
-добавляет только offline production loader/schema нового RP-контура:
-World и Scenario стали разными авторскими объектами, а новая партия
-в чистой RP SQLite получает их независимые immutable snapshots и
-SHA-256. Перенесён только `day-watch-moscow-v2`. API, provider, UI,
-deploy и live runtime не переключены; manifest-based WorldPack остаётся
-действующим трактом до шага 12.
+Срез 6 [Decision 043](../../roles/apps/files/rp-stack/docs/decisions/043-rp-stack-rebuild.md)
+подключает clean World/Scenario/Party, provider и runner к Gateway API за
+`RP_REBUILD_ENABLED`. Перенесён только `day-watch-moscow-v2`; preset/free Party
+получают независимые immutable snapshots и SHA-256. Training и Showroom пока
+остаются на legacy runtime. Inventory держит cutover-флаг выключенным: Light
+GUI, apply и live runtime ещё не переключены, manifest-based WorldPack остаётся
+production-трактом до отдельной activation.
 
 [Decision 036](../../roles/apps/files/rp-stack/docs/decisions/036-retire-novel-and-nvidia.md)
 выводит из активного контракта режим совместного романа и NVIDIA provider.
@@ -203,11 +203,13 @@ endurance для более высоких ступеней не заявлен�
 принимает полный ребилд RP-контура вокруг World / Scenario / Party, трёх
 раздельных модельных ролей и единственного мира `day-watch-moscow-v2`. Decision
 043 вытесняет staged revision 8–12 rollout из 042; старый `Adjudicator` ради него
-не расширяется. Срез 2 Decision 043 поставляет только уровень `каркас`:
-изолированный `app/rp` с clean SQLite и offline atomic `RPTurnEngine`. Он не
-подключён к `main.py`, API, runtime, provider или legacy DB. Поэтому текущая Wiki
-ниже продолжает описывать действующий runtime на старом `Adjudicator`; UX,
-deployment и live readiness этим срезом не меняются.
+не расширяется. В срезе 6 clean `app/rp` подключён к существующим Party API,
+provider client и FastAPI lifespan за `RP_REBUILD_ENABLED`. Новый source-контракт
+возвращает один World, создаёт preset/free Party, коммитит opening/ход только
+после успешного Narrator и ведёт три раздельные роли без raw/fallback. Training и
+Showroom остаются на legacy runtime. Light GUI, apply и live runtime ещё не
+переключены; inventory сохраняет флаг выключенным, поэтому страницы ниже явно
+различают clean source-контракт и пока действующий production UX.
 
 Интерактивные training artifacts из revision `8b8a8fe` применены на `abykovserv`
 и прошли контейнерные, HTTP/API и браузерные live-проверки. Независимые флаги

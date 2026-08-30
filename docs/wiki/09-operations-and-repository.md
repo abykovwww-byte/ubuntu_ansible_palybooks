@@ -377,6 +377,23 @@ Workbench не добавляет контейнер, порт или новый
 container или HTTP `200` не заменяет authenticated admin-browser canary и
 проверку сохранённых строк.
 
+### Cutover controls Decision 043
+
+IaC доставляет `RP_REBUILD_ENABLED`, отдельный `RP_DATABASE_URL`, kill switches
+Narrator/atomic/Administrator, model choice Administrator и интервалы runner.
+В committed server inventory `RP_REBUILD_ENABLED=false`: merge и обычный apply
+ещё не активируют clean ordinary RP.
+
+Перед включением отдельно проверяются: пустая clean DB, backup обоих SQLite,
+exact container env, health, один preset и один free API-flow, provider
+failure/retry без partial turn, restart с pending jobs без роста attempts,
+owner-scoped Administrator decision и отсутствие ordinary legacy RP в
+state/autotest/dataset/trace. Training и Showroom должны пройти свои retained
+smokes; Training smoke включает фильтрованный каталог WorldPack, template,
+draft/save персонажа и создание партии. После этого нужны authenticated Light
+GUI smoke и настоящая Party;
+pytest, CI, healthy container и HTTP `200` не являются live gameplay proof.
+
 ## Live verification интерактивных training artifacts
 
 Snapshot от 31 июля 2026 года для revision `8b8a8fe`:
@@ -453,12 +470,13 @@ ubuntu_ansible_palybooks/
 | `services/service_models.py` | Глобальный service-model catalog/runtime |
 | `services/service_model_client.py` | Exact redacted service-model log, request/attempt metadata и retention |
 | `services/turn_trace.py` | Request/branch/revision-aware trace read model и аннотации |
-| `app/rp/` | Inert clean-schema storage и offline atomic `RPTurnEngine`; не подключён к Gateway runtime |
+| `app/rp/` | Clean RP schema/engine, Narrator/provider boundary, atomic/Administrator handlers и lifespan runner |
 
 Gateway запускает восстановление через единый FastAPI `lifespan`, а не через
-устаревшие `startup`/`shutdown` handlers. До приёма запросов он согласует
-прерванную работу party и branch, возобновляет ожидающие service jobs и
-планирует resumable autotest runs. Отдельной shutdown-фазы сейчас нет.
+устаревшие `startup`/`shutdown` handlers. Для clean RP тот же lifespan возвращает
+claimed job в `pending`, запускает два role loop, а на shutdown делает cancel и
+await обоих loops. Legacy Training/Showroom recovery остаётся отдельным
+ограниченным трактом.
 
 ## Где менять типовые функции
 
@@ -466,7 +484,7 @@ Gateway запускает восстановление через единый 
 |---|---|
 | Новый endpoint | `rp-gateway/app/main.py`, schemas и tests |
 | Изменить обработку хода | `adjudicator.py`, `rule_engine.py`, `validator.py` |
-| Изменить offline-каркас Decision 043 | `app/rp/` и `tests/test_rp_turn_engine.py`; не подключать через `main.py` до отдельного среза |
+| Изменить clean RP Decision 043 | `app/rp/`, `app/main.py`, clean `test_rp_*`; сохранять Training/Showroom isolation и exact provider boundary |
 | Изменить prompt/memory | `narrative.py`, `memory.py`, `rp_story_memory.py`, `rp_history.py`, `context_budget.py`, `state_store.py` |
 | Изменить Light GUI | `rp-light-gui/index.html`, `app.js`, `styles.css` |
 | Изменить Turn Trace Workbench | `turn_trace.py`, `state_store.py`, `narrative.py`, `service_model_client.py`, `main.py`, Light GUI trace assets и tests |
@@ -507,15 +525,15 @@ python -m compileall rp-gateway/app
 pytest
 ```
 
-Для offline-каркаса Decision 043 из каталога `rp-gateway`:
+Для clean RP Decision 043 из каталога `rp-gateway`:
 
 ```bash
-python -m pytest -q tests/test_rp_turn_engine.py
+python -m pytest -q tests/test_rp_turn_engine.py tests/test_rp_world_scenario.py tests/test_rp_narrator_memory.py tests/test_rp_mechanics.py tests/test_rp_runner.py tests/test_rp_provider.py tests/test_rp_gateway_integration.py tests/test_rp_gateway_lifecycle.py
 ```
 
-Этот focused-прогон доказывает только `каркас`: clean SQLite и атомарную
-module-boundary. Он не является проверкой API, provider, deployment или живой
-партии и не повышает readiness до `подключено`.
+Focused-прогон проверяет clean SQLite, HTTP contract, один provider boundary,
+runner lifecycle и изоляцию retained legacy paths. Он не доказывает доступность
+реального provider, качество прозы, apply, браузер или живую Party.
 
 Агрегатная проверка из корня для изменения общего гейта, integration/cutover или
 перед deployment; semantic acceptance запускается при изменении игровой

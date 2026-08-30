@@ -300,10 +300,31 @@ class RPNarratorService:
         engine: RPTurnEngine,
         narrator: RPNarrator,
         prompt_builder: RPNarratorPromptBuilder | None = None,
+        *,
+        atomic_service_enabled: bool = True,
+        derived_wait_seconds: float = 0.0,
+        derived_poll_interval: float = 0.05,
     ):
+        if not isinstance(atomic_service_enabled, bool):
+            raise ValueError("atomic_service_enabled must be a boolean")
+        if (
+            not isinstance(derived_wait_seconds, (int, float))
+            or isinstance(derived_wait_seconds, bool)
+            or derived_wait_seconds < 0
+        ):
+            raise ValueError("derived_wait_seconds must be non-negative")
+        if (
+            not isinstance(derived_poll_interval, (int, float))
+            or isinstance(derived_poll_interval, bool)
+            or derived_poll_interval <= 0
+        ):
+            raise ValueError("derived_poll_interval must be positive")
         self.engine = engine
         self.narrator = narrator
         self.prompt_builder = prompt_builder or RPNarratorPromptBuilder()
+        self.atomic_service_enabled = atomic_service_enabled
+        self.derived_wait_seconds = float(derived_wait_seconds)
+        self.derived_poll_interval = float(derived_poll_interval)
 
     async def narrate_turn(
         self,
@@ -353,6 +374,11 @@ class RPNarratorService:
         if claim.request.claim_token is None:
             raise RuntimeError("acquired narration claim has no token")
         try:
+            await self._wait_for_previous_atomic_service_jobs(
+                owner_user_id=owner_user_id,
+                party_id=party_id,
+                turns=turns,
+            )
             party = self.engine.get_party(
                 owner_user_id=owner_user_id, party_id=party_id
             )
@@ -361,6 +387,9 @@ class RPNarratorService:
                     f"party {party_id!r} is at version {party.current_version}, "
                     f"not {expected_version}"
                 )
+            turns = self.engine.list_turns(
+                owner_user_id=owner_user_id, party_id=party_id
+            )
             memory = self.engine.latest_story_memory(
                 owner_user_id=owner_user_id, party_id=party_id
             )
@@ -393,6 +422,35 @@ class RPNarratorService:
                 error=exc,
             )
             raise
+
+    async def _wait_for_previous_atomic_service_jobs(
+        self,
+        *,
+        owner_user_id: str,
+        party_id: str,
+        turns: tuple[RPTurn, ...],
+    ) -> None:
+        if (
+            not self.atomic_service_enabled
+            or self.derived_wait_seconds == 0
+            or not turns
+        ):
+            return
+        source_version = turns[-1].committed_version
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.derived_wait_seconds
+        while True:
+            jobs = self.engine.service_jobs_for_source_version(
+                owner_user_id=owner_user_id,
+                party_id=party_id,
+                source_version=source_version,
+            )
+            if all(job.status not in {"pending", "running"} for job in jobs):
+                return
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return
+            await asyncio.sleep(min(self.derived_poll_interval, remaining))
 
     async def narrate_opening(
         self,

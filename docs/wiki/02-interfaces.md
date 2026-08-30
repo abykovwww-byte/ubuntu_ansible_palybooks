@@ -15,6 +15,39 @@ manual branch или autotest может явно передать candidate-р�
 endpoint сохраняются. Пустое поле в админской форме сохраняет revision исходной
 партии. Existing party не повышается автоматически при изменении observed.
 
+## Clean RP API Decision 043
+
+При `RP_REBUILD_ENABLED=true` ordinary RP сохраняет прежние Party URL, но
+использует новый строгий payload без revision/state/character compatibility:
+
+- `GET /api/worldpacks` возвращает ровно `day-watch-moscow-v2` и summaries
+  пресетов; detail дополнительно возвращает валидный `free_scenario_seed`;
+- retained Training запрашивает только свои legacy WorldPack через
+  `GET /api/worldpacks?scenario_type=training`; detail, player templates,
+  draft/save/list персонажей разрешены только для WorldPack с `training` в
+  `scenario_types.supported`, а ordinary legacy RP по этим URL получает `410`;
+- `POST /api/parties` одним запросом принимает `world_id`, `scenario` типа
+  `preset` или `free`, `model_profile_id` и опциональные narrator settings;
+- `POST /api/parties/{id}/start` принимает только `idempotency_key`;
+- `POST /api/parties/{id}/messages` принимает ровно `content`,
+  `idempotency_key`, `expected_version`; stale version даёт `409` без replay;
+- history возвращает `turn_kind`, `player_text`, `narrator_text` и committed
+  version; provider failure даёт retryable `502`, не создаёт turn и возвращает
+  исходный текст игрока;
+- memory, jobs, runtime Lore, supervisor трёх ролей и Administrator proposals
+  читаются отдельными owner-scoped endpoints; proposal меняется только явным
+  `accept` или `reject` владельца Party.
+
+Narrator profile фиксирует exact provider/base URL/model. Clean BYOK можно
+сохранить только для этой связи; custom endpoint без exact Party key закрывается
+до provider call. Скрытый, batch, short-context или retired profile нельзя
+передать напрямую в create/start/message.
+
+Обычные legacy RP state/world/branch/autotest/dataset/trace операции при cutover
+не становятся compatibility-слоем: они возвращают `410` или фильтруют ordinary
+RP. Training и серверно подтверждённый Showroom продолжают использовать legacy
+контракт. Light GUI пока не переключён на этот API, а production-флаг выключен.
+
 ## Light GUI
 
 Light GUI — основной интерфейс владельца партии. Это статические HTML/CSS/JavaScript, которые nginx отдаёт на `:8010` и проксирует `/api` в Gateway.

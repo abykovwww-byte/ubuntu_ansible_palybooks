@@ -12,6 +12,28 @@
 
 Эти роли нельзя молча смешивать. Модель партии не становится служебной, а party BYOK не используется глобальными service jobs.
 
+### Clean RP роли Decision 043
+
+При `RP_REBUILD_ENABLED=true` ordinary RP использует другой явный набор из трёх
+ролей:
+
+| Роль | Scope | Маршрут |
+|---|---|---|
+| Narrator | Одна Party | Exact immutable provider/base URL/model Party; один вызов на opening/ход |
+| Атомарная служебная модель | Stack-managed | Story memory, Relationships и runtime Lore через свою очередь/handler |
+| Administrator | Stack-managed | Отдельная очередь/handler, только proposal; применение делает владелец Party |
+
+Narrator не наследует глобальную служебную модель, не меняет provider и не
+использует fallback/repair. Party-scoped BYOK допустим только при точном
+совпадении provider и base URL immutable binding; ключ custom endpoint без exact
+совпадения не отправляется ни на canonical, ни на custom endpoint. Служебные
+роли никогда не получают Party BYOK. Включённая служебная роль с недоступной
+моделью блокирует startup, вместо расходования job attempts после запуска.
+
+Supervisor clean Party показывает модель, enabled/kill switch, текущее
+состояние, success/error и последнюю ошибку каждой роли, но не raw provider
+payload. Этот source-контракт ещё не активирован в production inventory.
+
 ## Провайдеры narrator
 
 Gateway поддерживает OpenAI-compatible вызовы к:

@@ -466,6 +466,7 @@ class AuthStore:
         *,
         owner_user_id: str | None,
         party_id: str,
+        exact_base_url: bool = False,
     ) -> str | None:
         params: tuple[Any, ...]
         sql = "SELECT * FROM provider_api_keys WHERE provider = ? AND is_default = 1 AND owner_user_id IS ? AND party_id = ?"
@@ -476,7 +477,7 @@ class AuthStore:
         sql += " ORDER BY updated_at DESC LIMIT 1"
         with self.connect() as connection:
             row = connection.execute(sql, params).fetchone()
-            if row is None and base_url:
+            if row is None and base_url and not exact_base_url:
                 row = connection.execute(
                     "SELECT * FROM provider_api_keys WHERE provider = ? AND is_default = 1 AND owner_user_id IS ? AND party_id = ? ORDER BY updated_at DESC LIMIT 1",
                     (provider, owner_user_id, party_id),

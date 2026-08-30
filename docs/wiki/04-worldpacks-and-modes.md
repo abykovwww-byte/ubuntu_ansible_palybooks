@@ -2,9 +2,11 @@
 
 [← Жизненный цикл хода](03-turn-lifecycle.md) · [Главная](README.md) · [Далее: память и retrieval →](05-memory-and-retrieval.md)
 
-> Срез 3 Decision 043 добавил новый World/Scenario контракт только в
-> offline-контур. Разделы о manifest и revisions 0–11 ниже описывают
-> временно действующий runtime до шага 12; они не являются
+> Срез 6 Decision 043 подключил новый World/Scenario контракт к clean API за
+> `RP_REBUILD_ENABLED`. Detail единственного World отдаёт server-built
+> `free_scenario_seed`; Party сохраняет отдельные immutable snapshots и hashes.
+> Inventory пока держит флаг выключенным. Разделы о manifest и revisions 0–11
+> ниже описывают временно действующий legacy runtime до шага 12 и не являются
 > compatibility-слоем нового loader.
 
 ## RP contract в manifest
@@ -52,7 +54,7 @@ prompt-generated worlds. `incident-50` остаётся RP-only в исходн�
 Training runtime по-прежнему остаётся generic interpreter: предметная программа,
 score и debrief принадлежат WorldPack, а не Gateway.
 
-## Decision 043, срез 3: World и Scenario
+## Decision 043, срезы 3–6: World и Scenario
 
 Новый авторский source разделён по владельцам:
 
@@ -72,9 +74,9 @@ score и debrief принадлежат WorldPack, а не Gateway.
 персонажи и lore, четыре старта и три стиля. Пресет и свободно
 собранный Scenario материализуются одинаково: партия хранит
 отдельные `WorldSnapshot` / `ScenarioSnapshot` и SHA-256, поэтому
-последующее изменение source не переписывает её стартовый контракт.
-Эта материализация пока только offline: API, UI, provider и runtime не
-переключены, deploy и live-проверка не выполнялись.
+последующее изменение source не переписывает её стартовый контракт. Clean API
+теперь материализует preset и server-built free seed, но Light GUI и production
+inventory ещё не переключены; deploy и live-проверка не выполнялись.
 
 ## Что такое WorldPack
 

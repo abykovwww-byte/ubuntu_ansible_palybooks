@@ -338,10 +338,6 @@ class RPAdministratorHandler:
         party = self.engine.get_party(
             owner_user_id=job.owner_user_id, party_id=job.party_id
         )
-        if party.current_version != job.source_version:
-            return self.engine.record_administrator_no_proposal(
-                job=job, reason="source_version_expired"
-            )
         guidance = self.engine.derived_context(
             owner_user_id=job.owner_user_id, party_id=job.party_id
         ).administrator_guidance
@@ -370,7 +366,6 @@ class RPAdministratorHandler:
         proposal = self.engine.create_administrator_proposal(
             job=job,
             after_text=result.after,
-            expected_base_party_version=party.current_version,
             expected_before_text=before_text,
         )
         if proposal is None:
