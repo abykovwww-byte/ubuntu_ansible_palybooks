@@ -76,7 +76,18 @@
 
         <div class="message-status-bar hidden" id="messageStatus" role="status" aria-live="polite"></div>
 
-        <section class="gm-decision hidden" id="gmDecisionPanel" aria-live="polite">
+        <section class="gm-decision hidden" id="openingRetryPanel" aria-live="polite">
+          <div>
+            <div class="section-label">Старт партии</div>
+            <strong>Opening ещё не создан</strong>
+          </div>
+          <p class="panel-hint" id="openingRetryHint">Текст opening не был сохранён. Повтор запуска использует тот же ключ запроса и не создаст второй старт.</p>
+          <div class="inline-actions">
+            <button class="tool-button" id="retryOpeningButton" type="button">Повторить старт</button>
+          </div>
+        </section>
+
+        <section class="gm-decision hidden" id="gmDecisionPanel" data-legacy-rp-control aria-live="polite">
           <div>
             <div class="section-label" id="gmDecisionLabel">Обращение к мастеру</div>
             <strong id="gmDecisionTitle"></strong>
@@ -123,7 +134,48 @@
           <dl class="meta-grid" id="partyMeta"></dl>
         </section>
 
-        <section class="summary-panel grow">
+        <section class="summary-panel hidden" id="cleanRoleStatusPanel">
+          <div class="section-label">Роли партии</div>
+          <p class="panel-hint">Для каждой роли видны выбранная модель, состояние последней работы, ошибка и kill switch.</p>
+          <div class="proposal-list" id="cleanRoleCards">
+            <article class="proposal" id="narratorRoleCard" data-rp-role="narrator">
+              <strong>Нарратор</strong>
+              <div class="panel-hint" id="narratorRoleStatus">Нет данных</div>
+            </article>
+            <article class="proposal" id="atomicServiceRoleCard" data-rp-role="atomic_service">
+              <strong>Атомарная служебная модель</strong>
+              <div class="panel-hint" id="atomicServiceRoleStatus">Нет данных</div>
+            </article>
+            <article class="proposal" id="administratorRoleCard" data-rp-role="administrator">
+              <strong>Administrator</strong>
+              <div class="panel-hint" id="administratorRoleStatus">Нет данных</div>
+            </article>
+          </div>
+        </section>
+
+        <section class="summary-panel hidden" id="cleanAdministratorPanel">
+          <div class="section-label">Предложения Administrator</div>
+          <p class="panel-hint">Administrator только предлагает versioned-правку. Принять или отклонить её может владелец этой партии; глобальная роль администратора не требуется.</p>
+          <div id="administratorProposalList" class="proposal-list">
+            <div class="proposal">Новых предложений нет.</div>
+          </div>
+          <template id="administratorProposalTemplate">
+            <article class="proposal" data-administrator-proposal>
+              <strong data-proposal-title></strong>
+              <div class="gm-diff">
+                <div><span>Было</span><p data-proposal-before></p></div>
+                <div><span>Станет</span><p data-proposal-after></p></div>
+              </div>
+              <p class="panel-hint" data-proposal-meta></p>
+              <div class="inline-actions">
+                <button class="tool-button" type="button" data-administrator-decision="accept">Принять</button>
+                <button class="text-button danger-text" type="button" data-administrator-decision="reject">Отклонить</button>
+              </div>
+            </article>
+          </template>
+        </section>
+
+        <section class="summary-panel grow" data-legacy-rp-control>
           <div class="panel-head">
             <div class="section-label">Состояние</div>
             <button class="text-button" id="stateRefreshButton" title="Перечитать state этой партии из gateway">Обновить</button>
@@ -132,7 +184,7 @@
           <div id="stateSummary" class="state-summary"></div>
         </section>
 
-        <section class="summary-panel">
+        <section class="summary-panel" data-legacy-rp-control>
           <div class="section-label">Персонажи</div>
           <p class="panel-hint">Карточки игрока и заметных NPC из structured state: статус, отношения, обязательства, нитки и последнее появление.</p>
           <div class="character-editor">
@@ -176,13 +228,13 @@
           <div id="characterSheets" class="character-sheets"></div>
         </section>
 
-        <section class="summary-panel">
+        <section class="summary-panel" data-legacy-rp-control>
           <div class="section-label">Контекст</div>
           <p class="panel-hint">Фактический prompt предыдущего запроса: state, правила и прямое окно истории из записанного Gateway prompt_json.</p>
           <div id="contextSummary" class="context-summary"></div>
         </section>
 
-        <section class="summary-panel">
+        <section class="summary-panel" data-legacy-rp-control>
           <div class="panel-head">
             <div class="section-label">Prompt inspector</div>
             <button class="text-button" id="promptPreviewButton" type="button" title="Без текста откроет предыдущий prompt; с текстом в поле хода покажет dry-run и объяснит память">Показать prompt</button>
@@ -195,7 +247,7 @@
           <div class="section-label">Память</div>
           <p id="memoryPanelHint" class="panel-hint">Долгая память для модели: сжатые старые ходы, подтвержденные факты, открытые нити и изменения отношений. State напрямую не меняет.</p>
           <div id="memorySummary" class="state-summary"></div>
-          <div class="button-grid">
+          <div class="button-grid" data-legacy-rp-control>
             <button id="memorySummarizeButton" class="tool-button" title="Обновить доступные для режима слои памяти по ходам этой партии">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20v-6"/><path d="M6 20V10"/><path d="M18 20V4"/><path d="M4 20h16"/></svg>
               Обновить память
@@ -207,7 +259,7 @@
           </div>
           <div class="section-label subsection-label">Lore Cards</div>
           <p class="panel-hint">WorldPack-карточки копируются при создании партии. Черновик из хода появляется здесь и попадет в память только после вашего подтверждения.</p>
-          <form id="loreCardForm" class="stack-form">
+          <form id="loreCardForm" class="stack-form" data-legacy-rp-control>
             <input id="loreCardTitle" maxlength="160" placeholder="Название карточки" required>
             <textarea id="loreCardContent" rows="3" maxlength="12000" placeholder="Факт, деталь мира или нить сюжета" required></textarea>
             <input id="loreCardKeywords" maxlength="500" placeholder="Триггеры через запятую" required>
@@ -216,16 +268,18 @@
             <button id="loreCardSubmitButton" class="tool-button" type="submit">Подтвердить Lore Card</button>
           </form>
           <div id="loreCardList" class="state-summary"></div>
-          <div class="section-label subsection-label">Checkpoints</div>
-          <p class="panel-hint">Безопасный снимок state, покрытия памяти и активных карточек. От checkpoint можно создать изолированную ветку внутри партии; основная линия не изменяется.</p>
-          <form id="checkpointForm" class="inline-form">
-            <input id="checkpointLabel" maxlength="160" placeholder="Например: перед входом в башню" required>
-            <button class="tool-button" type="submit">Создать checkpoint</button>
-          </form>
-          <div id="checkpointList" class="state-summary"></div>
+          <div data-legacy-rp-control>
+            <div class="section-label subsection-label">Checkpoints</div>
+            <p class="panel-hint">Безопасный снимок state, покрытия памяти и активных карточек. От checkpoint можно создать изолированную ветку внутри партии; основная линия не изменяется.</p>
+            <form id="checkpointForm" class="inline-form">
+              <input id="checkpointLabel" maxlength="160" placeholder="Например: перед входом в башню" required>
+              <button class="tool-button" type="submit">Создать checkpoint</button>
+            </form>
+            <div id="checkpointList" class="state-summary"></div>
+          </div>
         </section>
 
-        <section class="summary-panel">
+        <section class="summary-panel" data-legacy-rp-control>
           <div class="section-label">Режим GM</div>
           <p class="panel-hint">Безопасные правки мира: сначала preview, потом явное применение.</p>
           <textarea id="worldInstruction" rows="3" placeholder="Например: страж Варн теперь подозревает игрока" title="Натуральная инструкция для изменения world state"></textarea>
@@ -257,15 +311,15 @@
         <section class="summary-panel">
           <div class="section-label">Управление</div>
           <p class="panel-hint">Операции над текущей партией. Миры и персонажи не удаляются этой кнопкой.</p>
-          <label class="management-field">
+          <label class="management-field" data-legacy-rp-control>
             <span>Провайдер</span>
             <select id="partyModelProviderSelect" title="Провайдер LLM для следующих ходов этой партии"></select>
           </label>
-          <label class="management-field">
+          <label class="management-field" data-legacy-rp-control>
             <span>Модель партии</span>
             <select id="partyModelSelect" title="Сменить модель для следующих ходов этой партии"></select>
           </label>
-          <div id="narratorSettingsPanel" class="narrator-settings">
+          <div id="narratorSettingsPanel" class="narrator-settings" data-legacy-rp-control>
             <div class="narrator-settings-title">Параметры наратора</div>
             <p id="narratorSettingsAvailability" class="panel-hint">Выберите поддерживаемую модель.</p>
             <div id="narratorSettingsFields" class="narrator-settings-fields" hidden>
@@ -293,11 +347,11 @@
             <button id="resetNarratorSettingsButton" class="text-button wide-button" type="button" hidden>Все параметры — Авто</button>
             <p id="narratorSettingsSavedHint" class="narrator-settings-note" hidden>Сохраняется для текущей партии и применяется со следующего ответа наратора.</p>
           </div>
-          <button id="changePartyModelButton" class="tool-button wide-button" type="button" title="Применить выбранную модель и параметры наратора к этой партии">
+          <button id="changePartyModelButton" class="tool-button wide-button" type="button" data-legacy-rp-control title="Применить выбранную модель и параметры наратора к этой партии">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3h4v4"/><path d="M21 3 13 11"/><path d="M7 21H3v-4"/><path d="M3 21l8-8"/></svg>
             Применить модель и параметры
           </button>
-          <button id="deletePartyButton" class="tool-button danger wide-button" type="button" title="Удалить партию, ее историю ходов и isolated state">
+          <button id="deletePartyButton" class="tool-button danger wide-button" type="button" data-legacy-rp-control title="Удалить партию, ее историю ходов и isolated state">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
             Удалить партию
           </button>
@@ -318,7 +372,7 @@
               </button>
             </form>
           </div>
-          <div class="admin-block management-block admin-only hidden" id="autotestBlock">
+          <div class="admin-block management-block admin-only hidden" id="autotestBlock" data-legacy-rp-control>
             <h4>Автотест · LLM против LLM</h4>
             <p class="panel-hint">Только для администратора. Gateway создаст отдельную ветку от checkpoint активной партии; основная линия не изменяется.</p>
             <form id="adminAutotestForm" class="admin-form">
@@ -340,7 +394,7 @@
 
         <section class="summary-panel admin-panel hidden" id="adminPanel">
           <div class="section-label">Глобальные настройки</div>
-          <div class="admin-block service-model-block">
+          <div class="admin-block service-model-block" data-legacy-rp-control>
             <h4>Служебная модель</h4>
             <p class="panel-hint"><strong>Служебная модель</strong> — единая глобальная LLM для долговременной памяти, изменения мира и генерации персонажей. Администратор выбирает её один раз для всего RP Stack: для всех текущих и будущих партий всех пользователей. Она не ведёт партию и не использует партийные BYOK-ключи.</p>
             <form id="serviceModelForm" class="admin-form">
@@ -352,7 +406,7 @@
               <button class="tool-button wide-button" type="submit">Применить ко всему RP Stack</button>
             </form>
           </div>
-          <div class="admin-block">
+          <div class="admin-block" data-legacy-rp-control>
             <h4>Датасет LoRA / QLoRA</h4>
             <p class="panel-hint">Сырые ходы сохраняются всегда, но в JSONL попадут только партия и ходы со статусом «Одобрено». Перед одобрением проверьте качество, персональные данные и fallback.</p>
             <form id="adminDatasetPartyForm" class="admin-form">
@@ -377,7 +431,7 @@
             </div>
             <div id="adminDatasetTurnsList" class="admin-list"></div>
           </div>
-          <div class="admin-block">
+          <div class="admin-block" data-legacy-rp-control>
             <h4>Миры-пресеты</h4>
             <p class="panel-hint">Приватные миры видны только администраторам и недоступны в ShowRoom.</p>
             <div id="adminWorldpacksList" class="admin-list"></div>
@@ -439,7 +493,65 @@
             </div>
           </fieldset>
 
-          <fieldset class="choice-block wide">
+          <div class="wizard-grid wide hidden" id="cleanPartyWizardFields" data-party-flow="clean">
+            <label class="wide">
+              <span>World</span>
+              <select id="cleanWorldSelect" title="Неизменяемый World, из которого создаётся snapshot партии"></select>
+              <small class="field-hint">World задаёт канон. Выбор сценария ниже меняет роль, старт и форму повествования только в этой партии.</small>
+            </label>
+
+            <fieldset class="choice-block wide">
+              <legend>Сценарий</legend>
+              <div class="segmented">
+                <label><input type="radio" name="cleanScenarioSource" value="preset" checked /> Авторский пресет</label>
+                <label><input type="radio" name="cleanScenarioSource" value="free" /> Собрать свободно</label>
+              </div>
+            </fieldset>
+
+            <label class="wide" id="cleanScenarioPresetFields">
+              <span>Пресет</span>
+              <select id="cleanScenarioPresetSelect" title="Готовая роль, старт и стиль из выбранного World"></select>
+            </label>
+
+            <div class="prompt-fields wide hidden" id="cleanScenarioFreeFields">
+              <input id="cleanScenarioIdInput" type="hidden" />
+              <label>
+                <span>Название сценария</span>
+                <input id="cleanScenarioTitleInput" maxlength="160" />
+              </label>
+              <label>
+                <span>Роль игрока</span>
+                <textarea id="cleanPlayerRoleInput" rows="3" maxlength="4000"></textarea>
+              </label>
+              <label>
+                <span>Стиль повествования</span>
+                <textarea id="cleanScenarioStyleInput" rows="2" maxlength="4000"></textarea>
+              </label>
+              <label>
+                <span>Формат</span>
+                <input id="cleanScenarioFormatInput" maxlength="160" />
+              </label>
+              <label>
+                <span>Сложность</span>
+                <input id="cleanScenarioDifficultyInput" maxlength="160" placeholder="Без отдельной сложности" />
+              </label>
+              <label>
+                <span>Детализация</span>
+                <input id="cleanScenarioDetailLevelInput" maxlength="160" />
+              </label>
+              <label class="wide">
+                <span>Стартовая сцена</span>
+                <textarea id="cleanOpeningInput" rows="5" maxlength="12000"></textarea>
+              </label>
+              <label class="wide">
+                <span>Заметка наратору</span>
+                <textarea id="cleanNarratorNoteInput" rows="4" maxlength="12000"></textarea>
+              </label>
+              <p class="field-hint wide">Канон, системные правила, начальное состояние и состав NPC берутся из server-built seed и сохраняются в snapshot партии.</p>
+            </div>
+          </div>
+
+          <fieldset class="choice-block wide" data-party-flow="legacy">
             <legend>Мир</legend>
             <div class="segmented world-source-segmented">
               <label><input type="radio" name="worldSource" value="ready" checked /> Готовый worldpack</label>
@@ -449,22 +561,22 @@
             <p class="field-hint">Готовый мир берется из `/worldpacks`; ручной prompt ограничен 6000 символами, а Markdown-файл — 200 000 символов и 1 МиБ.</p>
           </fieldset>
 
-          <label class="wide" id="worldReadyFields">
+          <label class="wide" id="worldReadyFields" data-party-flow="legacy">
             <span>Готовый мир</span>
             <select id="worldSelect" required title="Worldpack, установленный на сервере"></select>
           </label>
 
-          <label class="wide hidden" id="partyPresetFields">
+          <label class="wide hidden" id="partyPresetFields" data-party-flow="legacy">
             <span>Стиль повествования</span>
             <select id="partyPresetSelect" title="Авторский вариант правил и формы повествования для этой партии"></select>
           </label>
 
-          <label class="wide hidden" id="partyOpeningFields">
+          <label class="wide hidden" id="partyOpeningFields" data-party-flow="legacy">
             <span>Старт партии</span>
             <select id="partyOpeningSelect" title="Авторская стартовая роль и исходное состояние этой партии"></select>
           </label>
 
-          <div class="prompt-fields wide hidden" id="worldPromptFields">
+          <div class="prompt-fields wide hidden" id="worldPromptFields" data-party-flow="legacy">
             <label>
               <span>Название prompt-мира</span>
               <input id="worldPromptTitleInput" maxlength="160" title="Короткое название мира для списка партий и worldpack registry" />
@@ -481,7 +593,7 @@
             </label>
           </div>
 
-          <fieldset class="choice-block wide">
+          <fieldset class="choice-block wide" data-party-flow="legacy">
             <legend>Персонаж</legend>
             <div class="segmented">
               <label><input type="radio" name="characterSource" value="ready" checked /> Роль из мира</label>
@@ -490,11 +602,11 @@
             <p class="field-hint">Роль берется из выбранного старта; для прежних worldpacks — из `manifest.player_role`. Prompt-персонаж сохраняется в profile персонажа.</p>
           </fieldset>
 
-          <label>
+          <label data-party-flow="legacy">
             <span>Имя персонажа</span>
             <input id="characterNameInput" required title="Имя игрокового персонажа в этой партии" />
           </label>
-          <label class="wide">
+          <label class="wide" data-party-flow="legacy">
             <span id="characterDescriptionLabel">Описание готового персонажа</span>
             <textarea id="characterDescriptionInput" rows="4" title="Описание попадет в player profile и стартовый state"></textarea>
             <small id="characterDescriptionHint" class="field-hint">Берется роль игрока из worldpack; можно слегка поправить перед стартом.</small>
@@ -567,8 +679,8 @@
     <div id="operationStatus" class="operation-status hidden" role="status" aria-live="polite"></div>
     <div id="toast" class="toast"></div>
     <script src="/structured-content.js?v=20260729-messenger-boundary"></script>
-    <script src="/message-time.js?v=20260729-message-time"></script>
+    <script src="/message-time.js?v=20260830-rp-clean-time"></script>
     <script src="/training-artifacts.js?v=20260731-messenger-links"></script>
-    <script src="/app.js?v=20260812-adr026-candidate-revision"></script>
+    <script src="/app.js?v=20260830-rp-clean-cutover"></script>
   </body>
 </html>
