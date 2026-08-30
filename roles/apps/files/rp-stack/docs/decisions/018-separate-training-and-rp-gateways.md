@@ -14,8 +14,8 @@ Decision 019 выполнил подготовительный этап: пре�
 следующую конкретную границу реализации:
 
 - Showroom, `awareness`, `awareness-one-day` и generic training runtime
-  переносятся в отдельный public GitHub project, который IaC клонирует по HTTPS
-  на exact commit без GitHub token;
+  переносятся в отдельный public GitHub project, который IaC клонирует анонимно
+  по HTTPS на exact commit без GitHub token;
 - новый Gateway обслуживает только `scenario_type=training`, использует свою
   SQLite, state, cookies, Docker network и backup;
 - исходный RP Stack после cutover обслуживает только `scenario_type=rp` и

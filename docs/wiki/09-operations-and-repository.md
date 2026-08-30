@@ -19,10 +19,12 @@ flowchart LR
     TRD["/srv/app-data/awareness-showroom"] --> TRT
 ```
 
-Основной IaC-репозиторий приватный. Сервер читает его по SSH с отдельным
-read-only deploy key; приватная часть ключа хранится только на `abykovserv`, не
-попадает в Git и не используется для push. Standalone application repository
-публичный и клонируется по HTTPS на exact commit без GitHub token.
+Оба GitHub-репозитория публичные. Существующий IaC checkout читается
+сервером по SSH с отдельным read-only deploy key; приватная часть
+ключа хранится только на `abykovserv`, не попадает в Git и не даёт права
+push. Standalone application клонируется по HTTPS без GitHub token на
+exact commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Public visibility не
+добавляет серверу права записи.
 
 Обычный цикл:
 
@@ -298,14 +300,18 @@ curl -fsS http://192.168.1.88:8011/health
 
 ### Zero-window C1/O2 Decision 018: source готов, apply ожидается
 
-Живой runtime пока остаётся прежним: старый Showroom занимает `:8011`, а I1
-shadow доступен только на loopback `:18011`. C1 source уже закрепляет exact
-standalone commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`, LAN-only
-`192.168.1.88:8011`, production `SCENARIO_TYPE=rp` для старого Gateway и RP
-Compose/source без `rp-showcase-gui`, Awareness WorldPacks и training runtime.
-Rollback window по решению владельца равен `0`; SQLite rows/tables, state и
-backups не удаляются. Ни одно из этих переключений не считается применённым до
-интерактивного Ansible apply.
+До production cutover старый Showroom остаётся на `:8011`, а I1 shadow
+на loopback `127.0.0.1:18011` уже применён из exact commit public
+repository `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Объединённый C1/O2
+source закрепляет тот же commit для LAN-only `192.168.1.88:8011`,
+`SCENARIO_TYPE=rp` для RP Gateway и RP Compose/source без
+`rp-showcase-gui`, Awareness WorldPacks и training runtime. Standalone принимает
+только `training`, RP Gateway — только `rp`.
+
+Production-переключение не считается применённым до интерактивного
+Ansible apply. Rollback window равен `0`: после cutover сбои исправляются
+fix-forward через application/IaC PR и повторный apply. Legacy RP SQLite
+rows/tables, state, backups и data artifacts сохраняются.
 
 ```text
 /srv/apps/awareness-showroom
@@ -324,13 +330,15 @@ runs/users/sessions/keys и не удаляет посторонние DB-стр
 
 External checkout — единственный явно opt-in ownership exception Apps role:
 
-- root Git fetch/reset получают exact per-command
+- root Git clone/update получают process-scoped exact
   `safe.directory=/srv/apps/awareness-showroom`;
 - сразу после reset checkout и `.git` рекурсивно приводятся к
   `abykov:abykov`, чтобы операторский Git не получал `dubious ownership`;
 - ownership-only change не входит в collector Compose restarts;
 - tracked `.env.example` остаётся source-owned и не перезаписывается
   Ansible; server-only секреты по-прежнему рендерятся только в `.env`.
+- repository token для Awareness не используется и не требуется; provider keys
+  остаются только в `/etc/ansible/local-overrides.yml`.
 
 После C1 apply эти границы проверяются отдельно:
 

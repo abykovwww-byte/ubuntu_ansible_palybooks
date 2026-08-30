@@ -43,12 +43,16 @@ apply, а existing parties не мигрировались автоматиче�
 
 ## Git ownership после Decision 018
 
-C1 source подготовлен, но ещё не применён. RP WorldPacks остаются в
-`ubuntu_ansible_palybooks`, а активными source-owned копиями `awareness` и
-`awareness-one-day` владеет public project `tavern-awareness-showroom` на exact
-commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Zero-window C1/O2 удаляет старые
-копии из RP repository и managed checkout в той же поставке; RP SQLite, state и
-backups при этом сохраняются.
+В объединённом C1/O2 source ownership уже разделено. RP WorldPacks
+остаются в `ubuntu_ansible_palybooks`, а единственные активные source-копии
+`awareness` и `awareness-one-day` принадлежат public project
+`tavern-awareness-showroom` на exact commit
+`67244432659f6c25a268cbf788a8fa3af0f5b52f`. Standalone принимает только
+`training`, а RP source и Gateway — только `rp`; один активный
+WorldPack не дублируется между repositories. Zero-window apply удаляет
+старые копии из managed checkout, но сохраняет legacy RP SQLite,
+state и backups; оперативного topology rollback нет, сбои исправляются
+fix-forward через application/IaC PR и повторный apply.
 
 Новый project публикует только packs с
 `scenario_types: {recommended: training, supported: [training]}` и не разрешает

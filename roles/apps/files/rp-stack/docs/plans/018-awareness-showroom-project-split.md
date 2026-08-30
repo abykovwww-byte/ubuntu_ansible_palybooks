@@ -17,9 +17,9 @@ backups этим разрешением не удаляются.
 | Awareness Showroom | `abykovwww-byte/tavern-awareness-showroom` | Showroom `:8011` | только `training` | `/srv/app-data/awareness-showroom` |
 
 `ubuntu_ansible_palybooks` остаётся authority для server topology и хранит
-полный commit pin нового public application repository. Ansible клонирует его
-анонимно по HTTPS без GitHub token; код нового приложения живёт только в его
-repository и не копируется из старого дерева.
+полный commit pin отдельного public application repository. Ansible клонирует
+его анонимно по HTTPS без GitHub token; код нового приложения живёт только в
+его repository и не копируется из старого дерева.
 
 ## Владение компонентами
 
@@ -124,7 +124,7 @@ Cookie names разделены, потому что разные host ports н�
 
 ### N0/N1 — new repository bootstrap
 
-Создать standalone project из subtree history. Добавить `AGENTS.md`, README,
+Создать standalone public project из subtree history. Добавить `AGENTS.md`, README,
 provenance, standalone Compose/env example, CI и migration documentation.
 Baseline должен собираться до удаления code.
 
@@ -143,7 +143,8 @@ WorldPacks, services, endpoints и tests из нового training repository. 
 
 ### I1 — shadow deploy
 
-IaC клонирует новый public repository по HTTPS без GitHub token на exact commit в
+IaC клонирует новый public repository анонимно по HTTPS без GitHub token на
+exact commit в
 `/srv/apps/awareness-showroom`, persistent data — в
 `/srv/app-data/awareness-showroom`, backup — в
 `/srv/backups/awareness-showroom`. Showroom временно публикуется на `18011`,

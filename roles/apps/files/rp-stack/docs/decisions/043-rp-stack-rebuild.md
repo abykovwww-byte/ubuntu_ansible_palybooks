@@ -8,15 +8,20 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении, срезы 6–7 source-merged. Clean RP schema v7,
-Narrator, persisted role jobs и runner подключены к `main.py`, существующим
+**Delivery status:** в исполнении; срезы 6–7 и acceptance-срез 8 source-merged.
+Clean RP schema v7, Narrator, persisted role jobs и runner подключены к
+`main.py`, существующим
 Party API, реальному provider client и Light GUI за серверным флагом
 `RP_REBUILD_ENABLED`. В source флаг включает один World `day-watch-moscow-v2`,
 создание Party из preset или полного `free_scenario_seed`, opening/ходы с exact
 idempotency и optimistic version, отдельные Relationship/Lore/Memory job и
-ручной Administrator `accept/reject`. C1 source оставляет RP Gateway и Light GUI
-RP-only, а Training/Showroom передаёт standalone project на целевом LAN-only
-`192.168.1.88:8011`; до apply живой сервер ещё использует прежний общий runtime.
+ручной Administrator `accept/reject`. При включении clean-флага ordinary legacy
+RP fail-closed получает `410`. Zero-window C1/O2 source оставляет RP Gateway и
+Light GUI RP-only, а Training/Showroom передаёт standalone project на целевом
+LAN-only `192.168.1.88:8011`; до apply живой сервер ещё использует прежний общий
+runtime. Acceptance-срез 8 закрепляет public standalone commit
+`67244432659f6c25a268cbf788a8fa3af0f5b52f` и анонимный HTTPS checkout без
+GitHub token.
 
 Party неизменяемо связывает Narrator с exact `(profile, provider, base_url,
 model, settings)`. Party-scoped BYOK принимается только для этого provider и
@@ -149,14 +154,17 @@ Party не проверены. Wiki обновлена, потому что из
 Срез 7 начат от merged `origin/main @ def3daf`
 (`def3daf9730c5bbed50e8eb5b5594d8c9d4701b6`) и merged PR 114 как
 `ead598ce039be58c36097f455a0ed4c119ebe31b`. Light GUI использует clean API для
-preset/free Party, ручного same-key retry и решений Administrator. Реальный
-локальный smoke на текущем Gateway, runner и чистой SQLite подтвердил
-opening/turn, provider failure, stale `409` без replay и три отдельные роли.
-Focused clean RP boundary — `91 passed`, тогдашний Awareness/Training isolation
-gate — `9 passed`, все 14 Light GUI test-файлов и пять GitHub checks — PASS.
-Это source/local evidence: apply, production activation и live Party ещё не
-выполнены. После C1 Light GUI не содержит training path: training UX принадлежит
-standalone Showroom на `:8011`.
+preset/free Party и оставляет Training на retained-контракте. Реальный локальный
+smoke на текущем Gateway, runner и чистой SQLite подтвердил opening/turn,
+provider failure и ручной same-key retry, stale `409` без replay, три отдельные
+роли и решение Administrator владельцем Party. Focused clean RP boundary —
+`91 passed`, retained Awareness/Training gate — `9 passed`, все 14 Light GUI
+test-файлов и пять GitHub checks — PASS. Это source/local evidence: apply,
+production activation и live Party ещё не выполнены. Wiki изменена только из-за
+нового внешнего Light GUI/API-контракта; skills не менялись.
+Последующий O2 source удаляет retained Training path из RP Light GUI/Gateway:
+training UX принадлежит standalone Showroom на `:8011`. Это состояние также
+ожидает C1 apply и отдельной live-приёмки.
 
 ## Context
 

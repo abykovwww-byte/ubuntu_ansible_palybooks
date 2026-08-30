@@ -25,9 +25,10 @@ Codex edits local checkout
 -> server uses a read-only deploy key, pulls GitHub, and applies Ansible to localhost
 ```
 
-The private deploy key is stored only in the server account's SSH directory.
-The repository-local `core.sshCommand` selects it for pull operations; the key
-is not committed and has no push permission.
+The existing read-only deploy key is stored only in the server account's SSH
+directory. The repository-local `core.sshCommand` selects it for pull
+operations; the key is not committed and has no push permission. The public
+repository does not require a credential for a fresh read-only clone.
 
 `scripts/apply-local.sh` performs:
 
