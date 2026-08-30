@@ -283,7 +283,7 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     atomic = RPAtomicServiceProvider(
         _settings(tmp_path),
         provider="openrouter",
-        model="atomic/model",
+        model="qwen/qwen3.5-flash-02-23",
         client=atomic_client,  # type: ignore[arg-type]
     )
     administrator = RPAdministratorProvider(
@@ -321,9 +321,9 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     asyncio.run(exercise())
 
     assert [call["model"] for call in atomic_client.calls] == [
-        "atomic/model",
-        "atomic/model",
-        "atomic/model",
+        "qwen/qwen3.5-flash-02-23",
+        "qwen/qwen3.5-flash-02-23",
+        "qwen/qwen3.5-flash-02-23",
     ]
     assert [call["role"] for call in atomic_client.calls] == [
         "rp_atomic_relationships",
@@ -334,6 +334,31 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         call["payload"]["reasoning"] == {"enabled": False}
         for call in atomic_client.calls
     )
+    assert all(
+        call["payload"]["provider"] == {"require_parameters": True}
+        for call in atomic_client.calls
+    )
+    expected_roots = (
+        {"candidates"},
+        {"result", "kind", "title", "content", "keywords", "evidence_span_ids"},
+        {
+            "schema_version",
+            "observed_through_version",
+            "situation",
+            "threads",
+            "characters",
+            "assets_and_rules",
+            "chronology_and_hooks",
+        },
+    )
+    for call, expected_root in zip(atomic_client.calls, expected_roots, strict=True):
+        response_format = call["payload"]["response_format"]
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["strict"] is True
+        schema = response_format["json_schema"]["schema"]
+        assert schema["additionalProperties"] is False
+        assert set(schema["properties"]) == expected_root
+        assert "OUTPUT_SCHEMA=" in call["payload"]["messages"][0]["content"]
     assert "max_tokens" not in atomic_client.calls[0]["payload"]
     assert atomic_client.calls[1]["payload"]["max_tokens"] == 400
     assert "max_tokens" not in atomic_client.calls[2]["payload"]
@@ -344,6 +369,79 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     assert administrator_client.calls[0]["payload"]["reasoning"] == {
         "enabled": False
     }
+    assert "provider" not in administrator_client.calls[0]["payload"]
+    administrator_schema = administrator_client.calls[0]["payload"]["response_format"][
+        "json_schema"
+    ]["schema"]
+    assert set(administrator_schema["properties"]) == {
+        "result",
+        "target_slot",
+        "after",
+    }
+    assert "OUTPUT_SCHEMA=" in administrator_client.calls[0]["payload"]["messages"][0][
+        "content"
+    ]
+
+
+def test_non_reasoning_openrouter_route_requires_schema_without_reasoning(
+    tmp_path: Path,
+) -> None:
+    client = RecordingClient(_completion('{"candidates":[]}'))
+    provider = RPAtomicServiceProvider(
+        _settings(tmp_path),
+        provider="openrouter",
+        model="qwen/qwen3-30b-a3b-instruct-2507",
+        client=client,  # type: ignore[arg-type]
+    )
+
+    asyncio.run(
+        provider.extract_relationships(
+            party=_party(), turn=_turn(), evidence_spans=_spans()
+        )
+    )
+
+    payload = client.calls[0]["payload"]
+    assert payload["provider"] == {"require_parameters": True}
+    assert payload["response_format"]["type"] == "json_schema"
+    assert "reasoning" not in payload
+
+
+@pytest.mark.parametrize(
+    ("operation", "content"),
+    [
+        ("relationships", '{"relationships":[],"events":[],"notes":[]}'),
+        ("runtime_lore", '{"cards":[]}'),
+        ("story_memory", '{"party_id":"party-one","memory_snapshot":{}}'),
+    ],
+)
+def test_live_wrong_envelopes_are_rejected_without_normalization(
+    tmp_path: Path, operation: str, content: str
+) -> None:
+    client = RecordingClient(_completion(content))
+    provider = RPAtomicServiceProvider(
+        _settings(tmp_path),
+        provider="openrouter",
+        model="atomic/model",
+        client=client,  # type: ignore[arg-type]
+    )
+
+    async def invoke() -> object:
+        if operation == "relationships":
+            return await provider.extract_relationships(
+                party=_party(), turn=_turn(), evidence_spans=_spans()
+            )
+        if operation == "runtime_lore":
+            return await provider.extract_runtime_lore(
+                party=_party(), turn=_turn(), evidence_spans=_spans()
+            )
+        return await provider.update_story_memory(
+            party=_party(), turns=(_turn(),), previous=None
+        )
+
+    with pytest.raises(RPModelOutputRejected):
+        asyncio.run(invoke())
+
+    assert len(client.calls) == 1
 
 
 @pytest.mark.parametrize(

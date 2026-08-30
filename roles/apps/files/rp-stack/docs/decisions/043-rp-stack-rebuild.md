@@ -8,10 +8,13 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении; срезы 6–7 и acceptance-срез 8 source-merged.
-Clean RP schema v7, Narrator, persisted role jobs и runner подключены к
-`main.py`, существующим
-Party API, реальному provider client и Light GUI за серверным флагом
+**Delivery status:** в исполнении; срезы 6–7 и acceptance-source среза 8 merged.
+Инертный production baseline
+`bb2562acbbd8526492a6b7f5d045e21428106303` applied; structured-output
+коррекция среза 8 прошла изолированную real-provider приёмку и ожидает повторного
+image apply и финального canary без bind mount. Clean RP schema v7, Narrator,
+persisted role jobs и runner подключены к `main.py`, существующим Party API,
+реальному provider client и Light GUI за серверным флагом
 `RP_REBUILD_ENABLED`. В source флаг включает один World `day-watch-moscow-v2`,
 создание Party из preset или полного `free_scenario_seed`, opening/ходы с exact
 idempotency и optimistic version, отдельные Relationship/Lore/Memory job и
@@ -34,7 +37,7 @@ loops. Claims сериализуются SQLite-предикатом; restart и
 незавершённые job в `pending` без расхода attempts, попытка растёт только после
 фактического отказа, а включённая роль с недоступной моделью блокирует startup.
 
-Состав срезов 6–7:
+Состав срезов 6–8:
 
 - **добавлено:** clean Party HTTP path, concrete provider adapters, lifecycle
   runner, supervisor трёх ролей, exact Party endpoint/BYOK binding, source/API
@@ -46,9 +49,12 @@ loops. Claims сериализуются SQLite-предикатом; restart и
 - **не добавлено:** универсальная queue-платформа, новый сервис, fallback/repair,
   compatibility adapter, автоматический replay пользовательского текста или
   multi-replica lease;
-- **ещё не сделано:** seeded/живая RP-приёмка, apply, activation и live
-  verification. Inventory оставляет `RP_REBUILD_ENABLED=false`, поэтому merge
-  срезов сам по себе не меняет production UX; C1 cutover и полная standalone
+- **проверено в срезе 8:** инертный apply, изолированный seeded run с реальными
+  provider/runner, четыре исхода §3 и exact duplicate без второго provider call;
+- **ещё не сделано:** apply образа с текущей source-коррекцией, повторный canary
+  уже без bind mount, blind A/B, живая длинная RP-партия, activation, cutover и
+  live verification. Inventory оставляет `RP_REBUILD_ENABLED=false`, поэтому
+  merge среза сам по себе не меняет production UX; C1 cutover и полная standalone
   training-приёмка также требуют отдельного apply/live proof.
 
 ### Brief среза 8: четыре проверяемых исхода §3
@@ -165,6 +171,46 @@ production activation и live Party ещё не выполнены. Wiki изм�
 Последующий O2 source удаляет retained Training path из RP Light GUI/Gateway:
 training UX принадлежит standalone Showroom на `:8011`. Это состояние также
 ожидает C1 apply и отдельной live-приёмки.
+
+Срез 8 начат от merged `origin/main @ bb2562a`
+(`bb2562acbbd8526492a6b7f5d045e21428106303`). Этот baseline применён Ansible с
+`failed=0`: production-контейнеры healthy, Gateway image прошёл `749 passed, 1
+skipped`, Awareness — `150 passed`; `RP_REBUILD_ENABLED=false`, clean RP-БД на
+live volume не создана, прежние HTTP/UI-маршруты остались доступны. Это applied
+proof инертной поставки, а не активация нового RP и не proof следующей
+source-коррекции.
+
+Изолированный candidate использовал ровно applied Gateway image с bind-mounted
+diff `provider.py`, отдельные SQLite/data каталоги и loopback port. Из архива
+`party_16c210a8a099` в новую Party перенесены только первые 50 committed RAW;
+версии 51…66 прошли через настоящий API, runner и provider. Созданы две разные
+Party одного World — preset и free Scenario. На corrected route реальные
+Relationship, Runtime Lore и Story Memory jobs завершились успешно; memory safe
+coverage продвинулся до 53, затем 61. Administrator прошёл своим handler и
+отдельной локальной моделью на версиях 56 и 64. Concurrent exact duplicate на
+версии 52 дал один committed turn и один Narrator provider call. Отдельный
+container probe предъявил все четыре исхода §3: атомарный status-predicate claim,
+нулевой расход attempts при claim/restart, runner-owned graceful/SIGKILL recovery
+и разные role/handler/call для атомарной модели и Administrator.
+
+До коррекции реальный Qwen route возвращал HTTP 200 с неверными обёртками для
+трёх атомарных операций; strict parser отклонил их без нормализации. В candidate
+контракт результата и исполняемая Pydantic schema переданы модели явно, а
+OpenRouter требует поддержку параметров маршрута. После финального ревью current
+Qwen route дал валидные Relationship, Lore и Memory, а non-reasoning Qwen3 30B —
+валидный Relationship без несовместимого reasoning-параметра. Полный Gateway
+suite на applied-image patched candidate до C1 — `753 passed, 1 skipped`. После
+rebase на `origin/main @ 209d312` весь current Gateway source в том же dependency
+image прошёл `657 passed, 1 skipped`; focused
+provider/service-client/runner/mechanics boundary — `47 passed`. Обе candidate
+БД прошли `integrity_check=ok` и foreign-key check; production container, флаг и
+данные не менялись. Backup остановленного candidate:
+`/srv/backups/rp-stack/decision043-acceptance-run3-20260830T182144Z.tar.gz`,
+SHA-256 `9369c8a9744a8f142e5030af52fcd728e92cc9528b150e3ab67baebf561ccd89`.
+Поскольку функциональный прогон использовал bind-mounted source diff, он
+доказывает реальную границу provider/runner, но не заменяет apply собранного
+образа и финальный canary без mount. Wiki и skills не менялись: внешнего
+пользовательского или операционного контракта этот срез не изменяет.
 
 ## Context
 

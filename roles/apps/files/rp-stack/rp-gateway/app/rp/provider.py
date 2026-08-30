@@ -20,6 +20,7 @@ from app.rp.narrator import RPNarratorPrompt
 from app.rp.turn_engine import RPModelOutputRejected, RPParty, RPTurn
 from app.services.provider_catalog import normalize_provider, validate_narrator_settings
 from app.services.service_model_client import ServiceModelClient, service_prompt_text
+from app.services.service_models import OPENROUTER_OPTIONAL_REASONING_MODELS
 
 
 _ACTIVE_PROVIDERS = frozenset({"local", "gemini", "openrouter"})
@@ -105,7 +106,9 @@ class RPAtomicServiceProvider:
             system=(
                 "Ты атомарная служебная модель отношений. Используй только переданные "
                 "события онтологии и пронумерованные фрагменты RAW. Не выдумывай "
-                "персонажей, события или доказательства. Верни только строгий JSON."
+                "персонажей, события или доказательства. Корень ответа содержит только "
+                "candidates; не возвращай обёртки relationships, events или notes. "
+                "Верни только строгий JSON."
             ),
             body={
                 "task": "extract_relationships",
@@ -137,7 +140,11 @@ class RPAtomicServiceProvider:
             system=(
                 "Ты атомарная служебная модель runtime Lore. Создавай не более одной "
                 "карточки и только из явно переданного RAW-доказательства. Если нового "
-                "устойчивого факта нет, верни no_candidate. Верни только строгий JSON."
+                "устойчивого факта нет, верни no_candidate. Корень ответа содержит ровно "
+                "result, kind, title, content, keywords и evidence_span_ids; не возвращай "
+                "cards или другую обёртку. Для no_candidate поле kind обязательно, а "
+                "title, content, keywords и evidence_span_ids равны null. Верни только "
+                "строгий JSON."
             ),
             body={
                 "task": "extract_runtime_lore",
@@ -171,7 +178,22 @@ class RPAtomicServiceProvider:
             system=(
                 "Ты атомарная служебная модель памяти. Обнови пять секций памяти только "
                 "по committed RAW. Не меняй RAW и не утверждай safe coverage за пределами "
-                "переданных ходов. Верни полный snapshot как строгий JSON."
+                "переданных ходов. Верни сам полный snapshot без обёртки party_id или "
+                "memory_snapshot. Корень содержит schema_version, observed_through_version, "
+                "situation, threads, characters, assets_and_rules и chronology_and_hooks. "
+                "schema_version равен rp-story-memory.v1; observed_through_version равен "
+                "наибольшему переданному committed_version. coverage каждой секции — это "
+                "номер committed-версии Party, а не процент; после проверки всех ходов он "
+                "равен observed_through_version. Каждый элемент массива фактов внутри "
+                "секций — JSON-объект по OUTPUT_SCHEMA; не добавляй в массивы фактов "
+                "голые строки. "
+                "Для успешного полного обновления status каждой секции равен fresh. "
+                "Каждый факт содержит ровно fact_id, text, status, authority и "
+                "source_turn_versions: status факта — active, superseded или retracted; "
+                "authority — player, narrator или inference; source_turn_versions — "
+                "положительные уникальные версии по возрастанию, не выше coverage. "
+                "fact_id уникален во всём snapshot и соответствует OUTPUT_SCHEMA. "
+                "Верни строгий JSON."
             ),
             body={
                 "task": "update_story_memory",
@@ -208,6 +230,8 @@ class RPAtomicServiceProvider:
             messages=messages,
             result_type=result_type,
             schema_name=schema_name,
+            provider=self.provider,
+            model=self.model,
             max_tokens=max_tokens,
         )
         completion = await self.client.complete(
@@ -250,7 +274,9 @@ class RPAdministratorProvider:
                 "Ты Администратор RP-партии в режиме suggest. Ты не меняешь World, RAW "
                 "или партию напрямую. Разрешена только versioned-рекомендация для "
                 "narrator_guidance, строго обоснованная переданным окном. Если правка не "
-                "нужна, верни no_proposal. Верни только строгий JSON."
+                "нужна, верни no_proposal. Корень ответа содержит ровно result, "
+                "target_slot и after; не возвращай другую обёртку. Для no_proposal поля "
+                "target_slot и after равны null. Верни только строгий JSON."
             ),
             body={
                 "task": "review_party",
@@ -266,6 +292,8 @@ class RPAdministratorProvider:
             messages=messages,
             result_type=RPAdministratorResult,
             schema_name="rp_administrator_result",
+            provider=self.provider,
+            model=self.model,
         )
         completion = await self.client.complete(
             role="rp_administrator",
@@ -336,21 +364,36 @@ def _structured_payload(
     messages: list[dict[str, str]],
     result_type: type[BaseModel],
     schema_name: str,
+    provider: str,
+    model: str,
     max_tokens: int | None = None,
 ) -> dict[str, Any]:
+    schema = result_type.model_json_schema(mode="validation")
+    prompt_messages = [dict(message) for message in messages]
+    prompt_messages[0]["content"] = (
+        f"{prompt_messages[0]['content']} "
+        "Верни ровно один JSON-объект, который проходит OUTPUT_SCHEMA. "
+        "Не повторяй и не оборачивай входные данные. "
+        f"OUTPUT_SCHEMA={_canonical_json(schema)}"
+    )
     payload: dict[str, Any] = {
-        "messages": messages,
+        "messages": prompt_messages,
         "stream": False,
-        "reasoning": {"enabled": False},
         "response_format": {
             "type": "json_schema",
             "json_schema": {
                 "name": schema_name,
                 "strict": True,
-                "schema": result_type.model_json_schema(mode="validation"),
+                "schema": schema,
             },
         },
     }
+    if provider == "openrouter":
+        payload["provider"] = {"require_parameters": True}
+        if model in OPENROUTER_OPTIONAL_REASONING_MODELS:
+            payload["reasoning"] = {"enabled": False}
+    else:
+        payload["reasoning"] = {"enabled": False}
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
     return payload
