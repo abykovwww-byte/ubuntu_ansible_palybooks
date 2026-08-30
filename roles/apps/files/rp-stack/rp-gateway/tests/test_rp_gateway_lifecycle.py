@@ -24,9 +24,6 @@ PARTY_ID = "party-one"
 
 def _settings(tmp_path: Path) -> Settings:
     state_path = tmp_path / "state" / "current.json"
-    state_path.parent.mkdir(parents=True)
-    source_state = Path(__file__).resolve().parents[2] / "state" / "campaign.example.json"
-    state_path.write_text(source_state.read_text(encoding="utf-8"), encoding="utf-8")
     return Settings(
         app_env="test",
         campaign_id="default",
