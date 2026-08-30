@@ -8,41 +8,43 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении, срез 5. Шаг 8 поставляет offline-core уровня
-`каркас` поверх clean RP schema v4. Persisted narration claim создаётся до
-provider boundary, поэтому concurrent exact duplicates делают ровно один вызов
-и получают один committed turn. Успешный opening/turn одним transaction сохраняет
-RAW и ставит три role-specific service job (`story_memory`, `relationships`,
-`runtime_lore`) и отдельный Administrator job. Relationships, typed runtime Lore
-и Administrator proposal с ручным `accept/reject` проходят разными сохраняемыми
-маршрутами; принятая guidance применяет versioned CAS и попадает в следующий
-offline prompt.
+**Delivery status:** в исполнении, срез 6. Clean RP schema v7, Narrator,
+persisted role jobs и runner подключены к `main.py`, существующим Party API и
+реальному provider client за серверным флагом `RP_REBUILD_ENABLED`. В source
+флаг включает один World `day-watch-moscow-v2`, создание Party из preset или
+полного `free_scenario_seed`, opening/ходы с exact idempotency и optimistic
+version, отдельные Relationship/Lore/Memory job и ручной Administrator
+`accept/reject`. Обычный legacy RP при cutover fail-closed получает `410`, а
+Training и Showroom остаются на старом тракте до внешнего gate Plan 018.
 
-Новый runner владеет recovery, startup, cancel, await и shutdown двух отдельных
-worker loops. Claims сериализуются SQLite-предикатом; restart и shutdown
-возвращают незавершённые job в `pending` без расхода attempts, а попытка растёт
-только после фактического отказа. Детерминированно отвергнутый model output
-терминален после одной попытки и не повторяется без corrective context.
+Party неизменяемо связывает Narrator с exact `(profile, provider, base_url,
+model, settings)`. Party-scoped BYOK принимается только для этого provider и
+endpoint; custom endpoint без exact Party key закрывается до provider call.
+Narrator делает один вызов без provider fallback, repair и raw-обёртки. Скрытый,
+короткоконтекстный, batch или выведенный профиль нельзя выбрать прямым API.
 
-Состав среза 5:
+Runner владеет recovery, startup, cancel, await и shutdown двух отдельных worker
+loops. Claims сериализуются SQLite-предикатом; restart и shutdown возвращают
+незавершённые job в `pending` без расхода attempts, попытка растёт только после
+фактического отказа, а включённая роль с недоступной моделью блокирует startup.
 
-- **добавлено:** persisted narration claims, три фиксированных service job,
-  отдельная Administrator queue, typed role handlers, source-order по партии,
-  provenance для runtime Lore, независимая проверка relationship candidates и
-  versioned manual proposal-flow;
-- **не добавлено:** универсальная queue-платформа, новые сервисы, fallback/repair,
-  ожидание derived jobs следующим реальным API-ходом или multi-replica lease;
-- **временно оставлено:** действующий `Adjudicator`, ревизии 0–11, legacy
-  SQLite и manifest-based WorldPack runtime. Они остаются активным
-  пользовательским трактом до переключения и удаляются вместе с
-  монолитом на шаге 12.
+Состав среза 6:
 
-Новый контур по-прежнему не подключён к `main.py`, API, runtime, реальному
-provider или Light GUI. Модели в проверках — offline boundary doubles;
-пользовательский UX, apply и live runtime не изменены. Поэтому срез 5 не является
-приёмкой раздела 6 или шага 9.
+- **добавлено:** clean Party HTTP path, concrete provider adapters, lifecycle
+  runner, supervisor трёх ролей, exact Party endpoint/BYOK binding и source/API
+  seed свободного Scenario;
+- **изолировано:** ordinary legacy RP API, автотесты, datasets и traces; Training
+  и серверно подтверждённый Showroom продолжают работать через legacy storage;
+  Training WorldPack/templates/player characters доступны только через
+  фильтрованный retained-контракт и не открывают ordinary legacy RP;
+- **не добавлено:** универсальная queue-платформа, новый сервис, fallback/repair,
+  compatibility adapter, автоматический replay пользовательского текста или
+  multi-replica lease;
+- **ещё не сделано:** Light GUI, seeded/живая RP-приёмка, apply, activation и
+  live verification. Inventory оставляет `RP_REBUILD_ENABLED=false`, поэтому
+  merge среза сам по себе не меняет production UX.
 
-### Проверенные исходы среза 5 / шага 8
+### Проверенные исходы срезов 5–6 / шага 8
 
 Срез непосредственно тестами и restart-проверкой доказывает все четыре исхода:
 
@@ -56,7 +58,7 @@ provider или Light GUI. Модели в проверках — offline bounda
 exact duplicates выполняют ровно один provider call и возвращают один committed
 turn.
 
-Универсальная queue-платформа не создаётся. Wiki и skills в срезе 5 и каждом
+Универсальная queue-платформа не создаётся. Wiki и skills в срезе 6 и каждом
 следующем срезе меняются только при изменении внешнего пользовательского,
 операционного или авторского контракта. Внутренняя перестановка или ещё не
 подключённый компонент сами по себе не являются основанием для документационного
@@ -125,6 +127,22 @@ offline
 evidence на boundary doubles: `main.py`, API, реальный provider, Light GUI,
 apply и live runtime этим срезом не подключены и не проверены; Wiki и skills не
 изменялись.
+
+Срез 6 начат от merged `origin/main @ d8d05b0`
+(`d8d05b03245e0b63f288e6f07fa3d5d61edb707d`). Clean source теперь подключён к
+`main.py`, Party HTTP API, concrete `ServiceModelClient` adapters и FastAPI
+lifespan. Focused source/storage/provider/lifecycle boundary — `84 passed`;
+полный Gateway suite после endpoint/BYOK/retained Training regression fixes —
+`750 passed`.
+Интеграционные тесты подтверждают preset/free creation только через API, один
+provider call/turn для exact duplicate, fail-closed provider error без partial
+RAW, owner/version isolation, role-specific supervisor, recovery без расхода
+attempts, exact custom endpoint key и две Administrator guidance revisions на
+одной gameplay version. Network provider в тестах подменён boundary fake;
+реальный outbound call, качество прозы, Light GUI, apply, activation и live
+Party не проверены. Wiki обновлена, потому что изменился внешний API и
+операционный cutover-контракт; skills не менялись. Server inventory оставляет
+`RP_REBUILD_ENABLED=false`.
 
 ## Context
 

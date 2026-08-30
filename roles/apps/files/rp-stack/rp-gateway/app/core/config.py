@@ -46,6 +46,20 @@ class Settings:
     world_system_prompt: str = ""
     world_authors_note: str = ""
     database_url: str = os.getenv("DATABASE_URL", "sqlite:////data/rp_gateway.db")
+    rp_rebuild_enabled: bool = env_bool("RP_REBUILD_ENABLED", False)
+    rp_database_url: str = os.getenv("RP_DATABASE_URL", "sqlite:////data/rp_engine.db")
+    rp_narrator_enabled: bool = env_bool("RP_NARRATOR_ENABLED", True)
+    rp_atomic_service_enabled: bool = env_bool("RP_ATOMIC_SERVICE_ENABLED", True)
+    rp_administrator_enabled: bool = env_bool("RP_ADMINISTRATOR_ENABLED", True)
+    rp_administrator_model_choice: str = os.getenv(
+        "RP_ADMINISTRATOR_MODEL_CHOICE", "local-gemma"
+    )
+    rp_derived_wait_seconds: float = float(
+        os.getenv("RP_DERIVED_WAIT_SECONDS", "15")
+    )
+    rp_runner_poll_interval_seconds: float = float(
+        os.getenv("RP_RUNNER_POLL_INTERVAL_SECONDS", "0.05")
+    )
     world_state_path: str = os.getenv("WORLD_STATE_PATH", "/state/current.json")
     party_state_root: str = os.getenv("PARTY_STATE_ROOT", "/state/parties")
     state_schema_path: str = os.getenv("STATE_SCHEMA_PATH", "/state/schema.json")
@@ -148,6 +162,13 @@ class Settings:
         if not self.database_url.startswith(prefix):
             raise ValueError("Only sqlite:/// DATABASE_URL values are supported in this MVP")
         return self.database_url[len(prefix) :]
+
+    @property
+    def rp_sqlite_path(self) -> str:
+        prefix = "sqlite:///"
+        if not self.rp_database_url.startswith(prefix):
+            raise ValueError("Only sqlite:/// RP_DATABASE_URL values are supported")
+        return self.rp_database_url[len(prefix) :]
 
     @property
     def effective_party_context_limit_tokens(self) -> int:

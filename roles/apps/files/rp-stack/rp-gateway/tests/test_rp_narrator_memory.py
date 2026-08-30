@@ -35,6 +35,7 @@ from app.rp.narrator import (
 from app.rp.turn_engine import (
     RPMemoryIdempotencyConflict,
     RPMemoryVersionConflict,
+    RPPartyVersionConflict,
     RPTurn,
     RPTurnEngine,
 )
@@ -263,6 +264,45 @@ def test_concurrent_exact_retry_returns_the_single_committed_turn(tmp_path: Path
     assert first == second
     assert engine.list_turns(owner_user_id="owner-one", party_id="party-one") == (
         first,
+    )
+
+
+def test_concurrent_different_request_fails_before_second_provider_call(
+    tmp_path: Path,
+) -> None:
+    engine = _create_engine(tmp_path)
+    narrator = RacingNarrator()
+    first_service = RPNarratorService(engine, narrator)
+    second_service = RPNarratorService(RPTurnEngine(engine.sqlite_path), narrator)
+
+    async def race() -> RPTurn:
+        first_task = asyncio.create_task(
+            first_service.narrate_turn(
+                owner_user_id="owner-one",
+                party_id="party-one",
+                request_id="request-one",
+                idempotency_key="key-one",
+                expected_version=0,
+                player_text="Первое действие.",
+            )
+        )
+        await narrator.started.wait()
+        with pytest.raises(RPPartyVersionConflict, match="in-flight narration"):
+            await second_service.narrate_turn(
+                owner_user_id="owner-one",
+                party_id="party-one",
+                request_id="request-two",
+                idempotency_key="key-two",
+                expected_version=0,
+                player_text="Конкурирующее действие.",
+            )
+        narrator.release.set()
+        return await first_task
+
+    committed = asyncio.run(race())
+    assert narrator.calls == 1
+    assert engine.list_turns(owner_user_id="owner-one", party_id="party-one") == (
+        committed,
     )
 
 
@@ -679,6 +719,194 @@ def test_persisted_raw_and_latest_memory_feed_the_narrator_boundary(
     assert len(memory_blocks) == 1
     assert "LATEST_MEMORY_TOKEN" in memory_blocks[0]
     assert "OLD_MEMORY_TOKEN" not in memory_blocks[0]
+
+
+def test_narrator_waits_for_previous_raw_jobs_then_rereads_prompt_inputs(
+    tmp_path: Path,
+) -> None:
+    engine = _create_engine(tmp_path)
+    engine.commit_turn(
+        owner_user_id="owner-one",
+        party_id="party-one",
+        request_id="seed-request",
+        idempotency_key="seed-key",
+        expected_version=0,
+        player_text="Я замечаю знак.",
+        narrator_text="Знак остаётся на стене.",
+    )
+    claimed_jobs = []
+    while True:
+        job = engine.claim_service_job()
+        if job is None:
+            break
+        claimed_jobs.append(job)
+    assert len(claimed_jobs) == 3
+
+    terminal = False
+    history_reads = 0
+    original_list_turns = engine.list_turns
+    original_get_party = engine.get_party
+    original_latest_memory = engine.latest_story_memory
+    original_derived_context = engine.derived_context
+
+    def checked_list_turns(**kwargs: object) -> tuple[RPTurn, ...]:
+        nonlocal history_reads
+        history_reads += 1
+        if history_reads > 1:
+            assert terminal is True
+        return original_list_turns(**kwargs)  # type: ignore[arg-type]
+
+    def checked_get_party(**kwargs: object) -> object:
+        assert terminal is True
+        return original_get_party(**kwargs)  # type: ignore[arg-type]
+
+    def checked_latest_memory(**kwargs: object) -> RPStoryMemoryRecord | None:
+        assert terminal is True
+        return original_latest_memory(**kwargs)  # type: ignore[arg-type]
+
+    def checked_derived_context(**kwargs: object) -> object:
+        assert terminal is True
+        return original_derived_context(**kwargs)  # type: ignore[arg-type]
+
+    engine.list_turns = checked_list_turns  # type: ignore[method-assign]
+    engine.get_party = checked_get_party  # type: ignore[method-assign]
+    engine.latest_story_memory = checked_latest_memory  # type: ignore[method-assign]
+    engine.derived_context = checked_derived_context  # type: ignore[method-assign]
+    narrator = RecordingNarrator("Следующая сцена учитывает обновлённую память.")
+    service = RPNarratorService(
+        engine,
+        narrator,
+        atomic_service_enabled=True,
+        derived_wait_seconds=0.5,
+        derived_poll_interval=0.001,
+    )
+
+    async def exercise() -> RPTurn:
+        nonlocal terminal
+
+        async def finish_jobs() -> None:
+            nonlocal terminal
+            await asyncio.sleep(0.01)
+            engine.append_story_memory(
+                owner_user_id="owner-one",
+                party_id="party-one",
+                expected_base_snapshot_id=None,
+                update_id="waited-memory",
+                snapshot=_snapshot(1, 1, memory_text="WAITED_MEMORY_TOKEN"),
+            )
+            for job in claimed_jobs:
+                assert job.claim_token is not None
+                engine.complete_service_job(
+                    job_id=job.id,
+                    claim_token=job.claim_token,
+                    result={"kind": job.job_type, "result": "completed"},
+                )
+            terminal = True
+
+        turn_task = asyncio.create_task(
+            service.narrate_turn(
+                owner_user_id="owner-one",
+                party_id="party-one",
+                request_id="live-request",
+                idempotency_key="live-key",
+                expected_version=1,
+                player_text="Я изучаю знак.",
+            )
+        )
+        await asyncio.gather(turn_task, finish_jobs())
+        return turn_task.result()
+
+    committed = asyncio.run(exercise())
+
+    assert committed.committed_version == 2
+    assert history_reads >= 2
+    assert narrator.prompts[0].raw_turn_versions == (1,)
+    memory_block = next(
+        message.content
+        for message in narrator.prompts[0].messages
+        if message.block_id == "story_memory"
+    )
+    assert "WAITED_MEMORY_TOKEN" in memory_block
+
+
+def test_narrator_derived_wait_is_bounded_and_fail_open(tmp_path: Path) -> None:
+    engine = _create_engine(tmp_path)
+    engine.commit_turn(
+        owner_user_id="owner-one",
+        party_id="party-one",
+        request_id="seed-request",
+        idempotency_key="seed-key",
+        expected_version=0,
+        player_text="Я действую.",
+        narrator_text="Сцена отвечает.",
+    )
+    service = RPNarratorService(
+        engine,
+        RecordingNarrator("Ход продолжается после bounded wait."),
+        atomic_service_enabled=True,
+        derived_wait_seconds=0.01,
+        derived_poll_interval=0.001,
+    )
+
+    async def exercise() -> RPTurn:
+        return await asyncio.wait_for(
+            service.narrate_turn(
+                owner_user_id="owner-one",
+                party_id="party-one",
+                request_id="live-request",
+                idempotency_key="live-key",
+                expected_version=1,
+                player_text="Я продолжаю.",
+            ),
+            timeout=0.5,
+        )
+
+    committed = asyncio.run(exercise())
+
+    assert committed.committed_version == 2
+    previous_jobs = engine.service_jobs_for_source_version(
+        owner_user_id="owner-one", party_id="party-one", source_version=1
+    )
+    assert all((job.status, job.attempts) == ("pending", 0) for job in previous_jobs)
+
+
+def test_narrator_skips_derived_wait_when_atomic_service_is_disabled(
+    tmp_path: Path,
+) -> None:
+    engine = _create_engine(tmp_path)
+    engine.commit_turn(
+        owner_user_id="owner-one",
+        party_id="party-one",
+        request_id="seed-request",
+        idempotency_key="seed-key",
+        expected_version=0,
+        player_text="Я действую.",
+        narrator_text="Сцена отвечает.",
+    )
+
+    def unexpected_wait(**_: object) -> object:
+        raise AssertionError("disabled atomic service must not be polled")
+
+    engine.service_jobs_for_source_version = unexpected_wait  # type: ignore[method-assign]
+    service = RPNarratorService(
+        engine,
+        RecordingNarrator("Ход продолжается без ожидания service jobs."),
+        atomic_service_enabled=False,
+        derived_wait_seconds=60,
+    )
+
+    committed = asyncio.run(
+        service.narrate_turn(
+            owner_user_id="owner-one",
+            party_id="party-one",
+            request_id="live-request",
+            idempotency_key="live-key",
+            expected_version=1,
+            player_text="Я продолжаю.",
+        )
+    )
+
+    assert committed.committed_version == 2
 
 
 def test_hard_prompt_overflow_stops_before_narrator_and_commit(tmp_path: Path) -> None:

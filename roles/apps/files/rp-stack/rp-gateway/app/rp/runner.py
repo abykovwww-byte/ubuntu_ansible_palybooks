@@ -35,20 +35,28 @@ class RPRunner:
         service_handler: RPServiceJobHandler,
         administrator_handler: RPAdministratorJobHandler,
         *,
+        service_enabled: bool = True,
+        administrator_enabled: bool = True,
         poll_interval: float = 0.05,
     ):
+        if not isinstance(service_enabled, bool):
+            raise ValueError("service_enabled must be a boolean")
+        if not isinstance(administrator_enabled, bool):
+            raise ValueError("administrator_enabled must be a boolean")
         if poll_interval <= 0:
             raise ValueError("poll_interval must be positive")
         self.engine = engine
         self.service_handler = service_handler
         self.administrator_handler = administrator_handler
+        self.service_enabled = service_enabled
+        self.administrator_enabled = administrator_enabled
         self.poll_interval = poll_interval
         self._service_task: asyncio.Task[None] | None = None
         self._administrator_task: asyncio.Task[None] | None = None
 
     @property
     def running(self) -> bool:
-        return any(
+        return all(
             task is not None and not task.done()
             for task in (self._service_task, self._administrator_task)
         )
@@ -82,6 +90,9 @@ class RPRunner:
 
     async def _run_service_jobs(self) -> None:
         while True:
+            if not self.service_enabled:
+                await asyncio.sleep(self.poll_interval)
+                continue
             try:
                 job = self.engine.claim_service_job()
             except Exception:
@@ -123,9 +134,13 @@ class RPRunner:
                     )
                 except RPBackgroundJobConflict:
                     pass
+                await asyncio.sleep(self.poll_interval)
 
     async def _run_administrator_jobs(self) -> None:
         while True:
+            if not self.administrator_enabled:
+                await asyncio.sleep(self.poll_interval)
+                continue
             try:
                 job = self.engine.claim_administrator_job()
             except Exception:
@@ -167,6 +182,7 @@ class RPRunner:
                     )
                 except RPBackgroundJobConflict:
                     pass
+                await asyncio.sleep(self.poll_interval)
 
     def _release_service(self, job: RPServiceJob) -> None:
         assert job.claim_token is not None

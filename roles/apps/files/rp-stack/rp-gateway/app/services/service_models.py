@@ -68,9 +68,9 @@ def service_model_choice(settings: Settings, choice_id: str | None = None) -> di
     }
 
 
-def service_model_settings(settings: Settings) -> Settings:
+def service_model_settings(settings: Settings, choice_id: str | None = None) -> Settings:
     """Return provider settings for the globally selected service model."""
-    choice = service_model_choice(settings)
+    choice = service_model_choice(settings, choice_id)
     if choice["provider"] not in {"local", "openrouter"}:
         raise ValueError(f"service model choice is retired or unsupported: {choice['id']}")
     if choice["provider"] == "local":

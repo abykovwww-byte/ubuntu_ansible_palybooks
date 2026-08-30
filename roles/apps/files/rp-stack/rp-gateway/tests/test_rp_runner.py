@@ -89,6 +89,14 @@ def _engine_with_queued_jobs(database: Path) -> RPTurnEngine:
 QueuedJob = RPServiceJob | RPAdministratorJob
 
 
+class _TaskState:
+    def __init__(self, done: bool):
+        self._done = done
+
+    def done(self) -> bool:
+        return self._done
+
+
 def _concurrent_claims(
     claim: Callable[[], QueuedJob | None],
 ) -> tuple[QueuedJob | None, ...]:
@@ -100,6 +108,19 @@ def _concurrent_claims(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         return tuple(pool.map(run, range(2)))
+
+
+def test_runner_is_healthy_only_while_both_role_loops_are_alive(
+    tmp_path: Path,
+) -> None:
+    engine = RPTurnEngine(tmp_path / "rp-clean.db")
+    runner = RPRunner(engine, object(), object())  # type: ignore[arg-type]
+    runner._service_task = _TaskState(False)  # type: ignore[assignment]
+    runner._administrator_task = _TaskState(False)  # type: ignore[assignment]
+    assert runner.running is True
+
+    runner._administrator_task = _TaskState(True)  # type: ignore[assignment]
+    assert runner.running is False
 
 
 def test_claims_are_atomic_role_specific_and_do_not_spend_attempts(
@@ -241,6 +262,62 @@ class _CompletingAdministratorHandler:
         return {}
 
 
+def test_disabled_role_gates_leave_jobs_pending_without_attempts(
+    tmp_path: Path,
+) -> None:
+    engine = _engine_with_queued_jobs(tmp_path / "rp-clean.db")
+    service_claims = 0
+    administrator_claims = 0
+    claim_service_job = engine.claim_service_job
+    claim_administrator_job = engine.claim_administrator_job
+
+    def counted_service_claim() -> RPServiceJob | None:
+        nonlocal service_claims
+        service_claims += 1
+        return claim_service_job()
+
+    def counted_administrator_claim() -> RPAdministratorJob | None:
+        nonlocal administrator_claims
+        administrator_claims += 1
+        return claim_administrator_job()
+
+    engine.claim_service_job = counted_service_claim  # type: ignore[method-assign]
+    engine.claim_administrator_job = (  # type: ignore[method-assign]
+        counted_administrator_claim
+    )
+
+    async def exercise() -> None:
+        runner = RPRunner(
+            engine,
+            _CompletingServiceHandler(),
+            _CompletingAdministratorHandler(),
+            service_enabled=False,
+            administrator_enabled=False,
+            poll_interval=0.001,
+        )
+        await runner.start()
+        await asyncio.sleep(0.01)
+        await runner.stop()
+
+    asyncio.run(exercise())
+
+    assert service_claims == administrator_claims == 0
+    assert all(
+        (job.status, job.attempts, job.claim_token) == ("pending", 0, None)
+        for job in engine.list_service_jobs(
+            owner_user_id=OWNER_ID, party_id=PARTY_ID
+        )
+    )
+    administrator = engine.list_administrator_jobs(
+        owner_user_id=OWNER_ID, party_id=PARTY_ID
+    )[0]
+    assert (administrator.status, administrator.attempts, administrator.claim_token) == (
+        "pending",
+        0,
+        None,
+    )
+
+
 class _RejectingServiceHandler:
     def __init__(self) -> None:
         self.calls = 0
@@ -364,6 +441,55 @@ def test_runner_retries_transient_claim_errors_without_stopping_workers(
 
     assert service_claims >= 2
     assert administrator_claims >= 2
+
+
+def test_retryable_handler_failure_waits_one_poll_before_reclaim(
+    tmp_path: Path,
+) -> None:
+    engine = _engine_with_queued_jobs(tmp_path / "rp-clean.db")
+    for _ in range(2):
+        skipped = engine.claim_service_job()
+        assert skipped is not None
+        assert skipped.claim_token is not None
+        engine.complete_service_job(
+            job_id=skipped.id,
+            claim_token=skipped.claim_token,
+            result={"kind": skipped.job_type, "result": "not_exercised"},
+        )
+
+    async def exercise() -> tuple[float, float]:
+        handled = asyncio.Event()
+        call_times: list[float] = []
+
+        class FailOnce:
+            async def handle(self, job: RPServiceJob) -> object:
+                call_times.append(asyncio.get_running_loop().time())
+                if len(call_times) == 1:
+                    raise RuntimeError("retryable provider failure")
+                handled.set()
+                return {}
+
+        poll_interval = 0.03
+        runner = RPRunner(
+            engine,
+            FailOnce(),
+            _CompletingAdministratorHandler(),
+            administrator_enabled=False,
+            poll_interval=poll_interval,
+        )
+        await runner.start()
+        await asyncio.wait_for(handled.wait(), timeout=1)
+        await runner.stop()
+        assert len(call_times) == 2
+        return call_times[0], call_times[1]
+
+    first_call, second_call = asyncio.run(exercise())
+
+    assert second_call - first_call >= 0.02
+    retried = engine.list_service_jobs(
+        owner_user_id=OWNER_ID, party_id=PARTY_ID
+    )[-1]
+    assert (retried.status, retried.attempts) == ("succeeded", 1)
 
 
 def test_finished_tasks_are_not_running_but_require_stop_cleanup(

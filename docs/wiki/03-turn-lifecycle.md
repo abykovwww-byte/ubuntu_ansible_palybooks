@@ -509,35 +509,56 @@ memory и усечения. Ошибка остаётся typed `error/unchecked
 author note/current action; repair собирает тот же порядок. Supervisor не
 вычисляет и не исправляет локацию действия.
 
-## Decision 043, срез 2: offline atomic turn
+## Decision 043, срез 6: clean RP turn
 
-Новый `RPTurnEngine` пока существует только внутри inert-пакета `app/rp`. Он
-принимает подготовленные offline-входы и атомарно сохраняет одну RAW-пару в
-чистой SQLite. Provider, HTTP/API, FastAPI lifespan и действующие
-`PartyStore`/`StateStore`/`Adjudicator` в этот путь не входят.
+При включённом cutover-флаге ordinary RP проходит через `RPTurnEngine`, concrete
+Narrator provider и runner в FastAPI lifespan. Claim narration request
+сохраняется до provider boundary; exact duplicate присоединяется к нему и не
+создаёт второй вызов. Отличающийся запрос на той же версии отклоняется до модели.
 
 ```mermaid
 sequenceDiagram
-    participant Test as Focused module test
+    participant Client as API client
+    participant API as Gateway
     participant Engine as app/rp RPTurnEngine
+    participant Narrator as exact Narrator route
     participant DB as Clean SQLite
+    participant Runner as role runner
 
-    Test->>Engine: offline turn input
-    Engine->>DB: BEGIN IMMEDIATE + owner / idempotency / version checks
-    alt вход и версия допустимы
-        Engine->>DB: player RAW + narrator RAW + новая party version
-        Engine->>DB: COMMIT
-        DB-->>Engine: committed result
-    else ошибка или конфликт
-        Engine->>DB: ROLLBACK
-        DB-->>Engine: no partial RAW/version commit
+    Client->>API: content + idempotency_key + expected_version
+    API->>Engine: claim persisted narration request
+    Engine->>DB: owner + exact input + version checks
+    alt claim acquired
+        API->>Narrator: one provider call
+        alt provider success
+            API->>Engine: commit exact player/narrator RAW
+            Engine->>DB: turn + version + 3 service jobs + admin job
+            API-->>Client: committed turn
+            Runner->>DB: claim role-specific jobs
+        else provider failure
+            API->>Engine: mark request retryable
+            API-->>Client: 502 + unchanged player text
+        end
+    else exact duplicate
+        Engine-->>API: same request/committed turn
+        API-->>Client: one result, no second provider call
+    else stale or different input
+        API-->>Client: 409, no provider call
     end
-    Engine-->>Test: result or explicit error
 ```
 
-Это уровень `каркас`, а не `подключено`: действующий player turn по-прежнему
-проходит через последовательность ниже. Срез не доказывает provider failure,
-runtime retry, gameplay quality или живую партию.
+Успех коммитит RAW и новую version одной транзакцией; provider error не коммитит
+ничего, а ручной retry использует те же request/idempotency identifiers. Derived
+job не блокируют ход: при выключенной роли остаются явно `disabled`, а Narrator
+возвращает RAW после bounded ожидания.
+
+Runner сохраняет четыре обязательных свойства: переход `pending → running`
+атомарен и содержит status predicate в `UPDATE`; attempt растёт после
+фактического отказа, а не claim; startup/shutdown, cancel и await принадлежат
+runner; Administrator и атомарная служебная модель имеют разные очереди, роли и
+handlers. Restart/shutdown возвращает claimed job в `pending` без расхода
+attempt. Эта source-интеграция ещё не является живой игровой приёмкой: inventory
+выключен, Light GUI не переключён, seeded и live Party не пройдены.
 
 ## Обычный ход
 

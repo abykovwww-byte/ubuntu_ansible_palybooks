@@ -967,7 +967,7 @@ async function logoutAdmin() {
 async function loadAdminData() {
   const [scenarios, worlds, models] = await Promise.all([
     apiGet("/api/admin/showroom/scenarios"),
-    apiGet("/api/worldpacks"),
+    apiGet("/api/admin/showroom/worldpacks"),
     apiGet("/api/model-profiles"),
   ]);
   appState.adminScenarios = scenarios.scenarios || [];

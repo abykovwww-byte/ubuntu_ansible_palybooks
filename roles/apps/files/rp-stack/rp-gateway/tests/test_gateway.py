@@ -2655,6 +2655,19 @@ def test_party_byok_is_scoped_to_current_party(tmp_path: Path):
         provider="openrouter", owner_user_id=first_party.owner_user_id, party_id=first["id"]
     ) == "managed-provider-key"
     assert c.app.state.auth_store.default_provider_secret(
+        "https://legacy-changed.example/v1",
+        provider="openrouter",
+        owner_user_id=first_party.owner_user_id,
+        party_id=first["id"],
+    ) == "managed-provider-key"
+    assert c.app.state.auth_store.default_provider_secret(
+        "https://legacy-changed.example/v1",
+        provider="openrouter",
+        owner_user_id=first_party.owner_user_id,
+        party_id=first["id"],
+        exact_base_url=True,
+    ) is None
+    assert c.app.state.auth_store.default_provider_secret(
         provider="openrouter", owner_user_id=second_party.owner_user_id, party_id=second["id"]
     ) is None
 

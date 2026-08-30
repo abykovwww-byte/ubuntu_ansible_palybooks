@@ -73,38 +73,41 @@ flowchart LR
 identity начинается заново. Между Gateway нет runtime-вызовов, общей БД или
 dual-write.
 
-### Срезы 2–3 Decision 043: offline-граница
+### Срез 6 Decision 043: clean RP за cutover-флагом
 
-Шаг 5 добавил чистую SQLite и offline atomic turn. Шаг 6 добавляет
-production loader/schema, в котором World владеет общим каноном и
-статикой, а Scenario — игроком, стартом, активными NPC, стартовыми
-отношениями и настройками опыта. Loader материализует их в два
-независимых immutable snapshot с SHA-256 и только потом создаёт
-offline-партию:
+Clean RP использует тот же Gateway-процесс и HTTP-префикс, но отдельные
+`RPTurnEngine`, SQLite и role handlers. World владеет общим каноном и статикой,
+Scenario — ролью игрока, стартом, активными NPC, отношениями и настройками опыта;
+loader материализует два immutable snapshot с SHA-256 до создания Party.
+`RP_REBUILD_ENABLED` выбирает clean ordinary RP, не смешивая записи двух схем:
 
 ```mermaid
 flowchart LR
-    subgraph Current["Действующий runtime"]
-        UI["Light GUI / Showroom"] --> API["Gateway API"]
-        API --> Adj["Adjudicator"]
-        Adj --> Legacy[("legacy rp_gateway.db")]
-    end
+    UI["Light GUI / API client"] --> API["Gateway main.py"]
+    API --> Flag{"RP_REBUILD_ENABLED?"}
+    Flag -->|"ordinary RP: true"| Engine["RPTurnEngine"]
+    Engine --> Clean[("rp_engine.db")]
+    Engine --> Narrator["exact Narrator route"]
+    Engine --> Runner["atomic + Administrator runner"]
 
-    subgraph Offline["Decision 043, срез 3 — каркас"]
-        World["world.json\nWorldDefinition"] --> Loader["production loader/schema"]
-        Scenario["scenario-presets/*.json\nScenarioPresetDefinition"] --> Loader
+    Flag -->|"false"| Adj["legacy Adjudicator"]
+    Flag -->|"Training / server-bound Showroom"| Adj
+    Adj --> Legacy[("rp_gateway.db")]
+
+    subgraph Source["World / Scenario source"]
+        World["world.json"] --> Loader["production loader/schema"]
+        Scenario["scenario-presets/*.json"] --> Loader
         Loader --> Snap["WorldSnapshot + ScenarioSnapshot\nотдельные SHA-256"]
-        Snap --> Engine["app/rp RPTurnEngine"]
-        Engine --> Clean[("clean SQLite")]
     end
+    Snap --> Engine
 ```
 
-В offline-контур перенесён только `day-watch-moscow-v2`. `app/rp` не
-импортируется `main.py`, не получает запросы FastAPI, не вызывает provider и
-не открывает legacy DB. Между двумя контурами нет runtime edge или
-dual-write. Manifest-based runtime временно остаётся пользовательским
-трактом до шага 12. Поэтому диаграммы контейнеров и сетей выше этим
-срезом не меняются; apply, deploy и live proof не выполнялись.
+В clean-контур перенесён только `day-watch-moscow-v2`. Он не читает и не пишет
+legacy Party/state/turn tables; обычные legacy RP endpoints при включённом флаге
+возвращают `410`. Training и Showroom сохраняются только через проверенный
+серверный scope, а не по клиентскому параметру. Нового контейнера, порта или
+dual-write нет. В inventory флаг пока `false`: source интегрирован, но apply,
+activation, браузерный UX и live proof ещё не выполнены.
 
 ## Ответственность компонентов
 

@@ -74,6 +74,12 @@ class RPAdministratorProposalConflict(RuntimeError):
 class RPParty:
     id: str
     owner_user_id: str
+    title: str
+    narrator_profile_id: str
+    narrator_provider: str
+    narrator_base_url: str
+    narrator_model: str
+    narrator_settings: dict[str, Any]
     world_snapshot: WorldSnapshot
     world_hash: str
     scenario_snapshot: ScenarioSnapshot
@@ -205,6 +211,7 @@ class RPAdministratorProposal:
     before_text: str
     after_text: str
     base_party_version: int
+    base_guidance_revision: int
     evidence_versions: tuple[int, ...]
     window_hash: str
     status: str
@@ -247,9 +254,33 @@ class RPTurnEngine:
         party_id: str,
         world_snapshot: WorldSnapshot,
         scenario_snapshot: ScenarioSnapshot,
+        title: str | None = None,
+        narrator_profile_id: str = "openrouter-openrouter-auto",
+        narrator_provider: str = "openrouter",
+        narrator_base_url: str | None = None,
+        narrator_model: str = "openrouter/auto",
+        narrator_settings: dict[str, Any] | None = None,
     ) -> RPParty:
         owner_user_id = _required_text(owner_user_id, "owner_user_id")
         party_id = _required_text(party_id, "party_id")
+        title = _required_text(title or scenario_snapshot.title, "title")
+        narrator_profile_id = _required_text(
+            narrator_profile_id, "narrator_profile_id"
+        )
+        narrator_provider = _required_text(narrator_provider, "narrator_provider")
+        if narrator_provider not in {"local", "gemini", "openrouter"}:
+            raise ValueError("narrator_provider is retired or unsupported")
+        if narrator_base_url is None:
+            if narrator_provider != "openrouter":
+                raise ValueError("narrator_base_url is required for this provider")
+            narrator_base_url = "https://openrouter.ai/api/v1"
+        narrator_base_url = _required_text(narrator_base_url, "narrator_base_url")
+        narrator_model = _required_text(narrator_model, "narrator_model")
+        if narrator_settings is None:
+            narrator_settings = {}
+        if not isinstance(narrator_settings, dict):
+            raise ValueError("narrator_settings must be an object")
+        narrator_settings_json = _canonical_json(narrator_settings)
         if world_snapshot.world_id != scenario_snapshot.world_id:
             raise ValueError("World and Scenario snapshots must target the same World")
         world_snapshot_json = canonical_snapshot_json(world_snapshot)
@@ -264,15 +295,23 @@ class RPTurnEngine:
                     """
                     INSERT INTO rp_parties(
                         id, owner_user_id,
+                        title, narrator_profile_id, narrator_provider,
+                        narrator_base_url, narrator_model, narrator_settings_json,
                         world_snapshot_json, world_hash,
                         scenario_snapshot_json, scenario_hash,
                         current_version, created_at, updated_at
-                    ) VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?)
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                     ON CONFLICT(id) DO NOTHING
                     """,
                     (
                         party_id,
                         owner_user_id,
+                        title,
+                        narrator_profile_id,
+                        narrator_provider,
+                        narrator_base_url,
+                        narrator_model,
+                        narrator_settings_json,
                         world_snapshot_json,
                         world_snapshot_hash,
                         scenario_snapshot_json,
@@ -288,6 +327,12 @@ class RPTurnEngine:
                 if (
                     party.world_snapshot != world_snapshot
                     or party.scenario_snapshot != scenario_snapshot
+                    or party.title != title
+                    or party.narrator_profile_id != narrator_profile_id
+                    or party.narrator_provider != narrator_provider
+                    or party.narrator_base_url != narrator_base_url
+                    or party.narrator_model != narrator_model
+                    or party.narrator_settings != narrator_settings
                 ):
                     raise RPPartySnapshotConflict(
                         f"party {party_id!r} already owns different source snapshots"
@@ -306,6 +351,15 @@ class RPTurnEngine:
         if party is None:
             raise RPPartyNotFound(party_id)
         return _party_from_row(party)
+
+    def list_parties(self, *, owner_user_id: str) -> tuple[RPParty, ...]:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT * FROM rp_parties WHERE owner_user_id = ? ORDER BY created_at",
+                (owner_user_id,),
+            ).fetchall()
+        return tuple(_party_from_row(row) for row in rows)
 
     def claim_narration(
         self,
@@ -382,6 +436,23 @@ class RPTurnEngine:
                     if existing.status == "running":
                         connection.commit()
                         return RPNarrationClaim(acquired=False, request=existing)
+                    current_version = int(party["current_version"])
+                    if current_version != expected_version:
+                        raise RPPartyVersionConflict(
+                            f"party {party_id!r} is at version {current_version}, "
+                            f"not {expected_version}"
+                        )
+                    in_flight = connection.execute(
+                        """
+                        SELECT id FROM rp_narration_requests
+                        WHERE party_id = ? AND status = 'running' AND id != ?
+                        """,
+                        (party_id, existing.id),
+                    ).fetchone()
+                    if in_flight is not None:
+                        raise RPPartyVersionConflict(
+                            f"party {party_id!r} already has an in-flight narration"
+                        )
                     reclaimed = connection.execute(
                         """
                         UPDATE rp_narration_requests
@@ -405,6 +476,17 @@ class RPTurnEngine:
                     raise RPPartyVersionConflict(
                         f"party {party_id!r} is at version {current_version}, "
                         f"not {expected_version}"
+                    )
+                in_flight = connection.execute(
+                    """
+                    SELECT id FROM rp_narration_requests
+                    WHERE party_id = ? AND status = 'running'
+                    """,
+                    (party_id,),
+                ).fetchone()
+                if in_flight is not None:
+                    raise RPPartyVersionConflict(
+                        f"party {party_id!r} already has an in-flight narration"
                     )
                 cursor = connection.execute(
                     """
@@ -460,6 +542,37 @@ class RPTurnEngine:
         if row is None:
             raise LookupError(idempotency_key)
         return _narration_request_from_row(row)
+
+    def get_narration_request_by_request_id(
+        self, *, owner_user_id: str, party_id: str, request_id: str
+    ) -> RPNarrationRequest:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        party_id = _required_text(party_id, "party_id")
+        request_id = _required_text(request_id, "request_id")
+        with closing(self._connect()) as connection:
+            if _owned_party(connection, owner_user_id, party_id) is None:
+                raise RPPartyNotFound(party_id)
+            row = connection.execute(
+                "SELECT * FROM rp_narration_requests WHERE party_id = ? AND request_id = ?",
+                (party_id, request_id),
+            ).fetchone()
+        if row is None:
+            raise LookupError(request_id)
+        return _narration_request_from_row(row)
+
+    def list_narration_requests(
+        self, *, owner_user_id: str, party_id: str
+    ) -> tuple[RPNarrationRequest, ...]:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        party_id = _required_text(party_id, "party_id")
+        with closing(self._connect()) as connection:
+            if _owned_party(connection, owner_user_id, party_id) is None:
+                raise RPPartyNotFound(party_id)
+            rows = connection.execute(
+                "SELECT * FROM rp_narration_requests WHERE party_id = ? ORDER BY id",
+                (party_id,),
+            ).fetchall()
+        return tuple(_narration_request_from_row(row) for row in rows)
 
     def fail_narration(self, *, request_id: int, claim_token: str, error: str) -> None:
         claim_token = _required_text(claim_token, "claim_token")
@@ -1160,6 +1273,31 @@ class RPTurnEngine:
             ).fetchall()
         return tuple(_service_job_from_row(row, owner_user_id) for row in rows)
 
+    def service_jobs_for_source_version(
+        self,
+        *,
+        owner_user_id: str,
+        party_id: str,
+        source_version: int,
+    ) -> tuple[RPServiceJob, ...]:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        party_id = _required_text(party_id, "party_id")
+        if not isinstance(source_version, int) or isinstance(source_version, bool):
+            raise ValueError("source_version must be a non-negative integer")
+        if source_version < 0:
+            raise ValueError("source_version must be a non-negative integer")
+        with closing(self._connect()) as connection:
+            if _owned_party(connection, owner_user_id, party_id) is None:
+                raise RPPartyNotFound(party_id)
+            rows = connection.execute(
+                """
+                SELECT * FROM rp_service_jobs
+                WHERE party_id = ? AND source_version = ? ORDER BY id
+                """,
+                (party_id, source_version),
+            ).fetchall()
+        return tuple(_service_job_from_row(row, owner_user_id) for row in rows)
+
     def list_administrator_jobs(
         self, *, owner_user_id: str, party_id: str
     ) -> tuple[RPAdministratorJob, ...]:
@@ -1429,7 +1567,6 @@ class RPTurnEngine:
         *,
         job: RPAdministratorJob,
         after_text: str,
-        expected_base_party_version: int,
         expected_before_text: str,
     ) -> RPAdministratorProposal | None:
         after_text = _required_text(after_text, "after_text", preserve=True)
@@ -1464,10 +1601,7 @@ class RPTurnEngine:
                     (job.party_id,),
                 ).fetchone()
                 before_text = str(guidance["content"]) if guidance is not None else ""
-                if (
-                    int(party["current_version"]) != expected_base_party_version
-                    or before_text != expected_before_text
-                ):
+                if before_text != expected_before_text:
                     result = {
                         "kind": "administrator",
                         "result": "stale_review",
@@ -1485,21 +1619,26 @@ class RPTurnEngine:
                         )
                     connection.commit()
                     return None
+                base_guidance_revision = (
+                    int(guidance["revision"]) if guidance is not None else 0
+                )
                 cursor = connection.execute(
                     """
                     INSERT INTO rp_administrator_proposals(
                         party_id, administrator_job_id, kind, target_slot,
                         before_text, after_text, base_party_version,
+                        base_guidance_revision,
                         evidence_versions_json, window_hash, status, created_at
                     ) VALUES(?, ?, 'narrator_guidance', 'narrator_guidance',
-                             ?, ?, ?, ?, ?, 'pending', ?)
+                             ?, ?, ?, ?, ?, ?, 'pending', ?)
                     """,
                     (
                         job.party_id,
                         job.id,
                         before_text,
                         after_text,
-                        expected_base_party_version,
+                        int(party["current_version"]),
+                        base_guidance_revision,
                         _canonical_json(list(job.evidence_versions)),
                         job.window_hash,
                         timestamp,
@@ -1614,22 +1753,17 @@ class RPTurnEngine:
                         (timestamp, proposal_id),
                     )
                 else:
-                    applied_version = proposal.base_party_version + 1
-                    advanced = connection.execute(
+                    guidance = connection.execute(
                         """
-                        UPDATE rp_parties
-                        SET current_version = ?, updated_at = ?
-                        WHERE id = ? AND owner_user_id = ? AND current_version = ?
+                        SELECT * FROM rp_administrator_guidance
+                        WHERE party_id = ? ORDER BY revision DESC LIMIT 1
                         """,
-                        (
-                            applied_version,
-                            timestamp,
-                            party_id,
-                            owner_user_id,
-                            proposal.base_party_version,
-                        ),
-                    ).rowcount
-                    if advanced != 1:
+                        (party_id,),
+                    ).fetchone()
+                    current_guidance_revision = (
+                        int(guidance["revision"]) if guidance is not None else 0
+                    )
+                    if current_guidance_revision != proposal.base_guidance_revision:
                         connection.execute(
                             """
                             UPDATE rp_administrator_proposals
@@ -1640,16 +1774,10 @@ class RPTurnEngine:
                         )
                         connection.commit()
                         raise RPAdministratorProposalConflict(
-                            "proposal base Party version is stale"
+                            "proposal base Administrator guidance is stale"
                         )
-                    revision_row = connection.execute(
-                        """
-                        SELECT COALESCE(MAX(revision), 0) + 1 AS next_revision
-                        FROM rp_administrator_guidance WHERE party_id = ?
-                        """,
-                        (party_id,),
-                    ).fetchone()
-                    revision = int(revision_row["next_revision"])
+                    applied_version = int(party["current_version"])
+                    revision = current_guidance_revision + 1
                     connection.execute(
                         """
                         INSERT INTO rp_administrator_guidance(
@@ -1782,6 +1910,14 @@ def _party_from_row(row: sqlite3.Row) -> RPParty:
     return RPParty(
         id=str(row["id"]),
         owner_user_id=str(row["owner_user_id"]),
+        title=str(row["title"]),
+        narrator_profile_id=str(row["narrator_profile_id"]),
+        narrator_provider=str(row["narrator_provider"]),
+        narrator_base_url=str(row["narrator_base_url"]),
+        narrator_model=str(row["narrator_model"]),
+        narrator_settings=_json_object(
+            str(row["narrator_settings_json"]), "narrator settings"
+        ),
         world_snapshot=world_snapshot,
         world_hash=world_snapshot_hash,
         scenario_snapshot=scenario_snapshot,
@@ -2150,6 +2286,7 @@ def _administrator_proposal_from_row(row: sqlite3.Row) -> RPAdministratorProposa
         before_text=str(row["before_text"]),
         after_text=str(row["after_text"]),
         base_party_version=int(row["base_party_version"]),
+        base_guidance_revision=int(row["base_guidance_revision"]),
         evidence_versions=_json_int_tuple(
             str(row["evidence_versions_json"]), "administrator proposal evidence"
         ),

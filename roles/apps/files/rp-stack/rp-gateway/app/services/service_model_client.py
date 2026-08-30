@@ -69,7 +69,7 @@ class ServiceModelClient:
         self,
         *,
         role: str,
-        provider: Literal["local", "openrouter"],
+        provider: Literal["local", "gemini", "openrouter"],
         model: str,
         party_id: str | None,
         turn_id: int | None,
@@ -319,6 +319,8 @@ class ServiceModelClient:
             return self.settings.local_llm_base_url, ""
         if provider == "openrouter":
             return self.settings.openrouter_api_base, self.settings.service_openrouter_api_key
+        if provider == "gemini":
+            return self.settings.gemini_api_base, self.settings.gemini_api_key
         raise ValueError(f"service provider is retired or unsupported: {provider}")
 
     def _retention_days(self, explicit: int | None) -> int:

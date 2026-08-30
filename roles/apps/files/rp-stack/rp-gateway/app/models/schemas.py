@@ -370,6 +370,68 @@ class NarratorSettings(BaseModel):
     max_tokens: Literal[1024, 2048, 4096, 8192, 16384] | None = None
 
 
+class RPScenarioPresetCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["preset"]
+    preset_id: WorldChoiceId
+
+
+class RPScenarioFreeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["free"]
+    scenario_id: WorldChoiceId
+    title: str = Field(min_length=1, max_length=160)
+    player_role: str = Field(min_length=1, max_length=4000)
+    style: str = Field(min_length=1, max_length=4000)
+    format: str = Field(min_length=1, max_length=160)
+    difficulty: str | None = Field(default=None, max_length=160)
+    detail_level: str = Field(min_length=1, max_length=160)
+    narrator_system: str = Field(min_length=1, max_length=12000)
+    narrator_note: str = Field(min_length=1, max_length=12000)
+    opening: str = Field(min_length=1, max_length=12000)
+    initial_state: dict[str, Any]
+    active_character_ids: list[WorldChoiceId] = Field(min_length=1, max_length=100)
+    local_overrides: dict[str, Any] = Field(default_factory=dict)
+
+
+RPScenarioCreate = Annotated[
+    RPScenarioPresetCreate | RPScenarioFreeCreate,
+    Field(discriminator="source"),
+]
+
+
+class RPPartyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=160)
+    world_id: Literal["day-watch-moscow-v2"]
+    scenario: RPScenarioCreate
+    model_profile_id: str = Field(min_length=1, max_length=160)
+    narrator_settings: NarratorSettings | None = None
+
+
+class RPAdministratorProposalDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["accept", "reject"]
+
+
+class RPPartyStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str | None = Field(default=None, max_length=200)
+
+
+class RPPartyMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, max_length=12000)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    expected_version: int = Field(ge=1)
+
+
 class PartyModelUpdate(BaseModel):
     model_profile_id: str
     narrator_settings: NarratorSettings | None = None
@@ -475,6 +537,8 @@ class PartyCharacterStateEditRequest(BaseModel):
 
 
 class PartyStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     idempotency_key: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None

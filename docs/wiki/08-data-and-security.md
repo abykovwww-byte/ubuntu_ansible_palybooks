@@ -162,31 +162,34 @@ party удаляет их до turns. Они не входят в canonical stat
 dataset и не используются как authority локации. `observe` никогда не создаёт
 narrator advisory.
 
-## Decision 043, срезы 2–3: clean RP SQLite
+## Decision 043, срез 6: clean RP SQLite
 
-Inert-пакет `app/rp` владеет отдельной чистой SQLite для offline
-`RPTurnEngine`. Хранилище начинается без старых партий и не читает, не мигрирует
-и не меняет `rp_gateway.db`. В нём нет account/session/provider-key таблиц или
-секретов; `owner_user_id` сохраняется только как owner scope партии. В базе нет
-revision 0–11 или общего state-file mirror. Одна успешная offline-операция
-сохраняет RAW-пару и продвигает версию партии одной транзакцией; ошибка или
-конфликт не оставляют частичного RAW/version commit.
+`app/rp` владеет отдельной schema v7 по `RP_DATABASE_URL` (по умолчанию
+`/data/rp_engine.db`). Хранилище начинается без старых партий и не читает, не
+мигрирует и не меняет `rp_gateway.db`. В нём нет account/session/provider-key
+таблиц или секретов; `owner_user_id` сохраняется только как owner scope Party.
+В базе нет revision 0–11 или общего state-file mirror.
 
-Срез 3 добавляет в строку партии четыре обязательных поля:
+Строка Party хранит четыре обязательных source-поля:
 `world_snapshot_json`, `world_hash`, `scenario_snapshot_json` и
-`scenario_hash`. Production loader/schema материализует общий канон
-и конкретный старт отдельно; база отклоняет изменение любого из этих
-значений. SHA-256 считается от canonical JSON, а чтение повторно
-сверяет payload с hash. Поэтому изменение `world.json`, пресета или
-ссылочного контента влияет только на будущую материализацию и не
-переписывает стартовый контракт уже созданной партии.
+`scenario_hash`, а также immutable Narrator binding: profile, provider, exact
+base URL, model и settings. Production loader материализует World и Scenario
+отдельно; база отклоняет изменение source или binding. Изменение исходников
+влияет только на будущие Party.
 
-Для этой базы ещё не назначены production path, volume, backup, restore или
-retention policy. Она существует только как source/module-test `каркас` и не
-меняет перечисленные ниже серверные пути. API и runtime её не открывают;
-deploy/apply и live-проверка среза 3 не выполнялись. Называть новую
-production DB пустой или изолированной до подключения и отдельной
-runtime-проверки нельзя.
+Narration request сохраняется до provider call. Успех одной транзакцией пишет
+RAW turn, increment Party version и фиксированные role jobs; provider failure не
+оставляет частичного turn/version. Job claim не увеличивает attempts, recovery
+возвращает `running` в `pending`, а actual failure увеличивает attempts. Guidance
+Administrator имеет собственную revision и может обновляться несколько раз на
+одной gameplay version.
+
+Party BYOK остаётся в legacy `provider_api_keys` Gateway DB и никогда не
+копируется в clean SQLite. Runtime читает только exact owner/Party/provider/base
+URL key; mismatched custom key отклоняется до outbound call. Source path и volume
+подготовлены, но inventory держит cutover-флаг выключенным; backup/restore,
+фактическая пустота live DB и retention будут доказаны отдельно при apply/live
+verification, а не этим текстом.
 
 ## Где находятся данные
 
