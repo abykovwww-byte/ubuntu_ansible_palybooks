@@ -8,25 +8,49 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении, срез 3. Шаг 6 поставляет уровень `каркас`:
-offline production loader/schema разделяет `WorldDefinition` и
-`ScenarioPresetDefinition`, а `RPTurnEngine` сохраняет их независимые
-immutable snapshots и SHA-256 в чистой RP SQLite. Новый контур не
-подключён к `main.py`, API, runtime или provider; пользовательский UX не
-изменён.
+**Delivery status:** в исполнении, срез 4. Шаг 7 поставляет уровень `каркас`:
+каждое выполнение offline narrator use case делает не больше одного plain-text
+вызова через выделенную границу клиента и только после успеха атомарно сохраняет
+opening либо RAW-пару. Prompt
+собирается из immutable World/Scenario snapshots, complete Party RAW и последнего
+валидного пятисекционного memory snapshot; safe coverage, `W/A` RAW-tail,
+hard input budget и cache-stable prefix вычисляются без legacy `Adjudicator`.
+Новый контур по-прежнему не подключён к `main.py`, API, runtime или реальному
+provider; автоматического обновления памяти, jobs, runner и пользовательского UX
+в этом срезе нет. До сохраняемого claim шага 8 два одновременных exact duplicate
+могут сделать два provider-вызова, но сохраняют и возвращают один победивший ход.
 
-Состав среза 3:
+Состав среза 4:
 
-- **добавлено:** production `World`/`Scenario` loader/schema,
-  авторский контракт и материализация только
-  `day-watch-moscow-v2`, независимые snapshots/hashes партии и
-  boundary-проверки;
-- **удалено:** противоречащие новому контракту правила из
-  `rp-world-pack-builder` и его дублирующая проверка в repository validator;
+- **добавлено:** assistant-only opening unit, одновызовный narrator orchestration,
+  history-first prompt, пять строгих memory sections и append-only party-scoped
+  memory snapshots с optimistic base;
+- **не добавлено:** fallback/repair/semantic prose validator, background memory
+  execution, `service_jobs`, attempts, queue или универсальный dispatcher ролей;
 - **временно оставлено:** действующий `Adjudicator`, ревизии 0–11, legacy
   SQLite и manifest-based WorldPack runtime. Они остаются активным
   пользовательским трактом до переключения и удаляются вместе с
   монолитом на шаге 12.
+
+### Проверяемый бриф среза 5 / шага 8
+
+Как только появляются сохраняемые jobs и runner, срез обязан доказать все четыре
+исхода непосредственно тестами и restart-проверкой:
+
+1. переход `pending → running` атомарен, с предикатом статуса в самом `UPDATE`;
+2. попытка считается **по фактическому отказу**, а не по захвату: перезапуск
+   процесса не расходует бюджет;
+3. startup и shutdown принадлежат runner'у, включая cancel и await;
+4. у администратора и у атомарной служебной модели разные роли и обработчики.
+
+Отдельный removal gate временного ограничения среза 4: concurrent exact
+duplicates выполняют ровно один provider call и возвращают один committed turn.
+
+Универсальная queue-платформа не создаётся. Wiki и skills в срезе 5 и каждом
+следующем срезе меняются только при изменении внешнего пользовательского,
+операционного или авторского контракта. Внутренняя перестановка или ещё не
+подключённый компонент сами по себе не являются основанием для документационного
+зеркала.
 
 Это решение — единственный анкер ребилда. Отдельные ADR на слои, роли и приёмку
 не заводятся: дробление на срезы было одной из причин накопления легаси.
@@ -49,6 +73,9 @@ Context остаются историческими read-only наблюдени
 Срез 3 начат от `origin/main @ 5c87f2b`
 (`5c87f2b5621c67d4bcbc77646d1e7e4be882c4f3`); merge, apply и live-проверка
 этого среза фиксируются как разные состояния.
+Срез 4 начат от `origin/main @ 8c38bbd`
+(`8c38bbdf6fa9a0ab41e5324adac2b4a583cf256b`) с тем же разделением source,
+merge, apply и live-проверки.
 
 Локальное evidence среза 3: production loader материализует committed V2 World
 и все 12 Scenario (четыре старта × три стиля), focused boundary — `20 passed`,
@@ -56,6 +83,16 @@ Context остаются историческими read-only наблюдени
 PASS. В отдельной временной SQLite подтверждены независимые hashes, сохранение
 старого snapshot после изменения копии source и fail-closed перепривязка party
 ID. Это offline-доказательство нового source/storage boundary, не runtime proof.
+
+Локальное evidence среза 4: focused narrator/memory/source/storage boundary —
+`37 passed`, полный Gateway suite — `703 passed`, repository gates и сохранённый
+Semantic Acceptance — PASS. Production loader и временная чистая SQLite провели
+партию через 66 полных RAW-единиц: при safe coverage 58 хвост равен 9…58, на 59
+остаётся 9…59, на 66 сдвигается к 17…66; отказ narrator не изменил 66 сохранённых
+единиц и version партии. Две memory revisions в этой проверке применены вручную,
+а provider был offline boundary double. Поэтому это доказательство сборки prompt,
+fail-closed commit и хранения, но не seeded acceptance шага 9, не реальный
+provider/runner и не live UX.
 
 ## Context
 

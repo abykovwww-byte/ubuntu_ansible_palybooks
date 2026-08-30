@@ -6,11 +6,19 @@ import sqlite3
 
 
 RP_DATABASE_APPLICATION_ID = 0x5250454E  # "RPEN"
-RP_SCHEMA_VERSION = 2
+RP_SCHEMA_VERSION = 3
 
-_EXPECTED_TABLES = frozenset({"rp_parties", "rp_turns"})
+_EXPECTED_TABLES = frozenset(
+    {"rp_parties", "rp_turns", "rp_story_memory_snapshots"}
+)
 _EXPECTED_TRIGGERS = frozenset(
-    {"rp_parties_snapshots_immutable", "rp_turns_immutable"}
+    {
+        "rp_parties_snapshots_immutable",
+        "rp_turns_immutable",
+        "rp_turns_no_delete",
+        "rp_story_memory_snapshots_immutable",
+        "rp_story_memory_snapshots_no_delete",
+    }
 )
 
 
@@ -55,17 +63,53 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE rp_turns (
             id INTEGER PRIMARY KEY,
             party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            turn_kind TEXT NOT NULL CHECK(turn_kind IN ('opening_scene', 'narrative')),
             request_id TEXT NOT NULL CHECK(length(trim(request_id)) > 0),
             idempotency_key TEXT NOT NULL CHECK(length(trim(idempotency_key)) > 0),
             expected_version INTEGER NOT NULL CHECK(expected_version >= 0),
             committed_version INTEGER NOT NULL CHECK(committed_version > 0),
-            player_text TEXT NOT NULL CHECK(length(trim(player_text)) > 0),
+            player_text TEXT NOT NULL,
             narrator_text TEXT NOT NULL CHECK(length(trim(narrator_text)) > 0),
             created_at INTEGER NOT NULL,
             CHECK(committed_version = expected_version + 1),
+            CHECK(
+                (turn_kind = 'opening_scene' AND player_text = '') OR
+                (turn_kind = 'narrative' AND length(trim(player_text)) > 0)
+            ),
             UNIQUE(party_id, committed_version),
             UNIQUE(party_id, request_id),
             UNIQUE(party_id, idempotency_key)
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_story_memory_snapshots (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            base_snapshot_id INTEGER,
+            update_id TEXT NOT NULL CHECK(length(trim(update_id)) > 0),
+            snapshot_json TEXT NOT NULL CHECK(length(trim(snapshot_json)) > 0),
+            observed_through_version INTEGER NOT NULL CHECK(observed_through_version >= 0),
+            situation_coverage INTEGER NOT NULL CHECK(situation_coverage >= 0),
+            threads_coverage INTEGER NOT NULL CHECK(threads_coverage >= 0),
+            characters_coverage INTEGER NOT NULL CHECK(characters_coverage >= 0),
+            assets_and_rules_coverage INTEGER NOT NULL CHECK(assets_and_rules_coverage >= 0),
+            chronology_and_hooks_coverage INTEGER NOT NULL CHECK(chronology_and_hooks_coverage >= 0),
+            created_at INTEGER NOT NULL,
+            CHECK(situation_coverage <= observed_through_version),
+            CHECK(threads_coverage <= observed_through_version),
+            CHECK(characters_coverage <= observed_through_version),
+            CHECK(assets_and_rules_coverage <= observed_through_version),
+            CHECK(chronology_and_hooks_coverage <= observed_through_version),
+            CHECK(
+                (revision = 1 AND base_snapshot_id IS NULL) OR
+                (revision > 1 AND base_snapshot_id IS NOT NULL)
+            ),
+            UNIQUE(party_id, id),
+            UNIQUE(party_id, revision),
+            UNIQUE(party_id, update_id),
+            FOREIGN KEY(party_id, base_snapshot_id)
+                REFERENCES rp_story_memory_snapshots(party_id, id) ON DELETE RESTRICT
         ) STRICT
         """,
         """
@@ -82,6 +126,27 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         ON rp_parties
         BEGIN
             SELECT RAISE(ABORT, 'RP source snapshots are immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_turns_no_delete
+        BEFORE DELETE ON rp_turns
+        BEGIN
+            SELECT RAISE(ABORT, 'committed RP turns cannot be deleted');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_story_memory_snapshots_immutable
+        BEFORE UPDATE ON rp_story_memory_snapshots
+        BEGIN
+            SELECT RAISE(ABORT, 'RP story-memory snapshots are immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_story_memory_snapshots_no_delete
+        BEFORE DELETE ON rp_story_memory_snapshots
+        BEGIN
+            SELECT RAISE(ABORT, 'RP story-memory snapshots cannot be deleted');
         END
         """,
     )

@@ -8,8 +8,8 @@
   "format": "plain_scene_text",
   "difficulty": null,
   "detail_level": "default",
-  "world_system_prompt_file": "presets/action/gm-system.md",
-  "world_authors_note_file": "presets/action/authors-note.md",
+  "world_system_prompt_file": "scenario-experience/action-system.md",
+  "world_authors_note_file": "scenario-experience/action-note.md",
   "opening_file": "prompts/openings/day-witch/opening-scene.md",
   "initial_state_file": "prompts/openings/day-witch/state-seed.json",
   "active_character_ids": [
