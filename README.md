@@ -134,7 +134,7 @@ ansible-playbook playbooks/site.yml --check --diff
 
 ## Pull Model On The Target Server
 
-For a self-hosted local server that pulls this private repository from GitHub with a read-only deploy key and applies Ansible to itself:
+For a self-hosted local server that pulls this public repository from GitHub with its existing read-only deploy key and applies Ansible to itself:
 
 ```bash
 sudo apt update

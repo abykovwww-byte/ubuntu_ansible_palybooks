@@ -12,7 +12,7 @@ Date: 2026-08-27 · Owner decision: accepted · Runtime status: I1 shadow applie
 | Awareness Showroom | `abykovwww-byte/tavern-awareness-showroom` | Showroom `:8011` | только `training` | `/srv/app-data/awareness-showroom` |
 
 `ubuntu_ansible_palybooks` остаётся authority для server topology и хранит
-commit pin нового private application repository. Код нового приложения живёт
+commit pin отдельного public application repository. Код нового приложения живёт
 только в его repository. Ansible не копирует его source из старого дерева.
 
 ## Владение компонентами
@@ -51,7 +51,7 @@ Awareness WorldPacks и training-only runtime/API/tests. Таблицы не у�
    git subtree split --prefix=roles/apps/files/rp-stack <SOURCE_BASE_SHA>
    ```
 
-3. Создать private `abykovwww-byte/tavern-awareness-showroom`, опубликовать
+3. Создать `abykovwww-byte/tavern-awareness-showroom`, опубликовать
    split history и записать `SOURCE_BASE_SHA`/`SUBTREE_HEAD` в provenance.
 4. После bootstrap все изменения нового project идут только через
    `codex/* -> non-draft PR -> green CI -> merge`.
@@ -118,7 +118,7 @@ Cookie names разделены, потому что разные host ports н�
 
 ### N0/N1 — new repository bootstrap
 
-Создать private project из subtree history. Добавить `AGENTS.md`, README,
+Создать отдельный project из subtree history. Добавить `AGENTS.md`, README,
 provenance, standalone Compose/env example, CI и migration documentation.
 Baseline должен собираться до удаления code.
 
@@ -135,7 +135,7 @@ training-only Showroom controls. Запустить focused Gateway/JS tests и 
 
 ### I1 — shadow deploy
 
-IaC клонирует новый private repository на exact commit в
+IaC клонирует новый public repository на exact commit в
 `/srv/apps/awareness-showroom`, persistent data — в
 `/srv/app-data/awareness-showroom`, backup — в
 `/srv/backups/awareness-showroom`. Showroom временно публикуется на `18011`,

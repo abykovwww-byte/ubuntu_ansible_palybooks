@@ -8,14 +8,15 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении, срез 6. Clean RP schema v7, Narrator,
-persisted role jobs и runner подключены к `main.py`, существующим Party API и
-реальному provider client за серверным флагом `RP_REBUILD_ENABLED`. В source
-флаг включает один World `day-watch-moscow-v2`, создание Party из preset или
-полного `free_scenario_seed`, opening/ходы с exact idempotency и optimistic
-version, отдельные Relationship/Lore/Memory job и ручной Administrator
-`accept/reject`. Обычный legacy RP при cutover fail-closed получает `410`, а
-Training и Showroom остаются на старом тракте до внешнего gate Plan 018.
+**Delivery status:** в исполнении, срез 7 merged; срез 8 начат. Clean RP schema
+v7, Narrator, persisted role jobs и runner подключены к `main.py`, существующим
+Party API, реальному provider client и Light GUI за серверным флагом
+`RP_REBUILD_ENABLED`. В source флаг включает один World `day-watch-moscow-v2`,
+создание Party из preset или полного `free_scenario_seed`, opening/ходы с exact
+idempotency и optimistic version, отдельные Relationship/Lore/Memory job и
+ручной Administrator `accept/reject`. Обычный legacy RP при cutover fail-closed
+получает `410`, а Training и Showroom остаются на старом тракте до внешнего gate
+Plan 018.
 
 Party неизменяемо связывает Narrator с exact `(profile, provider, base_url,
 model, settings)`. Party-scoped BYOK принимается только для этого provider и
@@ -28,11 +29,12 @@ loops. Claims сериализуются SQLite-предикатом; restart и
 незавершённые job в `pending` без расхода attempts, попытка растёт только после
 фактического отказа, а включённая роль с недоступной моделью блокирует startup.
 
-Состав среза 6:
+Состав срезов 6–7:
 
 - **добавлено:** clean Party HTTP path, concrete provider adapters, lifecycle
-  runner, supervisor трёх ролей, exact Party endpoint/BYOK binding и source/API
-  seed свободного Scenario;
+  runner, supervisor трёх ролей, exact Party endpoint/BYOK binding, source/API
+  seed свободного Scenario и Light GUI для preset/free Party, ручного retry и
+  решений Administrator;
 - **изолировано:** ordinary legacy RP API, автотесты, datasets и traces; Training
   и серверно подтверждённый Showroom продолжают работать через legacy storage;
   Training WorldPack/templates/player characters доступны только через
@@ -40,9 +42,9 @@ loops. Claims сериализуются SQLite-предикатом; restart и
 - **не добавлено:** универсальная queue-платформа, новый сервис, fallback/repair,
   compatibility adapter, автоматический replay пользовательского текста или
   multi-replica lease;
-- **ещё не сделано:** Light GUI, seeded/живая RP-приёмка, apply, activation и
-  live verification. Inventory оставляет `RP_REBUILD_ENABLED=false`, поэтому
-  merge среза сам по себе не меняет production UX.
+- **ещё не сделано:** seeded/живая RP-приёмка, apply, activation и live
+  verification. Inventory оставляет `RP_REBUILD_ENABLED=false`, поэтому merge
+  срезов сам по себе не меняет production UX.
 
 ### Brief среза 8: четыре проверяемых исхода §3
 
@@ -142,6 +144,18 @@ attempts, exact custom endpoint key и две Administrator guidance revisions �
 Party не проверены. Wiki обновлена, потому что изменился внешний API и
 операционный cutover-контракт; skills не менялись. Server inventory оставляет
 `RP_REBUILD_ENABLED=false`.
+
+Срез 7 начат от merged `origin/main @ def3daf`
+(`def3daf9730c5bbed50e8eb5b5594d8c9d4701b6`) и merged PR 114 как
+`ead598ce039be58c36097f455a0ed4c119ebe31b`. Light GUI использует clean API для
+preset/free Party и оставляет Training на retained-контракте. Реальный локальный
+smoke на текущем Gateway, runner и чистой SQLite подтвердил opening/turn,
+provider failure и ручной same-key retry, stale `409` без replay, три отдельные
+роли и решение Administrator владельцем Party. Focused clean RP boundary —
+`91 passed`, retained Awareness/Training gate — `9 passed`, все 14 Light GUI
+test-файлов и пять GitHub checks — PASS. Это source/local evidence: apply,
+production activation и live Party ещё не выполнены. Wiki изменена только из-за
+нового внешнего Light GUI/API-контракта; skills не менялись.
 
 ## Context
 
