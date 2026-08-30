@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from dataclasses import dataclass, fields
@@ -12,7 +13,14 @@ from app.rp.memory import (
     RPStoryMemoryRecord,
     memory_prompt_text,
 )
+from app.rp.mechanics import (
+    RP_LORE_PROMPT_MAX_CHARS,
+    lore_prompt_text,
+    relationship_values,
+)
 from app.rp.turn_engine import (
+    RPBackgroundJobConflict,
+    RPDerivedContext,
     RPIdempotencyConflict,
     RPParty,
     RPPartyVersionConflict,
@@ -59,7 +67,9 @@ class RPPromptLimits:
     player_chars: int = 4_000
     world_rules_chars: int = 8_000
     memory_chars: int = RP_MEMORY_PROMPT_MAX_CHARS
-    lore_chars: int = 16_000
+    lore_chars: int = RP_LORE_PROMPT_MAX_CHARS
+    relationship_chars: int = 12_000
+    administrator_chars: int = 4_000
     narrator_note_chars: int = 1_500
     opening_chars: int = 4_000
     hard_input_chars: int = 400_000
@@ -108,6 +118,7 @@ class RPNarratorPromptBuilder:
         turns: tuple[RPTurn, ...],
         memory: RPStoryMemoryRecord | None,
         player_text: str,
+        derived: RPDerivedContext | None = None,
     ) -> RPNarratorPrompt:
         if not isinstance(player_text, str) or not player_text.strip():
             raise ValueError("player_text must be a non-empty string")
@@ -115,6 +126,7 @@ class RPNarratorPromptBuilder:
             party=party,
             turns=turns,
             memory=memory,
+            derived=derived,
             current=RPPromptMessage("user", "current_player_action", player_text),
         )
 
@@ -126,6 +138,7 @@ class RPNarratorPromptBuilder:
             party=party,
             turns=(),
             memory=None,
+            derived=None,
             current=RPPromptMessage("user", "opening_request", opening),
         )
 
@@ -135,6 +148,7 @@ class RPNarratorPromptBuilder:
         party: RPParty,
         turns: tuple[RPTurn, ...],
         memory: RPStoryMemoryRecord | None,
+        derived: RPDerivedContext | None,
         current: RPPromptMessage,
     ) -> RPNarratorPrompt:
         world = party.world_snapshot
@@ -190,20 +204,43 @@ class RPNarratorPromptBuilder:
             volatile_messages.append(
                 RPPromptMessage("system", "story_memory", memory_text)
             )
-        if world.seed_lore_cards:
-            lore_text = self._bounded(
-                "lore",
-                "WORLD_SEED_LORE\n"
-                + json.dumps(
-                    world.seed_lore_cards,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
+        relationship_text = self._bounded(
+            "relationships",
+            _relationship_prompt_text(party, derived),
+            self.limits.relationship_chars,
+        )
+        volatile_messages.append(
+            RPPromptMessage(
+                "system", "party_relationships", relationship_text
+            )
+        )
+        runtime_lore = (
+            derived.runtime_lore_cards if derived is not None else ()
+        )
+        if world.seed_lore_cards or runtime_lore:
+            lore_text = lore_prompt_text(
+                world.seed_lore_cards,
+                runtime_lore,
                 self.limits.lore_chars,
             )
+            if len(lore_text) > self.limits.lore_chars:
+                raise RPPromptBudgetExceeded(
+                    "lore", len(lore_text), self.limits.lore_chars
+                )
             volatile_messages.append(
-                RPPromptMessage("system", "world_seed_lore", lore_text)
+                RPPromptMessage("system", "lore", lore_text)
+            )
+        if derived is not None and derived.administrator_guidance is not None:
+            administrator_text = self._bounded(
+                "administrator",
+                "ACCEPTED_PARTY_ADMINISTRATOR_GUIDANCE\n"
+                + derived.administrator_guidance.content,
+                self.limits.administrator_chars,
+            )
+            volatile_messages.append(
+                RPPromptMessage(
+                    "system", "administrator_guidance", administrator_text
+                )
             )
         narrator_note = self._bounded(
             "narrator_note",
@@ -292,45 +329,69 @@ class RPNarratorService:
         )
         if replay is not None:
             return replay
-        party = self.engine.get_party(owner_user_id=owner_user_id, party_id=party_id)
-        if party.current_version != expected_version:
-            raise RPPartyVersionConflict(
-                f"party {party_id!r} is at version {party.current_version}, "
-                f"not {expected_version}"
-            )
-        memory = self.engine.latest_story_memory(
-            owner_user_id=owner_user_id, party_id=party_id
-        )
-        prompt = self.prompt_builder.build_turn(
-            party=party,
-            turns=turns,
-            memory=memory,
+        claim = self.engine.claim_narration(
+            owner_user_id=owner_user_id,
+            party_id=party_id,
+            turn_kind="narrative",
+            request_id=request_id,
+            idempotency_key=idempotency_key,
+            expected_version=expected_version,
             player_text=player_text,
         )
-        narrator_text = await self._complete(prompt, player_text)
-        try:
-            return self.engine.commit_turn(
+        if claim.turn is not None:
+            return claim.turn
+        if not claim.acquired:
+            return await self._wait_for_narration(
                 owner_user_id=owner_user_id,
                 party_id=party_id,
-                request_id=request_id,
-                idempotency_key=idempotency_key,
-                expected_version=expected_version,
-                player_text=player_text,
-                narrator_text=narrator_text,
-            )
-        except RPIdempotencyConflict:
-            replay = _turn_replay(
-                self.engine.list_turns(
-                    owner_user_id=owner_user_id, party_id=party_id
-                ),
                 turn_kind="narrative",
                 request_id=request_id,
                 idempotency_key=idempotency_key,
                 expected_version=expected_version,
                 player_text=player_text,
             )
-            if replay is not None:
-                return replay
+        if claim.request.claim_token is None:
+            raise RuntimeError("acquired narration claim has no token")
+        try:
+            party = self.engine.get_party(
+                owner_user_id=owner_user_id, party_id=party_id
+            )
+            if party.current_version != expected_version:
+                raise RPPartyVersionConflict(
+                    f"party {party_id!r} is at version {party.current_version}, "
+                    f"not {expected_version}"
+                )
+            memory = self.engine.latest_story_memory(
+                owner_user_id=owner_user_id, party_id=party_id
+            )
+            derived = self.engine.derived_context(
+                owner_user_id=owner_user_id, party_id=party_id
+            )
+            prompt = self.prompt_builder.build_turn(
+                party=party,
+                turns=turns,
+                memory=memory,
+                player_text=player_text,
+                derived=derived,
+            )
+            narrator_text = await self._complete(prompt, player_text)
+            return self.engine.complete_narration(
+                owner_user_id=owner_user_id,
+                party_id=party_id,
+                turn_kind="narrative",
+                request_id=request_id,
+                idempotency_key=idempotency_key,
+                expected_version=expected_version,
+                player_text=player_text,
+                narrator_text=narrator_text,
+                claim_token=claim.request.claim_token,
+            )
+        except BaseException as exc:
+            self._fail_claim(
+                request_id=claim.request.id,
+                claim_token=claim.request.claim_token,
+                error=exc,
+            )
             raise
 
     async def narrate_opening(
@@ -353,35 +414,104 @@ class RPNarratorService:
         )
         if replay is not None:
             return replay
-        party = self.engine.get_party(owner_user_id=owner_user_id, party_id=party_id)
-        if party.current_version != 0:
-            raise RPPartyVersionConflict(
-                f"party {party_id!r} already started at version {party.current_version}"
-            )
-        prompt = self.prompt_builder.build_opening(party=party)
-        narrator_text = await self._complete(prompt, None)
-        try:
-            return self.engine.commit_opening(
+        claim = self.engine.claim_narration(
+            owner_user_id=owner_user_id,
+            party_id=party_id,
+            turn_kind="opening_scene",
+            request_id=request_id,
+            idempotency_key=idempotency_key,
+            expected_version=0,
+            player_text="",
+        )
+        if claim.turn is not None:
+            return claim.turn
+        if not claim.acquired:
+            return await self._wait_for_narration(
                 owner_user_id=owner_user_id,
                 party_id=party_id,
-                request_id=request_id,
-                idempotency_key=idempotency_key,
-                narrator_text=narrator_text,
-            )
-        except RPIdempotencyConflict:
-            replay = _turn_replay(
-                self.engine.list_turns(
-                    owner_user_id=owner_user_id, party_id=party_id
-                ),
                 turn_kind="opening_scene",
                 request_id=request_id,
                 idempotency_key=idempotency_key,
                 expected_version=0,
                 player_text="",
             )
-            if replay is not None:
-                return replay
+        if claim.request.claim_token is None:
+            raise RuntimeError("acquired narration claim has no token")
+        try:
+            party = self.engine.get_party(
+                owner_user_id=owner_user_id, party_id=party_id
+            )
+            if party.current_version != 0:
+                raise RPPartyVersionConflict(
+                    f"party {party_id!r} already started at version {party.current_version}"
+                )
+            prompt = self.prompt_builder.build_opening(party=party)
+            narrator_text = await self._complete(prompt, None)
+            return self.engine.complete_narration(
+                owner_user_id=owner_user_id,
+                party_id=party_id,
+                turn_kind="opening_scene",
+                request_id=request_id,
+                idempotency_key=idempotency_key,
+                expected_version=0,
+                player_text="",
+                narrator_text=narrator_text,
+                claim_token=claim.request.claim_token,
+            )
+        except BaseException as exc:
+            self._fail_claim(
+                request_id=claim.request.id,
+                claim_token=claim.request.claim_token,
+                error=exc,
+            )
             raise
+
+    async def _wait_for_narration(
+        self,
+        *,
+        owner_user_id: str,
+        party_id: str,
+        turn_kind: str,
+        request_id: str,
+        idempotency_key: str,
+        expected_version: int,
+        player_text: str,
+    ) -> RPTurn:
+        while True:
+            request = self.engine.get_narration_request(
+                owner_user_id=owner_user_id,
+                party_id=party_id,
+                idempotency_key=idempotency_key,
+            )
+            if request.status == "failed":
+                raise RPNarratorUnavailable(player_text or None)
+            if request.status == "succeeded":
+                replay = _turn_replay(
+                    self.engine.list_turns(
+                        owner_user_id=owner_user_id, party_id=party_id
+                    ),
+                    turn_kind=turn_kind,
+                    request_id=request_id,
+                    idempotency_key=idempotency_key,
+                    expected_version=expected_version,
+                    player_text=player_text,
+                )
+                if replay is None:
+                    raise RuntimeError("succeeded narration has no committed turn")
+                return replay
+            await asyncio.sleep(0.01)
+
+    def _fail_claim(
+        self, *, request_id: int, claim_token: str, error: BaseException
+    ) -> None:
+        try:
+            self.engine.fail_narration(
+                request_id=request_id,
+                claim_token=claim_token,
+                error=str(error) or type(error).__name__,
+            )
+        except RPBackgroundJobConflict:
+            pass
 
     async def _complete(
         self, prompt: RPNarratorPrompt, player_text: str | None
@@ -491,6 +621,46 @@ def _scenario_experience(scenario: object) -> str:
             f"detail_level={scenario.detail_level}",
             scenario.narrator_system,
         )
+    )
+
+
+def _relationship_prompt_text(
+    party: RPParty, derived: RPDerivedContext | None
+) -> str:
+    causes = derived.relationship_causes if derived is not None else ()
+    totals = relationship_values(party, causes)
+    recent: list[dict[str, object]] = []
+    for cause in causes:
+        recent.append(
+            {
+                "character_id": cause.character_id,
+                "direction": cause.direction,
+                "axis": cause.axis,
+                "event": cause.event_id,
+                "delta": cause.delta,
+                "source_version": cause.source_version,
+            }
+        )
+    payload = {
+        "authored_starting_relationships": (
+            party.scenario_snapshot.starting_relationships
+        ),
+        "current": [
+            {
+                "character_id": character_id,
+                "direction": "character_to_player",
+                "axis": axis,
+                "value": value,
+            }
+            for (character_id, axis), value in sorted(totals.items())
+        ],
+        "recent_causes": recent[-20:],
+    }
+    return "PARTY_RELATIONSHIPS\n" + json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     )
 
 

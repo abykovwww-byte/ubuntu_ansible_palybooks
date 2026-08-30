@@ -6,14 +6,31 @@ import sqlite3
 
 
 RP_DATABASE_APPLICATION_ID = 0x5250454E  # "RPEN"
-RP_SCHEMA_VERSION = 3
+RP_SCHEMA_VERSION = 4
 
 _EXPECTED_TABLES = frozenset(
-    {"rp_parties", "rp_turns", "rp_story_memory_snapshots"}
+    {
+        "rp_administrator_guidance",
+        "rp_administrator_jobs",
+        "rp_administrator_proposals",
+        "rp_narration_requests",
+        "rp_parties",
+        "rp_relationship_causes",
+        "rp_runtime_lore_cards",
+        "rp_service_jobs",
+        "rp_story_memory_snapshots",
+        "rp_turns",
+    }
 )
 _EXPECTED_TRIGGERS = frozenset(
     {
+        "rp_administrator_guidance_immutable",
+        "rp_administrator_guidance_no_delete",
         "rp_parties_snapshots_immutable",
+        "rp_relationship_causes_immutable",
+        "rp_relationship_causes_no_delete",
+        "rp_runtime_lore_cards_immutable",
+        "rp_runtime_lore_cards_no_delete",
         "rp_turns_immutable",
         "rp_turns_no_delete",
         "rp_story_memory_snapshots_immutable",
@@ -113,6 +130,164 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         ) STRICT
         """,
         """
+        CREATE TABLE rp_narration_requests (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            turn_kind TEXT NOT NULL CHECK(turn_kind IN ('opening_scene', 'narrative')),
+            request_id TEXT NOT NULL CHECK(length(trim(request_id)) > 0),
+            idempotency_key TEXT NOT NULL CHECK(length(trim(idempotency_key)) > 0),
+            expected_version INTEGER NOT NULL CHECK(expected_version >= 0),
+            player_text TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('running', 'succeeded', 'failed')),
+            claim_token TEXT CHECK(claim_token IS NULL OR length(trim(claim_token)) > 0),
+            turn_id INTEGER REFERENCES rp_turns(id) ON DELETE RESTRICT,
+            last_error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            CHECK(
+                (turn_kind = 'opening_scene' AND player_text = '' AND expected_version = 0) OR
+                (turn_kind = 'narrative' AND length(trim(player_text)) > 0)
+            ),
+            CHECK(
+                (status = 'running' AND claim_token IS NOT NULL AND turn_id IS NULL) OR
+                (status = 'succeeded' AND claim_token IS NULL AND turn_id IS NOT NULL) OR
+                (status = 'failed' AND claim_token IS NULL AND turn_id IS NULL)
+            ),
+            UNIQUE(party_id, request_id),
+            UNIQUE(party_id, idempotency_key)
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_service_jobs (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            job_type TEXT NOT NULL CHECK(
+                job_type IN ('story_memory', 'relationships', 'runtime_lore')
+            ),
+            source_turn_id INTEGER NOT NULL REFERENCES rp_turns(id) ON DELETE RESTRICT,
+            source_version INTEGER NOT NULL CHECK(source_version > 0),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'running', 'succeeded', 'failed')),
+            attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+            max_attempts INTEGER NOT NULL CHECK(max_attempts > 0),
+            claim_token TEXT CHECK(claim_token IS NULL OR length(trim(claim_token)) > 0),
+            result_json TEXT,
+            last_error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            CHECK(attempts <= max_attempts),
+            CHECK(
+                (status = 'running' AND claim_token IS NOT NULL) OR
+                (status != 'running' AND claim_token IS NULL)
+            ),
+            UNIQUE(party_id, job_type, source_turn_id)
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_administrator_jobs (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            source_turn_id INTEGER NOT NULL REFERENCES rp_turns(id) ON DELETE RESTRICT,
+            source_version INTEGER NOT NULL CHECK(source_version > 0),
+            window_start_version INTEGER NOT NULL CHECK(window_start_version > 0),
+            window_end_version INTEGER NOT NULL CHECK(window_end_version >= window_start_version),
+            window_hash TEXT NOT NULL CHECK(length(window_hash) = 64),
+            evidence_versions_json TEXT NOT NULL CHECK(length(trim(evidence_versions_json)) > 0),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'running', 'succeeded', 'failed')),
+            attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+            max_attempts INTEGER NOT NULL CHECK(max_attempts > 0),
+            claim_token TEXT CHECK(claim_token IS NULL OR length(trim(claim_token)) > 0),
+            result_json TEXT,
+            last_error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            CHECK(attempts <= max_attempts),
+            CHECK(
+                (status = 'running' AND claim_token IS NOT NULL) OR
+                (status != 'running' AND claim_token IS NULL)
+            ),
+            UNIQUE(party_id, source_turn_id)
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_relationship_causes (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            service_job_id INTEGER NOT NULL REFERENCES rp_service_jobs(id) ON DELETE RESTRICT,
+            source_turn_id INTEGER NOT NULL REFERENCES rp_turns(id) ON DELETE RESTRICT,
+            source_version INTEGER NOT NULL CHECK(source_version > 0),
+            candidate_key TEXT NOT NULL CHECK(length(candidate_key) = 64),
+            character_id TEXT NOT NULL CHECK(length(trim(character_id)) > 0),
+            direction TEXT NOT NULL CHECK(direction = 'character_to_player'),
+            event_id TEXT NOT NULL CHECK(length(trim(event_id)) > 0),
+            axis TEXT NOT NULL CHECK(length(trim(axis)) > 0),
+            delta INTEGER NOT NULL,
+            evidence_span_ids_json TEXT NOT NULL CHECK(length(trim(evidence_span_ids_json)) > 0),
+            created_at INTEGER NOT NULL,
+            UNIQUE(party_id, candidate_key)
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_runtime_lore_cards (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            service_job_id INTEGER NOT NULL REFERENCES rp_service_jobs(id) ON DELETE RESTRICT,
+            source_turn_id INTEGER NOT NULL REFERENCES rp_turns(id) ON DELETE RESTRICT,
+            source_version INTEGER NOT NULL CHECK(source_version > 0),
+            card_key TEXT NOT NULL CHECK(length(card_key) = 64),
+            kind TEXT NOT NULL CHECK(kind IN ('character', 'event', 'location')),
+            origin TEXT NOT NULL CHECK(origin = 'runtime'),
+            title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+            content TEXT NOT NULL CHECK(length(trim(content)) > 0),
+            keywords_json TEXT NOT NULL CHECK(length(trim(keywords_json)) > 0),
+            evidence_span_ids_json TEXT NOT NULL CHECK(length(trim(evidence_span_ids_json)) > 0),
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+            created_at INTEGER NOT NULL,
+            UNIQUE(party_id, card_key)
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_administrator_proposals (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            administrator_job_id INTEGER NOT NULL
+                REFERENCES rp_administrator_jobs(id) ON DELETE RESTRICT,
+            kind TEXT NOT NULL CHECK(kind = 'narrator_guidance'),
+            target_slot TEXT NOT NULL CHECK(target_slot = 'narrator_guidance'),
+            before_text TEXT NOT NULL,
+            after_text TEXT NOT NULL CHECK(length(trim(after_text)) > 0),
+            base_party_version INTEGER NOT NULL CHECK(base_party_version >= 0),
+            evidence_versions_json TEXT NOT NULL CHECK(length(trim(evidence_versions_json)) > 0),
+            window_hash TEXT NOT NULL CHECK(length(window_hash) = 64),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'accepted', 'rejected', 'stale')),
+            applied_party_version INTEGER CHECK(applied_party_version > base_party_version),
+            created_at INTEGER NOT NULL,
+            decided_at INTEGER,
+            CHECK(
+                (status = 'accepted' AND applied_party_version IS NOT NULL AND decided_at IS NOT NULL) OR
+                (status IN ('rejected', 'stale') AND applied_party_version IS NULL AND decided_at IS NOT NULL) OR
+                (status = 'pending' AND applied_party_version IS NULL AND decided_at IS NULL)
+            ),
+            UNIQUE(party_id, administrator_job_id)
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_administrator_guidance (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            proposal_id INTEGER NOT NULL UNIQUE
+                REFERENCES rp_administrator_proposals(id) ON DELETE RESTRICT,
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            party_version INTEGER NOT NULL CHECK(party_version > 0),
+            content TEXT NOT NULL CHECK(length(trim(content)) > 0),
+            created_at INTEGER NOT NULL,
+            UNIQUE(party_id, revision),
+            UNIQUE(party_id, party_version)
+        ) STRICT
+        """,
+        """
         CREATE TRIGGER rp_turns_immutable
         BEFORE UPDATE ON rp_turns
         BEGIN
@@ -147,6 +322,48 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         BEFORE DELETE ON rp_story_memory_snapshots
         BEGIN
             SELECT RAISE(ABORT, 'RP story-memory snapshots cannot be deleted');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_relationship_causes_immutable
+        BEFORE UPDATE ON rp_relationship_causes
+        BEGIN
+            SELECT RAISE(ABORT, 'RP relationship causes are immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_relationship_causes_no_delete
+        BEFORE DELETE ON rp_relationship_causes
+        BEGIN
+            SELECT RAISE(ABORT, 'RP relationship causes cannot be deleted');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_runtime_lore_cards_immutable
+        BEFORE UPDATE ON rp_runtime_lore_cards
+        BEGIN
+            SELECT RAISE(ABORT, 'RP runtime Lore cards are immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_runtime_lore_cards_no_delete
+        BEFORE DELETE ON rp_runtime_lore_cards
+        BEGIN
+            SELECT RAISE(ABORT, 'RP runtime Lore cards cannot be deleted');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_administrator_guidance_immutable
+        BEFORE UPDATE ON rp_administrator_guidance
+        BEGIN
+            SELECT RAISE(ABORT, 'accepted RP administrator guidance is immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_administrator_guidance_no_delete
+        BEFORE DELETE ON rp_administrator_guidance
+        BEGIN
+            SELECT RAISE(ABORT, 'accepted RP administrator guidance cannot be deleted');
         END
         """,
     )
