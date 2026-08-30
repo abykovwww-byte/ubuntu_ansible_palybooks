@@ -8,14 +8,15 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении, срез 6. Clean RP schema v7, Narrator,
-persisted role jobs и runner подключены к `main.py`, существующим Party API и
-реальному provider client за серверным флагом `RP_REBUILD_ENABLED`. В source
-флаг включает один World `day-watch-moscow-v2`, создание Party из preset или
-полного `free_scenario_seed`, opening/ходы с exact idempotency и optimistic
-version, отдельные Relationship/Lore/Memory job и ручной Administrator
-`accept/reject`. Обычный legacy RP при cutover fail-closed получает `410`, а
-Training и Showroom остаются на старом тракте до внешнего gate Plan 018.
+**Delivery status:** в исполнении, срезы 6–7 source-merged. Clean RP schema v7,
+Narrator, persisted role jobs и runner подключены к `main.py`, существующим
+Party API, реальному provider client и Light GUI за серверным флагом
+`RP_REBUILD_ENABLED`. В source флаг включает один World `day-watch-moscow-v2`,
+создание Party из preset или полного `free_scenario_seed`, opening/ходы с exact
+idempotency и optimistic version, отдельные Relationship/Lore/Memory job и
+ручной Administrator `accept/reject`. C1 source оставляет RP Gateway и Light GUI
+RP-only, а Training/Showroom передаёт standalone project на целевом LAN-only
+`192.168.1.88:8011`; до apply живой сервер ещё использует прежний общий runtime.
 
 Party неизменяемо связывает Narrator с exact `(profile, provider, base_url,
 model, settings)`. Party-scoped BYOK принимается только для этого provider и
@@ -28,21 +29,22 @@ loops. Claims сериализуются SQLite-предикатом; restart и
 незавершённые job в `pending` без расхода attempts, попытка растёт только после
 фактического отказа, а включённая роль с недоступной моделью блокирует startup.
 
-Состав среза 6:
+Состав срезов 6–7:
 
 - **добавлено:** clean Party HTTP path, concrete provider adapters, lifecycle
-  runner, supervisor трёх ролей, exact Party endpoint/BYOK binding и source/API
-  seed свободного Scenario;
-- **изолировано:** ordinary legacy RP API, автотесты, datasets и traces; Training
-  и серверно подтверждённый Showroom продолжают работать через legacy storage;
-  Training WorldPack/templates/player characters доступны только через
-  фильтрованный retained-контракт и не открывают ordinary legacy RP;
+  runner, supervisor трёх ролей, exact Party endpoint/BYOK binding, source/API
+  seed свободного Scenario и Light GUI для preset/free Party, ручного retry и
+  решений Administrator;
+- **изолировано:** ordinary legacy RP API, автотесты, datasets и traces; C1
+  удаляет Training/Showroom routes и source из RP-контура, а legacy SQLite,
+  state и backups сохраняет как неисполняемые data/forensic artifacts;
 - **не добавлено:** универсальная queue-платформа, новый сервис, fallback/repair,
   compatibility adapter, автоматический replay пользовательского текста или
   multi-replica lease;
-- **ещё не сделано:** Light GUI, seeded/живая RP-приёмка, apply, activation и
-  live verification. Inventory оставляет `RP_REBUILD_ENABLED=false`, поэтому
-  merge среза сам по себе не меняет production UX.
+- **ещё не сделано:** seeded/живая RP-приёмка, apply, activation и live
+  verification. Inventory оставляет `RP_REBUILD_ENABLED=false`, поэтому merge
+  срезов сам по себе не меняет production UX; C1 cutover и полная standalone
+  training-приёмка также требуют отдельного apply/live proof.
 
 ### Brief среза 8: четыре проверяемых исхода §3
 
@@ -131,7 +133,8 @@ apply и live runtime этим срезом не подключены и не п
 (`d8d05b03245e0b63f288e6f07fa3d5d61edb707d`). Clean source теперь подключён к
 `main.py`, Party HTTP API, concrete `ServiceModelClient` adapters и FastAPI
 lifespan. Focused source/storage/provider/lifecycle boundary — `84 passed`;
-полный Gateway suite после endpoint/BYOK/retained Training regression fixes —
+полный Gateway suite после endpoint/BYOK и тогдашних shared-runtime Training
+regression fixes —
 `750 passed`.
 Интеграционные тесты подтверждают preset/free creation только через API, один
 provider call/turn для exact duplicate, fail-closed provider error без partial
@@ -142,6 +145,18 @@ attempts, exact custom endpoint key и две Administrator guidance revisions �
 Party не проверены. Wiki обновлена, потому что изменился внешний API и
 операционный cutover-контракт; skills не менялись. Server inventory оставляет
 `RP_REBUILD_ENABLED=false`.
+
+Срез 7 начат от merged `origin/main @ def3daf`
+(`def3daf9730c5bbed50e8eb5b5594d8c9d4701b6`) и merged PR 114 как
+`ead598ce039be58c36097f455a0ed4c119ebe31b`. Light GUI использует clean API для
+preset/free Party, ручного same-key retry и решений Administrator. Реальный
+локальный smoke на текущем Gateway, runner и чистой SQLite подтвердил
+opening/turn, provider failure, stale `409` без replay и три отдельные роли.
+Focused clean RP boundary — `91 passed`, тогдашний Awareness/Training isolation
+gate — `9 passed`, все 14 Light GUI test-файлов и пять GitHub checks — PASS.
+Это source/local evidence: apply, production activation и live Party ещё не
+выполнены. После C1 Light GUI не содержит training path: training UX принадлежит
+standalone Showroom на `:8011`.
 
 ## Context
 
@@ -325,8 +340,9 @@ supervisor после переноса полезной логики. Пять �
 модуль уходит вместе со своими тестами в том же изменении, которое вводит его
 замену.
 
-Компоненты, общие с training-контуром, удаляются из RP-источника по Plan 018 —
-после его cutover и rollback window, не этим решением.
+Компоненты, общие с training-контуром, удаляются из RP-источника zero-window
+поставкой по Plan 018, не этим решением. Legacy SQLite rows/tables, state и
+backups этот внешний cleanup не удаляет.
 
 `incident-50` не является исключением: он удаляется вместе с остальными старыми
 RP-мирами. Формулировка Plan 018 о том, что он остаётся только в RP project,
@@ -470,22 +486,24 @@ Training-контур идёт параллельно по Plan 018 и здес�
    RP-партия.
    **Правило brief:** Wiki/skills меняются только при реальном внешнем
    пользовательском/операционном контракте, не при внутренней перестановке.
-10. **Закрыть внешний Awareness-gate по Plan 018.** Обязательный порядок: полная
-    приёмка Awareness в отдельном проекте и на его пустой стартовой БД → cutover
-    Showroom на `:8011` → rollback window → удаление training-кода и data mounts
-    из активного RP source. Это выполняется в Awareness-потоке, но блокирует
-    финальный RP cleanup.
+10. **Закрыть внешний Awareness-gate по Plan 018.** До cutover выполняется только
+    shadow smoke отдельного проекта на пустой стартовой БД. Затем один apply
+    переключает Showroom на `:8011` с rollback window `0` и удаляет training-код
+    и старые source declarations из активного RP source. Полная live-приёмка
+    обоих курсов выполняется уже после этого cutover на production endpoint;
+    внешний gate закрывается только после неё. Legacy data сохраняются, а
+    дальнейший независимый RP cleanup до закрытия gate запрещён.
     **Правило brief:** Wiki/skills меняются только при реальном внешнем
     пользовательском/операционном контракте, не при внутренней перестановке.
 11. **Переключить Light GUI на новый RP Gateway.**
     **Правило brief:** Wiki/skills меняются только при реальном внешнем
     пользовательском/операционном контракте, не при внутренней перестановке.
 12. **Удалить старый RP-монолит последней операцией.** Удаляются старый RP-код,
-    RP-only state-каталоги, снятые миры и активная привязка к старому смешанному
-    хранилищу. Новая RP-БД остаётся чистой от старых партий. Legacy DB/backup,
-    необходимые Awareness, не мутируются destructive SQL и не удаляются: их
-    retention принадлежит Plan 018. Ни один предыдущий шаг ничего из этого не
-    удаляет.
+    source-only state templates, снятые миры и активная привязка к старому
+    смешанному хранилищу. Новая RP-БД остаётся чистой от старых партий. Mutable
+    legacy RP SQLite/state/backups и сохранённые Awareness data artifacts не
+    мутируются destructive SQL и не удаляются: их retention принадлежит Plan
+    018. Ни один предыдущий шаг ничего из этого не удаляет.
     **Правило brief:** Wiki/skills меняются только при реальном внешнем
     пользовательском/операционном контракте, не при внутренней перестановке.
 

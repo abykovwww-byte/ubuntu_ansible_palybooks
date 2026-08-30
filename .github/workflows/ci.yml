@@ -60,8 +60,6 @@ jobs:
           find worldpacks -name state-seed.json -print0 | sort -z | while IFS= read -r -d '' state; do
             python scripts/validate-state.py --state "$state" --schema state/schema.json
           done
-      - name: Validate deterministic training runtime
-        run: python scripts/validate-training-runtime.py --worldpacks worldpacks
       - name: Exercise state workflow
         run: python scripts/test-state-workflow.py
       - name: Exercise check workflow
@@ -79,7 +77,6 @@ jobs:
         shell: bash
         run: |
           node --check roles/apps/files/rp-stack/rp-light-gui/app.js
-          node --check roles/apps/files/rp-stack/rp-showcase-gui/app.js
       - name: Run browser client tests
         shell: bash
         run: |

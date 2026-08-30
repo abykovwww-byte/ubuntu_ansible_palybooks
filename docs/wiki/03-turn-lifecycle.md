@@ -557,8 +557,9 @@ Runner сохраняет четыре обязательных свойства
 фактического отказа, а не claim; startup/shutdown, cancel и await принадлежат
 runner; Administrator и атомарная служебная модель имеют разные очереди, роли и
 handlers. Restart/shutdown возвращает claimed job в `pending` без расхода
-attempt. Эта source-интеграция ещё не является живой игровой приёмкой: inventory
-выключен, Light GUI не переключён, seeded и live Party не пройдены.
+attempt. Эта source-интеграция ещё не является живой игровой приёмкой: Light GUI
+подключён в source, но inventory выключен, production не активирован, seeded и
+live Party не пройдены.
 
 ## Обычный ход
 
@@ -767,7 +768,8 @@ provider завершает запрос контролируемой ошибк
 Legacy-партии `rp-core.v1` сохраняют прежний однопроходный контракт до явной
 миграции.
 
-WorldPack runtime использует `TRAINING_REPAIR_ATTEMPTS`: canonical
+Standalone WorldPack runtime использует принадлежащий training project
+`TRAINING_REPAIR_ATTEMPTS`: canonical
 header/question/no-link marker сначала чинятся без LLM, soft field/profile
 нарушение может получить один repair с русским списком реально проваленных
 ограничений, а hard identity/shape/URL/attachment/score или provider failure
@@ -986,8 +988,9 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 - [RP story memory](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
 - [Revision-8 history selection](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_history.py)
 - [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
-- [Активный standalone Training Gateway](https://github.com/abykovwww-byte/tavern-awareness-showroom)
-- Legacy-копии `training_artifacts.py` и `training_runtime.py` в RP source сохранены только до явной очистки O2 и после C1 не исполняются.
+- [Standalone Training Gateway source](https://github.com/abykovwww-byte/tavern-awareness-showroom)
+- Legacy training modules удалены из RP source zero-window поставкой; старые
+  SQLite rows остаются только под read-only quarantine guards.
 - [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)

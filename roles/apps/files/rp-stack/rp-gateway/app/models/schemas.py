@@ -41,15 +41,10 @@ OutcomeLabel = Literal[
     "success",
     "critical_success",
     "narrative_continuation",
-    "deterministic_resolution",
 ]
 
-ActiveScenarioType = Literal["rp", "training"]
+ActiveScenarioType = Literal["rp"]
 StoredScenarioType = Literal["rp", "novel", "training"]
-ShowroomScenarioStatus = Literal["draft", "published", "archived"]
-ShowroomWorldSource = Literal["preset", "prompt"]
-ShowroomLeaderboardMetric = Literal["state_path", "turn_count"]
-TrainingArtifactEventType = Literal["link_opened", "form_submitted", "site_closed", "reported"]
 
 
 class ChatMessage(BaseModel):
@@ -707,162 +702,6 @@ class TurnTraceAnnotationCreate(BaseModel):
         if not normalized:
             raise ValueError("value must not be blank")
         return normalized
-
-
-class NarrativeArtifactContent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    artifact_key: str = Field(min_length=1, max_length=120, pattern=r"^[a-z0-9][a-z0-9-]*$")
-    blueprint_id: str = Field(min_length=1, max_length=120, pattern=r"^[a-z0-9][a-z0-9-]*$")
-    slots: dict[str, str] = Field(default_factory=dict, max_length=40)
-
-    @field_validator("slots")
-    @classmethod
-    def validate_slot_values(cls, value: dict[str, str]) -> dict[str, str]:
-        if any(not isinstance(item, str) for item in value.values()):
-            raise ValueError("artifact slot values must be strings")
-        return value
-
-
-class NarrativeWorkspaceFileContent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    file_key: str = Field(min_length=1, max_length=120, pattern=r"^[a-z0-9][a-z0-9-]*$")
-    blueprint_id: str = Field(min_length=1, max_length=120, pattern=r"^[a-z0-9][a-z0-9-]*$")
-    slots: dict[str, str] = Field(default_factory=dict, max_length=40)
-
-    @field_validator("slots")
-    @classmethod
-    def validate_slot_values(cls, value: dict[str, str]) -> dict[str, str]:
-        if any(not isinstance(item, str) for item in value.values()):
-            raise ValueError("workspace file slot values must be strings")
-        return value
-
-
-class NarrativeBundle(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal["rp-gateway.narrative-bundle.v1", "rp-gateway.narrative-bundle.v2"]
-    narrative_text: str = Field(min_length=1, max_length=30000)
-    artifacts: list[NarrativeArtifactContent] = Field(default_factory=list, max_length=4)
-    workspace_files: list[NarrativeWorkspaceFileContent] = Field(default_factory=list, max_length=8)
-
-
-class TrainingArtifactSnapshot(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal["rp-gateway.training-artifact.v1"] = "rp-gateway.training-artifact.v1"
-    artifact_id: str = Field(min_length=1, max_length=160)
-    artifact_key: str = Field(min_length=1, max_length=120)
-    artifact_revision: int = Field(ge=1)
-    surface_turn: int = Field(ge=1)
-    blueprint_id: str = Field(min_length=1, max_length=120)
-    renderer: str = Field(min_length=1, max_length=80)
-    theme: str = Field(min_length=1, max_length=80)
-    display_url: str = Field(min_length=1, max_length=300)
-    field_ids: list[str] = Field(default_factory=list, max_length=20)
-    field_types: dict[str, Literal["text", "password", "otp", "email"]] = Field(default_factory=dict)
-    actions: list[Literal["submit", "close", "report"]] = Field(default_factory=list, max_length=8)
-    slots: dict[str, str] = Field(default_factory=dict, max_length=40)
-
-
-class TrainingArtifactEventRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    event_id: str = Field(min_length=8, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
-    artifact_id: str = Field(min_length=1, max_length=160)
-    artifact_revision: int = Field(ge=1)
-    event_type: TrainingArtifactEventType
-    filled_field_ids: list[str] = Field(default_factory=list, max_length=20)
-
-    @field_validator("filled_field_ids")
-    @classmethod
-    def unique_field_ids(cls, value: list[str]) -> list[str]:
-        normalized = [str(item).strip() for item in value if str(item).strip()]
-        if any(len(item) > 80 for item in normalized):
-            raise ValueError("artifact field id is too long")
-        return list(dict.fromkeys(normalized))
-
-
-class TrainingArtifactEventResponse(BaseModel):
-    accepted: bool = True
-    event_sequence: int = Field(ge=1)
-    duplicate: bool = False
-
-
-class TrainingWorkspaceEventRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    event_id: str = Field(min_length=8, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
-    file_id: str = Field(min_length=1, max_length=160)
-    file_revision: int = Field(ge=1)
-    event_type: Literal["file_opened", "file_downloaded", "file_reported", "link_opened", "active_content_enabled"]
-
-
-class TrainingWorkspaceEventResponse(BaseModel):
-    accepted: bool = True
-    event_sequence: int = Field(ge=1)
-    duplicate: bool = False
-
-
-class InteractionEvidence(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    event_sequence: int = Field(ge=1)
-    event_id: str
-    artifact_id: str
-    artifact_key: str
-    blueprint_id: str
-    event_type: str
-    evidence: str = ""
-    score_rule_id: str = ""
-    score_once: bool = True
-    score_eligible: bool = True
-    decision_result: Literal["pass", "fail", "neutral"] = "neutral"
-
-
-class ShowroomScenarioCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=160)
-    description: str = Field(default="", max_length=1200)
-    status: ShowroomScenarioStatus = "draft"
-    scenario_type: ActiveScenarioType
-    model_profile_id: str = Field(min_length=1, max_length=240)
-    world_source: ShowroomWorldSource = "preset"
-    worldpack_id: str | None = Field(default=None, max_length=240)
-    world_prompt: str | None = Field(default=None, max_length=6000)
-    leaderboard_enabled: bool = True
-    leaderboard_metric: ShowroomLeaderboardMetric = "state_path"
-    leaderboard_state_path: str = Field(default="meta.turn", min_length=1, max_length=240)
-    leaderboard_label: str = Field(default="Очки", min_length=1, max_length=80)
-    interactive_links_enabled: bool = False
-    interactive_workspace_enabled: bool = False
-    sort_order: int = Field(default=100, ge=0, le=10000)
-
-
-class ShowroomScenarioUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=160)
-    description: str | None = Field(default=None, max_length=1200)
-    status: ShowroomScenarioStatus | None = None
-    scenario_type: ActiveScenarioType | None = None
-    model_profile_id: str | None = Field(default=None, min_length=1, max_length=240)
-    world_source: ShowroomWorldSource | None = None
-    worldpack_id: str | None = Field(default=None, max_length=240)
-    world_prompt: str | None = Field(default=None, max_length=6000)
-    leaderboard_enabled: bool | None = None
-    leaderboard_metric: ShowroomLeaderboardMetric | None = None
-    leaderboard_state_path: str | None = Field(default=None, min_length=1, max_length=240)
-    leaderboard_label: str | None = Field(default=None, min_length=1, max_length=80)
-    interactive_links_enabled: bool | None = None
-    interactive_workspace_enabled: bool | None = None
-    sort_order: int | None = Field(default=None, ge=0, le=10000)
-
-
-class ShowroomRunCreate(BaseModel):
-    character_name: str = Field(min_length=1, max_length=120)
-    character_prompt: str = Field(min_length=1, max_length=4000)
-    employee_position: str = Field(default="", max_length=160)
-    leaderboard_opt_in: bool = True
-    client_request_id: str | None = Field(default=None, max_length=160)
 
 
 class AutoTestCreate(BaseModel):

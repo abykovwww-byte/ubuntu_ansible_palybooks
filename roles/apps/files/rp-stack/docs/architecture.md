@@ -26,8 +26,10 @@ Browser
 The standalone Gateway owns training programs, assessment, fallbacks,
 interactive artifacts, immutable Showroom run flags, typed evidence, and
 canonical scoring. It shares neither routes nor database state with RP Gateway.
-Legacy training modules retained in this source tree are not reachable in the
-RP process and remain only until the explicit O2 cleanup.
+The zero-window cutover removes the legacy training modules, Awareness
+WorldPacks, and static Showroom from this source tree and RP Compose. Old
+training and Showroom rows remain in RP SQLite for read-only preservation, but
+the RP process neither publishes nor writes them.
 
 The canonical term **service model / служебная модель** means the one global
 LLM selected by an administrator for long-term memory, world-state changes,

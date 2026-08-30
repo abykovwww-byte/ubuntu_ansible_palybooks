@@ -93,7 +93,6 @@ function phasePresentation(phase) {
     turn_commit: "GW фиксирует завершённый ход",
     turn_result: "GW показывает итоговый ответ хода",
     relationship_causes: "GW показывает причины изменений отношений",
-    training_projection: "GW обновляет проекции тренинга",
     memory_projection: "GW обновляет проекции памяти",
     projection_mutations: "GW обновляет производные проекции",
     request_terminal: "GW фиксирует итоговый статус запроса",

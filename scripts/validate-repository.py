@@ -805,6 +805,8 @@ def validate_agents(errors: list[str]) -> None:
         return
     for relative_text in result.stdout.splitlines():
         path = ROOT / relative_text
+        if not path.is_file():
+            continue
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if direct_main_push.search(line) and not prohibition.search(line):
                 fail(errors, f"direct push to main instruction: {relative_text}:{line_number}")
@@ -1027,7 +1029,9 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     rp_compose_path = ROOT / "roles" / "apps" / "templates" / "rp-stack.compose.yml.j2"
     rp_env_path = ROOT / "roles" / "apps" / "templates" / "rp-stack.env.j2"
     rp_example_env_path = ROOT / "roles" / "apps" / "templates" / "rp-stack.env.example.j2"
+    ci_workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
     rp_light_gui_path = ROOT / "roles" / "apps" / "files" / "rp-stack" / "rp-light-gui" / "index.html"
+    rp_light_gui_app_path = ROOT / "roles" / "apps" / "files" / "rp-stack" / "rp-light-gui" / "app.js"
     incident_manifest_path = (
         ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks" / "incident-50" / "manifest.json"
     )
@@ -1040,7 +1044,9 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         rp_compose_path,
         rp_env_path,
         rp_example_env_path,
+        ci_workflow_path,
         rp_light_gui_path,
+        rp_light_gui_app_path,
         incident_manifest_path,
     )
     for path in required_paths:
@@ -1057,7 +1063,9 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     rp_compose = rp_compose_path.read_text(encoding="utf-8")
     rp_env = rp_env_path.read_text(encoding="utf-8")
     rp_example_env = rp_example_env_path.read_text(encoding="utf-8")
+    ci_workflow = ci_workflow_path.read_text(encoding="utf-8")
     rp_light_gui = rp_light_gui_path.read_text(encoding="utf-8")
+    rp_light_gui_app = rp_light_gui_app_path.read_text(encoding="utf-8")
     incident_manifest = json.loads(incident_manifest_path.read_text(encoding="utf-8"))
     placeholder = "_".join(("ROOT", "FINAL", "PIN"))
 
@@ -1111,8 +1119,7 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
             'repo_url: "{{ awareness_showroom_repo_url }}"',
             'repo_version: "{{ awareness_showroom_repo_version }}"',
             "repo_version_is_commit: true",
-            "repo_token_var: awareness_showroom_github_token",
-            "repo_token_required: true",
+            "repo_token_required: false",
             "repo_normalize_ownership: true",
             'project_dir: "{{ awareness_showroom_project_dir }}"',
             "env_template: awareness-showroom.env.j2",
@@ -1127,7 +1134,13 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         for marker in app_markers:
             if marker not in app_body:
                 fail(errors, f"Awareness Showroom docker_apps contract missing marker: {marker}")
-        for forbidden in ("source_dir:", "compose_template:"):
+        for forbidden in (
+            "source_dir:",
+            "compose_template:",
+            "repo_token_var:",
+            "repo_token_required: true",
+            "repo_recreate_if_not_git:",
+        ):
             if forbidden in app_body:
                 fail(errors, f"Awareness Showroom source/Compose must remain owned by its repository: {forbidden}")
 
@@ -1135,6 +1148,15 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         awareness_position = inventory.find("  - name: awareness-showroom\n")
         if rp_stack_position < 0 or awareness_position <= rp_stack_position:
             fail(errors, "Awareness Showroom must follow RP Stack in docker_apps for deterministic future cutover ordering")
+
+    rp_app_match = re.search(
+        r"(?ms)^  - name: rp-stack\n(?P<body>.*?)(?=^  - name:|\Z)",
+        inventory,
+    )
+    if rp_app_match is None:
+        fail(errors, "docker_apps does not contain RP Stack")
+    elif "compose_remove_orphans: true" not in rp_app_match.group("body"):
+        fail(errors, "RP Stack must remove the stopped legacy Showroom orphan during zero-window cutover")
 
     production_markers = (
         "COMPOSE_PROJECT_NAME=tavern-awareness-showroom",
@@ -1186,14 +1208,37 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
             fail(errors, f"Awareness Showroom example env missing marker: {marker}")
 
     if "rp-showcase-gui:" in rp_compose:
-        fail(errors, "RP Stack Compose must not publish the retired in-stack Showroom after C1")
+        fail(errors, "RP Stack Compose must not publish the retired in-stack Showroom after zero-window cutover")
+    forbidden_rp_inventory_markers = (
+        "rp_stack_showcase_gui_host_port:",
+        "rp_stack_gateway_training_repair_attempts:",
+        'src: "rp-stack/worldpacks/awareness/sillytavern/awareness.json"',
+        'src: "rp-stack/worldpacks/awareness-one-day/sillytavern/awareness-one-day.json"',
+    )
+    for marker in forbidden_rp_inventory_markers:
+        if marker in inventory:
+            fail(errors, f"retired RP training inventory marker must be removed: {marker}")
+    forbidden_rp_env_markers = (
+        "TRAINING_REPAIR_ATTEMPTS=",
+        "SHOWROOM_VISITOR_COOKIE_NAME=",
+        "SHOWROOM_VISITOR_TTL_SECONDS=",
+        "SHOWROOM_COVER_DIR=",
+        "SHOWROOM_COVER_MAX_BYTES=",
+    )
+    for path, content in ((rp_env_path, rp_env), (rp_example_env_path, rp_example_env)):
+        for marker in forbidden_rp_env_markers:
+            if marker in content:
+                fail(errors, f"retired RP training env marker must be removed from {path.relative_to(ROOT)}: {marker}")
+    for marker in ("scripts/validate-training-runtime.py", "rp-showcase-gui/app.js"):
+        if marker in ci_workflow:
+            fail(errors, f"CI must not invoke retired RP training source: {marker}")
     for path, content in ((rp_env_path, rp_env), (rp_example_env_path, rp_example_env)):
         if "SCENARIO_TYPE=rp" not in content:
             fail(errors, f"RP-only Gateway env missing SCENARIO_TYPE=rp: {path.relative_to(ROOT)}")
     if 'name="scenarioType" value="training"' in rp_light_gui:
         fail(errors, "RP Light GUI must not offer training party creation after C1")
-    if 'name="scenarioType" value="rp" required checked' not in rp_light_gui:
-        fail(errors, "RP Light GUI must select the sole RP scenario type by default")
+    if 'scenario_type: "rp"' not in rp_light_gui_app:
+        fail(errors, "RP Light GUI must hardcode the sole RP scenario type in party creation")
     if incident_manifest.get("scenario_types") != {"recommended": "rp", "supported": ["rp"]}:
         fail(errors, "incident-50 must be RP-only after C1")
 
@@ -1204,15 +1249,92 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     if collector_match is None or "\n  no_log: true\n" not in collector_match.group("body"):
         fail(errors, "token-auth Docker app results must stay hidden while collecting changed apps")
 
+    retired_source_state_match = re.search(
+        r"(?ms)^- name: Check retired RP Stack training source in managed checkout\n"
+        r"(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    retired_source_paths = (
+        "rp-showcase-gui",
+        "worldpacks/awareness",
+        "worldpacks/awareness-one-day",
+        "ui-shared",
+        "scripts/validate-training-runtime.py",
+        "rp-gateway/app/services/showroom.py",
+        "rp-gateway/app/services/training_artifacts.py",
+        "rp-gateway/app/services/training_capabilities.py",
+        "rp-gateway/app/services/training_runtime.py",
+        "rp-gateway/app/services/training_workspace.py",
+        "rp-gateway/tests/test_showroom_portal.py",
+        "rp-gateway/tests/test_training_artifacts.py",
+        "rp-gateway/tests/test_training_capabilities.py",
+        "rp-gateway/tests/test_training_runtime.py",
+        "rp-gateway/tests/test_awareness_one_day.py",
+    )
+    if retired_source_state_match is None:
+        fail(errors, "retired RP training source preflight task is missing")
+    else:
+        state_body = retired_source_state_match.group("body")
+        for marker in (
+            'path: "{{ rp_stack_project_dir }}/{{ item }}"',
+            "register: rp_stack_retired_training_source_state",
+            *retired_source_paths,
+        ):
+            if marker not in state_body:
+                fail(errors, f"retired RP training source preflight marker is missing: {marker}")
+        source_copy_position = apps_tasks.find("- name: Copy Docker app source\n")
+        state_position = apps_tasks.find("- name: Check retired RP Stack training source in managed checkout\n")
+        runtime_files_position = apps_tasks.find("- name: Create Docker app runtime files when missing\n")
+        if not (source_copy_position < state_position < runtime_files_position):
+            fail(errors, "retired RP training source preflight must run after source copy and before runtime/build tasks")
+    retired_source_cleanup_match = re.search(
+        r"(?ms)^- name: Remove retired RP Stack training source from managed checkout\n"
+        r"(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if retired_source_cleanup_match is None:
+        fail(errors, "retired RP training source cleanup task is missing")
+    else:
+        cleanup_body = retired_source_cleanup_match.group("body")
+        for marker in (
+            'path: "{{ rp_stack_project_dir }}/{{ item }}"',
+            "state: absent",
+            "showroom_port_handoff_required | bool",
+            "register: rp_stack_retired_training_source_removal",
+            *retired_source_paths,
+        ):
+            if marker not in cleanup_body:
+                fail(errors, f"retired RP training source cleanup marker is missing: {marker}")
+    if (
+        "Resolve retired RP Stack training source presence" not in apps_tasks
+        or "rp_stack_retired_training_source_present" not in apps_tasks
+        or "Mark RP Stack changed for retired training source cleanup" not in apps_tasks
+        or "docker_app_changed_names" not in apps_tasks
+    ):
+        fail(errors, "retired RP training source presence must trigger coordinated cleanup and an RP Stack rebuild")
+    if "Validate RP Stack training runtime WorldPacks" in apps_tasks:
+        fail(errors, "RP Stack must not run the retired training WorldPack preflight")
+    for marker in (
+        "/srv/app-data/rp-stack/default-user/worlds/Awareness.json",
+        "/srv/app-data/rp-stack/default-user/worlds/Awareness. One day.json",
+    ):
+        if marker in apps_tasks:
+            fail(errors, f"zero-window source cleanup must preserve legacy RP data artifact: {marker}")
+
     handoff_task_names = (
         "Normalize changed Docker app list",
         "Check pending Showroom port handoff",
         "Resolve coordinated Showroom port handoff",
+        "Keep both cutover applications in the handoff start set",
         "Persist pending Showroom port handoff",
-        "Keep both Showroom owners in the handoff start set",
+        "Read standalone Showroom revision before handoff",
+        "Verify standalone Showroom exact revision before handoff",
+        "Validate Showroom handoff Compose configurations",
+        "Prebuild Showroom handoff applications",
         "Check legacy RP Showroom container before handoff",
         "Stop legacy RP Showroom before handoff",
         "Stop standalone Showroom before handoff",
+        "Remove retired RP Stack training source from managed checkout",
         "Start changed Docker apps",
         "Clear completed Showroom port handoff",
     )
@@ -1226,7 +1348,7 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     if missing_handoff_tasks:
         fail(errors, f"Showroom port handoff tasks missing: {', '.join(missing_handoff_tasks)}")
     elif list(handoff_positions.values()) != sorted(handoff_positions.values()):
-        fail(errors, "Showroom port handoff must stop both UI owners before RP then standalone Compose startup")
+        fail(errors, "Showroom port handoff must persist retry state, then validate and build both applications before stopping the old UI")
     else:
         handoff_slice = apps_tasks[
             handoff_positions["Check pending Showroom port handoff"]
@@ -1235,9 +1357,14 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         for marker in (
             ".port-8011-handoff-pending",
             "showroom_port_handoff_marker.stat.exists",
+            "rp_stack_retired_training_source_present",
             "'rp-stack' in (docker_app_changed_names | default([]))",
             "'awareness-showroom' in (docker_app_changed_names | default([]))",
             "docker_app_changed_names + ['rp-stack', 'awareness-showroom']",
+            'safe.directory={{ awareness_showroom_project_dir | default(app_deploy_base_dir ~ \'/awareness-showroom\') }}',
+            "awareness_showroom_handoff_revision.stdout == awareness_showroom_repo_version",
+            "cmd: docker compose config --quiet",
+            "cmd: docker compose build",
             "docker\n      - container\n      - inspect\n      - rp-stack-showcase-gui",
             "docker\n      - stop\n      - rp-stack-showcase-gui",
             "cmd: docker compose stop showroom",
@@ -1310,6 +1437,22 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         )
         if marker not in task_body:
             fail(errors, f"{task_name} missing exact -c/safe.directory argv pair")
+
+    public_git_match = re.search(
+        r"(?ms)^- name: Clone public Docker app repositories\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if public_git_match is None:
+        fail(errors, "missing public Docker app Git task")
+    else:
+        public_git_body = public_git_match.group("body")
+        for marker in (
+            'GIT_CONFIG_COUNT: "1"',
+            "GIT_CONFIG_KEY_0: safe.directory",
+            'GIT_CONFIG_VALUE_0: "{{ app.project_dir | default(app_deploy_base_dir ~ \'/\' ~ app.name) }}"',
+        ):
+            if marker not in public_git_body:
+                fail(errors, f"public repository Git task missing process-scoped safe.directory marker: {marker}")
 
     if "safe.directory=*" in apps_tasks:
         fail(errors, "Docker app Git tasks must not use a wildcard safe.directory")

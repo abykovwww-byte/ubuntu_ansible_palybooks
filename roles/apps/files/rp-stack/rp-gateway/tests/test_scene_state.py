@@ -659,19 +659,18 @@ def test_character_departure_requires_a_destination_outside_current_scene(
     assert (result.scene_state is not None) is expected_valid
 
 
-def test_stable_affiliation_prose_conflict_is_not_semantically_rejected() -> None:
+def test_stable_affiliation_prose_conflict_is_hard_with_empty_delta() -> None:
     result = materialize(
         scene_bundle(text="Горазд теперь приказчик Милорада и служит ему, а не дому Ждана."),
         outcome=scene_allowance(),
     )
 
-    assert result.valid is True
-    assert result.violations == []
-    assert result.scene_state is not None
-    assert result.scene_state["stable_affiliations"]["gorazd"] == "zhdan-household"
+    assert result.valid is False
+    assert result.scene_state is None
+    assert any("stable affiliation" in violation.lower() for violation in result.violations)
 
 
-def test_prose_only_affiliation_switch_does_not_change_canonical_projection() -> None:
+def test_single_stable_character_cannot_switch_to_an_unassigned_known_faction() -> None:
     current = scene_state()
     current["characters"] = {"gorazd": current["characters"]["gorazd"]}
     current["scene_state"]["stable_affiliations"] = {"gorazd": "zhdan-household"}
@@ -685,10 +684,9 @@ def test_prose_only_affiliation_switch_does_not_change_canonical_projection() ->
         ),
     )
 
-    assert result.valid is True
-    assert result.violations == []
-    assert result.scene_state is not None
-    assert result.scene_state["stable_affiliations"] == {"gorazd": "zhdan-household"}
+    assert result.valid is False
+    assert result.scene_state is None
+    assert any("stable affiliation" in violation.lower() for violation in result.violations)
 
 
 @pytest.mark.parametrize(
@@ -1244,7 +1242,7 @@ def test_world_affiliation_change_reanchors_without_restoring_stale_role(
         ),
     ],
 )
-def test_hard_bundle_violation_never_repairs_commits_or_uses_safe_fallback(
+def test_second_hard_bundle_violation_never_commits_or_uses_safe_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     invalid_payload: dict[str, Any],
@@ -1273,7 +1271,7 @@ def test_hard_bundle_violation_never_repairs_commits_or_uses_safe_fallback(
             )
         )
 
-    assert calls == 1
+    assert calls == 2
     assert authoritative_counts(store) == before
     assert store.get_state()["meta"]["turn"] == 14
     saved_request = store.get_turn_request("req-hard-scene-mismatch")

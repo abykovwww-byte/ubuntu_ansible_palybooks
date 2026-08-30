@@ -81,13 +81,24 @@ WorldPack-authored no-link fallback.
 WorldPack сам связывает публичный результат с numeric state path через `manifest.showroom_result`. Showroom scenario может включить leaderboard, но не выбирает, откуда взять score. Это сохраняет ownership оценки у authored training world.
 
 C1 source закрепляет этот контракт за отдельным training-only Gateway exact
-commit `b72c481d616d6b8d654dc198d4973dce4e3e123c`. Он начинает с собственной
+commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Он начинает с собственной
 SQLite: настройки опубликованных сценариев и covers создаются из Git-каталога,
 а visitors, runs, parties, turns, feedback, leaderboard, sessions и BYOK не
 переносятся. Владелец явно снял старую историю как blocker, поэтому `Мои
 прохождения` и рейтинг начинаются с нуля. Старая RP SQLite остаётся нетронутой.
+Rollback window равен `0`, поэтому legacy training source/tests удаляются из RP
+repository в той же поставке, но старые rows/state/backups сохраняются.
 Apply, оба полных курса, provider-turn, scoring/debrief, resume и backup/restore
 нового runtime ещё должны быть подтверждены отдельно.
+
+C1 live acceptance требует полные прохождения обоих курсов на одном exact
+application revision с `fallback_turns == 0`. В committed turns и audit не
+допускаются `provider_fallback`/`llm_safe_fallback`; каждый provider-required
+ход должен иметь successful completed provider call и committed response с
+`validator_valid=true`. `repaired=true` допустим только для успешного provider
+repair при `fallback=false`. Более мягкая медианная fallback-метрика может быть
+только post-acceptance SLO. Доказательство берётся из SQLite metadata и audit по
+полным runs, а не из одного визуально успешного экрана.
 
 Corporate portal — только presentational snapshot. Он не содержит schedule, rubric или скрытые ответы.
 
@@ -266,4 +277,3 @@ PUT       /api/showroom/runs/{run_id}/turns/{turn_id}/feedback
 - [Training capability ADR](../../roles/apps/files/rp-stack/docs/decisions/015-training-scenario-interaction-capabilities.md)
 - [WorldPack training runtime ADR](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
 - [Активный standalone training runtime и его тесты](https://github.com/abykovwww-byte/tavern-awareness-showroom)
-- Legacy `rp-gateway/tests/test_training_runtime.py` сохранён в RP source только до O2 и не является active runtime authority после C1.

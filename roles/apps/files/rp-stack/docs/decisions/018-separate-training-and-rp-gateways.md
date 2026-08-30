@@ -4,15 +4,18 @@ Date: 2026-08-08 · Переоформлено 2026-08-09 в формат ADR + 
 
 ## Status
 
-Accepted 2026-08-27; C1 source prepared, Ansible apply and live acceptance
-pending.
+Accepted 2026-08-27; zero-window C1/O2/N3 source prepared, Ansible apply and
+live acceptance pending. On 2026-08-30 the owner selected rollback window `0`
+and explicitly authorized immediate legacy source removal in the cutover
+delivery.
 
 Decision 019 выполнил подготовительный этап: предметный legacy Awareness удалён
 из общего Gateway, а training contract стал WorldPack-owned. Владелец принял
 следующую конкретную границу реализации:
 
 - Showroom, `awareness`, `awareness-one-day` и generic training runtime
-  переносятся в отдельный private GitHub project;
+  переносятся в отдельный public GitHub project, который IaC клонирует по HTTPS
+  на exact commit без GitHub token;
 - новый Gateway обслуживает только `scenario_type=training`, использует свою
   SQLite, state, cookies, Docker network и backup;
 - исходный RP Stack после cutover обслуживает только `scenario_type=rp` и
@@ -26,16 +29,16 @@ Decision 019 выполнил подготовительный этап: пре�
 
 Текущий production runtime до C1 apply всё ещё использует старый Showroom на
 `:8011`; I1 shadow доступен только на loopback `:18011`. Source C1 уже фиксирует
-standalone commit `b72c481d616d6b8d654dc198d4973dce4e3e123c`, целевой LAN-only
-bind `192.168.1.88:8011`, RP-only старый Gateway и отсутствие старого Showroom в
-активном Compose. Это source/delivery state, а не live-доказательство. Порядок
-apply, acceptance, cutover и rollback зафиксирован в
+standalone commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`, целевой LAN-only
+bind `192.168.1.88:8011`, RP-only старый Gateway и RP Compose без старого
+Showroom. Это source/delivery state, а не live-доказательство. Порядок apply,
+acceptance и zero-window cutover зафиксирован в
 [Plan 018](../plans/018-awareness-showroom-project-split.md).
 
 Владелец явно отказался от переноса истории и снял старые visitors/runs/active
 sessions как блокер переключения. Старая RP SQLite при этом не очищается и не
-переписывается. Физическое удаление training/Showroom source выполняется только
-после отдельной явной команды O2.
+переписывается. O2 удаляет training/Showroom source и контейнер в той же
+поставке, что C1; строки и таблицы SQLite, state и backups не удаляются.
 
 ## Контекст
 
@@ -78,8 +81,9 @@ RP после десятого хода. Реальный ответ LLM зам�
 
 Это должно быть разделение процессов и turn pipelines, а не новый набор ветвей
 в одном `Adjudicator`. Каждый runtime обязан отклонять неподдерживаемый
-`scenario_type`. Клиенты должны сохранить совместимый party-scoped API; точный
-механизм маршрутизации и миграции будет выбран в плане реализации.
+`scenario_type`. RP Light GUI сохраняет party-scoped API. Showroom сохраняет
+свой совместимый `/api/showroom/**` и публичный `run_id`, не раскрывая internal
+`party_id`; точный механизм маршрутизации зафиксирован в плане реализации.
 
 Общие auth, party identity, storage schema и provider plumbing разрешено
 переиспользовать без предварительного выделения нового framework или общей
@@ -131,9 +135,9 @@ Training Gateway сохраняет schema validation, hard/soft constraints,
 5. **Одно понятие режима на процесс.** После разделения `settings.scenario_type`
    и `party.scenario_type` не могут расходиться внутри обработки одного
    запроса: расхождение — это отказ по инварианту 4, а не выбор ветви.
-6. **Сохранение сквозных гарантий.** Idempotency, canonical state, raw history,
-   branch isolation и party-scoped публичный API остаются неизменными для
-   клиентов по обе стороны разделения.
+6. **Сохранение сквозных гарантий.** Idempotency, canonical state, raw history
+   и branch isolation сохраняются. RP оставляет party-scoped public API, а
+   Showroom — `/api/showroom/**` и `run_id` без раскрытия internal `party_id`.
 7. **Единственный писатель данных.** Ни одна таблица не получает второго
    пишущего процесса без явно принятого решения о владении (см. B.6).
 8. **Честная телеметрия.** RP получает `transport_status`. Метаданные
@@ -158,6 +162,15 @@ Training Gateway сохраняет schema validation, hard/soft constraints,
 - Продакшен-замер до и после: доля RP-ходов с `fallback` и `validator_valid`
   в `turns.metadata_json`, и события `llm_safe_fallback` в `audit_events`.
 - Локальная, pushed, applied и live-verified стадии сообщаются отдельно.
+
+C1 live acceptance требует полные прохождения обоих курсов на одном exact
+application revision с `fallback_turns == 0`: в committed turns и audit нет
+`provider_fallback`/`llm_safe_fallback`, каждый provider-required ход имеет
+успешный completed provider call и committed response с `validator_valid=true`.
+`repaired=true` допустим только для успешно завершённого provider repair при
+`fallback=false`. Медиана fallback может использоваться лишь как SLO после
+приёмки и не заменяет этот cutover gate. Подробный milestone определён в Plan
+018.
 
 ## Последствия
 
@@ -205,7 +218,7 @@ Plan 018.
 (отдельный worktree в `codex-worktrees/`) · **База:** `codex/rp-stack-devkit`
 
 > **Архивная инструкция.** Waves B и C больше не заблокированы: владелец выбрал
-> отдельный private project, независимые SQLite и config-only migration. Не
+> отдельный project, независимые SQLite и config-only migration. Не
 > исполнять этот brief как текущий план.
 
 **Состояние дерева на момент написания:** ветка `codex/rp-stack-devkit`, рабочее

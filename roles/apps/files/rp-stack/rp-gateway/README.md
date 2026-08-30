@@ -4,8 +4,9 @@ FastAPI authority and provider gateway for RP Stack.
 
 Light GUI proxies party-scoped `/api` requests to this service. Gateway owns
 authentication, world-pack discovery, character drafts, model profiles,
-canonical state, turn history, memory chapters, legacy check compatibility, and training
-progression. The administrator-selected **service model / служебная модель** is
+canonical state, turn history, memory chapters, and legacy check compatibility.
+Training progression is owned by the standalone Awareness/Showroom Gateway.
+The administrator-selected **service model / служебная модель** is
 global to the stack and handles long-term memory, world changes, and character
 generation. Party BYOK credentials remain isolated to their owning party.
 

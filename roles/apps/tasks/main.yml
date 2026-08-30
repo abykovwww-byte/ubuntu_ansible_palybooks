@@ -39,19 +39,6 @@
     - app.repo_version_is_commit | default(false) | bool
   tags: [apps, preflight, source, git]
 
-- name: Validate RP Stack training runtime WorldPacks
-  ansible.builtin.command:
-    argv:
-      - python3
-      - "{{ role_path }}/files/rp-stack/scripts/validate-training-runtime.py"
-      - --worldpacks
-      - "{{ role_path }}/files/rp-stack/worldpacks"
-  changed_when: false
-  delegate_to: localhost
-  run_once: true
-  when: rp_stack_enabled | default(false) | bool
-  tags: [apps, preflight, rp-stack]
-
 - name: Prepare local Vulkan LLM runtime
   ansible.builtin.import_tasks: local-llm.yml
   when: rp_stack_local_llm_enabled | default(false) | bool
@@ -235,6 +222,10 @@
     version: "{{ app.repo_version | default('main') }}"
     force: "{{ app.repo_force | default(false) }}"
     update: true
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app
@@ -283,6 +274,44 @@
     - app.source_dir is defined
   register: docker_app_source_copy
   tags: [apps, source]
+
+- name: Check retired RP Stack training source in managed checkout
+  ansible.builtin.stat:
+    path: "{{ rp_stack_project_dir }}/{{ item }}"
+  loop:
+    - rp-showcase-gui
+    - worldpacks/awareness
+    - worldpacks/awareness-one-day
+    - ui-shared
+    - scripts/validate-training-runtime.py
+    - rp-gateway/app/services/showroom.py
+    - rp-gateway/app/services/training_artifacts.py
+    - rp-gateway/app/services/training_capabilities.py
+    - rp-gateway/app/services/training_runtime.py
+    - rp-gateway/app/services/training_workspace.py
+    - rp-gateway/tests/test_showroom_portal.py
+    - rp-gateway/tests/test_training_artifacts.py
+    - rp-gateway/tests/test_training_capabilities.py
+    - rp-gateway/tests/test_training_runtime.py
+    - rp-gateway/tests/test_awareness_one_day.py
+  when: rp_stack_enabled | default(false) | bool
+  register: rp_stack_retired_training_source_state
+  tags: [apps, preflight, source, rp-stack]
+
+- name: Resolve retired RP Stack training source presence
+  ansible.builtin.set_fact:
+    rp_stack_retired_training_source_present: >-
+      {{
+        (
+          rp_stack_retired_training_source_state.results | default([])
+          | selectattr('stat', 'defined')
+          | selectattr('stat.exists', 'defined')
+          | selectattr('stat.exists', 'equalto', true)
+          | list
+          | length
+        ) > 0
+      }}
+  tags: [apps, preflight, source, rp-stack]
 
 - name: Create Docker app runtime files when missing
   ansible.builtin.copy:
@@ -402,6 +431,12 @@
     - item.item.0.name is defined
   tags: [apps, compose]
 
+- name: Mark RP Stack changed for retired training source cleanup
+  ansible.builtin.set_fact:
+    docker_app_changed_names: "{{ (docker_app_changed_names | default([])) + ['rp-stack'] }}"
+  when: rp_stack_retired_training_source_present | default(false) | bool
+  tags: [apps, compose, rp-stack]
+
 - name: Normalize changed Docker app list
   ansible.builtin.set_fact:
     docker_app_changed_names: "{{ docker_app_changed_names | default([]) | unique | list }}"
@@ -418,11 +453,19 @@
     showroom_port_handoff_required: >-
       {{
         showroom_port_handoff_marker.stat.exists | default(false)
+        or (rp_stack_retired_training_source_present | default(false) | bool)
         or (
           'rp-stack' in (docker_app_changed_names | default([]))
           and 'awareness-showroom' in (docker_app_changed_names | default([]))
         )
       }}
+  tags: [apps, compose]
+
+- name: Keep both cutover applications in the handoff start set
+  ansible.builtin.set_fact:
+    docker_app_changed_names: >-
+      {{ (docker_app_changed_names + ['rp-stack', 'awareness-showroom']) | unique | list }}
+  when: showroom_port_handoff_required | bool
   tags: [apps, compose]
 
 - name: Persist pending Showroom port handoff
@@ -435,10 +478,48 @@
   when: showroom_port_handoff_required | bool
   tags: [apps, compose]
 
-- name: Keep both Showroom owners in the handoff start set
-  ansible.builtin.set_fact:
-    docker_app_changed_names: >-
-      {{ (docker_app_changed_names + ['rp-stack', 'awareness-showroom']) | unique | list }}
+- name: Read standalone Showroom revision before handoff
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ awareness_showroom_project_dir | default(app_deploy_base_dir ~ '/awareness-showroom') }}"
+      - -c
+      - "safe.directory={{ awareness_showroom_project_dir | default(app_deploy_base_dir ~ '/awareness-showroom') }}"
+      - rev-parse
+      - HEAD
+  register: awareness_showroom_handoff_revision
+  changed_when: false
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose, source, git]
+
+- name: Verify standalone Showroom exact revision before handoff
+  ansible.builtin.assert:
+    that:
+      - awareness_showroom_handoff_revision.stdout == awareness_showroom_repo_version
+    fail_msg: "Standalone Showroom checkout does not match the exact cutover revision."
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose, source, git]
+
+- name: Validate Showroom handoff Compose configurations
+  ansible.builtin.command:
+    cmd: docker compose config --quiet
+    chdir: "{{ item }}"
+  loop:
+    - "{{ rp_stack_project_dir }}"
+    - "{{ awareness_showroom_project_dir | default(app_deploy_base_dir ~ '/awareness-showroom') }}"
+  changed_when: false
+  when: showroom_port_handoff_required | bool
+  tags: [apps, compose]
+
+- name: Prebuild Showroom handoff applications
+  ansible.builtin.command:
+    cmd: docker compose build
+    chdir: "{{ item }}"
+  loop:
+    - "{{ rp_stack_project_dir }}"
+    - "{{ awareness_showroom_project_dir | default(app_deploy_base_dir ~ '/awareness-showroom') }}"
+  changed_when: true
   when: showroom_port_handoff_required | bool
   tags: [apps, compose]
 
@@ -474,6 +555,32 @@
   when: showroom_port_handoff_required | bool
   changed_when: true
   tags: [apps, compose]
+
+- name: Remove retired RP Stack training source from managed checkout
+  ansible.builtin.file:
+    path: "{{ rp_stack_project_dir }}/{{ item }}"
+    state: absent
+  loop:
+    - rp-showcase-gui
+    - worldpacks/awareness
+    - worldpacks/awareness-one-day
+    - ui-shared
+    - scripts/validate-training-runtime.py
+    - rp-gateway/app/services/showroom.py
+    - rp-gateway/app/services/training_artifacts.py
+    - rp-gateway/app/services/training_capabilities.py
+    - rp-gateway/app/services/training_runtime.py
+    - rp-gateway/app/services/training_workspace.py
+    - rp-gateway/tests/test_showroom_portal.py
+    - rp-gateway/tests/test_training_artifacts.py
+    - rp-gateway/tests/test_training_capabilities.py
+    - rp-gateway/tests/test_training_runtime.py
+    - rp-gateway/tests/test_awareness_one_day.py
+  when:
+    - rp_stack_enabled | default(false) | bool
+    - showroom_port_handoff_required | bool
+  register: rp_stack_retired_training_source_removal
+  tags: [apps, source, compose, rp-stack]
 
 - name: Start changed Docker apps
   ansible.builtin.command:

@@ -2,7 +2,6 @@ const appState = {
   authEnabled: true,
   currentUser: null,
   worldpacks: [],
-  trainingWorldpacks: [],
   cleanWorldDetail: null,
   modelProfiles: [],
   parties: [],
@@ -245,7 +244,6 @@ const metaHints = {
 const scenarioTypeLabels = {
   rp: "RP",
   novel: "Архивный Novel",
-  training: "Обучение",
 };
 
 const providerLabels = {
@@ -370,9 +368,6 @@ function bindEvents() {
   });
   document.querySelectorAll("input[name='worldSource']").forEach((input) => input.addEventListener("change", renderCreationModes));
   document.querySelectorAll("input[name='characterSource']").forEach((input) => input.addEventListener("change", renderCreationModes));
-  document.querySelectorAll("input[name='scenarioType']").forEach((input) =>
-    input.addEventListener("change", () => void handleScenarioTypeChange()),
-  );
 }
 
 function openInspector() {
@@ -463,7 +458,6 @@ async function boot() {
       apiGet("/api/parties"),
     ]);
     appState.worldpacks = worldpacks.worldpacks || [];
-    appState.trainingWorldpacks = [];
     appState.cleanWorldDetail = null;
     appState.modelProfiles = models.model_profiles || [];
     appState.parties = parties.parties || [];
@@ -555,7 +549,6 @@ async function logout() {
 
 function clearWorkspaceState() {
   appState.worldpacks = [];
-  appState.trainingWorldpacks = [];
   appState.cleanWorldDetail = null;
   appState.modelProfiles = [];
   appState.parties = [];
@@ -638,32 +631,7 @@ function isCleanRpParty(party = appState.activeParty) {
 }
 
 function isCleanRpCreation() {
-  return selectedRadioValue("scenarioType", "") === "rp" && hasCleanRpCatalog();
-}
-
-function dialogWorldpacks() {
-  if (selectedRadioValue("scenarioType", "") === "training" && hasCleanRpCatalog()) {
-    return appState.trainingWorldpacks;
-  }
-  return appState.worldpacks;
-}
-
-async function handleScenarioTypeChange() {
-  const scenarioType = selectedRadioValue("scenarioType", "");
-  if (scenarioType === "training" && hasCleanRpCatalog() && !appState.trainingWorldpacks.length) {
-    try {
-      const result = await apiGet("/api/worldpacks?scenario_type=training");
-      appState.trainingWorldpacks = result.worldpacks || [];
-    } catch (error) {
-      showToast(error.message);
-    }
-  }
-  renderPartyFlow();
-  renderWorldOptions();
-  syncAutoPartyTitle();
-  syncReadyCharacterDescription();
-  renderWorldPreview();
-  if (isCleanRpCreation()) await loadCleanWorldDetail();
+  return hasCleanRpCatalog();
 }
 
 function renderPartyFlow() {
@@ -1953,7 +1921,6 @@ function renderChat({ scrollMode = "bottom" } = {}) {
         turnId: turn.id,
         rating: turn.player_rating || (turn.player_liked ? "positive" : "none"),
       },
-      turn.artifacts || [],
       turn.id,
       raisedLoreCardsForTurn(turn),
       allowLoreDraft,
@@ -1967,7 +1934,6 @@ function renderChat({ scrollMode = "bottom" } = {}) {
     messages.push(pendingMessageHtml(pending.requestId, pending.status, pending.createdAt));
   }
   els.chatLog.innerHTML = messages.join("");
-  mountTrainingArtifacts(visibleTurns);
   els.chatLog.scrollTop = scrollMode === "top" ? 0 : els.chatLog.scrollHeight;
 }
 
@@ -1975,30 +1941,6 @@ function coveredTurnRangeLabel(turnIds) {
   if (!Array.isArray(turnIds) || turnIds.length < 2) return "покрытие неизвестно";
   const [first, last] = turnIds;
   return first === last ? `ход ${first}` : `ходы ${first}–${last}`;
-}
-
-function mountTrainingArtifacts(turns) {
-  const renderer = globalThis.TrainingArtifacts;
-  if (!renderer || appState.activeBranch || !appState.activeParty) return;
-  for (const turn of turns) {
-    if (!Array.isArray(turn.artifacts) || !turn.artifacts.length) continue;
-    const host = els.chatLog.querySelector(`[data-training-artifact-turn="${Number(turn.id)}"]`);
-    if (!host) continue;
-    let artifactsToMount = turn.artifacts;
-    const message = host.closest(".message");
-    const messengerLinks = message?.querySelectorAll(".messenger-card .artifact-chip-link") || [];
-    for (const linkChip of messengerLinks) {
-      const matchingArtifact = renderer.artifactForDisplayUrl?.(turn.artifacts, linkChip.textContent);
-      if (!matchingArtifact) continue;
-      linkChip.replaceWith(host);
-      artifactsToMount = [matchingArtifact];
-      break;
-    }
-    renderer.mount(host, artifactsToMount, (payload) => apiPost(
-      `/api/parties/${encodeURIComponent(appState.activeParty.id)}/artifact-events`,
-      payload,
-    ));
-  }
 }
 
 function renderHistoryControls(hiddenTurnCount, totalTurns) {
@@ -2624,9 +2566,6 @@ function closePartyDialog() {
 }
 
 function renderDialogOptions() {
-  document.querySelectorAll("input[name='scenarioType']").forEach((input) => {
-    input.checked = input.value === "rp";
-  });
   renderWorldOptions();
   renderProviderOptions(els.modelProviderSelect, "openrouter");
   renderDialogModelOptions();
@@ -2659,9 +2598,8 @@ function renderDialogModelOptions() {
 }
 
 function renderWorldOptions() {
-  const scenarioType = selectedRadioValue("scenarioType", "");
   const previous = els.worldSelect.value;
-  const available = dialogWorldpacks().filter((pack) => worldSupportsScenario(pack, scenarioType));
+  const available = appState.worldpacks.filter((pack) => worldSupportsScenario(pack));
   els.worldSelect.innerHTML = available
     .map((pack) => `<option value="${escapeHtml(pack.id)}">${escapeHtml(pack.title)}${pack.status ? ` · ${escapeHtml(pack.status)}` : ""}</option>`)
     .join("");
@@ -2671,10 +2609,9 @@ function renderWorldOptions() {
   renderPartyWorldChoices();
 }
 
-function worldSupportsScenario(pack, scenarioType) {
-  if (!scenarioType) return true;
+function worldSupportsScenario(pack) {
   const supported = pack?.manifest?.scenario_types?.supported;
-  return !Array.isArray(supported) || !supported.length || supported.includes(scenarioType);
+  return !Array.isArray(supported) || !supported.length || supported.includes("rp");
 }
 
 function resolveWorldpackChoice(items, selectedId, defaultId) {
@@ -2685,9 +2622,6 @@ function resolveWorldpackChoice(items, selectedId, defaultId) {
 }
 
 function selectedPartyWorldChoices(pack = selectedWorldpack()) {
-  if (selectedRadioValue("scenarioType", "") !== "rp") {
-    return { preset: null, opening: null };
-  }
   return {
     preset: resolveWorldpackChoice(pack?.presets, els.partyPresetSelect?.value, pack?.presets_default),
     opening: resolveWorldpackChoice(pack?.openings, els.partyOpeningSelect?.value, pack?.openings_default),
@@ -2696,8 +2630,7 @@ function selectedPartyWorldChoices(pack = selectedWorldpack()) {
 
 function renderPartyWorldChoices() {
   const readyWorld = selectedRadioValue("worldSource") === "ready";
-  const rpScenario = selectedRadioValue("scenarioType", "") === "rp";
-  const pack = readyWorld && rpScenario ? selectedWorldpack() : null;
+  const pack = readyWorld ? selectedWorldpack() : null;
 
   const renderChoice = (fields, select, items, defaultId, placeholder) => {
     const options = Array.isArray(items) ? items : [];
@@ -2899,12 +2832,10 @@ function syncReadyCharacterDescription() {
 async function createParty(event) {
   event.preventDefault();
   const modelProfileId = els.modelSelect.value;
-  const scenarioType = selectedRadioValue("scenarioType", "");
   const characterPrompt = selectedRadioValue("characterSource") === "prompt";
   try {
     setBusy(true, isCleanRpCreation() ? "Создаю RP-партию..." : "Создаю партию и стартового персонажа...");
     if (!modelProfileId) throw new Error("Нет доступной модели для партии.");
-    if (!scenarioType) throw new Error("Выбери тип сценария.");
     if (isCleanRpCreation()) {
       const detail = await loadCleanWorldDetail();
       const worldId = els.cleanWorldSelect.value;
@@ -2925,8 +2856,8 @@ async function createParty(event) {
     }
     const worldpack = await resolveWorldpack();
     const choices = selectedPartyWorldChoices(worldpack);
-    const hasPresets = scenarioType === "rp" && Array.isArray(worldpack?.presets) && worldpack.presets.length > 0;
-    const hasOpenings = scenarioType === "rp" && Array.isArray(worldpack?.openings) && worldpack.openings.length > 0;
+    const hasPresets = Array.isArray(worldpack?.presets) && worldpack.presets.length > 0;
+    const hasOpenings = Array.isArray(worldpack?.openings) && worldpack.openings.length > 0;
     if (hasPresets && !choices.preset) throw new Error("Выбери стиль повествования.");
     if (hasOpenings && !choices.opening) throw new Error("Выбери старт партии.");
     const concept = characterPrompt
@@ -2946,7 +2877,7 @@ async function createParty(event) {
     const character = await apiPost("/api/player-characters", draft.draft);
     const partyPayload = {
       title: els.partyTitleInput.value.trim(),
-      scenario_type: scenarioType,
+      scenario_type: "rp",
       worldpack_id: worldpack.id,
       player_character_id: character.player_character.id,
       model_profile_id: modelProfileId,
@@ -3067,12 +2998,6 @@ async function submitComposerMessage(channel) {
   if (appState.busy) return;
   const text = els.messageInput.value.trim();
   if (!text || !appState.activeParty) return;
-  try {
-    await globalThis.TrainingArtifacts?.flush();
-  } catch (error) {
-    showToast(error.message);
-    return;
-  }
   els.messageInput.value = "";
   await submitPartyMessage(text, { channel });
 }
@@ -4379,7 +4304,7 @@ function apiErrorMessage(detail, status) {
 }
 
 function selectedWorldpack() {
-  const packs = dialogWorldpacks();
+  const packs = appState.worldpacks;
   if (isCleanRpCreation()) {
     return packs.find((pack) => pack.id === els.cleanWorldSelect.value) || packs.find(isCleanWorldpack) || null;
   }
@@ -4705,7 +4630,6 @@ function messageHtml(
   content,
   timestamp = Date.now(),
   feedback = null,
-  artifacts = [],
   turnId = null,
   loreCards = [],
   allowLoreDraft = false,
@@ -4717,14 +4641,10 @@ function messageHtml(
   const feedbackHtml = feedback?.turnId
     ? turnFeedbackControlsHtml(feedback)
     : "";
-  const artifactHost = kind === "assistant" && turnId && Array.isArray(artifacts) && artifacts.length
-    ? `<div class="training-artifact-host" data-training-artifact-turn="${escapeHtml(Number(turnId))}"></div>`
-    : "";
   const html = `<article class="message ${kind}${rendered.hasArtifacts ? " message-rich" : ""}">
     <div class="role">${escapeHtml(role)}</div>
     <div class="message-content">${rendered.html}</div>
     ${kind === "assistant" ? worldClockToolsHtml(worldClockEvents) : ""}
-    ${artifactHost}
     ${kind === "assistant" ? loreCardToolsHtml(loreCards, turnId, allowLoreDraft) : ""}
     ${messageTimeHtml(timestamp)}
     ${feedbackHtml}

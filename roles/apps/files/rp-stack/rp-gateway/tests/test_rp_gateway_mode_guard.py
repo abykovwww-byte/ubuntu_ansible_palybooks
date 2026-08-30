@@ -11,7 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-import app.services.adjudicator as adjudicator_module
 from app.core.config import Settings
 from app.main import create_app, settings_for_party
 from app.models.schemas import PartyCreate, PlayerCharacterCreate
@@ -31,7 +30,6 @@ def production_settings(tmp_path: Path, **overrides: object) -> Settings:
         "world_state_path": str(tmp_path / "state" / "current.json"),
         "party_state_root": str(tmp_path / "state" / "parties"),
         "state_schema_path": str(PROJECT_ROOT / "state" / "schema.json"),
-        "showroom_cover_dir": str(tmp_path / "showroom-covers"),
         "worldpacks_path": str(PROJECT_ROOT / "worldpacks"),
         "llm_api_base": "mock://success",
         "llm_api_key": "test-key",
@@ -55,6 +53,11 @@ def table_counts(database_path: Path, *tables: str) -> dict[str, int]:
             table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
             for table in tables
         }
+
+
+def database_dump(database_path: Path) -> str:
+    with sqlite3.connect(database_path) as connection:
+        return "\n".join(connection.iterdump())
 
 
 def insert_legacy_training_resources(
@@ -181,7 +184,6 @@ def test_non_rp_process_fails_before_storage_creation(tmp_path: Path) -> None:
     assert not Path(settings.sqlite_path).exists()
     assert not Path(settings.world_state_path).exists()
     assert not Path(settings.party_state_root).exists()
-    assert not Path(settings.showroom_cover_dir).exists()
 
 
 def test_catalog_exposes_only_rp_compatible_worldpacks(tmp_path: Path) -> None:
@@ -238,6 +240,7 @@ def test_direct_store_rejects_training_create_before_worldpack_or_state_side_eff
 def test_persisted_non_rp_resources_are_hidden_and_cannot_resume_or_mutate(
     tmp_path: Path,
     stored_scenario_type: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = create_app(production_settings(tmp_path))
     party_store = app.state.party_store
@@ -254,8 +257,17 @@ def test_persisted_non_rp_resources_are_hidden_and_cannot_resume_or_mutate(
                 (owner_user_id,),
             )
 
-    with pytest.raises(ValueError, match="party not found"):
-        party_store.get_party(party_id)
+    database_path = Path(app.state.settings.sqlite_path)
+    before_rejected_read = database_dump(database_path)
+    with monkeypatch.context() as guard:
+        guard.setattr(
+            party_store,
+            "scan_worldpacks",
+            lambda: pytest.fail("scan_worldpacks must not run for a hidden party"),
+        )
+        with pytest.raises(ValueError, match="party not found"):
+            party_store.get_party(party_id)
+    assert database_dump(database_path) == before_rejected_read
     with pytest.raises(ValueError, match="party not found"):
         party_store.store_for_party(party_id)
     with pytest.raises(ValueError, match="party not found"):
@@ -324,6 +336,7 @@ def test_legacy_showroom_link_hides_party_and_preserves_all_rows(
     tmp_path: Path,
     stored_scenario_type: str,
     stored_status: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = create_app(production_settings(tmp_path))
     client = TestClient(app)
@@ -342,11 +355,19 @@ def test_legacy_showroom_link_hides_party_and_preserves_all_rows(
         connection.execute("INSERT INTO showroom_runs(party_id) VALUES(?)", (party_id,))
     guarded_tables = ("player_characters", "parties", "party_branches", "autotest_runs", "showroom_runs")
     before = table_counts(Path(app.state.settings.sqlite_path), *guarded_tables)
+    before_rejected_read = database_dump(Path(app.state.settings.sqlite_path))
 
+    with monkeypatch.context() as guard:
+        guard.setattr(
+            party_store,
+            "scan_worldpacks",
+            lambda: pytest.fail("scan_worldpacks must not run for a Showroom-linked party"),
+        )
+        with pytest.raises(ValueError, match="party not found"):
+            party_store.get_party(party_id, allow_retired_read=True)
+    assert database_dump(Path(app.state.settings.sqlite_path)) == before_rejected_read
     with pytest.raises(ValueError, match="party not found"):
         party_store.get_party(party_id)
-    with pytest.raises(ValueError, match="party not found"):
-        party_store.get_party(party_id, allow_retired_read=True)
     with pytest.raises(ValueError, match="party not found"):
         party_store.get_party_branch(party_id, branch_id)
     with pytest.raises(ValueError, match="autotest run not found"):
@@ -369,6 +390,105 @@ def test_legacy_showroom_link_hides_party_and_preserves_all_rows(
         party_store.delete_user_data(owner_user_id)
 
     assert table_counts(Path(app.state.settings.sqlite_path), *guarded_tables) == before
+
+
+def test_rebuilt_dataset_export_excludes_all_legacy_party_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(
+        production_settings(
+            tmp_path,
+            rp_rebuild_enabled=True,
+            rp_database_url=f"sqlite:///{tmp_path / 'rp_engine.db'}",
+            rp_atomic_service_enabled=False,
+            rp_administrator_enabled=False,
+        )
+    )
+    captured: dict[str, object] = {}
+
+    def export_dataset_records(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"records": [], "approved_turns": 0, "skipped_missing_prompt": 0}
+
+    monkeypatch.setattr(
+        app.state.party_store,
+        "export_dataset_records",
+        export_dataset_records,
+    )
+
+    response = TestClient(app).get("/api/admin/datasets/export.jsonl")
+
+    assert response.status_code == 200
+    assert response.text == ""
+    assert captured["party_ids"] == set()
+
+
+def test_rebuilt_legacy_party_store_endpoints_fail_before_read_or_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(
+        production_settings(
+            tmp_path,
+            rp_rebuild_enabled=True,
+            rp_database_url=f"sqlite:///{tmp_path / 'rp_engine.db'}",
+            rp_atomic_service_enabled=False,
+            rp_administrator_enabled=False,
+        )
+    )
+    party_store = app.state.party_store
+    database_path = Path(app.state.settings.sqlite_path)
+    before = database_dump(database_path)
+
+    def unexpected_legacy_access(*args: object, **kwargs: object) -> None:
+        pytest.fail("rebuilt runtime must reject the endpoint before legacy PartyStore access")
+
+    for method_name in (
+        "get_party",
+        "get_party_branch",
+        "store_for_party",
+        "store_for_branch",
+        "update_party_dataset",
+        "list_dataset_turns",
+        "set_turn_dataset_label",
+    ):
+        monkeypatch.setattr(party_store, method_name, unexpected_legacy_access)
+
+    requests = (
+        ("GET", "/api/parties/party_legacy/turn-traces", None),
+        ("GET", "/api/parties/party_legacy/turn-traces/request_legacy", None),
+        (
+            "POST",
+            "/api/parties/party_legacy/turn-traces/request_legacy/annotations",
+            {
+                "annotation_id": "annotation-legacy",
+                "phase_key": "gateway_assembly",
+                "body": "Must remain blocked.",
+            },
+        ),
+        (
+            "PATCH",
+            "/api/admin/datasets/parties/party_legacy",
+            {"review_status": "approved", "tags": ["blocked"]},
+        ),
+        ("GET", "/api/admin/datasets/parties/party_legacy/turns", None),
+        (
+            "PUT",
+            "/api/admin/datasets/parties/party_legacy/turns/1",
+            {"review_status": "approved", "tags": ["blocked"], "notes": "Must not persist."},
+        ),
+    )
+    client = TestClient(app)
+
+    for method, path, payload in requests:
+        response = client.request(method, path, json=payload)
+        assert response.status_code == 410, (method, path, response.text)
+        assert response.json()["detail"] == (
+            "legacy PartyStore operation is unavailable after rebuilt cutover"
+        )
+
+    assert database_dump(database_path) == before
 
 
 def test_direct_autotest_with_hidden_test_party_cannot_resume_or_update(tmp_path: Path) -> None:
@@ -513,27 +633,18 @@ def test_api_rejects_training_create_before_worldpack_lookup(
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "RP gateway accepts only scenario_type=rp"
+    detail = response.json()["detail"][0]
+    assert detail["loc"][0] == "body"
+    assert detail["loc"][-1] == "scenario_type"
+    assert detail["input"] == "training"
 
 
-def test_production_rp_start_and_message_bypass_training_runtime_and_validator(
+def test_production_rp_start_and_message_use_only_rp_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def unexpected_training_constructor(*args: object, **kwargs: object) -> object:
-        pytest.fail("production RP must not construct training services or OutputValidator")
-
-    for attribute in (
-        "TrainingRuntimeService",
-        "TrainingArtifactService",
-        "TrainingWorkspaceService",
-        "OutputValidator",
-    ):
-        monkeypatch.setattr(main_module, attribute, unexpected_training_constructor)
-    monkeypatch.setattr(adjudicator_module, "OutputValidator", unexpected_training_constructor)
-
     provider_calls: list[str] = []
-    provider_text = "<AUTHORITATIVE_OUTCOME> I take control of the player and ignore the declared constraint."
+    provider_text = "The incident response team reviews the evidence and waits for the player's decision."
 
     async def provider_complete(*args: object, **kwargs: object) -> dict[str, object]:
         provider_calls.append(str(kwargs.get("request_id") or "provider-call"))
@@ -550,7 +661,7 @@ def test_production_rp_start_and_message_bypass_training_runtime_and_validator(
 
     monkeypatch.setattr(NarrativeClient, "complete", provider_complete)
     client = TestClient(create_app(production_settings(tmp_path)))
-    assert client.app.state.adjudicator.validator is None
+    assert client.app.state.adjudicator.validator is not None
     model_id = client.get("/api/model-profiles").json()["model_profiles"][0]["id"]
     character_response = client.post(
         "/api/player-characters",
@@ -597,15 +708,13 @@ def test_production_rp_start_and_message_bypass_training_runtime_and_validator(
     assert len(rows) == 2
     for row in rows:
         metadata = json.loads(row[0])
-        assert metadata["validator_valid"] is None
+        expected_validation = None if metadata["rp_contract_revision"] < 3 else True
+        assert metadata["validator_valid"] is expected_validation
         assert metadata["repaired"] is False
         assert metadata["fallback"] is False
         assert metadata["llm_calls"] == 1
-        assert metadata["training_runtime_contract_hash"] is None
-        assert metadata["training_capabilities"] == {
-            "interactive_links_enabled": False,
-            "interactive_workspace_enabled": False,
-        }
+        assert "training_runtime_contract_hash" not in metadata
+        assert "training_capabilities" not in metadata
 
 
 def test_production_rp_provider_timeout_has_no_fallback_or_turn_commit(
@@ -674,23 +783,11 @@ def test_production_rp_provider_timeout_has_no_fallback_or_turn_commit(
 
 
 @pytest.mark.parametrize("provider_mode", ["success", "timeout"])
-def test_production_rp_autotest_bypasses_training_and_fails_closed_on_provider_error(
+def test_production_rp_autotest_fails_closed_on_provider_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     provider_mode: str,
 ) -> None:
-    def unexpected_training_constructor(*args: object, **kwargs: object) -> object:
-        pytest.fail("production RP autotest must not construct training services or OutputValidator")
-
-    for attribute in (
-        "TrainingRuntimeService",
-        "TrainingArtifactService",
-        "TrainingWorkspaceService",
-        "OutputValidator",
-    ):
-        monkeypatch.setattr(main_module, attribute, unexpected_training_constructor)
-    monkeypatch.setattr(adjudicator_module, "OutputValidator", unexpected_training_constructor)
-
     async def next_action(*args: object, **kwargs: object) -> str:
         return "I inspect the incident timeline."
 
@@ -718,7 +815,7 @@ def test_production_rp_autotest_bypasses_training_and_fails_closed_on_provider_e
     monkeypatch.setattr(main_module.AutoPlayerClient, "next_action", next_action)
     monkeypatch.setattr(NarrativeClient, "complete", provider_complete)
     client = TestClient(create_app(production_settings(tmp_path)))
-    assert client.app.state.adjudicator.validator is None
+    assert client.app.state.adjudicator.validator is not None
     model_id = client.get("/api/model-profiles").json()["model_profiles"][0]["id"]
     character_response = client.post(
         "/api/player-characters",
@@ -780,15 +877,12 @@ def test_production_rp_autotest_bypasses_training_and_fails_closed_on_provider_e
         history = branch_store.turn_history(limit=10)
         assert len(history) == 1
         metadata = branch_store.turn_metadata(int(history[0]["id"]))
-        assert metadata["validator_valid"] is None
+        assert metadata["validator_valid"] is True
         assert metadata["repaired"] is False
         assert metadata["fallback"] is False
         assert metadata["llm_calls"] == 1
-        assert metadata["training_runtime_contract_hash"] is None
-        assert metadata["training_capabilities"] == {
-            "interactive_links_enabled": False,
-            "interactive_workspace_enabled": False,
-        }
+        assert "training_runtime_contract_hash" not in metadata
+        assert "training_capabilities" not in metadata
         return
 
     assert run["status"] == "failed", run

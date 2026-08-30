@@ -82,6 +82,6 @@ Party creation supports installed worldpacks or prompt-generated worlds. Prompt
 worlds are saved by gateway as generated worldpacks under the party state volume,
 then referenced by the normal party registry.
 
-Party creation also requires an explicit scenario type: `rp` or `training`.
+Party creation is RP-only and always sends `scenario_type: "rp"`.
 The type is persisted on the party and controls Gateway mechanics;
 worldpacks can advertise supported types but cannot select one automatically.

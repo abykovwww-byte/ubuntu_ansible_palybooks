@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import Settings, get_settings
 from app.core.json_patch import PatchError
@@ -53,17 +53,12 @@ from app.models.schemas import (
     PartyTurnDatasetUpdate,
     TurnTraceAnnotationCreate,
     TurnFeedbackUpdate,
-    TrainingArtifactEventRequest,
-    TrainingWorkspaceEventRequest,
     PartyCheckpointCreate,
     PlayerCharacterCreate,
     PlayerCharacterDraftRequest,
     ProviderApiKeyCreate,
     ProviderApiKeyUpdate,
     ServiceModelUpdate,
-    ShowroomRunCreate,
-    ShowroomScenarioCreate,
-    ShowroomScenarioUpdate,
     UserCreate,
     UserDeleteRequest,
     UserPasswordUpdate,
@@ -156,13 +151,9 @@ from app.services.scene_state import (
     scene_state_boundary_block,
     unresolved_noncanonical_fallback_turns,
 )
-from app.services.showroom import ShowroomStore
 from app.services.state_store import StateStore, StateVersionConflict
-from app.services.training_artifacts import TrainingArtifactService
-from app.services.training_runtime import TrainingRuntimeService
-from app.services.training_workspace import TrainingWorkspaceService
 from app.services.turn_trace import TurnTraceAssembler
-from app.services.validator import OutputValidator, safe_fallback
+from app.services.validator import safe_fallback
 from app.services.world_instructor import WorldInstructor
 from app.services.world_clock import (
     WorldClockBusy,
@@ -182,25 +173,13 @@ RP_ANONYMOUS_OWNER = "anonymous"
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
-    enforce_rp_mode = settings.app_env != "test"
-    if enforce_rp_mode and settings.scenario_type != "rp":
+    if settings.scenario_type != "rp":
         raise RuntimeError("RP gateway requires SCENARIO_TYPE=rp")
     store = StateStore(settings.sqlite_path, settings.campaign_id, settings.world_state_path)
     auth_store = AuthStore(settings)
     party_store = PartyStore(settings, default_owner_user_id=auth_store.default_owner_user_id())
-    showroom_store = None if enforce_rp_mode else ShowroomStore(settings, party_store)
     rp_engine: RPTurnEngine | None = None
     rp_runner: RPRunner | None = None
-
-    def keep_legacy_party_runtime(party: Any) -> bool:
-        return (
-            not settings.rp_rebuild_enabled
-            or party.scenario_type != "rp"
-            or (
-                showroom_store is not None
-                and showroom_store.capabilities_for_party(party.id) is not None
-            )
-        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -212,7 +191,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for party in party_store.list_parties():
                 if party.status != "active":
                     continue
-                if not keep_legacy_party_runtime(party):
+                if settings.rp_rebuild_enabled:
                     continue
                 party_state_store = party_store.store_for_party(party.id)
                 recovered = party_state_store.recover_interrupted_work()
@@ -237,24 +216,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ).schedule_service_jobs()
             for branch in party_store.list_all_party_branches():
                 if settings.rp_rebuild_enabled:
-                    try:
-                        branch_party = party_store.get_party(branch["party_id"])
-                    except ValueError:
-                        continue
-                    if not keep_legacy_party_runtime(branch_party):
-                        continue
+                    continue
                 branch_store = party_store.store_for_branch(branch["party_id"], branch["id"])
                 recovered = branch_store.recover_interrupted_work()
                 if any(recovered.values()):
                     logger.warning("recovered_interrupted_branch_work branch_id=%s %s", branch["id"], recovered)
             for run in party_store.resumable_autotest_runs():
                 if settings.rp_rebuild_enabled:
-                    try:
-                        source_party = party_store.get_party(str(run["source_party_id"]))
-                    except ValueError:
-                        continue
-                    if not keep_legacy_party_runtime(source_party):
-                        continue
+                    continue
                 schedule_autotest(run["id"])
             yield
         finally:
@@ -267,22 +236,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth_store = auth_store
     app.state.adjudicator = Adjudicator(settings, store)
     app.state.party_store = party_store
-    app.state.showroom_store = showroom_store
     app.state.autotest_tasks = {}
     app.state.rp_engine = None
     app.state.rp_runner = None
-
-    def is_retired_training_path(path: str) -> bool:
-        if path == "/api/showroom" or path.startswith("/api/showroom/"):
-            return True
-        if path == "/api/admin/showroom" or path.startswith("/api/admin/showroom/"):
-            return True
-        return bool(
-            re.fullmatch(
-                r"/api/parties/[^/]+/(?:artifact-events|workspace|workspace-events|workspace/files/[^/]+/content)",
-                path,
-            )
-        )
 
     def settings_with_global_service_model(base: Settings) -> Settings:
         choice_id = auth_store.get_global_setting(SERVICE_MODEL_SETTING_KEY, base.service_model_choice)
@@ -434,24 +390,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not party_store.model_profile_is_visible(profile):
             raise ValueError(f"model profile is unavailable for RP: {model_profile_id}")
         return profile
-
-    def training_services_for_party(
-        party: Any,
-        party_state_store: StateStore,
-    ) -> tuple[TrainingRuntimeService, TrainingArtifactService, TrainingWorkspaceService]:
-        run_capabilities = (
-            showroom_store.capabilities_for_party(party.id)
-            if showroom_store is not None
-            else None
-        )
-        links_enabled = run_capabilities is None or run_capabilities["interactive_links_enabled"]
-        workspace_enabled = run_capabilities is None or run_capabilities["interactive_workspace_enabled"]
-        return (
-            TrainingRuntimeService(party.worldpack, party_state_store),
-            TrainingArtifactService(party.worldpack, party_state_store, enabled=links_enabled),
-            TrainingWorkspaceService(party.worldpack, party_state_store, enabled=workspace_enabled),
-        )
-
     app.state.adjudicator = Adjudicator(settings_with_global_service_model(settings), store)
 
     def runtime_settings_for_profile(profile: Any, cache_session_id: str, party: Any | None = None) -> Settings:
@@ -537,20 +475,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     provider=narrator_profile.provider,
                     narrator_settings=party.narrator_settings,
                 )
-                runtime_service = None
-                artifact_service = None
-                workspace_service = None
-                if party.scenario_type == "training":
-                    runtime_service, artifact_service, workspace_service = training_services_for_party(
-                        party,
-                        party_state_store,
-                    )
                 narrator_response = await Adjudicator(
                     party_settings,
                     party_state_store,
-                    training_artifacts=artifact_service,
-                    training_workspace=workspace_service,
-                    training_runtime=runtime_service,
                     relationship_model=relationship_model_for_party(party),
                     scene_contract=scene_contract_for_party(party),
                     world_clock_contract=world_clock_contract_for_party(
@@ -563,7 +490,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     authorization=None,
                     idempotency_key=f"autotest:{run_id}:turn:{turn_number}",
                     request_id=f"{request_id}_narrator",
-                    allow_gateway_fallback=bool(runtime_service is not None and runtime_service.enabled),
+                    allow_gateway_fallback=(
+                        party_settings.rp_contract_revision >= 7
+                    ),
                 )
                 fallback_turns = int(run.get("fallback_turns") or 0)
                 choices = narrator_response.get("choices") or []
@@ -609,16 +538,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return user
 
     def owner_user_id(request: Request) -> str | None:
-        if getattr(request.state, "showroom_party_access", False):
-            return None
         user = current_user(request)
         return user.id if user else None
 
     def rebuilt_rp_request(request: Request) -> bool:
-        return settings.rp_rebuild_enabled and not (
-            getattr(request.state, "showroom_party_access", False)
-            or getattr(request.state, "retained_training_party_access", False)
-        )
+        return settings.rp_rebuild_enabled
 
     def rp_owner_user_id(request: Request) -> str:
         user = current_user(request)
@@ -812,12 +736,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         branch_id: str | None,
     ) -> tuple[Any, dict[str, Any] | None, StateStore]:
         require_admin(request)
-        party = require_retained_legacy_party(party_id, owner_user_id=None)
+        require_legacy_party_store_runtime()
+        party = party_store.get_party(party_id, owner_user_id=None)
         if branch_id:
             branch = party_store.get_party_branch(party_id, branch_id, owner_user_id=None)
             trace_store = party_store.store_for_branch(party_id, branch_id, owner_user_id=None)
             return party, branch, trace_store
         return party, None, party_store.store_for_party(party_id, owner_user_id=None)
+
+    def require_legacy_party_store_runtime() -> None:
+        if settings.rp_rebuild_enabled:
+            raise HTTPException(
+                status_code=410,
+                detail="legacy PartyStore operation is unavailable after rebuilt cutover",
+            )
 
     def require_admin(request: Request) -> AuthUser | None:
         user = current_user(request)
@@ -835,64 +767,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             owner_user_id=owner_user_id(request),
             include_private=can_view_private_worldpacks(request),
         )
-
-    def worldpack_supports_training(pack: Any) -> bool:
-        manifest = pack.manifest if isinstance(pack.manifest, dict) else {}
-        scenario_types = manifest.get("scenario_types")
-        supported = (
-            scenario_types.get("supported")
-            if isinstance(scenario_types, dict)
-            else None
-        )
-        return isinstance(supported, list) and "training" in supported
-
-    def retained_training_worldpacks(request: Request) -> list[Any]:
-        return [
-            pack
-            for pack in party_store.list_worldpacks(
-                owner_user_id=owner_user_id(request),
-                include_private=can_view_private_worldpacks(request),
-            )
-            if worldpack_supports_training(pack)
-        ]
-
-    def accessible_retained_training_worldpack(
-        request: Request, worldpack_id: str
-    ) -> Any:
-        try:
-            pack = accessible_worldpack(request, worldpack_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if not worldpack_supports_training(pack):
-            raise HTTPException(
-                status_code=410,
-                detail="ordinary legacy RP WorldPack is unavailable after rebuilt cutover",
-            )
-        return pack
-
-    def require_retained_legacy_party(
-        party_id: str, *, owner_user_id: str | None
-    ) -> Any:
-        party = party_store.get_party(party_id, owner_user_id=owner_user_id)
-        if settings.rp_rebuild_enabled and not keep_legacy_party_runtime(party):
-            raise HTTPException(
-                status_code=410,
-                detail="ordinary legacy RP party is unavailable after rebuilt cutover",
-            )
-        return party
-
-    def retained_showroom_worldpacks() -> list[Any]:
-        scenario_worldpack_ids = {
-            str(item["worldpack_id"])
-            for item in showroom_store.list_scenarios(public_only=False)
-        }
-        retained: list[Any] = []
-        for pack in party_store.list_worldpacks(
-            owner_user_id=None, include_private=True
-        ):
-            if pack.id in scenario_worldpack_ids or worldpack_supports_training(pack):
-                retained.append(pack)
-        return retained
 
     def rebuilt_party_http_route_allowed(method: str, path: str) -> bool:
         if path == "/api/parties":
@@ -929,20 +803,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
-        if enforce_rp_mode and is_retired_training_path(path):
-            return JSONResponse({"detail": "not found"}, status_code=404)
         if settings.auth_enabled and path.startswith("/api/"):
-            auth_exempt = (
-                path.startswith("/api/auth/")
-                or (
-                    not enforce_rp_mode
-                    and (
-                        path == "/api/showroom"
-                        or path.startswith("/api/showroom/")
-                    )
-                )
-            )
-            if not auth_exempt:
+            if not path.startswith("/api/auth/"):
                 token = request.cookies.get(settings.auth_session_cookie_name)
                 user = auth_store.user_for_session(token)
                 if user is None:
@@ -950,36 +812,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         {"detail": "authentication required"}, status_code=401
                     )
                 request.state.user = user
-        if settings.rp_rebuild_enabled:
-            party_path = re.match(r"^/api/parties/([^/]+)(?:/|$)", path)
-            if party_path is not None:
-                party_id = party_path.group(1)
-                clean_party_exists = False
-                if rp_engine is not None:
-                    try:
-                        rp_engine.get_party(
-                            owner_user_id=rp_owner_user_id(request),
-                            party_id=party_id,
-                        )
-                        clean_party_exists = True
-                    except RPPartyNotFound:
-                        pass
-                if not clean_party_exists:
-                    try:
-                        legacy_party = party_store.get_party(
-                            party_id, owner_user_id=owner_user_id(request)
-                        )
-                    except ValueError:
-                        pass
-                    else:
-                        if legacy_party.scenario_type == "training":
-                            request.state.retained_training_party_access = True
         if (
             settings.rp_rebuild_enabled
             and path.startswith("/api/parties")
-            and not getattr(
-                request.state, "retained_training_party_access", False
-            )
             and not rebuilt_party_http_route_allowed(request.method, path)
         ):
             return JSONResponse(
@@ -1208,8 +1043,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         payload: PartyDatasetUpdate,
     ) -> dict[str, Any]:
         admin = require_admin(request)
+        require_legacy_party_store_runtime()
         try:
-            require_retained_legacy_party(
+            party_store.get_party(
                 party_id, owner_user_id=admin.id if admin else None
             )
             party = party_store.update_party_dataset(
@@ -1230,8 +1066,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = 500,
     ) -> dict[str, Any]:
         admin = require_admin(request)
+        require_legacy_party_store_runtime()
         try:
-            require_retained_legacy_party(
+            party_store.get_party(
                 party_id, owner_user_id=admin.id if admin else None
             )
             turns = party_store.list_dataset_turns(
@@ -1253,8 +1090,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         branch_id: str | None = None,
     ) -> dict[str, Any]:
         admin = require_admin(request)
+        require_legacy_party_store_runtime()
         try:
-            require_retained_legacy_party(
+            party_store.get_party(
                 party_id, owner_user_id=admin.id if admin else None
             )
             label = party_store.set_turn_dataset_label(
@@ -1280,20 +1118,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         admin = require_admin(request)
         if scenario_type and scenario_type not in {"rp", "novel"}:
             raise HTTPException(status_code=400, detail="scenario_type must be rp or novel")
-        retained_party_ids = None
-        if settings.rp_rebuild_enabled:
-            retained_party_ids = {
-                party.id
-                for party in party_store.list_parties(
-                    owner_user_id=admin.id if admin else None
-                )
-                if keep_legacy_party_runtime(party)
-            }
+        legacy_party_ids = set() if settings.rp_rebuild_enabled else None
         export = party_store.export_dataset_records(
             owner_user_id=admin.id if admin else None,
             scenario_type=scenario_type,
             include_branches=include_branches,
-            party_ids=retained_party_ids,
+            party_ids=legacy_party_ids,
         )
         body = "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in export["records"])
         return StreamingResponse(
@@ -1321,17 +1151,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, scenario_type: str | None = None
     ) -> dict[str, Any]:
         if rebuilt_rp_request(request):
-            if scenario_type == "training":
-                return {
-                    "worldpacks": [
-                        pack.model_dump(mode="json")
-                        for pack in retained_training_worldpacks(request)
-                    ]
-                }
-            if scenario_type is not None:
+            if scenario_type not in {None, "rp"}:
                 raise HTTPException(
                     status_code=400,
-                    detail="scenario_type must be training after rebuilt cutover",
+                    detail="scenario_type must be rp after rebuilt cutover",
                 )
             try:
                 loader = rp_world_loader()
@@ -1375,12 +1198,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         require_admin(request)
         try:
-            if settings.rp_rebuild_enabled and worldpack_id not in {
-                pack.id for pack in retained_showroom_worldpacks()
-            }:
+            if settings.rp_rebuild_enabled:
                 raise HTTPException(
                     status_code=410,
-                    detail="ordinary legacy RP WorldPack is unavailable after rebuilt cutover",
+                    detail="legacy WorldPack administration is unavailable after rebuilt cutover",
                 )
             pack = party_store.set_worldpack_visibility(worldpack_id, payload.visibility)
         except ValueError as exc:
@@ -1399,8 +1220,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_worldpack(request: Request, worldpack_id: str) -> dict[str, Any]:
         if rebuilt_rp_request(request):
             if worldpack_id != SUPPORTED_WORLD_ID:
-                pack = accessible_retained_training_worldpack(request, worldpack_id)
-                return {"worldpack": pack.model_dump(mode="json")}
+                raise HTTPException(status_code=404, detail="worldpack not found")
             worldpack = list_worldpacks(request)["worldpacks"][0]
             try:
                 preset = rp_world_loader().materialize_preset(
@@ -1434,7 +1254,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/worldpacks/{worldpack_id}/player-templates")
     def player_templates(request: Request, worldpack_id: str) -> dict[str, Any]:
         if rebuilt_rp_request(request):
-            accessible_retained_training_worldpack(request, worldpack_id)
+            raise HTTPException(
+                status_code=410,
+                detail="player templates are unavailable after rebuilt cutover",
+            )
         try:
             templates = party_store.player_templates(
                 worldpack_id,
@@ -1448,25 +1271,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/player-characters")
     def list_player_characters(request: Request, worldpack_id: str | None = None) -> dict[str, Any]:
         if rebuilt_rp_request(request):
-            if worldpack_id is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="worldpack_id is required after rebuilt cutover",
-                )
-            accessible_retained_training_worldpack(request, worldpack_id)
+            raise HTTPException(
+                status_code=410,
+                detail="legacy player characters are unavailable after rebuilt cutover",
+            )
         characters = party_store.list_player_characters(worldpack_id=worldpack_id, owner_user_id=owner_user_id(request))
         return {"player_characters": [character.model_dump(mode="json") for character in characters]}
 
     @app.post("/api/player-characters/draft")
     def draft_player_character(request: Request, payload: PlayerCharacterDraftRequest) -> dict[str, Any]:
         if rebuilt_rp_request(request):
-            pack = accessible_retained_training_worldpack(request, payload.worldpack_id)
-        else:
-            try:
-                pack = accessible_worldpack(request, payload.worldpack_id)
-            except ValueError as exc:
-                status_code = 404 if str(exc).startswith("worldpack not found:") else 400
-                raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=410,
+                detail="legacy player character drafts are unavailable after rebuilt cutover",
+            )
+        try:
+            pack = accessible_worldpack(request, payload.worldpack_id)
+        except ValueError as exc:
+            status_code = 404 if str(exc).startswith("worldpack not found:") else 400
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
         try:
             opening_id, player_role = party_store.resolve_player_character_opening(pack, payload.opening_id)
         except ValueError as exc:
@@ -1491,11 +1314,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/player-characters")
     def create_player_character(request: Request, payload: PlayerCharacterCreate) -> dict[str, Any]:
+        if rebuilt_rp_request(request):
+            raise HTTPException(
+                status_code=410,
+                detail="legacy player characters are unavailable after rebuilt cutover",
+            )
         try:
-            if rebuilt_rp_request(request):
-                accessible_retained_training_worldpack(request, payload.worldpack_id)
-            else:
-                accessible_worldpack(request, payload.worldpack_id)
+            accessible_worldpack(request, payload.worldpack_id)
             character = party_store.create_player_character(payload, owner_user_id=owner_user_id(request))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1513,19 +1338,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             parties = require_rp_engine().list_parties(
                 owner_user_id=rp_owner_user_id(request)
             )
-            clean_party_ids = {party.id for party in parties}
-            retained_training = [
-                party.model_dump(mode="json")
-                for party in party_store.list_parties(
-                    owner_user_id=owner_user_id(request)
-                )
-                if party.scenario_type == "training"
-                and party.id not in clean_party_ids
-            ]
-            return {
-                "parties": [rp_party_payload(party) for party in parties]
-                + retained_training
-            }
+            return {"parties": [rp_party_payload(party) for party in parties]}
         return {"parties": [party.model_dump(mode="json") for party in party_store.list_parties(owner_user_id=owner_user_id(request))]}
 
     @app.post("/api/parties")
@@ -1585,22 +1398,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             return {"party": rp_party_payload(party)}
         if rebuilt_rp_request(request):
-            if enforce_rp_mode or payload.scenario_type != "training":
-                raise HTTPException(
-                    status_code=422,
-                    detail="legacy ordinary RP party creation is unavailable",
-                )
+            raise HTTPException(
+                status_code=422,
+                detail="legacy party creation is unavailable after rebuilt cutover",
+            )
         if isinstance(payload, RPPartyCreate):
             raise HTTPException(
                 status_code=422, detail="rebuilt RP runtime is not active"
             )
-        if enforce_rp_mode and payload.scenario_type != "rp":
-            raise HTTPException(status_code=422, detail="RP gateway accepts only scenario_type=rp")
         try:
-            if rebuilt_rp_request(request):
-                accessible_retained_training_worldpack(request, payload.worldpack_id)
-            else:
-                accessible_worldpack(request, payload.worldpack_id)
+            accessible_worldpack(request, payload.worldpack_id)
             party = party_store.create_party(payload, owner_user_id=owner_user_id(request))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1904,7 +1711,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_admin(request)
         parties = party_store.list_parties(owner_user_id=None)
         if settings.rp_rebuild_enabled:
-            parties = [party for party in parties if keep_legacy_party_runtime(party)]
+            parties = []
         response.headers["Cache-Control"] = "no-store"
         return {"parties": [party.model_dump(mode="json") for party in parties]}
 
@@ -1917,7 +1724,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         require_admin(request)
         try:
-            require_retained_legacy_party(party_id, owner_user_id=None)
+            if settings.rp_rebuild_enabled:
+                raise HTTPException(
+                    status_code=410,
+                    detail="legacy turn-trace branches are unavailable after rebuilt cutover",
+                )
+            party_store.get_party(party_id, owner_user_id=None)
             branches = party_store.list_party_branches(
                 party_id,
                 owner_user_id=None,
@@ -1972,73 +1784,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=detail) from exc
         response.headers["Cache-Control"] = "no-store"
         return result
-
-    @app.post("/api/parties/{party_id}/artifact-events")
-    def record_party_artifact_event(
-        http_request: Request,
-        party_id: str,
-        payload: TrainingArtifactEventRequest,
-    ) -> dict[str, Any]:
-        try:
-            party = party_store.get_party(party_id, owner_user_id=owner_user_id(http_request))
-            ensure_party_playable(party)
-            party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(http_request))
-            _, service, _ = training_services_for_party(party, party_state_store)
-            if not service.enabled or party.scenario_type != "training":
-                raise ValueError("interactive training artifacts are not enabled for this party")
-            result = service.record_event(payload)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"party_id": party_id, **result.model_dump(mode="json")}
-
-    @app.get("/api/parties/{party_id}/workspace")
-    def get_party_workspace(http_request: Request, party_id: str) -> dict[str, Any]:
-        try:
-            party = party_store.get_party(party_id, owner_user_id=owner_user_id(http_request))
-            ensure_party_playable(party)
-            party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(http_request))
-            _, _, service = training_services_for_party(party, party_state_store)
-            if not service.enabled or party.scenario_type != "training":
-                raise ValueError("interactive training workspace is not enabled for this party")
-            return {"party_id": party_id, "workspace": service.snapshot(party_state_store.get_state())}
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.post("/api/parties/{party_id}/workspace-events")
-    def record_party_workspace_event(
-        http_request: Request,
-        party_id: str,
-        payload: TrainingWorkspaceEventRequest,
-    ) -> dict[str, Any]:
-        try:
-            party = party_store.get_party(party_id, owner_user_id=owner_user_id(http_request))
-            ensure_party_playable(party)
-            party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(http_request))
-            _, _, service = training_services_for_party(party, party_state_store)
-            if not service.enabled or party.scenario_type != "training":
-                raise ValueError("interactive training workspace is not enabled for this party")
-            result = service.record_event(payload, party_state_store.get_state())
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"party_id": party_id, **result.model_dump(mode="json")}
-
-    @app.get("/api/parties/{party_id}/workspace/files/{file_id}/content")
-    def get_party_workspace_file_content(http_request: Request, party_id: str, file_id: str) -> FileResponse:
-        try:
-            party = party_store.get_party(party_id, owner_user_id=owner_user_id(http_request))
-            ensure_party_playable(party)
-            party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(http_request))
-            _, _, service = training_services_for_party(party, party_state_store)
-            if not service.enabled or party.scenario_type != "training":
-                raise ValueError("interactive training workspace is not enabled for this party")
-            path, mime_type, filename = service.resource_for_file(
-                file_id,
-                party_state_store.get_state(),
-                public_only=bool(getattr(http_request.state, "showroom_party_access", False)),
-            )
-            return FileResponse(path, media_type=mime_type, filename=filename)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.put("/api/parties/{party_id}/turns/{turn_id}/feedback")
     def update_party_turn_feedback(
@@ -3021,18 +2766,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 and party_settings.rp_contract_revision == 7
             )
             expected_state_version = int(state.get("meta", {}).get("state_version") or 0)
-            runtime_service = None
-            artifact_service = None
-            workspace_service = None
-            if party.scenario_type == "training":
-                runtime_service, artifact_service, workspace_service = training_services_for_party(
-                    party,
-                    party_state_store,
-                )
-            start_patch = (
-                runtime_service.start_patch(state, party_id)
-                if runtime_service is not None and runtime_service.enabled
-                else party_start_state_patch(state, party_id, party.worldpack_id, party.scenario_type)
+            start_patch = party_start_state_patch(
+                state,
+                party_id,
+                party.worldpack_id,
+                party.scenario_type,
             )
             narrative_state = party_start_narrative_state(state, start_patch)
             prompt = party_start_prompt(party_store, party)
@@ -3095,26 +2833,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if adjudicator.rp_story_memory is not None
                 else None
             )
-            artifact_contract = (
-                artifact_service.contract_for_state(narrative_state)
-                if artifact_service is not None
-                else None
-            )
-            workspace_contract = (
-                workspace_service.contract_for_state(narrative_state, party_start=True)
-                if workspace_service is not None
-                else None
-            )
-            interaction_contract = (
-                {"site": artifact_contract, "workspace": workspace_contract}
-                if artifact_contract or workspace_contract
-                else None
-            )
-            training_turn_contract = (
-                runtime_service.prompt_contract(narrative_state, interaction_contract)
-                if runtime_service is not None and runtime_service.enabled
-                else None
-            )
             world_clock_projection = (
                 adjudicator.world_clock.prompt_projection(narrative_state)
                 if adjudicator.world_clock is not None
@@ -3137,8 +2855,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 repair_instruction=None,
                 memory_summary=memory_summary,
                 rp_story_memory=rp_story_memory,
-                artifact_contract=interaction_contract,
-                training_turn_contract=training_turn_contract,
                 world_events=world_events,
                 supervisor_advisory=supervisor_advisory,
             )
@@ -3170,8 +2886,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "input": {"messages": prompt_messages},
                     "details": {
                         "message_count": len(prompt_messages),
-                        "training_turn_contract_included": bool(training_turn_contract),
-                        "interaction_contract_included": bool(interaction_contract),
                         "assembly_trace": adjudicator.prompt_assembly_trace(prompt_messages, prompt),
                     },
                 },
@@ -3214,8 +2928,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     memory_summary=memory_summary,
                     rp_story_memory=rp_story_memory,
                     request_id=request_id,
-                    artifact_contract=interaction_contract,
-                    training_turn_contract=training_turn_contract,
                     world_events=world_events,
                     supervisor_advisory=supervisor_advisory,
                 )
@@ -3243,17 +2955,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else:
                     fallback_reason = "runtime_error"
                     transport_status = "provider_error"
-                if party.scenario_type == "rp":
+                revision_seven_transport = revision_seven and isinstance(
+                    exc,
+                    (
+                        httpx.HTTPStatusError,
+                        httpx.TimeoutException,
+                        ProviderRateLimitError,
+                        httpx.RequestError,
+                    ),
+                )
+                if not revision_seven_transport:
                     raise
-                if runtime_service is None or not runtime_service.enabled:
-                    raise
-                text = runtime_service.fallback_text(narrative_state, interaction_contract)
+                text = safe_fallback(
+                    start_outcome,
+                    narrative_state,
+                    "",
+                    party.worldpack_id,
+                    party.scenario_type,
+                )
                 raw = adjudicator.provider_fallback_response(
                     start_outcome,
                     text,
                     fallback_reason,
                     request_id,
+                    audit=False,
                 )
+                fallback_noncanonical = True
             if scene_bundle_revision and not fallback_noncanonical:
                 scene_result = materialize_scene_bundle(
                     raw,
@@ -3270,17 +2997,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     },
                 )
                 if scene_result.valid:
-                    raw = Adjudicator.merge_interaction_response(
-                        raw,
-                        scene_result.text,
-                        None,
-                        None,
-                    )
+                    raw = Adjudicator.with_narrative_text(raw, scene_result.text)
             response = adjudicator.normalize_response(raw, model_profile.model)
             text = scene_result.text if scene_result is not None else response_text(response)
             if scene_result is not None and scene_result.valid:
                 response = adjudicator.normalize_response(
-                    Adjudicator.merge_interaction_response(response, text, None, None),
+                    Adjudicator.with_narrative_text(response, text),
                     model_profile.model,
                 )
             if (
@@ -3298,50 +3020,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     request_id,
                 )
                 raise RuntimeError("Narrative provider returned an invalid response")
-            artifact_result = None
-            workspace_result = None
-            if artifact_service is not None and workspace_service is not None and fallback_reason is None:
-                artifact_result = (
-                    artifact_service.materialize_response(response, artifact_contract)
-                    if artifact_service is not None
-                    else None
+            response = Adjudicator.with_narrative_text(response, text)
+            validation = (
+                None
+                if party_settings.rp_contract_revision < 3
+                else adjudicator.validator.validate(
+                    text,
+                    start_outcome,
+                    narrative_state,
+                    campaign_id=party.worldpack_id,
+                    scenario_type=party.scenario_type,
                 )
-                workspace_result = (
-                    workspace_service.materialize_response(response, workspace_contract)
-                    if workspace_service is not None
-                    else None
-                )
-                if artifact_result is not None and artifact_result.valid:
-                    text = artifact_result.text
-                if workspace_result is not None and workspace_result.valid:
-                    text = workspace_result.text
-                if (
-                    artifact_result is not None
-                    and workspace_result is not None
-                    and artifact_result.valid
-                    and workspace_result.valid
-                ):
-                    response = Adjudicator.merge_interaction_response(response, text, artifact_result, workspace_result)
-            elif artifact_service is not None and workspace_service is not None:
-                artifact_result = artifact_service.fallback_materialization(response, text, artifact_contract)
-                text = artifact_result.text
-                workspace_result = workspace_service.fallback_materialization(workspace_contract, text)
-            validator = None if party.scenario_type == "rp" else OutputValidator()
-            validation = None if party.scenario_type == "rp" else validator.validate(
-                text,
-                start_outcome,
-                narrative_state,
-                campaign_id=party.worldpack_id,
-                scenario_type=party.scenario_type,
-                training_runtime=runtime_service,
-                interaction_contract=interaction_contract,
             )
             if validation is not None:
                 initial_violations = [
                     *validation.violations,
                     *(scene_result.violations if scene_result else []),
-                    *(artifact_result.violations if artifact_result else []),
-                    *(workspace_result.violations if workspace_result else []),
                 ]
                 adjudicator.record_trace_event(
                     request_id=request_id,
@@ -3352,59 +3046,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status="completed" if not initial_violations else "failed",
                     payload={
                         "input": {"response": text},
-                        "output": {"valid": not initial_violations, "violations": initial_violations},
+                        "output": {
+                            "valid": not initial_violations,
+                            "violations": initial_violations,
+                        },
                         "metadata": {"repair": False, "opening_scene": True},
                     },
                     party_turn=expected_party_turn,
                 )
-            training_runtime_enabled = bool(runtime_service is not None and runtime_service.enabled)
-            repair_attempts = (
-                0
-                if party.scenario_type == "rp"
-                else party_settings.training_repair_attempts
-                if training_runtime_enabled
-                else party_settings.max_repair_attempts
-            )
-            training_repair_allowed = True
-            if training_runtime_enabled and runtime_service is not None:
-                runtime_violations = runtime_service.validate_narrative(
-                    text, narrative_state, interaction_contract
+            repair_attempts = 1 if revision_seven else party_settings.max_repair_attempts
+            if (
+                validation is not None
+                and (
+                    not validation.valid
+                    or (scene_result is not None and not scene_result.valid)
                 )
-                runtime_violation_set = set(runtime_violations)
-                training_repair_allowed = not runtime_service.hard_violations(
-                    text, narrative_state, interaction_contract
-                ) and not any(
-                    violation not in runtime_violation_set for violation in validation.violations
-                )
-            if validation is not None and (
-                not validation.valid
-                or (scene_result is not None and not scene_result.valid)
-                or (artifact_result is not None and not artifact_result.valid)
-                or (workspace_result is not None and not workspace_result.valid)
-            ) and repair_attempts > 0 and training_repair_allowed:
+                and repair_attempts > 0
+            ):
                 repaired = True
-                repair_instruction = (
-                    runtime_service.repair_instruction(text, narrative_state, interaction_contract)
-                    if training_runtime_enabled and runtime_service is not None
-                    else validation.repair_instruction
-                )
+                repair_instruction = validation.repair_instruction
                 if scene_result is not None and not scene_result.valid:
                     repair_instruction = " ".join(
                         [repair_instruction, scene_result.repair_instruction]
-                    ).strip()
-                if artifact_result is not None and not artifact_result.valid:
-                    repair_instruction = " ".join(
-                        [
-                            repair_instruction,
-                            "Return a valid narrative bundle: " + "; ".join(artifact_result.violations),
-                        ]
-                    ).strip()
-                if workspace_result is not None and not workspace_result.valid:
-                    repair_instruction = " ".join(
-                        [
-                            repair_instruction,
-                            "Return valid workspace_files: " + "; ".join(workspace_result.violations),
-                        ]
                     ).strip()
                 if revision_seven:
                     current_state_version = int(party_state_store.current_version() or 0)
@@ -3434,8 +3097,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     memory_summary=memory_summary,
                     rp_story_memory=rp_story_memory,
                     request_id=request_id,
-                    artifact_contract=interaction_contract,
-                    training_turn_contract=training_turn_contract,
                     world_events=world_events,
                     supervisor_advisory=supervisor_advisory,
                     opening_prompt=opening_repair_prompt,
@@ -3456,46 +3117,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         },
                     )
                     if scene_result.valid:
-                        raw = Adjudicator.merge_interaction_response(
-                            raw, scene_result.text, None, None
-                        )
+                        raw = Adjudicator.with_narrative_text(raw, scene_result.text)
                 response = adjudicator.normalize_response(raw, model_profile.model)
                 text = scene_result.text if scene_result is not None else response_text(response)
-                artifact_result = (
-                    artifact_service.materialize_response(response, artifact_contract)
-                    if artifact_service is not None
-                    else None
-                )
-                workspace_result = (
-                    workspace_service.materialize_response(response, workspace_contract)
-                    if workspace_service is not None
-                    else None
-                )
-                if artifact_result is not None and artifact_result.valid:
-                    text = artifact_result.text
-                if workspace_result is not None and workspace_result.valid:
-                    text = workspace_result.text
-                if (
-                    artifact_result is not None
-                    and workspace_result is not None
-                    and artifact_result.valid
-                    and workspace_result.valid
-                ):
-                    response = Adjudicator.merge_interaction_response(response, text, artifact_result, workspace_result)
-                validation = validator.validate(
+                response = Adjudicator.with_narrative_text(response, text)
+                validation = adjudicator.validator.validate(
                     text,
                     start_outcome,
                     narrative_state,
                     campaign_id=party.worldpack_id,
                     scenario_type=party.scenario_type,
-                    training_runtime=runtime_service,
-                    interaction_contract=interaction_contract,
                 )
                 repair_violations = [
                     *validation.violations,
                     *(scene_result.violations if scene_result else []),
-                    *(artifact_result.violations if artifact_result else []),
-                    *(workspace_result.violations if workspace_result else []),
                 ]
                 adjudicator.record_trace_event(
                     request_id=request_id,
@@ -3506,18 +3141,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status="completed" if not repair_violations else "failed",
                     payload={
                         "input": {"response": text},
-                        "output": {"valid": not repair_violations, "violations": repair_violations},
+                        "output": {
+                            "valid": not repair_violations,
+                            "violations": repair_violations,
+                        },
                         "metadata": {"repair": True, "opening_scene": True},
                     },
                     party_turn=expected_party_turn,
                 )
             if scene_result is not None and not scene_result.valid:
                 raise SceneContinuityError("; ".join(scene_result.violations))
-            if validation is not None and (
-                not validation.valid
-                or (artifact_result is not None and not artifact_result.valid)
-                or (workspace_result is not None and not workspace_result.valid)
-            ):
+            if validation is not None and not validation.valid:
                 fallback_reason = fallback_reason or "validation_failed"
                 transport_status = "invalid_response"
                 party_state_store.audit(
@@ -3525,59 +3159,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     {
                         "request_id": request_id,
                         "model": model_profile.model,
-                        "violations": [
-                            *validation.violations,
-                            *(artifact_result.violations if artifact_result else []),
-                            *(workspace_result.violations if workspace_result else []),
-                        ],
+                        "violations": validation.violations,
                     },
                     request_id,
                 )
-                allow_safe_fallback = (not revision_seven) and (
-                    getattr(http_request.state, "showroom_party_access", False) or (
-                    party.scenario_type == "training"
-                    and runtime_service is not None
-                    and runtime_service.enabled
-                    )
-                )
-                if not allow_safe_fallback:
-                    raise RuntimeError("LLM response failed narrative validation")
-                text = (
-                    runtime_service.fallback_text(narrative_state, interaction_contract)
-                    if runtime_service is not None and runtime_service.enabled
-                    else safe_fallback(
-                        start_outcome,
-                        narrative_state,
-                        "",
-                        party.worldpack_id,
-                        party.scenario_type,
-                    )
-                )
-                response = adjudicator.provider_fallback_response(
-                    start_outcome,
+                raise RuntimeError("LLM response failed narrative validation")
+            final_validation = (
+                None
+                if party_settings.rp_contract_revision < 3
+                else adjudicator.validator.validate(
                     text,
-                    fallback_reason,
-                    request_id,
+                    start_outcome,
+                    narrative_state,
+                    campaign_id=party.worldpack_id,
+                    scenario_type=party.scenario_type,
                 )
-                if artifact_service is not None and workspace_service is not None:
-                    artifact_result = artifact_service.fallback_materialization(response, text, artifact_contract)
-                    text = artifact_result.text
-                    workspace_result = workspace_service.fallback_materialization(workspace_contract, text)
-            response = Adjudicator.merge_interaction_response(response, text, artifact_result, workspace_result)
-            final_validation = None if party.scenario_type == "rp" else validator.validate(
-                text,
-                start_outcome,
-                narrative_state,
-                campaign_id=party.worldpack_id,
-                scenario_type=party.scenario_type,
-                training_runtime=runtime_service,
-                interaction_contract=interaction_contract,
             )
-            final_violations = [
-                *(final_validation.violations if final_validation is not None else []),
-                *(artifact_result.violations if artifact_result else []),
-                *(workspace_result.violations if workspace_result else []),
-            ]
+            final_violations = (
+                final_validation.violations if final_validation is not None else []
+            )
             adjudicator.record_trace_event(
                 request_id=request_id,
                 phase_key="validation:final",
@@ -3588,14 +3188,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 payload={
                     "input": {"response": text},
                     "output": {
-                        "valid": not final_violations if final_validation is not None else None,
+                        "valid": (
+                            final_validation.valid
+                            if final_validation is not None
+                            else None
+                        ),
                         "violations": final_violations,
-                        "reason": None if final_validation is not None else "not_applicable",
+                        "reason": (
+                            None if final_validation is not None else "not_applicable"
+                        ),
                     },
                     "metadata": {"repair": repaired, "opening_scene": True},
                 },
                 party_turn=expected_party_turn,
             )
+
             turn_metadata = {
                 "schema_version": "rp-gateway.turn.v1",
                 "turn_kind": "opening_scene",
@@ -3613,16 +3220,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "fallback_reason": fallback_reason,
                 "transport_status": transport_status,
                 "llm_calls": 2 if repaired else 1,
-                "training_runtime_contract_hash": (
-                    runtime_service.contract_hash
-                    if runtime_service is not None and runtime_service.enabled
-                    else None
-                ),
                 "outcome": start_outcome.model_dump(mode="json"),
-                "training_capabilities": {
-                    "interactive_links_enabled": bool(artifact_service and artifact_service.enabled),
-                    "interactive_workspace_enabled": bool(workspace_service and workspace_service.enabled),
-                },
             }
             if opening_prompt_assembly is not None:
                 turn_metadata["prompt_assembly"] = opening_prompt_assembly
@@ -3754,8 +3352,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     expected_state_version=expected_state_version,
                     prompt_messages=prompt_messages,
                     metadata=turn_metadata,
-                    artifacts=artifact_result.persistence_records if artifact_result else [],
-                    workspace_files=workspace_result.persistence_records if workspace_result else [],
                     consumed_world_clock_event_ids=(
                         list(world_clock_projection["event_ids"])
                         if world_clock_projection is not None and not fallback_noncanonical
@@ -3779,8 +3375,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     state_version,
                     prompt_messages,
                     turn_metadata,
-                    artifacts=artifact_result.persistence_records if artifact_result else [],
-                    workspace_files=workspace_result.persistence_records if workspace_result else [],
                     party_turn=int(state["meta"]["turn"]),
                 )
             try:
@@ -4011,20 +3605,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider=model_profile.provider,
                 narrator_settings=party.narrator_settings,
             )
-            runtime_service = None
-            artifact_service = None
-            workspace_service = None
-            if party.scenario_type == "training":
-                runtime_service, artifact_service, workspace_service = training_services_for_party(
-                    party,
-                    party_state_store,
-                )
             response = await Adjudicator(
                 party_settings,
                 party_state_store,
-                training_artifacts=artifact_service,
-                training_workspace=workspace_service,
-                training_runtime=runtime_service,
                 relationship_model=relationship_model_for_party(party),
                 scene_contract=scene_contract_for_party(party),
                 world_clock_contract=world_clock_contract_for_party(
@@ -4037,7 +3620,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 authorization,
                 request.idempotency_key,
                 request_id,
-                allow_gateway_fallback=bool(runtime_service is not None and runtime_service.enabled),
+                allow_gateway_fallback=(
+                    party_settings.rp_contract_revision >= 7
+                ),
                 story_memory_corrections=[
                     correction.model_dump(mode="json", exclude_none=True)
                     for correction in request.story_memory_corrections
@@ -4264,281 +3849,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    def require_showroom_visitor(request: Request) -> str:
-        visitor_id = showroom_store.visitor_id(request.cookies.get(settings.showroom_visitor_cookie_name))
-        if not visitor_id:
-            raise HTTPException(status_code=404, detail="anonymous showroom session not found")
-        return visitor_id
-
-    @app.get("/api/showroom/scenarios")
-    def public_showroom_scenarios() -> dict[str, Any]:
-        return {"scenarios": showroom_store.list_scenarios(public_only=True)}
-
-    @app.get("/api/showroom/scenarios/{scenario_id}/leaderboard")
-    def public_showroom_leaderboard(scenario_id: str, limit: int = 50) -> dict[str, Any]:
-        try:
-            return showroom_store.leaderboard(scenario_id, limit=limit)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.get("/api/showroom/scenarios/{scenario_id}/cover")
-    def public_showroom_cover(scenario_id: str) -> FileResponse:
-        try:
-            path, mime_type = showroom_store.cover(scenario_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return FileResponse(path, media_type=mime_type, headers={"Cache-Control": "public, max-age=3600"})
-
-    @app.post("/api/showroom/scenarios/{scenario_id}/runs")
-    def create_showroom_run(
-        http_request: Request,
-        response: Response,
-        scenario_id: str,
-        payload: ShowroomRunCreate,
-    ) -> dict[str, Any]:
-        visitor_id, new_token = showroom_store.ensure_visitor(
-            http_request.cookies.get(settings.showroom_visitor_cookie_name)
-        )
-        if new_token:
-            response.set_cookie(
-                settings.showroom_visitor_cookie_name,
-                new_token,
-                max_age=settings.showroom_visitor_ttl_seconds,
-                httponly=True,
-                secure=settings.auth_cookie_secure,
-                samesite="lax",
-                path="/",
-            )
-        try:
-            run = showroom_store.create_run(scenario_id, visitor_id, payload)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"run": run}
-
-    @app.get("/api/showroom/runs")
-    def list_showroom_runs(request: Request) -> dict[str, Any]:
-        visitor_id = showroom_store.visitor_id(request.cookies.get(settings.showroom_visitor_cookie_name))
-        return {"runs": showroom_store.list_runs(visitor_id) if visitor_id else []}
-
-    @app.get("/api/showroom/runs/{run_id}")
-    def get_showroom_run(request: Request, run_id: str) -> dict[str, Any]:
-        visitor_id = require_showroom_visitor(request)
-        try:
-            return {"run": showroom_store.get_run(run_id, visitor_id)}
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.get("/api/showroom/runs/{run_id}/history")
-    def get_showroom_run_history(request: Request, run_id: str, limit: int = 100) -> dict[str, Any]:
-        visitor_id = require_showroom_visitor(request)
-        try:
-            party_id = showroom_store.party_id_for_run(run_id, visitor_id, require_published=False)
-            request.state.showroom_party_access = True
-            history = get_party_history(request, party_id, limit=max(1, min(limit, 500)))
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"run_id": run_id, "turns": history["turns"]}
-
-    @app.put("/api/showroom/runs/{run_id}/turns/{turn_id}/feedback")
-    def update_showroom_turn_feedback(
-        request: Request,
-        run_id: str,
-        turn_id: int,
-        payload: TurnFeedbackUpdate,
-    ) -> dict[str, Any]:
-        visitor_id = require_showroom_visitor(request)
-        try:
-            party_id = showroom_store.party_id_for_run(run_id, visitor_id)
-            request.state.showroom_party_access = True
-            party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(request))
-            feedback = party_state_store.set_turn_feedback(
-                turn_id,
-                rating=payload.rating or ("positive" if payload.liked else "none"),
-                source_ui="showroom",
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"run_id": run_id, "feedback": feedback}
-
-    @app.post("/api/showroom/runs/{run_id}/artifact-events")
-    def record_showroom_artifact_event(
-        http_request: Request,
-        run_id: str,
-        payload: TrainingArtifactEventRequest,
-    ) -> dict[str, Any]:
-        visitor_id = require_showroom_visitor(http_request)
-        try:
-            party_id = showroom_store.party_id_for_run(run_id, visitor_id)
-            http_request.state.showroom_party_access = True
-            result = record_party_artifact_event(http_request, party_id, payload)
-            showroom_store.touch_run(run_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        result.pop("party_id", None)
-        return {"run_id": run_id, **result}
-
-    @app.get("/api/showroom/runs/{run_id}/workspace")
-    def get_showroom_workspace(http_request: Request, run_id: str) -> dict[str, Any]:
-        visitor_id = require_showroom_visitor(http_request)
-        try:
-            party_id = showroom_store.party_id_for_run(run_id, visitor_id)
-            http_request.state.showroom_party_access = True
-            result = get_party_workspace(http_request, party_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"run_id": run_id, "workspace": result["workspace"]}
-
-    @app.post("/api/showroom/runs/{run_id}/workspace-events")
-    def record_showroom_workspace_event(
-        http_request: Request,
-        run_id: str,
-        payload: TrainingWorkspaceEventRequest,
-    ) -> dict[str, Any]:
-        visitor_id = require_showroom_visitor(http_request)
-        try:
-            party_id = showroom_store.party_id_for_run(run_id, visitor_id)
-            http_request.state.showroom_party_access = True
-            result = record_party_workspace_event(http_request, party_id, payload)
-            showroom_store.touch_run(run_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        result.pop("party_id", None)
-        return {"run_id": run_id, **result}
-
-    @app.get("/api/showroom/runs/{run_id}/workspace/files/{file_id}/content")
-    def get_showroom_workspace_file_content(http_request: Request, run_id: str, file_id: str) -> FileResponse:
-        visitor_id = require_showroom_visitor(http_request)
-        try:
-            party_id = showroom_store.party_id_for_run(run_id, visitor_id)
-            http_request.state.showroom_party_access = True
-            return get_party_workspace_file_content(http_request, party_id, file_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.post("/api/showroom/runs/{run_id}/start")
-    async def start_showroom_run(
-        http_request: Request,
-        run_id: str,
-        payload: PartyStartRequest = PartyStartRequest(),
-        x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
-    ) -> dict[str, Any]:
-        visitor_id = require_showroom_visitor(http_request)
-        try:
-            party_id = showroom_store.party_id_for_run(run_id, visitor_id)
-            http_request.state.showroom_party_access = True
-            result = await start_party(
-                http_request,
-                party_id,
-                payload,
-                authorization=None,
-                x_request_id=x_request_id,
-            )
-            showroom_store.touch_run(run_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        result.pop("party_id", None)
-        return {"run_id": run_id, **result}
-
-    @app.post("/api/showroom/runs/{run_id}/messages")
-    async def showroom_run_message(
-        http_request: Request,
-        run_id: str,
-        payload: PartyMessageRequest,
-        x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
-    ) -> dict[str, Any]:
-        visitor_id = require_showroom_visitor(http_request)
-        try:
-            party_id = showroom_store.party_id_for_run(run_id, visitor_id)
-            http_request.state.showroom_party_access = True
-            result = await party_message(
-                http_request,
-                party_id,
-                payload,
-                authorization=None,
-                x_request_id=x_request_id,
-            )
-            showroom_store.touch_run(run_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        result.pop("party_id", None)
-        return {"run_id": run_id, **result}
-
-    @app.get("/api/admin/showroom/scenarios")
-    def admin_showroom_scenarios(request: Request) -> dict[str, Any]:
-        require_admin(request)
-        return {"scenarios": showroom_store.list_scenarios(public_only=False)}
-
-    @app.get("/api/admin/showroom/worldpacks")
-    def admin_showroom_worldpacks(request: Request) -> dict[str, Any]:
-        require_admin(request)
-        return {
-            "worldpacks": [
-                pack.model_dump(mode="json")
-                for pack in retained_showroom_worldpacks()
-            ]
-        }
-
-    @app.post("/api/admin/showroom/scenarios")
-    def admin_create_showroom_scenario(
-        request: Request,
-        payload: ShowroomScenarioCreate,
-    ) -> dict[str, Any]:
-        admin = require_admin(request)
-        try:
-            scenario = showroom_store.create_scenario(payload, created_by=admin.id if admin else None)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"scenario": scenario}
-
-    @app.patch("/api/admin/showroom/scenarios/{scenario_id}")
-    def admin_update_showroom_scenario(
-        request: Request,
-        scenario_id: str,
-        payload: ShowroomScenarioUpdate,
-    ) -> dict[str, Any]:
-        require_admin(request)
-        try:
-            scenario = showroom_store.update_scenario(
-                scenario_id,
-                payload.model_dump(exclude_unset=True),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"scenario": scenario}
-
-    @app.put("/api/admin/showroom/scenarios/{scenario_id}/cover")
-    async def admin_upload_showroom_cover(request: Request, scenario_id: str) -> dict[str, Any]:
-        require_admin(request)
-        content_length = request.headers.get("content-length")
-        if content_length:
-            try:
-                if int(content_length) > settings.showroom_cover_max_bytes:
-                    raise HTTPException(status_code=413, detail="cover image is too large")
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="invalid content length") from exc
-        data = await request.body()
-        try:
-            scenario = showroom_store.save_cover(
-                scenario_id,
-                request.headers.get("content-type", "application/octet-stream"),
-                data,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"scenario": scenario}
-
-    @app.delete("/api/admin/showroom/scenarios/{scenario_id}/cover")
-    def admin_delete_showroom_cover(request: Request, scenario_id: str) -> dict[str, Any]:
-        require_admin(request)
-        try:
-            scenario = showroom_store.delete_cover(scenario_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"scenario": scenario}
-
     @app.get("/api/admin/autotests/models")
     def admin_autotest_models(request: Request) -> dict[str, Any]:
         require_admin(request)
+        if settings.rp_rebuild_enabled:
+            raise HTTPException(
+                status_code=410,
+                detail="legacy autotests are unavailable after rebuilt cutover",
+            )
         party_store.settings = settings_with_provider_key(settings)
         profiles = party_store.list_autotest_model_profiles()
         return {"model_profiles": [profile.model_dump(mode="json") for profile in profiles]}
@@ -4550,30 +3868,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = 50,
     ) -> dict[str, Any]:
         admin = require_admin(request)
+        if settings.rp_rebuild_enabled:
+            raise HTTPException(
+                status_code=410,
+                detail="legacy autotests are unavailable after rebuilt cutover",
+            )
         if source_party_id:
             try:
-                require_retained_legacy_party(
+                party_store.get_party(
                     source_party_id, owner_user_id=admin.id if admin else None
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
-        runs = party_store.list_autotest_runs(
-            limit=limit, source_party_id=source_party_id
-        )
-        if settings.rp_rebuild_enabled:
-            retained_runs = []
-            for run in runs:
-                try:
-                    source_party = party_store.get_party(
-                        str(run["source_party_id"]),
-                        owner_user_id=admin.id if admin else None,
-                    )
-                except ValueError:
-                    continue
-                if keep_legacy_party_runtime(source_party):
-                    retained_runs.append(run)
-            runs = retained_runs
-        return {"runs": runs}
+        return {
+            "runs": party_store.list_autotest_runs(
+                limit=limit, source_party_id=source_party_id
+            )
+        }
 
     @app.post("/api/admin/autotests")
     async def admin_create_autotest(
@@ -4581,16 +3892,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         payload: AutoTestCreate,
     ) -> dict[str, Any]:
         admin = require_admin(http_request)
+        if settings.rp_rebuild_enabled:
+            raise HTTPException(
+                status_code=410,
+                detail="legacy autotests are unavailable after rebuilt cutover",
+            )
         owner_id = admin.id if admin else None
         try:
             source_party = party_store.get_party(payload.source_party_id, owner_user_id=owner_id)
-            if settings.rp_rebuild_enabled and not keep_legacy_party_runtime(
-                source_party
-            ):
-                raise HTTPException(
-                    status_code=410,
-                    detail="ordinary legacy RP autotests are unavailable after rebuilt cutover",
-                )
             supported_profiles = {profile.id: profile for profile in party_store.list_autotest_model_profiles()}
             player_profile = supported_profiles.get(payload.player_model_profile_id)
             if player_profile is None:
@@ -4632,11 +3941,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/admin/autotests/{run_id}/stop")
     def admin_stop_autotest(request: Request, run_id: str) -> dict[str, Any]:
         require_admin(request)
-        try:
-            current = party_store.get_autotest_run(run_id)
-            require_retained_legacy_party(
-                str(current["source_party_id"]), owner_user_id=None
+        if settings.rp_rebuild_enabled:
+            raise HTTPException(
+                status_code=410,
+                detail="legacy autotests are unavailable after rebuilt cutover",
             )
+        try:
             run = party_store.request_autotest_stop(run_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -4918,13 +4228,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return StreamingResponse(stream_openai_response(response), media_type="text/event-stream")
         return JSONResponse(response)
 
-    if enforce_rp_mode:
-        app.router.routes = [
-            route
-            for route in app.router.routes
-            if not is_retired_training_path(str(getattr(route, "path", "")))
-        ]
-
     return app
 
 
@@ -5157,17 +4460,10 @@ def party_start_prompt(party_store: PartyStore, party: Any) -> str:
         "No dedicated opening-scene file is available. Synthesize the first scene from the current state, "
         "world premise, and player character. End with a concrete player-facing choice."
     )
-    mode_instruction = {
-        "training": (
-            "Write the first turn of a deterministic training scenario in Russian. Follow the world opening template, "
-            "schedule, and formatting literally. Do not reveal lessons, hints, safety judgments, scoring, or hidden "
-            "scenario structure. Do not choose an action for the player."
-        ),
-        "rp": (
-            "Write the first GM message for a roleplaying party in Russian. Establish a playable situation without "
-            "rolling a check or resolving a player choice, and end with a concrete opening for player action."
-        ),
-    }.get(party.scenario_type, "Write the opening scene in Russian while preserving player agency.")
+    mode_instruction = (
+        "Write the first GM message for a roleplaying party in Russian. Establish a playable situation without "
+        "rolling a check or resolving a player choice, and end with a concrete opening for player action."
+    )
     blocks = [
             "START_PARTY_OPENING_SCENE",
             "This is an internal Light GUI auto-start request, not a player action.",
@@ -5191,12 +4487,7 @@ def party_start_outcome(
     scenario_type: str = "rp",
     rp_contract_revision: int = 0,
 ) -> Outcome:
-    result = {
-        "training": "deterministic_resolution",
-    }.get(
-        scenario_type,
-        "narrative_continuation" if rp_contract_revision >= 1 else "success",
-    )
+    result = "narrative_continuation" if rp_contract_revision >= 1 else "success"
     return Outcome(
         check_id=f"party_start:{party_id}",
         action_type=(

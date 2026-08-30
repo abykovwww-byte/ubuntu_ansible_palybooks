@@ -14,13 +14,13 @@ $rpVerificationFiles = @(
     Get-ChildItem (Join-Path $rpRoot "evals") -Recurse -File -Filter "*.py"
     Get-ChildItem (Join-Path $rpRoot "scripts") -File -Filter "*.py" |
         Where-Object { $_.Name -like "test-*.py" -or $_.Name -eq "validate-relationships.py" }
-) | Where-Object { $_.Name -notmatch "^(test_)?(awareness|training).*\.py$" }
+)
 [int]$rpVerificationLoc = ($rpVerificationFiles |
     ForEach-Object { (Get-Content -LiteralPath $_.FullName).Count } |
     Measure-Object -Sum).Sum
 $rpVerificationDebt = [Math]::Max(0, $rpVerificationLoc - 5000)
 Write-Host "[budget] RP verification: $rpVerificationLoc / 5000 LOC at cutover; debt $rpVerificationDebt; full <=60s GitHub, focused <=30s local."
-Write-Host "[budget] Scope: $($rpVerificationFiles.Count) files; dedicated Awareness/training files excluded; shared files count conservatively."
+Write-Host "[budget] Scope: $($rpVerificationFiles.Count) retained RP verification files; all count conservatively."
 
 function Resolve-Tool {
     param([string]$Name, [string]$OverrideEnvironmentVariable, [string]$BundledRelativePath)
@@ -80,7 +80,6 @@ try {
                 & $python scripts/validate-state.py --state $stateSeed.FullName --schema state/schema.json
             }
         }
-        Invoke-Checked "training runtime" { & $python scripts/validate-training-runtime.py --worldpacks worldpacks }
         Invoke-Checked "relationship models" { & $python scripts/validate-relationships.py --worldpacks worldpacks }
         Invoke-Checked "state workflow" { & $python scripts/test-state-workflow.py }
         Invoke-Checked "check workflow" { & $python scripts/test-check-workflow.py }
@@ -90,8 +89,7 @@ try {
     Invoke-Checked "Gateway syntax" { & $python -m compileall -q roles/apps/files/rp-stack/rp-gateway/app }
 
     $javascriptFiles = @(
-        (Join-Path $rpRoot "rp-light-gui\app.js"),
-        (Join-Path $rpRoot "rp-showcase-gui\app.js")
+        (Join-Path $rpRoot "rp-light-gui\app.js")
     )
     foreach ($file in $javascriptFiles) {
         Invoke-Checked "JavaScript syntax: $($file.Substring($repoRoot.Length + 1))" { & $node --check $file }

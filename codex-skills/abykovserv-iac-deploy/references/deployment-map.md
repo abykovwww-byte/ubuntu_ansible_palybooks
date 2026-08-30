@@ -193,20 +193,22 @@ Light GUI proxies `/api/*` to `rp-gateway:8088`.
 
 ## Awareness Showroom C1 Candidate
 
-The private application repository is deployed independently from the bundled
+The public application repository is deployed independently from the bundled
 RP Stack source. IaC owns the exact Git commit, server paths, server-only
 secrets, and rendered `.env`; the application repository owns its `compose.yml`,
 images, Gateway, Showroom UI, and training WorldPacks.
 
 C1 source is prepared with application pin
-`b72c481d616d6b8d654dc198d4973dce4e3e123c`, target bind
-`192.168.1.88:8011`, an RP-only production Gateway, and no old Showroom service
-in the active RP Compose. It is not applied yet: live I1 remains loopback
+`67244432659f6c25a268cbf788a8fa3af0f5b52f`, target bind
+`192.168.1.88:8011`, an RP-only production Gateway, and no legacy Showroom in
+the RP Compose or source tree. The owner selected rollback window `0`; source
+and container cleanup ship with cutover, while legacy SQLite rows/tables, state,
+and backups remain preserved. It is not applied yet: live I1 remains loopback
 `127.0.0.1:18011`, and the old Showroom still owns production `8011`.
 
 The inventory enables the app only with its single full 40-character merge
-commit. The role rejects a missing private-repository token before clone and
-rejects a branch or tag used as the deploy revision.
+commit. The role clones it anonymously over public HTTPS without a GitHub token
+and rejects a branch or tag used as the deploy revision.
 
 Runtime paths:
 
@@ -228,17 +230,16 @@ and does not join the RP network. Any future provider-network attachment must be
 reviewed separately and must never mount RP Stack data, state, WorldPacks, or
 SQLite.
 
-Private repository and provider secrets remain server-only:
+Provider secrets remain server-only; the public repository needs no GitHub
+token:
 
 ```yaml
-awareness_showroom_github_token: "..."
 awareness_showroom_gemini_api_key: "..."
 awareness_showroom_openrouter_api_key: "..."
 awareness_showroom_service_openrouter_api_key: "..."
 ```
 
-Set `awareness_showroom_github_token` before apply. Set only the provider keys
-actually used by the published scenarios in
+Set only the provider keys actually used by the published scenarios in
 `/etc/ansible/local-overrides.yml`; keep the service key separate when the
 training service model uses OpenRouter. Never copy users, sessions, provider
 keys, runs, or the old RP Stack SQLite into the standalone data directory.
@@ -253,18 +254,32 @@ endpoint:
 
 ```bash
 cd /srv/apps/awareness-showroom
-test "$(git rev-parse HEAD)" = "b72c481d616d6b8d654dc198d4973dce4e3e123c"
+test "$(git rev-parse HEAD)" = "67244432659f6c25a268cbf788a8fa3af0f5b52f"
 docker compose ps
 docker compose config --quiet
 curl -fsS -o /tmp/awareness-showroom.html -w '%{http_code} %{size_download}\n' http://192.168.1.88:8011/
+cd /srv/apps/rp-stack
+! docker compose config --services | grep -qx rp-showcase-gui
+test -z "$(docker ps -aq --filter name=rp-stack-showcase-gui)"
+test ! -e rp-showcase-gui
+test ! -e worldpacks/awareness
+test ! -e worldpacks/awareness-one-day
 ```
 
 These checks prove deployment shape and HTTP reachability only. A real
 Awareness run, provider evidence, artifact/workspace events, persistence after
 restart, SQLite checks, backup/test-restore, and browser verification remain
-mandatory before the explicit O2 cleanup command. The owner waived migration of
-legacy visitors/runs/history as a C1 blocker; the old RP SQLite remains untouched
-and physical training/Showroom source deletion waits for that separate command.
+mandatory before declaring the training contour observed. The owner waived
+migration of legacy visitors/runs/history as a C1 blocker and selected a
+zero-length rollback window. O2 source/container cleanup is therefore part of
+the cutover apply, but it must not delete SQLite rows/tables, invoke
+`delete_user_data`, or remove legacy state/backups.
+
+Do not delete the already copied
+`/srv/app-data/rp-stack/default-user/worlds/Awareness.json` or
+`/srv/app-data/rp-stack/default-user/worlds/Awareness. One day.json`. They are
+preserved legacy data artifacts, no longer managed by `runtime_source_files`,
+and are not read by the active RP Gateway/Compose target.
 
 ## Deploy Commands
 
@@ -337,6 +352,11 @@ Preferred rollback:
 2. Push the working branch, open a non-draft PR, and merge it after CI is green.
 3. Run `sudo systemctl start ansible-local-apply.service` on the server.
 4. Verify containers and HTTP endpoints.
+
+Awareness uses rollback window `0`: after cutover there is no supported instant
+return to the legacy Showroom. Fix forward through an application/IaC PR and a
+new apply. Preserve both SQLite databases as separate forensic/data contours;
+never merge standalone training writes into RP SQLite.
 
 For data loss or runtime state problems, restore from `/srv/backups/<app-name>`
 or the app-specific backup path. Stop containers before restoring data, then

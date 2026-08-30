@@ -206,7 +206,6 @@ rp_stack_openrouter_model_catalog_live: true
 rp_stack_provider_model_catalog_ttl_seconds: 86400
 rp_stack_gateway_port: 8088
 rp_stack_light_gui_host_port: 8010
-rp_stack_showcase_gui_host_port: 8011
 rp_stack_gateway_database_url: "sqlite:////data/rp_gateway.db"
 rp_stack_gateway_rp_database_url: "sqlite:////data/rp_engine.db"
 rp_stack_rp_rebuild_enabled: false
@@ -219,7 +218,6 @@ rp_stack_rp_runner_poll_interval_seconds: 0.05
 rp_stack_gateway_log_level: INFO
 rp_stack_gateway_log_prompts: "false"
 rp_stack_gateway_max_repair_attempts: 1
-rp_stack_gateway_training_repair_attempts: 1
 rp_stack_gateway_request_timeout_seconds: 900
 rp_stack_gateway_model_attempt_timeout_seconds: 150
 rp_stack_gateway_party_start_model_attempt_timeout_seconds: 300
@@ -248,11 +246,9 @@ rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 
 # Deploy only this exact merged application commit; do not replace it with a branch or tag.
-awareness_showroom_repo_version: "1f0d5cb73afb23f36900623ad99f4ac762da9ff9"
+awareness_showroom_repo_version: "67244432659f6c25a268cbf788a8fa3af0f5b52f"
 awareness_showroom_enabled: "{{ (awareness_showroom_repo_version | length) == 40 }}"
 awareness_showroom_repo_url: "https://github.com/abykovwww-byte/tavern-awareness-showroom.git"
-# Required for this private repository; set only in /etc/ansible/local-overrides.yml.
-awareness_showroom_github_token: ""
 awareness_showroom_project_dir: "{{ app_deploy_base_dir }}/awareness-showroom"
 awareness_showroom_data_dir: "{{ app_data_base_dir }}/awareness-showroom"
 awareness_showroom_gateway_data_dir: "{{ awareness_showroom_data_dir }}/gateway"
@@ -422,14 +418,6 @@ docker_apps:
       - "{{ rp_stack_state_history_dir }}"
       - "{{ rp_stack_state_proposed_dir }}"
     runtime_source_files:
-      - src: "rp-stack/worldpacks/awareness/sillytavern/awareness.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/Awareness.json"
-        mode: "0640"
-        force: false
-      - src: "rp-stack/worldpacks/awareness-one-day/sillytavern/awareness-one-day.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/Awareness. One day.json"
-        mode: "0640"
-        force: false
       - src: "rp-stack/worldpacks/starosta/sillytavern/starosta.json"
         path: "{{ rp_stack_data_dir }}/default-user/worlds/starosta.json"
         mode: "0640"
@@ -600,9 +588,7 @@ docker_apps:
     repo_url: "{{ awareness_showroom_repo_url }}"
     repo_version: "{{ awareness_showroom_repo_version }}"
     repo_version_is_commit: true
-    repo_token_var: awareness_showroom_github_token
-    repo_token_required: true
-    repo_recreate_if_not_git: true
+    repo_token_required: false
     repo_normalize_ownership: true
     project_dir: "{{ awareness_showroom_project_dir }}"
     owner: abykov

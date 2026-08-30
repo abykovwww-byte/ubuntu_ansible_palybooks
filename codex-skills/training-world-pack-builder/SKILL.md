@@ -5,11 +5,13 @@ description: Build or update deterministic scored learning world packs for the s
 
 # Training World Pack Builder
 
-Create reviewable, playable training world packs in the private
+Create reviewable, playable training world packs in the public
 `tavern-awareness-showroom` application repository. This skill owns authored
-learning design and pack artifacts; it does not deploy directly. Do not edit the
-retained training copies under `ubuntu_ansible_palybooks/roles/apps/files/rp-stack`;
-they are inactive rollback material until O2.
+learning design and pack artifacts; it does not deploy directly. Zero-window O2
+removed the old training copies from
+`ubuntu_ansible_palybooks/roles/apps/files/rp-stack`; they are not rollback
+material. Fix failures forward through application/IaC PRs while preserving
+legacy RP SQLite, state, backups, and authored data artifacts.
 
 ## Hard Boundaries
 

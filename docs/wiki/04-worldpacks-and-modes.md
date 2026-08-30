@@ -45,10 +45,10 @@ apply, а existing parties не мигрировались автоматиче�
 
 C1 source подготовлен, но ещё не применён. RP WorldPacks остаются в
 `ubuntu_ansible_palybooks`, а активными source-owned копиями `awareness` и
-`awareness-one-day` владеет private project `tavern-awareness-showroom` на exact
-commit `b72c481d616d6b8d654dc198d4973dce4e3e123c`. Старые копии в RP repository
-не удаляются этим переключением, но RP-only Gateway их не публикует и не
-исполняет. Физическая очистка ждёт отдельной команды O2.
+`awareness-one-day` владеет public project `tavern-awareness-showroom` на exact
+commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Zero-window C1/O2 удаляет старые
+копии из RP repository и managed checkout в той же поставке; RP SQLite, state и
+backups при этом сохраняются.
 
 Новый project публикует только packs с
 `scenario_types: {recommended: training, supported: [training]}` и не разрешает
@@ -56,7 +56,7 @@ prompt-generated worlds. `incident-50` остаётся RP-only в исходн�
 Training runtime по-прежнему остаётся generic interpreter: предметная программа,
 score и debrief принадлежат WorldPack, а не Gateway.
 
-## Decision 043, срезы 3–6: World и Scenario
+## Decision 043, срезы 3–7: World и Scenario
 
 Новый авторский source разделён по владельцам:
 
@@ -76,9 +76,9 @@ score и debrief принадлежат WorldPack, а не Gateway.
 персонажи и lore, четыре старта и три стиля. Пресет и свободно
 собранный Scenario материализуются одинаково: партия хранит
 отдельные `WorldSnapshot` / `ScenarioSnapshot` и SHA-256, поэтому
-последующее изменение source не переписывает её стартовый контракт. Clean API
-теперь материализует preset и server-built free seed, но Light GUI и production
-inventory ещё не переключены; deploy и live-проверка не выполнялись.
+последующее изменение source не переписывает её стартовый контракт. Clean API и
+Light GUI source теперь поддерживают preset и server-built free seed, но
+production inventory ещё не активирован; deploy и live-проверка не выполнялись.
 
 ## Что такое WorldPack
 
@@ -383,7 +383,8 @@ Gateway отклоняет несовместимую комбинацию, но
 Сохранённые training Party и ShowroomScenario старой RP SQLite не конвертируются
 и не копируются в standalone project. Владелец снял их перенос и завершение как
 блокер C1. Сама старая БД остаётся нетронутой, а production RP Gateway скрывает
-эти resources; физическое удаление возможно только отдельной командой O2.
+эти resources. Source/контейнер удаляются zero-window поставкой, но строки и
+таблицы SQLite физически не удаляются.
 
 ## Executable training runtime
 
@@ -428,8 +429,8 @@ pack обязан объявить `training_runtime` и хранить расп
 
 | Slug | Название | Рекомендуемый режим | Поддержка | Особенности |
 |---|---|---|---|---|
-| `awareness` | Awareness | `training` | `training` | Активный authority — standalone project; WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score`; старая RP-копия скрыта до O2 |
-| `awareness-one-day` | Awareness. One day | `training` | `training` | Активный authority — standalone project; 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10; старая RP-копия скрыта до O2 |
+| `awareness` | Awareness | `training` | `training` | Активный и единственный source authority — standalone project; WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score` |
+| `awareness-one-day` | Awareness. One day | `training` | `training` | Активный и единственный source authority — standalone project; 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
 | `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Revision 10 без authored-календаря: свободный персонаж, точка входа из PlayerCharacter, authored Lore Cards и закрытые мотивации NPC |
 | `day-watch-moscow-v2` | Дневной Дозор: Москва — четыре начала | `rp` | `rp` | Revision 11: presets `book/action/strategic`, четыре независимых opening seeds, 20 Lore Cards и те же 11 активных NPC; world clock не добавлен |
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
@@ -444,12 +445,19 @@ pack обязан объявить `training_runtime` и хранить расп
 
 ## Public и private
 
-Администратор может назначить WorldPack видимость:
+Администратор может назначить WorldPack видимость в registry конкретного
+процесса:
 
-- `public` — доступен пользователям, созданию Party и Showroom;
-- `private` — виден администраторам, но не может быть использован обычным пользователем или опубликован в Showroom.
+- `public` в RP Gateway — доступен пользователям для создания RP Party, но не
+  публикуется в Showroom;
+- `public` в standalone Training Gateway — доступен Showroom и созданию
+  training run;
+- `private` — виден администраторам своего процесса, но недоступен обычному
+  пользователю и не публикуется его интерфейсом.
 
-Default — `public`, чтобы старые миры сохранили поведение. Видимость хранится в Gateway registry, а source manifest остаётся версионируемым описанием пакета.
+Default — `public` внутри своего process mode, чтобы старые миры сохранили
+поведение. RP и training registry не синхронизируют visibility, а source
+manifest остаётся версионируемым описанием пакета.
 
 ## WorldPack и ShowroomScenario
 
@@ -477,11 +485,15 @@ Schedule, correctness и scoring никогда не переходят в porta
 
 WorldPack заранее содержит ограниченный набор типовых site blueprints. Authored schedule указывает, на каком ходе какой template разрешён и какие публичные поля narrator должен вернуть вместе с письмом или чатом. Gateway валидирует bundle, материализует immutable snapshot и выдаёт capability URL; отдельного LLM-запроса и отдельного runtime-сервиса для сборки страницы нет.
 
-Оба интерфейса используют один статический renderer из `ui-shared/`. Blueprint определяет стиль, структуру, поля формы и разрешённые действия; модель не генерирует HTML, CSS, JavaScript, URL назначения или scoring policy.
+Standalone Showroom использует собственный статический renderer из своего
+`ui-shared/`. RP Light GUI training renderer не содержит. Blueprint определяет
+стиль, структуру, поля формы и разрешённые действия; модель не генерирует HTML,
+CSS, JavaScript, URL назначения или scoring policy.
 
 ## Links и workspace как независимые capabilities
 
-> Статус: активация, workspace contract и runtime реализованы в IaC.
+> Статус: standalone workspace contract и runtime реализованы в source;
+> production `:8011`, C1 apply и live-приёмка ещё не подтверждены.
 
 Детальный контракт означает, что мир поддерживает capability:
 

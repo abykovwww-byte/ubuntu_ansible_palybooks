@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from app.models.schemas import Outcome, ValidationResult
 from app.services.world_clock import world_clock_narrative_violations
-
-if TYPE_CHECKING:
-    from app.services.training_runtime import TrainingRuntimeService
-
 
 SERVICE_LINE_RE = re.compile(
     r"^\s*(?:[-—–]\s*)?"
@@ -91,8 +87,6 @@ class OutputValidator:
         campaign_id: str | None = None,
         latest_user_message: str = "",
         scenario_type: str = "rp",
-        training_runtime: "TrainingRuntimeService | None" = None,
-        interaction_contract: dict[str, Any] | None = None,
     ) -> ValidationResult:
         lowered = text.lower()
         violations: list[str] = []
@@ -125,10 +119,6 @@ class OutputValidator:
                 violations.append("Narrative switched into the player character's first-person voice.")
         if "you decide to" in lowered or "you willingly" in lowered:
             violations.append("Narrative may have taken control of the player character.")
-        if scenario_type == "training" and training_runtime and training_runtime.enabled:
-            violations.extend(
-                training_runtime.validate_narrative(text, state or {}, interaction_contract)
-            )
         if violations:
             world_clock_repair = (
                 " Текущая игровая дата и уже произошедшие события из блока «СОБЫТИЯ МИРА» — канон: "
@@ -157,8 +147,6 @@ def safe_fallback(
     campaign_id: str | None = None,
     scenario_type: str = "rp",
 ) -> str:
-    if scenario_type == "training":
-        return "Ситуация меняется только в пределах явно выбранного действия. Следующий этап сценария готов к продолжению."
     first = RESULT_NARRATION.get(outcome.result, "Сцена сдвигается дальше, но без лишних уступок за кадром.")
     if outcome.blocked_reasons:
         second = "Что-то в устройстве мира упирается и не дает продавить желаемое напрямую."

@@ -457,22 +457,6 @@ class TurnTraceAssembler:
                 "SELECT * FROM relationship_causes WHERE campaign_id = ? AND turn_id = ? ORDER BY id",
                 (self.store.campaign_id, turn_id),
             ).fetchall()
-            artifacts = connection.execute(
-                "SELECT * FROM training_artifacts WHERE campaign_id = ? AND turn_id = ? ORDER BY id",
-                (self.store.campaign_id, turn_id),
-            ).fetchall()
-            workspace = connection.execute(
-                "SELECT * FROM training_workspace_files WHERE campaign_id = ? AND turn_id = ? ORDER BY id",
-                (self.store.campaign_id, turn_id),
-            ).fetchall()
-            artifact_events = connection.execute(
-                "SELECT * FROM training_artifact_events WHERE campaign_id = ? AND consumed_turn_id = ? ORDER BY id",
-                (self.store.campaign_id, turn_id),
-            ).fetchall()
-            workspace_events = connection.execute(
-                "SELECT * FROM training_workspace_events WHERE campaign_id = ? AND consumed_turn_id = ? ORDER BY id",
-                (self.store.campaign_id, turn_id),
-            ).fetchall()
             memory_chapters = connection.execute(
                 "SELECT * FROM memory_chapters WHERE campaign_id = ? AND to_turn_id = ? ORDER BY id",
                 (self.store.campaign_id, turn_id),
@@ -511,24 +495,6 @@ class TurnTraceAssembler:
                     event_type="relationship_projection",
                     output={"rows": [dict(row) for row in causes]},
                     order=85,
-                )
-            )
-        if artifacts or workspace or artifact_events or workspace_events:
-            phases.append(
-                self._phase(
-                    "training_projection",
-                    "training_projection",
-                    "main",
-                    "completed",
-                    "Training-проекции",
-                    event_type="training_projection",
-                    output={
-                        "artifacts": [self._decoded_row(row) for row in artifacts],
-                        "workspace_files": [self._decoded_row(row) for row in workspace],
-                        "consumed_artifact_events": [self._decoded_row(row) for row in artifact_events],
-                        "consumed_workspace_events": [self._decoded_row(row) for row in workspace_events],
-                    },
-                    order=55,
                 )
             )
         if memory_chapters or memory_summaries or story_snapshots:

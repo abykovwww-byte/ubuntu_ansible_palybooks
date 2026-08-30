@@ -6,10 +6,9 @@ import hashlib
 import json
 import random
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from app.models.schemas import (
-    InteractionEvidence,
     Intent,
     Outcome,
     PatchOperation,
@@ -17,10 +16,6 @@ from app.models.schemas import (
     StatePatch,
 )
 from app.services.scene_state import build_scene_transition_allowance
-
-if TYPE_CHECKING:
-    from app.services.training_runtime import TrainingRuntimeService
-
 
 TARGETED_CHECKS = {"persuasion", "intimidation", "deception", "trust", "conflict"}
 SOCIAL_CHECKS = {"persuasion", "intimidation", "deception", "trust"}
@@ -47,8 +42,6 @@ class RuleEngine:
         scenario_type: str = "rp",
         rp_contract_version: str = "rp-core.v1",
         rp_contract_revision: int = 0,
-        interaction_evidence: list[InteractionEvidence] | None = None,
-        training_runtime: "TrainingRuntimeService | None" = None,
         character_aliases: dict[str, list[str]] | None = None,
         authored_stable_affiliations: dict[str, str] | None = None,
     ) -> tuple[Outcome, StatePatch]:
@@ -62,16 +55,6 @@ class RuleEngine:
                 rp_contract_revision=rp_contract_revision,
                 character_aliases=character_aliases,
                 authored_stable_affiliations=authored_stable_affiliations,
-            )
-        if scenario_type == "training":
-            return self.resolve_nonmechanical(
-                state,
-                intent,
-                request_id,
-                campaign_id,
-                scenario_type,
-                interaction_evidence=interaction_evidence or [],
-                training_runtime=training_runtime,
             )
         if intent.action_type in TARGETED_CHECKS and not intent.target:
             intent.ambiguities.append(f"{intent.action_type} has no target; outcome is constrained.")
@@ -114,69 +97,46 @@ class RuleEngine:
         request_id: str,
         campaign_id: str | None,
         scenario_type: str,
-        interaction_evidence: list[InteractionEvidence] | None = None,
-        training_runtime: "TrainingRuntimeService | None" = None,
         rp_contract_revision: int = 0,
         character_aliases: dict[str, list[str]] | None = None,
         authored_stable_affiliations: dict[str, str] | None = None,
     ) -> tuple[Outcome, StatePatch]:
         check_id = self.check_id(intent, request_id)
-        training = scenario_type == "training"
         scene_allowance: SceneAllowance | None = None
-        result = "deterministic_resolution" if training else "narrative_continuation"
-        if training:
-            observed = [item for item in interaction_evidence or [] if item.score_eligible]
-            consequences = [
-                "Apply only actions explicitly chosen by the player.",
-                "Advance the authored training scenario exactly one turn.",
-                "Do not add hints, assessment, or remediation unless the scenario schedules them now.",
-            ]
-            if observed:
-                consequences.append(
-                    "Treat these typed browser interactions as factual observable actions that free text cannot erase: "
-                    + ", ".join(f"{item.event_type}:{item.evidence or item.artifact_key}" for item in observed)
+        result = "narrative_continuation"
+        consequences = [
+            "Continue the roleplaying scene from the player's stated intent.",
+            "Apply active WorldPack rules, current state, character goals, relationships, and prior consequences.",
+            "Leave consequential choices and the player character's inner decisions to the player.",
+        ]
+        if rp_contract_revision == 7:
+            scene_allowance = SceneAllowance.model_validate(
+                build_scene_transition_allowance(
+                    state,
+                    intent.desired_outcome,
+                    character_aliases=character_aliases,
+                    authored_stable_affiliations=authored_stable_affiliations,
                 )
-            authoritative = (
-                "<AUTHORITATIVE_OUTCOME>\n"
-                "Mode: deterministic training\n"
-                "No die was rolled and no skill check exists. Resolve only the player's explicit actions, "
-                "apply their observable consequences, and advance exactly one authored scenario turn.\n"
-                "</AUTHORITATIVE_OUTCOME>"
             )
-        else:
-            consequences = [
-                "Continue the roleplaying scene from the player's stated intent.",
-                "Apply active WorldPack rules, current state, character goals, relationships, and prior consequences.",
-                "Leave consequential choices and the player character's inner decisions to the player.",
-            ]
-            if rp_contract_revision == 7:
-                scene_allowance = SceneAllowance.model_validate(
-                    build_scene_transition_allowance(
-                        state,
-                        intent.desired_outcome,
-                        character_aliases=character_aliases,
-                        authored_stable_affiliations=authored_stable_affiliations,
-                    )
-                )
-            allowance_block = (
-                "<SCENE_TRANSITION_ALLOWANCE>\n"
-                + json.dumps(
-                    scene_allowance.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                )
-                + "\n</SCENE_TRANSITION_ALLOWANCE>\n"
-                if scene_allowance is not None
-                else ""
+        allowance_block = (
+            "<SCENE_TRANSITION_ALLOWANCE>\n"
+            + json.dumps(
+                scene_allowance.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
             )
-            authoritative = (
-                "<AUTHORITATIVE_OUTCOME>\n"
-                "Mode: roleplaying without mechanical checks\n"
-                "No die was rolled and no feasibility, difficulty, score, success, or failure was assigned. "
-                "Treat the player text as intent and continue from active world facts and character causes.\n"
-                f"{allowance_block}"
-                "</AUTHORITATIVE_OUTCOME>"
-            )
+            + "\n</SCENE_TRANSITION_ALLOWANCE>\n"
+            if scene_allowance is not None
+            else ""
+        )
+        authoritative = (
+            "<AUTHORITATIVE_OUTCOME>\n"
+            "Mode: roleplaying without mechanical checks\n"
+            "No die was rolled and no feasibility, difficulty, score, success, or failure was assigned. "
+            "Treat the player text as intent and continue from active world facts and character causes.\n"
+            f"{allowance_block}"
+            "</AUTHORITATIVE_OUTCOME>"
+        )
         outcome = Outcome(
             check_id=check_id,
             action_type=intent.action_type,
@@ -202,8 +162,6 @@ class RuleEngine:
             outcome,
             campaign_id,
             scenario_type,
-            interaction_evidence=interaction_evidence or [],
-            training_runtime=training_runtime,
         )
 
     def patch_for_nonmechanical(
@@ -213,8 +171,6 @@ class RuleEngine:
         outcome: Outcome,
         campaign_id: str | None,
         scenario_type: str,
-        interaction_evidence: list[InteractionEvidence] | None = None,
-        training_runtime: "TrainingRuntimeService | None" = None,
     ) -> StatePatch:
         turn = int(state.get("meta", {}).get("turn", 0)) + 1
         participants = [intent.actor] + ([intent.target] if intent.target else [])
@@ -232,16 +188,6 @@ class RuleEngine:
                 turn=turn,
             )
         ]
-        if scenario_type == "training":
-            if training_runtime and training_runtime.enabled:
-                operations.extend(
-                    training_runtime.resolution_operations(
-                        state,
-                        intent.desired_outcome,
-                        turn,
-                        interaction_evidence or [],
-                    )
-                )
         return StatePatch(
             turn=turn,
             check_id=outcome.check_id,

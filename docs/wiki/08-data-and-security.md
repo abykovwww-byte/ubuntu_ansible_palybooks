@@ -222,8 +222,8 @@ SQLite используется несколькими service stores, но scop
 | Reliability | `turn_requests`, `memory_checkpoints`, `party_branches`, `autotest_runs` |
 | RP supervision | `rp_supervisor_evaluations` (typed, 30-day TTL, no raw prompt/response) |
 | Dataset | `dataset_turn_labels`, `turn_feedback` |
-| Showroom | Активные `showroom_scenarios`, `showroom_visitors`, `showroom_runs` находятся в standalone SQLite; старые RP-строки остаются нетронутыми и скрытыми |
-| Training artifacts | Активные `training_artifacts`, `training_artifact_events` принадлежат standalone SQLite; старые RP-строки сохраняются до O2 |
+| Showroom | После C1 активные `showroom_scenarios`, `showroom_visitors`, `showroom_runs` находятся в standalone SQLite; старые RP-строки остаются нетронутыми и скрытыми |
+| Training artifacts | После C1 активные `training_artifacts`, `training_artifact_events` принадлежат standalone SQLite; старые RP-строки сохраняются под read-only quarantine |
 | Diagnostics | `turn_trace_events`, `turn_state_mutations`, `turn_phase_annotations`, `service_call_log` |
 | Provider access | `provider_api_keys` |
 
@@ -262,12 +262,13 @@ runtime API между RP и training Gateway нет. Старые Showroom rows
 legacy RP SQLite, но новый training runtime их не читает.
 
 C1 source закрепляет exact application commit
-`b72c481d616d6b8d654dc198d4973dce4e3e123c` и LAN-only
+`67244432659f6c25a268cbf788a8fa3af0f5b52f` и LAN-only
 `192.168.1.88:8011`, но apply ещё не выполнен. Live I1 shadow продолжает
 использовать отдельные paths на loopback `:18011`, а старый Showroom занимает
 `:8011`. Старая RP SQLite не мигрируется и не изменяется; её training rows не
 являются blocker по явному решению владельца. Полный training flow и restore
-после C1 apply ещё не доказаны.
+после C1 apply ещё не доказаны. Rollback window равен `0`: старый Showroom и
+training source удаляются при том же apply, а SQLite/state/backups сохраняются.
 
 ### Git-каталог Showroom
 
@@ -297,7 +298,11 @@ Narrator не может передать произвольный HTML, CSS и�
 
 Значения credential-полей остаются в браузере: при submit клиент передаёт только тип события, artifact ID и idempotency key. Artifact snapshots содержат видимый учебный текст и поэтому подчиняются тем же правилам privacy/review, что и raw turns; server-only interaction policy и скрытый scoring в публичный API не выдаются.
 
-Live-проверка с синтетическими значениями подтвердила этот privacy boundary: в `training_artifact_events` сохранились только тип события и идентификаторы полей `login` / `password`, а сами введённые строки в Gateway SQLite отсутствовали. Проверка не использовала реальные учётные данные.
+Историческая live-проверка прежнего общего runtime с синтетическими значениями
+подтвердила этот privacy boundary: в `training_artifact_events` сохранились
+только тип события и идентификаторы полей `login` / `password`, а сами введённые
+строки в Gateway SQLite отсутствовали. Проверка не использовала реальные
+учётные данные; standalone `:8011` требует отдельного post-C1 proof.
 
 ### Workspace resources
 
@@ -446,15 +451,17 @@ Awareness backup находится в `/srv/backups/awareness-showroom` и не
 с RP backup. После C1 apply test restore должен идти в отдельные временные target
 paths и доказать SQLite integrity, наличие реального run, scoring/debrief и
 resume data, не перезаписывая live data directory. Этот runtime gate ещё не
-пройден. C1 не удаляет и не восстанавливает старую RP SQLite; её физическая
-training-очистка ждёт явной команды O2.
+пройден. Zero-window C1/O2 не удаляет и не восстанавливает старую RP SQLite.
+
+O2 в составе cutover удаляет только legacy source/container/source
+declarations. Он не удаляет строки или таблицы SQLite, не запускает
+`delete_user_data`, не очищает state и не перезаписывает backups.
 
 ## Источники
 
 - [AuthStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/auth_store.py)
 - [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
-- [Активный standalone Awareness Showroom](https://github.com/abykovwww-byte/tavern-awareness-showroom)
-- Legacy-копии `showroom.py` и `training_artifacts.py` в RP source сохранены только до явной очистки O2 и после C1 не обслуживают API.
+- [Standalone Awareness Showroom source](https://github.com/abykovwww-byte/tavern-awareness-showroom)
 - [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)

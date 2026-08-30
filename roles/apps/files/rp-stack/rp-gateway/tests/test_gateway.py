@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import sqlite3
-import shutil
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -135,7 +134,6 @@ def client(tmp_path: Path, mode: str = "success", api_key: str = "test-key", **s
         "database_url": f"sqlite:///{tmp_path / 'rp_gateway.db'}",
         "world_state_path": str(state_path),
         "party_state_root": str(tmp_path / "state" / "parties"),
-        "showroom_cover_dir": str(tmp_path / "showroom-covers"),
         "worldpacks_path": str(tmp_path / "worldpacks"),
         "llm_api_base": f"mock://{mode}",
         "llm_api_key": api_key,
@@ -228,8 +226,6 @@ def write_worldpack(
     }
     if supported_modes:
         manifest["scenario_types"] = {"recommended": supported_modes[0], "supported": supported_modes}
-        if supported_modes == ["training"]:
-            manifest["showroom_result"] = {"metric": "state_path", "state_path": "meta.turn"}
     if rp_revision is not None:
         manifest["scenario_types"] = {"recommended": "rp", "supported": ["rp"]}
         manifest["rp_contract"] = {"schema_version": "rp-core.v2", "revision": rp_revision}
@@ -398,455 +394,16 @@ def test_bootstrap_admin_is_added_when_configured_user_is_missing(tmp_path: Path
     assert login(second, "rp", "rp-secret")["role"] == "admin"
 
 
-def test_public_showroom_keeps_scenarios_separate_from_worlds_and_users(tmp_path: Path):
-    write_worldpack(tmp_path, supported_modes=["rp", "training"])
-    admin = client(
-        tmp_path,
-        auth_enabled=True,
-        bootstrap_admin_username="admin",
-        bootstrap_admin_password="admin-secret",
-    )
-    login(admin)
-    model_id = admin.get("/api/model-profiles").json()["model_profiles"][0]["id"]
-
-    first = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={
-            "title": "Night investigation",
-            "description": "Investigate one difficult night.",
-            "status": "published",
-            "scenario_type": "rp",
-            "model_profile_id": model_id,
-            "world_source": "preset",
-            "worldpack_id": "demo-world",
-            "leaderboard_enabled": True,
-            "leaderboard_metric": "state_path",
-            "leaderboard_state_path": "meta.turn",
-            "leaderboard_label": "Turns",
-        },
-    )
-    assert first.status_code == 200, first.text
-    first_scenario = first.json()["scenario"]
-    second = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={
-            "title": "Quiet character drama",
-            "description": "A different scenario in the same world.",
-            "status": "published",
-            "scenario_type": "training",
-            "model_profile_id": model_id,
-            "world_source": "preset",
-            "worldpack_id": "demo-world",
-            "leaderboard_enabled": True,
-            "leaderboard_metric": "turn_count",
-            "leaderboard_state_path": "meta.turn",
-            "leaderboard_label": "Turns",
-        },
-    )
-    assert second.status_code == 200, second.text
-    second_scenario = second.json()["scenario"]
-    assert first_scenario["id"] != second_scenario["id"]
-    assert first_scenario["worldpack_id"] == second_scenario["worldpack_id"] == "demo-world"
-    assert first_scenario["title"] != first_scenario["world"]["title"]
-
-    public = TestClient(admin.app)
-    assert public.get("/api/admin/showroom/scenarios").status_code == 401
-    listed = public.get("/api/showroom/scenarios")
-    assert listed.status_code == 200
-    listed_scenarios = listed.json()["scenarios"]
-    assert {item["title"] for item in listed_scenarios} == {"Night investigation", "Quiet character drama"}
-    assert all("model_profile_id" not in item for item in listed_scenarios)
-    assert public.get("/api/parties").status_code == 401
-
-    run_response = public.post(
-        f"/api/showroom/scenarios/{first_scenario['id']}/runs",
-        json={
-            "character_name": "Anonymous Hero",
-            "character_prompt": "A careful investigator.",
-            "leaderboard_opt_in": True,
-            "client_request_id": "browser-request-1",
-        },
-    )
-    assert run_response.status_code == 200, run_response.text
-    run = run_response.json()["run"]
-    assert "party_id" not in run
-    assert admin.app.state.settings.showroom_visitor_cookie_name in public.cookies
-    assert public.get("/api/showroom/runs").json()["runs"][0]["id"] == run["id"]
-
-    repeated = public.post(
-        f"/api/showroom/scenarios/{first_scenario['id']}/runs",
-        json={
-            "character_name": "Anonymous Hero",
-            "character_prompt": "A careful investigator.",
-            "leaderboard_opt_in": True,
-            "client_request_id": "browser-request-1",
-        },
-    )
-    assert repeated.json()["run"]["id"] == run["id"]
-
-    renamed = admin.patch(
-        f"/api/admin/showroom/scenarios/{first_scenario['id']}",
-        json={"title": "Renamed storefront card"},
-    )
-    assert renamed.status_code == 200, renamed.text
-    historical_run = public.get(f"/api/showroom/runs/{run['id']}").json()["run"]
-    assert historical_run["scenario"]["title"] == "Night investigation"
-
-    started = public.post(
-        f"/api/showroom/runs/{run['id']}/start",
-        json={"idempotency_key": f"showroom-start:{run['id']}"},
-    )
-    assert started.status_code == 200, started.text
-    assert "party_id" not in started.json()
-    with sqlite3.connect(tmp_path / "rp_gateway.db") as connection:
-        technical_owner = connection.execute(
-            """
-            SELECT parties.owner_user_id
-            FROM showroom_runs JOIN parties ON parties.id = showroom_runs.party_id
-            WHERE showroom_runs.id = ?
-            """,
-            (run["id"],),
-        ).fetchone()[0]
-    assert technical_owner == "__showroom__"
-    history = public.get(f"/api/showroom/runs/{run['id']}/history")
-    assert history.status_code == 200
-    assert len(history.json()["turns"]) == 1
-
-    player_turn = public.post(
-        f"/api/showroom/runs/{run['id']}/messages",
-        json={"content": "I inspect the room.", "idempotency_key": "showroom-turn-1"},
-    )
-    assert player_turn.status_code == 200, player_turn.text
-    assert "party_id" not in player_turn.json()
-
-    leaderboard = public.get(f"/api/showroom/scenarios/{first_scenario['id']}/leaderboard")
-    assert leaderboard.status_code == 200
-    assert leaderboard.json()["entries"][0]["display_name"] == "Anonymous Hero"
-    assert leaderboard.json()["entries"][0]["score"] == 1
-    other_board = public.get(f"/api/showroom/scenarios/{second_scenario['id']}/leaderboard")
-    assert other_board.json()["entries"] == []
-
-    intruder = TestClient(admin.app)
-    assert intruder.get(f"/api/showroom/runs/{run['id']}").status_code == 404
 
 
-def test_showroom_rejects_novel_create_and_update_with_422(tmp_path: Path):
-    write_worldpack(tmp_path, supported_modes=["rp", "training"])
-    admin = client(
-        tmp_path,
-        auth_enabled=True,
-        bootstrap_admin_username="admin",
-        bootstrap_admin_password="admin-secret",
-    )
-    login(admin)
-    model_id = admin.get("/api/model-profiles").json()["model_profiles"][0]["id"]
-    payload = {
-        "title": "Active scenario contract",
-        "description": "Only active modes are accepted.",
-        "status": "draft",
-        "scenario_type": "novel",
-        "model_profile_id": model_id,
-        "world_source": "preset",
-        "worldpack_id": "demo-world",
-    }
-
-    rejected_create = admin.post("/api/admin/showroom/scenarios", json=payload)
-    assert rejected_create.status_code == 422, rejected_create.text
-
-    created = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={**payload, "scenario_type": "rp"},
-    )
-    assert created.status_code == 200, created.text
-    rejected_update = admin.patch(
-        f"/api/admin/showroom/scenarios/{created.json()['scenario']['id']}",
-        json={"scenario_type": "novel"},
-    )
-    assert rejected_update.status_code == 422, rejected_update.text
 
 
-def test_legacy_novel_showroom_is_archived_terminal_and_run_history_stays_readable(tmp_path: Path):
-    write_worldpack(tmp_path, supported_modes=["rp"])
-    admin = client(
-        tmp_path,
-        auth_enabled=True,
-        bootstrap_admin_username="admin",
-        bootstrap_admin_password="admin-secret",
-    )
-    login(admin)
-    model_id = admin.get("/api/model-profiles").json()["model_profiles"][0]["id"]
-    scenario = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={
-            "title": "Legacy Showroom",
-            "description": "Stored legacy scenario.",
-            "status": "published",
-            "scenario_type": "rp",
-            "model_profile_id": model_id,
-            "world_source": "preset",
-            "worldpack_id": "demo-world",
-        },
-    ).json()["scenario"]
-    visitor = TestClient(admin.app)
-    run_response = visitor.post(
-        f"/api/showroom/scenarios/{scenario['id']}/runs",
-        json={"character_name": "Legacy Hero", "character_prompt": "Historical run."},
-    )
-    assert run_response.status_code == 200, run_response.text
-    run = run_response.json()["run"]
-
-    with sqlite3.connect(tmp_path / "rp_gateway.db") as connection:
-        party_id = connection.execute(
-            "SELECT party_id FROM showroom_runs WHERE id = ?",
-            (run["id"],),
-        ).fetchone()[0]
-        connection.execute(
-            "UPDATE showroom_scenarios SET scenario_type = 'novel', status = 'published' WHERE id = ?",
-            (scenario["id"],),
-        )
-        connection.execute(
-            "UPDATE parties SET scenario_type = 'novel', status = 'active' WHERE id = ?",
-            (party_id,),
-        )
-
-    for _ in range(2):
-        admin.app.state.party_store.init_db()
-        admin.app.state.showroom_store.init_db()
-
-    stored = next(
-        item
-        for item in admin.get("/api/admin/showroom/scenarios").json()["scenarios"]
-        if item["id"] == scenario["id"]
-    )
-    assert stored["scenario_type"] == "novel"
-    assert stored["status"] == "archived"
-    assert all(item["id"] != scenario["id"] for item in visitor.get("/api/showroom/scenarios").json()["scenarios"])
-    assert visitor.get(f"/api/showroom/runs/{run['id']}").status_code == 200
-    assert visitor.get(f"/api/showroom/runs/{run['id']}/history").status_code == 200
-
-    republish = admin.patch(
-        f"/api/admin/showroom/scenarios/{scenario['id']}",
-        json={"status": "published"},
-    )
-    assert republish.status_code == 400
-    assert republish.json()["detail"] == "archived showroom scenario is terminal"
-    new_run = visitor.post(
-        f"/api/showroom/scenarios/{scenario['id']}/runs",
-        json={"character_name": "Blocked", "character_prompt": "Must not run."},
-    )
-    assert new_run.status_code == 400
-    assert visitor.post(f"/api/showroom/runs/{run['id']}/start").status_code == 404
-    assert visitor.post(
-        f"/api/showroom/runs/{run['id']}/messages",
-        json={"content": "Must not run."},
-    ).status_code == 404
 
 
-def test_showroom_training_capabilities_are_validated_and_snapshotted(tmp_path: Path):
-    source = Path(__file__).resolve().parents[2] / "worldpacks" / "awareness-one-day"
-    shutil.copytree(source, tmp_path / "worldpacks" / "awareness-one-day")
-    admin = client(
-        tmp_path,
-        auth_enabled=True,
-        bootstrap_admin_username="admin",
-        bootstrap_admin_password="admin-secret",
-    )
-    login(admin)
-    model_id = admin.get("/api/model-profiles").json()["model_profiles"][0]["id"]
-    response = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={
-            "title": "Training with both interaction surfaces",
-            "status": "published",
-            "scenario_type": "training",
-            "model_profile_id": model_id,
-            "world_source": "preset",
-            "worldpack_id": "awareness-one-day",
-            "interactive_links_enabled": True,
-            "interactive_workspace_enabled": True,
-        },
-    )
-    assert response.status_code == 200, response.text
-    scenario = response.json()["scenario"]
-    assert scenario["interactive_links_enabled"] is True
-    assert scenario["interactive_workspace_enabled"] is True
-    assert scenario["training_capabilities"] == {
-        "interactive_links_supported": True,
-        "interactive_workspace_supported": True,
-    }
-
-    public = TestClient(admin.app)
-    run_response = public.post(
-        f"/api/showroom/scenarios/{scenario['id']}/runs",
-        json={
-            "character_name": "Employee",
-            "character_prompt": "Security-aware employee",
-            "employee_position": "Security analyst",
-        },
-    )
-    assert run_response.status_code == 200, run_response.text
-    run = run_response.json()["run"]
-    assert run["interactive_links_enabled"] is True
-    assert run["interactive_workspace_enabled"] is True
-
-    changed = admin.patch(
-        f"/api/admin/showroom/scenarios/{scenario['id']}",
-        json={"interactive_links_enabled": False, "interactive_workspace_enabled": False},
-    )
-    assert changed.status_code == 200, changed.text
-    unchanged_run = public.get(f"/api/showroom/runs/{run['id']}").json()["run"]
-    assert unchanged_run["interactive_links_enabled"] is True
-    assert unchanged_run["interactive_workspace_enabled"] is True
-    leaderboard = public.get(f"/api/showroom/scenarios/{scenario['id']}/leaderboard").json()
-    assert leaderboard["dimensions"] == {
-        "interactive_links_enabled": False,
-        "interactive_workspace_enabled": False,
-    }
-    assert leaderboard["entries"] == []
-
-    started = public.post(
-        f"/api/showroom/runs/{run['id']}/start",
-        json={"idempotency_key": f"showroom-start:{run['id']}"},
-    )
-    assert started.status_code == 200, started.text
-    workspace = public.get(f"/api/showroom/runs/{run['id']}/workspace")
-    assert workspace.status_code == 200, workspace.text
-    assert {item["file_key"] for item in workspace.json()["workspace"]["files"]} == {"security-policy"}
-    assert "resource_classification" not in workspace.text
-    with admin.app.state.showroom_store.connect() as connection:
-        party_id = connection.execute(
-            "SELECT party_id FROM showroom_runs WHERE id = ?",
-            (run["id"],),
-        ).fetchone()["party_id"]
-    dataset_turn = admin.app.state.party_store.list_dataset_turns(party_id, limit=None)[0]
-    assert dataset_turn["metadata"]["training_capabilities"] == {
-        "interactive_links_enabled": True,
-        "interactive_workspace_enabled": True,
-    }
-    assert [item["file_key"] for item in dataset_turn["workspace_files"]] == ["security-policy"]
-    sft = admin.app.state.party_store.dataset_sft_record(dataset_turn)
-    assert sft["metadata"]["training_capabilities"]["interactive_workspace_enabled"] is True
-    assert [item["file_key"] for item in sft["metadata"]["workspace_files"]] == ["security-policy"]
-
-    unsupported_dir = write_worldpack(tmp_path, pack_id="unsupported-training", supported_modes=["training"])
-    unsupported_manifest_path = unsupported_dir / "manifest.json"
-    unsupported_manifest = json.loads(unsupported_manifest_path.read_text(encoding="utf-8"))
-    unsupported_manifest["showroom_result"] = {"metric": "state_path", "state_path": "meta.turn"}
-    unsupported_manifest_path.write_text(json.dumps(unsupported_manifest), encoding="utf-8")
-    unsupported = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={
-            "title": "Unsupported links",
-            "status": "draft",
-            "scenario_type": "training",
-            "model_profile_id": model_id,
-            "world_source": "preset",
-            "worldpack_id": "unsupported-training",
-            "interactive_links_enabled": True,
-        },
-    )
-    assert unsupported.status_code == 400
-    assert "does not support interactive links" in unsupported.text
 
 
-def test_showroom_rp_start_ignores_semantic_validator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    write_worldpack(tmp_path)
-    admin = client(
-        tmp_path,
-        auth_enabled=True,
-        bootstrap_admin_username="admin",
-        bootstrap_admin_password="admin-secret",
-    )
-    login(admin)
-    model_id = admin.get("/api/model-profiles").json()["model_profiles"][0]["id"]
-    scenario = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={
-            "title": "Fallback showroom scenario",
-            "status": "published",
-            "scenario_type": "rp",
-            "model_profile_id": model_id,
-            "world_source": "preset",
-            "worldpack_id": "demo-world",
-        },
-    ).json()["scenario"]
-    public = TestClient(admin.app)
-    run = public.post(
-        f"/api/showroom/scenarios/{scenario['id']}/runs",
-        json={"character_name": "Hero", "character_prompt": "Investigator"},
-    ).json()["run"]
-
-    monkeypatch.setattr(
-        OutputValidator,
-        "validate",
-        lambda *args, **kwargs: SimpleNamespace(
-            valid=False,
-            violations=["forced test violation"],
-            repair_instruction="repair",
-        ),
-    )
-    started = public.post(
-        f"/api/showroom/runs/{run['id']}/start",
-        json={"idempotency_key": f"showroom-start:{run['id']}"},
-    )
-
-    assert started.status_code == 200, started.text
-    assert started.json()["raw"]["choices"][0]["finish_reason"] == "stop"
-    history = public.get(f"/api/showroom/runs/{run['id']}/history").json()["turns"]
-    assert len(history) == 1
-    with sqlite3.connect(tmp_path / "rp_gateway.db") as connection:
-        showroom_party_id = connection.execute(
-            "SELECT party_id FROM showroom_runs WHERE id = ?", (run["id"],)
-        ).fetchone()[0]
-    metadata = latest_turn_metadata(admin.app.state.party_store.store_for_party(showroom_party_id))
-    assert metadata["validator_valid"] is None
-    assert metadata["fallback"] is False
-    assert metadata["transport_status"] == "ok"
 
 
-def test_showroom_prompt_world_and_cover_are_scenario_owned_runtime_content(tmp_path: Path):
-    admin = client(
-        tmp_path,
-        auth_enabled=True,
-        bootstrap_admin_username="admin",
-        bootstrap_admin_password="admin-secret",
-    )
-    login(admin)
-    model_id = admin.get("/api/model-profiles").json()["model_profiles"][0]["id"]
-    created = admin.post(
-        "/api/admin/showroom/scenarios",
-        json={
-            "title": "Station at the edge",
-            "description": "A public card title independent of the generated world.",
-            "status": "published",
-            "scenario_type": "training",
-            "model_profile_id": model_id,
-            "world_source": "prompt",
-            "world_prompt": "A remote scientific station loses contact during a polar night.",
-            "leaderboard_enabled": True,
-            "leaderboard_metric": "turn_count",
-            "leaderboard_state_path": "meta.turn",
-            "leaderboard_label": "Turns",
-        },
-    )
-    assert created.status_code == 200, created.text
-    scenario = created.json()["scenario"]
-    assert scenario["id"] != scenario["worldpack_id"]
-    assert scenario["title"] != scenario["world"]["title"]
-    assert scenario["world_source"] == "prompt"
-
-    png = b"\x89PNG\r\n\x1a\n" + (b"mock" * 10)
-    uploaded = admin.put(
-        f"/api/admin/showroom/scenarios/{scenario['id']}/cover",
-        content=png,
-        headers={"Content-Type": "image/png"},
-    )
-    assert uploaded.status_code == 200, uploaded.text
-    public = TestClient(admin.app)
-    cover = public.get(f"/api/showroom/scenarios/{scenario['id']}/cover")
-    assert cover.status_code == 200
-    assert cover.headers["content-type"].startswith("image/png")
-    assert cover.content == png
 
 
 def test_health_and_state(tmp_path: Path):
@@ -1091,7 +648,7 @@ def test_rp_core_v2_turn_has_no_hidden_check_or_random_result(tmp_path: Path):
     assert checks == 0
 
 
-def test_rp_revision_one_and_training_never_call_random_system_rng(
+def test_rp_revision_one_never_calls_random_system_rng(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class ForbiddenRng:
@@ -1109,16 +666,11 @@ def test_rp_revision_one_and_training_never_call_random_system_rng(
         rp_contract_version="rp-core.v2",
         rp_contract_revision=1,
     )
-    training_outcome, _ = RuleEngine().resolve(
-        base_state(),
-        intent,
-        "training-no-rng",
-        scenario_type="training",
-    )
 
     assert rp_outcome.result == "narrative_continuation"
-    assert training_outcome.result == "deterministic_resolution"
-    assert rp_outcome.roll == training_outcome.roll == 0
+    assert rp_outcome.roll == 0
+
+
 
 
 def test_candidate_revision_is_branch_only_until_observed(tmp_path: Path) -> None:
@@ -1361,7 +913,7 @@ def test_rp_validator_rejects_observed_first_person_player_takeover(
     ]
 
 
-def test_rp_core_v2_provider_response_commits_without_training_repair(
+def test_rp_core_v2_repeated_absolute_rule_violation_never_commits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1405,15 +957,14 @@ def test_rp_core_v2_provider_response_commits_without_training_repair(
         json={"content": "Use the power.", "idempotency_key": "absolute-rule-failure"},
     )
 
-    assert response.status_code == 200, response.text
-    assert llm_calls == 1
-    assert int(store.current_version() or 0) > int(version_before or 0)
-    history = c.get(f"/api/parties/{party['id']}/history").json()["turns"]
-    assert len(history) == 1
-    assert history[0]["narrative_response"] == "The power fails on living matter."
+    assert response.status_code == 502
+    assert response.json()["detail"] == "LLM response failed narrative validation"
+    assert llm_calls == 2
+    assert store.current_version() == version_before
+    assert c.get(f"/api/parties/{party['id']}/history").json()["turns"] == []
 
 
-def test_rp_opening_scene_provider_response_commits_without_training_repair(
+def test_rp_opening_scene_repeated_absolute_rule_violation_never_commits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1450,17 +1001,18 @@ def test_rp_opening_scene_provider_response_commits_without_training_repair(
     ]
     state["meta"]["state_version"] = int(store.current_version() or 0) + 1
     store.insert_state_version(state, "test:opening-absolute-rule")
+    version_before = store.current_version()
 
     response = c.post(
         f"/api/parties/{party['id']}/start",
         json={"idempotency_key": "opening-absolute-rule-failure"},
     )
 
-    assert response.status_code == 200, response.text
-    assert calls == 1
-    history = store.turn_history()
-    assert len(history) == 1
-    assert history[0]["narrative_response"] == "The power fails on living matter."
+    assert response.status_code == 502
+    assert response.json()["detail"] == "LLM response failed narrative validation"
+    assert calls == 2
+    assert store.current_version() == version_before
+    assert store.turn_history() == []
 
 
 def test_provider_payload_contains_relationship_pressure_on_first_attempt(
@@ -1962,63 +1514,6 @@ def test_trust_gained_reaches_next_prompt_despite_global_turn_id_offset_end_to_e
     assert RelationshipStore(store, model).event_rows("king", "favour") == []
 
 
-def test_training_party_ignores_relationship_declaration_and_writes_no_relationship_rows(tmp_path: Path):
-    """Proves the full Training lifecycle cannot activate the RP relationship layer."""
-    source = Path(__file__).resolve().parents[2] / "worldpacks" / "awareness-one-day"
-    target = tmp_path / "worldpacks" / "awareness-one-day"
-    shutil.copytree(source, target)
-    model_source = (
-        Path(__file__).resolve().parents[2]
-        / "worldpacks"
-        / "mechanist-new-world"
-        / "relationships"
-        / "model.json"
-    )
-    manifest_path = target / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["relationships"] = {
-        "schema_version": "rp-relationships.v2",
-        "model": "relationships/model.json",
-    }
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
-    relationship_dir = target / "relationships"
-    relationship_dir.mkdir()
-    shutil.copy2(model_source, relationship_dir / "model.json")
-
-    c = client(tmp_path, mode="repair-fail")
-    party = create_demo_party(
-        c,
-        title="Training relationship guard",
-        character_name="Эллина",
-        scenario_type="training",
-        worldpack_id="awareness-one-day",
-    )
-    started = c.post(
-        f"/api/parties/{party['id']}/start",
-        json={"idempotency_key": "training-relationship-start"},
-    )
-    assert started.status_code == 200, started.text
-    message = c.post(
-        f"/api/parties/{party['id']}/messages",
-        json={"content": "Проверяю сообщение.", "idempotency_key": "training-relationship-turn"},
-    )
-    assert message.status_code == 200, message.text
-
-    store = c.app.state.party_store.store_for_party(str(party["id"]))
-    with store.connect() as connection:
-        counts = {
-            table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-            for table in (
-                "relationship_causes",
-                "character_badges",
-                "narrative_events",
-                "character_axis_state",
-            )
-        }
-    assert counts == {table: 0 for table in counts}
-    assert all(job["job_type"] != "relationship_extraction" for job in store.service_jobs(limit=20))
-    recorded = store.latest_turn(include_prompt=True)
-    assert "RELATIONSHIP_PRESSURE" not in str(recorded.get("prompt_json") or "")
 
 
 def test_party_requires_manual_scenario_type_and_rejects_unsupported_mode(tmp_path: Path):
@@ -2038,7 +1533,7 @@ def test_party_requires_manual_scenario_type_and_rejects_unsupported_mode(tmp_pa
 
     assert c.post("/api/parties", json=base_payload).status_code == 422
     assert c.post("/api/parties", json={**base_payload, "scenario_type": "novel"}).status_code == 422
-    assert c.post("/api/parties", json={**base_payload, "scenario_type": "training"}).status_code == 400
+    assert c.post("/api/parties", json={**base_payload, "scenario_type": "training"}).status_code == 422
     created = c.post("/api/parties", json={**base_payload, "scenario_type": "rp"})
     assert created.status_code == 200
     assert created.json()["party"]["scenario_type"] == "rp"
@@ -2119,7 +1614,7 @@ def test_rp_party_after_turn_10_keeps_narrator_response_and_honest_metadata(tmp_
     assert metadata["transport_status"] == "ok"
 
 
-def test_rp_party_runs_twelve_turns_without_training_or_fallback_metadata(tmp_path: Path):
+def test_rp_party_runs_twelve_turns_without_fallback_metadata(tmp_path: Path):
     write_worldpack(tmp_path)
     c = client(tmp_path)
     party = create_demo_party(c, title="Twelve-turn RP party", scenario_type="rp")
@@ -2140,7 +1635,7 @@ def test_rp_party_runs_twelve_turns_without_training_or_fallback_metadata(tmp_pa
     metadata = [json.loads(row[0]) for row in rows]
     assert len(metadata) == 12
     assert {item["scenario_type"] for item in metadata} == {"rp"}
-    assert {item["training_runtime_contract_hash"] for item in metadata} == {None}
+    assert all("training_runtime_contract_hash" not in item for item in metadata)
     assert all(item["fallback"] is False for item in metadata)
     assert all(item["fallback_reason"] is None for item in metadata)
     assert all(item["validator_valid"] is None for item in metadata)
@@ -2246,31 +1741,8 @@ def test_legacy_novel_party_is_archived_readable_and_terminal(tmp_path: Path):
         assert response.json()["detail"] == "archived party is terminal"
 
 
-def test_scenario_system_prompts_have_distinct_contracts():
-    rp_rules = NarrativeClient(Settings(scenario_type="rp")).scenario_rules()
-    training_rules = NarrativeClient(Settings(scenario_type="training")).scenario_rules()
-
-    assert "D20" in rp_rules
-    assert "deterministic training" in training_rules
-    assert "Do not coach, hint, assess" in training_rules
 
 
-def test_training_party_is_deterministic_and_disables_manual_checks(tmp_path: Path):
-    write_worldpack(tmp_path)
-    c = client(tmp_path)
-    party = create_demo_party(c, title="Training", scenario_type="training")
-
-    check = c.post(
-        f"/api/parties/{party['id']}/checks",
-        json={"check_type": "information", "goal": "inspect", "difficulty": 10},
-        headers={"Authorization": "Bearer test"},
-    )
-    assert check.status_code == 400
-    preview = c.post(f"/api/parties/{party['id']}/prompt/preview", json={"content": "Проверяю факты"})
-    assert preview.status_code == 200
-    outcome = preview.json()["preview"]["outcome"]
-    assert outcome["result"] == "deterministic_resolution"
-    assert outcome["roll"] == 0
 
 
 def test_auth_required_and_parties_are_user_scoped(tmp_path: Path):
@@ -2554,7 +2026,7 @@ def test_admin_rp_autotest_ignores_semantic_validator_without_fallback(
     assert metadata["transport_status"] == "ok"
 
 
-def test_admin_revision_six_rp_autotest_bypasses_training_services_and_validator(
+def test_admin_revision_six_rp_autotest_does_not_commit_validation_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -2578,20 +2050,15 @@ def test_admin_revision_six_rp_autotest_bypasses_training_services_and_validator
     async def next_action(*args: object, **kwargs: object) -> str:
         return "I take the next action."
 
-    def unexpected_training_constructor(*args: object, **kwargs: object) -> object:
-        pytest.fail("RP autotest must not construct training services or OutputValidator")
+    def reject_narrative(*args: object, **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            valid=False,
+            violations=["forced repeated absolute-rule violation"],
+            repair_instruction="Respect the absolute rule.",
+        )
 
     monkeypatch.setattr("app.main.AutoPlayerClient.next_action", next_action)
-    for attribute in (
-        "TrainingRuntimeService",
-        "TrainingArtifactService",
-        "TrainingWorkspaceService",
-    ):
-        monkeypatch.setattr(f"app.main.{attribute}", unexpected_training_constructor)
-    monkeypatch.setattr(
-        "app.services.adjudicator.OutputValidator",
-        unexpected_training_constructor,
-    )
+    monkeypatch.setattr("app.services.adjudicator.OutputValidator.validate", reject_narrative)
     source_party = create_demo_party(admin, title="Revision 6 invalid autotest")
     assert source_party["rp_contract_revision"] == 6
     local_profile = next(
@@ -2623,21 +2090,15 @@ def test_admin_revision_six_rp_autotest_bypasses_training_services_and_validator
             break
         time.sleep(0.02)
 
-    assert run["status"] == "completed", run
-    assert run["completed_turns"] == 1
+    assert run["status"] == "failed", run
+    assert run["completed_turns"] == 0
     assert run["fallback_turns"] == 0
     branch_store = admin.app.state.party_store.store_for_branch(
         source_party["id"],
         run["branch_id"],
         owner_user_id=run["owner_user_id"],
     )
-    history = branch_store.turn_history(limit=10)
-    assert len(history) == 1
-    metadata = latest_turn_metadata(branch_store)
-    assert metadata["validator_valid"] is None
-    assert metadata["repaired"] is False
-    assert metadata["fallback"] is False
-    assert metadata["llm_calls"] == 1
+    assert branch_store.turn_history(limit=10) == []
 
 
 def test_party_byok_is_scoped_to_current_party(tmp_path: Path):
@@ -3178,29 +2639,6 @@ def test_default_memory_policy_is_tuned_for_long_context(monkeypatch: pytest.Mon
     assert settings.rp_story_memory_reserve_tokens == 10_000
 
 
-def test_rp_story_memory_api_fields_are_absent_from_training(tmp_path: Path):
-    write_worldpack(tmp_path, supported_modes=["rp", "training"])
-    c = client(tmp_path)
-    rp_party = create_demo_party(c, title="RP memory", scenario_type="rp")
-    training_party = create_demo_party(
-        c,
-        title="Training without RP memory",
-        character_name="Trainee",
-        scenario_type="training",
-    )
-
-    rp_memory = c.get(f"/api/parties/{rp_party['id']}/memory").json()
-    training_memory = c.get(f"/api/parties/{training_party['id']}/memory").json()
-    rp_context = c.get(f"/api/parties/{rp_party['id']}/context").json()["context"]
-    training_context = c.get(f"/api/parties/{training_party['id']}/context").json()["context"]
-
-    assert "story_memory" in rp_memory
-    assert rp_memory["story_memory_stats"]["enabled"] is True
-    assert "rp_story_memory_tokens" in rp_context
-    assert "story_memory" not in training_memory
-    assert "story_memory_stats" not in training_memory
-    assert "rp_story_memory_tokens" not in training_context
-    assert training_context["history_token_budget"] == 81_920
 
 
 def test_typed_story_memory_replace_forces_cadence_and_reaches_later_prompt(tmp_path: Path):
@@ -3404,33 +2842,6 @@ def test_reconstructed_last_prompt_does_not_apply_later_pending_correction(tmp_p
     assert "The gate is open." not in prompt
 
 
-@pytest.mark.parametrize("scenario_type", ["training"])
-def test_typed_story_memory_correction_rejects_training_without_turn(
-    tmp_path: Path,
-    scenario_type: str,
-):
-    write_worldpack(tmp_path, supported_modes=[scenario_type])
-    c = client(tmp_path)
-    party = create_demo_party(c, title="Non-RP correction", scenario_type=scenario_type)
-    store = c.app.state.party_store.store_for_party(party["id"])
-
-    response = c.post(
-        f"/api/parties/{party['id']}/messages",
-        json={
-            "content": "Invalid correction lane.",
-            "story_memory_corrections": [
-                {
-                    "field": "canon",
-                    "fact_id": "fact:not-present",
-                    "action": "retract",
-                }
-            ],
-        },
-    )
-
-    assert response.status_code == 400
-    assert "only available for RP parties" in response.json()["detail"]
-    assert store.turn_history(limit=10) == []
 
 
 def test_typed_story_memory_correction_rejects_rp_revision_one_without_turn(tmp_path: Path):
@@ -4262,70 +3673,88 @@ def test_revision10_party_start_includes_and_consumes_world_clock_without_clock_
             request=httpx.Request("POST", "https://provider.example/v1/chat/completions"),
         )
 
-    failed_opening = create_demo_party(c, title="World Clock Opening Provider Failure")
+    fallback_opening = create_demo_party(c, title="World Clock Opening Fallback")
     confirmed = c.post(
-        f"/api/parties/{failed_opening['id']}/world-clock/markers/demo.opening-ready/confirm",
-        json={"idempotency_key": "confirm-failed-opening-event"},
+        f"/api/parties/{fallback_opening['id']}/world-clock/markers/demo.opening-ready/confirm",
+        json={"idempotency_key": "confirm-fallback-opening-event"},
     )
     assert confirmed.status_code == 200, confirmed.text
-    failed_opening_store = c.app.state.party_store.store_for_party(str(failed_opening["id"]))
-    failed_opening_state = failed_opening_store.get_state()
     monkeypatch.setattr(NarrativeClient, "complete", unavailable_narrator)
     started = c.post(
-        f"/api/parties/{failed_opening['id']}/start",
-        json={"idempotency_key": "world-clock-opening-provider-failure"},
+        f"/api/parties/{fallback_opening['id']}/start",
+        json={"idempotency_key": "world-clock-opening-fallback"},
     )
-    assert started.status_code == 502, started.text
-    assert started.json()["detail"] == "Narrative provider request failed"
-    assert failed_opening_store.turn_history() == []
-    assert failed_opening_store.get_state() == failed_opening_state
+    assert started.status_code == 200, started.text
+
+    fallback_store = c.app.state.party_store.store_for_party(str(fallback_opening["id"]))
+    fallback_turn = fallback_store.latest_turn(include_prompt=True)
+    fallback_record = fallback_store.turn_record(int(fallback_turn["id"]))
+    assert fallback_record is not None
+    assert fallback_record["excluded_from_memory"] is True
+    assert "world_clock_events" not in fallback_record["metadata"]
+    assert any(
+        message["content"].startswith("СОБЫТИЯ МИРА")
+        and "Стартовое событие произошло." in message["content"]
+        for message in json.loads(fallback_turn["prompt_json"])
+    )
+    fallback_state = fallback_store.get_state()
     assert [
         item["id"]
-        for item in failed_opening_state["world_clock"]["pending_announcements"]
+        for item in fallback_state["world_clock"]["pending_announcements"]
     ] == ["demo.opening-event"]
-    assert failed_opening_state["world_clock"]["event_statuses"]["demo.opening-event"].get(
+    assert fallback_state["world_clock"]["event_statuses"]["demo.opening-event"].get(
         "announced_party_turn"
     ) is None
 
     monkeypatch.setattr(NarrativeClient, "complete", original_complete)
-    failed_turn_party = create_demo_party(c, title="World Clock Turn Provider Failure")
+    fallback_turn_party = create_demo_party(c, title="World Clock Turn Fallback")
     started = c.post(
-        f"/api/parties/{failed_turn_party['id']}/start",
-        json={"idempotency_key": "world-clock-before-turn-failure"},
+        f"/api/parties/{fallback_turn_party['id']}/start",
+        json={"idempotency_key": "world-clock-before-turn-fallback"},
     )
     assert started.status_code == 200, started.text
     confirmed = c.post(
-        f"/api/parties/{failed_turn_party['id']}/world-clock/markers/demo.opening-ready/confirm",
-        json={"idempotency_key": "confirm-turn-failure-event"},
+        f"/api/parties/{fallback_turn_party['id']}/world-clock/markers/demo.opening-ready/confirm",
+        json={"idempotency_key": "confirm-turn-fallback-event"},
     )
     assert confirmed.status_code == 200, confirmed.text
-    failed_turn_store = c.app.state.party_store.store_for_party(str(failed_turn_party["id"]))
-    failed_turn_state = failed_turn_store.get_state()
-    failed_turn_history = failed_turn_store.turn_history()
     monkeypatch.setattr(NarrativeClient, "complete", unavailable_narrator)
     message = c.post(
-        f"/api/parties/{failed_turn_party['id']}/messages",
+        f"/api/parties/{fallback_turn_party['id']}/messages",
         json={
             "content": "Осматриваю двор.",
             "channel": "scene",
-            "idempotency_key": "world-clock-turn-provider-failure",
+            "idempotency_key": "world-clock-turn-fallback",
         },
     )
-    assert message.status_code == 502, message.text
-    assert message.json()["detail"] == "Narrative provider request failed"
-    assert failed_turn_store.turn_history() == failed_turn_history
-    assert failed_turn_store.get_state() == failed_turn_state
-    assert failed_turn_state["world_clock"]["date"] == "0964-04-18T09:00:00Z"
+    assert message.status_code == 200, message.text
+    assert message.json().get("status") != "route_required"
+
+    fallback_turn_store = c.app.state.party_store.store_for_party(
+        str(fallback_turn_party["id"])
+    )
+    fallback_message = fallback_turn_store.latest_turn(include_prompt=True)
+    fallback_message_record = fallback_turn_store.turn_record(int(fallback_message["id"]))
+    assert fallback_message_record is not None
+    assert fallback_message_record["excluded_from_memory"] is True
+    assert "world_clock_events" not in fallback_message_record["metadata"]
+    assert any(
+        message["content"].startswith("СОБЫТИЯ МИРА")
+        and "Стартовое событие произошло." in message["content"]
+        for message in json.loads(fallback_message["prompt_json"])
+    )
+    fallback_turn_state = fallback_turn_store.get_state()
+    assert fallback_turn_state["world_clock"]["date"] == "0964-04-18T09:00:00Z"
     assert [
         item["id"]
-        for item in failed_turn_state["world_clock"]["pending_announcements"]
+        for item in fallback_turn_state["world_clock"]["pending_announcements"]
     ] == ["demo.opening-event"]
-    assert failed_turn_state["world_clock"]["event_statuses"]["demo.opening-event"].get(
+    assert fallback_turn_state["world_clock"]["event_statuses"]["demo.opening-event"].get(
         "announced_party_turn"
     ) is None
     assert all(
         job["job_type"] != "world_clock"
-        for job in failed_turn_store.service_jobs(limit=20)
+        for job in fallback_turn_store.service_jobs(limit=20)
     )
 
 
@@ -5578,7 +5007,7 @@ def test_repair_prompt_is_compact_and_does_not_replay_party_history():
     settings = Settings(
         llm_provider="openrouter",
         narrative_model="deepseek/deepseek-v4-flash",
-        scenario_type="training",
+        scenario_type="rp",
     )
     state = base_state()
     state["meta"]["turn"] = 4  # type: ignore[index]
@@ -5605,13 +5034,13 @@ def test_repair_prompt_is_compact_and_does_not_replay_party_history():
     )
     encoded = json.dumps(messages, ensure_ascii=False)
 
-    assert len(messages) == 2
+    assert len(messages) == 3
     assert "Remove the leaked assessment label" in encoded
     assert "AUTHORITATIVE_OUTCOME: keep the scheduled scene" in encoded
     assert "Correct scene text" in encoded
     assert "The old tower burned" not in encoded
     assert "LONG_TERM_PARTY_MEMORY" not in encoded
-    assert "RELATIONSHIP_PRESSURE" not in encoded
+    assert "RELATIONSHIP_PRESSURE" in encoded
 
 
 def test_rp_repair_prompt_keeps_relationship_pressure_before_the_failed_response():
@@ -5985,121 +5414,8 @@ def test_party_start_timeout_returns_504_and_marks_request_failed(
     assert "ReadTimeout" in status["error"]
 
 
-@pytest.mark.parametrize(
-    ("provider_mode", "expected_transport"),
-    [("http-503", "provider_error"), ("timeout", "provider_timeout")],
-)
-def test_training_runtime_party_start_provider_error_uses_world_fallback(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    provider_mode: str,
-    expected_transport: str,
-):
-    original_complete = NarrativeClient.complete
-    llm_calls = 0
-
-    async def counted_complete(*args: object, **kwargs: object) -> dict:
-        nonlocal llm_calls
-        llm_calls += 1
-        return await original_complete(*args, **kwargs)
-
-    monkeypatch.setattr(NarrativeClient, "complete", counted_complete)
-    source = Path(__file__).resolve().parents[2] / "worldpacks" / "awareness-one-day"
-    shutil.copytree(source, tmp_path / "worldpacks" / "awareness-one-day")
-    c = client(tmp_path, mode=provider_mode)
-    party = create_demo_party(
-        c,
-        title="Runtime provider fallback",
-        character_name="Эллина",
-        scenario_type="training",
-        worldpack_id="awareness-one-day",
-    )
-
-    response = c.post(
-        f"/api/parties/{party['id']}/start",
-        json={"idempotency_key": "runtime-start-provider-http-503"},
-        headers={"Authorization": "Bearer test", "X-Request-ID": "req_runtime_start_http_503"},
-    )
-
-    assert response.status_code == 200, response.text
-    assert response.json()["choices"][0]["finish_reason"] == "provider_fallback"
-    assert response.json()["choices"][0]["message"]["content"].startswith(
-        "Ход 1. Понедельник, 09:00-09:30."
-    )
-    history = c.get(f"/api/parties/{party['id']}/history").json()["turns"]
-    assert len(history) == 1
-    assert llm_calls == 1
-    metadata = latest_turn_metadata(c.app.state.party_store.store_for_party(party["id"]))
-    assert metadata["transport_status"] == expected_transport
-    deleted = c.delete(f"/api/parties/{party['id']}")
-    assert deleted.status_code == 200, deleted.text
 
 
-@pytest.mark.parametrize(
-    ("failure_kind", "expected_calls", "expected_finish_reason"),
-    [("soft-deadline", 2, "provider_fallback"), ("hard-sender", 1, "provider_fallback")],
-)
-def test_training_runtime_repairs_only_soft_validation_failures(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    failure_kind: str,
-    expected_calls: int,
-    expected_finish_reason: str,
-):
-    llm_calls = 0
-
-    async def training_complete(*args: object, **kwargs: object) -> dict:
-        nonlocal llm_calls
-        llm_calls += 1
-        sender = "Посторонний" if failure_kind == "hard-sender" else "Анна Петрова <petrova@ptsecurity.com>"
-        deadline = "утром" if failure_kind == "soft-deadline" and llm_calls == 1 else "09:35"
-        content = (
-            "ПИСЬМО\n"
-            "Канал: корпоративная почта\n"
-            f"От: {sender}\n"
-            "Кому: Эллина\n"
-            "Дата/время: понедельник, 09:12\n"
-            "Тема: Первый результат\n"
-            "Вложения: нет\n"
-            "Ссылки: нет\n"
-            "Тело:\n"
-            f"К {deadline} пришли первый результат или конкретный вопрос по работе Investigator.\n"
-            "Подпись:\nАнна Петрова"
-        )
-        return {
-            "id": f"training-repair-{llm_calls}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": "mock-model",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
-
-    monkeypatch.setattr(NarrativeClient, "complete", training_complete)
-    source = Path(__file__).resolve().parents[2] / "worldpacks" / "awareness-one-day"
-    shutil.copytree(source, tmp_path / "worldpacks" / "awareness-one-day")
-    c = client(tmp_path)
-    party = create_demo_party(
-        c,
-        title="Runtime repair classification",
-        character_name="Эллина",
-        scenario_type="training",
-        worldpack_id="awareness-one-day",
-    )
-
-    response = c.post(
-        f"/api/parties/{party['id']}/start",
-        json={"idempotency_key": f"runtime-repair-{failure_kind}"},
-        headers={"Authorization": "Bearer test"},
-    )
-
-    assert response.status_code == 200, response.text
-    assert llm_calls == expected_calls
-    assert response.json()["choices"][0]["finish_reason"] == expected_finish_reason
-    metadata = latest_turn_metadata(c.app.state.party_store.store_for_party(party["id"]))
-    assert metadata["transport_status"] == "invalid_response"
-    if failure_kind == "soft-profile":
-        assert "Investigator" in response.json()["choices"][0]["message"]["content"]
 
 
 def test_configured_attempt_order_keeps_explicit_models():

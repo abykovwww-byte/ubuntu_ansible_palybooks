@@ -22,10 +22,9 @@ endpoint сохраняются. Пустое поле в админской ф�
 
 - `GET /api/worldpacks` возвращает ровно `day-watch-moscow-v2` и summaries
   пресетов; detail дополнительно возвращает валидный `free_scenario_seed`;
-- retained Training запрашивает только свои legacy WorldPack через
-  `GET /api/worldpacks?scenario_type=training`; detail, player templates,
-  draft/save/list персонажей разрешены только для WorldPack с `training` в
-  `scenario_types.supported`, а ordinary legacy RP по этим URL получает `410`;
+- training query/payload не является compatibility-веткой: после C1 RP Gateway
+  не публикует training WorldPacks/templates/player characters и отклоняет
+  `scenario_type=training` до DB/provider write;
 - `POST /api/parties` одним запросом принимает `world_id`, `scenario` типа
   `preset` или `free`, `model_profile_id` и опциональные narrator settings;
 - `POST /api/parties/{id}/start` принимает только `idempotency_key`;
@@ -45,9 +44,10 @@ Narrator profile фиксирует exact provider/base URL/model. Clean BYOK м
 
 Обычные legacy RP state/world/branch/autotest/dataset/trace операции при cutover
 не становятся compatibility-слоем: они возвращают `410` или фильтруют ordinary
-RP. Training и серверно подтверждённый Showroom продолжают использовать legacy
-контракт. Light GUI в source уже понимает clean API, но production-флаг
-выключен, поэтом live UX ещё не переключён и не проверен.
+RP. Training/Showroom не используют этот контракт: их единственный active source
+находится в standalone project с целевым LAN-only `192.168.1.88:8011`. Light GUI
+в source уже понимает clean API, но production-флаг выключен, поэтому live UX
+ещё не переключён и не проверен.
 
 ### Light GUI при clean cutover
 
@@ -61,8 +61,8 @@ RP. Training и серверно подтверждённый Showroom прод�
 - панель показывает три раздельные роли: Narrator, atomic service и Administrator;
 - предложения Administrator принимает или отклоняет владелец Party, а не только
   пользователь с глобальной ролью admin;
-- Training остаётся в том же Light GUI на retained legacy-маршруте до внешнего
-  cutover Plan 018.
+- training UI и routes в RP Light GUI отсутствуют; пользователь проходит курсы
+  через standalone Showroom на `:8011` после C1 apply.
 
 ## Light GUI
 
@@ -256,12 +256,18 @@ endpoint: пользовательская session, visitor cookie и `run_id` �
 Showroom — отдельная витрина на `:8011` для прохождения опубликованных сценариев без регистрации.
 
 Decision 018 сохраняет этот пользовательский адрес и публичный `run_id` API, но
-меняет deployment ownership: C1 source закрепляет private
+меняет deployment ownership: C1 source закрепляет public
 `tavern-awareness-showroom` exact commit
-`b72c481d616d6b8d654dc198d4973dce4e3e123c` с training-only Gateway и
+`67244432659f6c25a268cbf788a8fa3af0f5b52f` с training-only Gateway и
 LAN-only bind `192.168.1.88:8011`. Выбор `rp` и создание мира по prompt в нём
 отсутствуют. До Ansible apply текущий старый Showroom на `:8011` и общий Gateway
 остаются live; source merge сам по себе не доказывает переключение.
+
+Публичные `/api/showroom/**` и `run_id` не меняются: browser обращается к тому
+же origin `:8011`, а Nginx нового Showroom проксирует `/api/*` только в свой
+standalone Training Gateway. В ответах Showroom по-прежнему нет `party_id`.
+Rollback window равен `0`: legacy UI и его RP source удаляются в той же
+поставке и второго training route после apply нет.
 
 ```mermaid
 sequenceDiagram
@@ -297,7 +303,7 @@ sequenceDiagram
 - показывать immutable snapshot корпоративного портала до пяти персонажей;
 - материализовать динамическую должность из описания сотрудника;
 - отображать структурированные письма и чаты безопасными text nodes;
-- открывать валидированные учебные сайты общим с Light GUI DOM-renderer;
+- открывать валидированные учебные сайты безопасным DOM-renderer standalone UI;
 - собирать opt-in leaderboard по numeric state path или числу ходов;
 - хранить обратную связь 👍/👎 с проверкой владельца visitor cookie.
 
@@ -374,7 +380,6 @@ Party-scoped `POST /api/parties/{party_id}/checks` также сохранён �
 ## Исходники
 
 - [Light GUI](../../roles/apps/files/rp-stack/rp-light-gui)
-- [Legacy Showroom source до отдельной команды O2](../../roles/apps/files/rp-stack/rp-showcase-gui)
 - [Standalone Awareness Showroom](https://github.com/abykovwww-byte/tavern-awareness-showroom)
 - [Showroom ADR](../../roles/apps/files/rp-stack/docs/decisions/012-public-showroom-scenarios.md)
 - [Project split plan](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md)

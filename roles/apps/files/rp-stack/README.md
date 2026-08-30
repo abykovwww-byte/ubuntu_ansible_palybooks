@@ -20,8 +20,10 @@ Showroom and Awareness training run as the separate training-only
 `tavern-awareness-showroom` application on `http://192.168.1.88:8011`, with its
 own Gateway, WorldPacks, database, backup, and provider path. This repository
 pins and deploys that application but is not its application-source authority.
-The retained training source below `rp-stack/` is inactive rollback material
-until the explicit O2 deletion.
+The owner selected a zero-length rollback window: the legacy Showroom,
+Awareness WorldPacks, and training runtime are removed from `rp-stack/` in the
+same cutover delivery. Legacy SQLite rows, state, and backups remain preserved
+and quarantined from the RP runtime.
 
 **Service model / Служебная модель** is the single administrator-selected LLM
 for the whole RP Stack. It serves long-term memory, world-state change drafts,
