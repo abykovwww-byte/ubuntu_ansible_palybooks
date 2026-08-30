@@ -2,6 +2,8 @@ const appState = {
   authEnabled: true,
   currentUser: null,
   worldpacks: [],
+  trainingWorldpacks: [],
+  cleanWorldDetail: null,
   modelProfiles: [],
   parties: [],
   activeParty: null,
@@ -22,6 +24,7 @@ const appState = {
   busy: false,
   busyText: "",
   pendingMessages: {},
+  failedMessageRetries: {},
   pendingStoryMemoryCorrections: [],
   pendingGmRoute: null,
   pendingGmDraft: null,
@@ -113,10 +116,33 @@ const els = {
   promptPreviewButton: document.querySelector("#promptPreviewButton"),
   promptPreview: document.querySelector("#promptPreview"),
   proposalList: document.querySelector("#proposalList"),
+  openingRetryPanel: document.querySelector("#openingRetryPanel"),
+  openingRetryHint: document.querySelector("#openingRetryHint"),
+  retryOpeningButton: document.querySelector("#retryOpeningButton"),
+  cleanRoleStatusPanel: document.querySelector("#cleanRoleStatusPanel"),
+  narratorRoleStatus: document.querySelector("#narratorRoleStatus"),
+  atomicServiceRoleStatus: document.querySelector("#atomicServiceRoleStatus"),
+  administratorRoleStatus: document.querySelector("#administratorRoleStatus"),
+  cleanAdministratorPanel: document.querySelector("#cleanAdministratorPanel"),
+  administratorProposalList: document.querySelector("#administratorProposalList"),
   toast: document.querySelector("#toast"),
   partyDialog: document.querySelector("#partyDialog"),
   partyForm: document.querySelector("#partyForm"),
   partyTitleInput: document.querySelector("#partyTitleInput"),
+  cleanPartyWizardFields: document.querySelector("#cleanPartyWizardFields"),
+  cleanWorldSelect: document.querySelector("#cleanWorldSelect"),
+  cleanScenarioPresetFields: document.querySelector("#cleanScenarioPresetFields"),
+  cleanScenarioPresetSelect: document.querySelector("#cleanScenarioPresetSelect"),
+  cleanScenarioFreeFields: document.querySelector("#cleanScenarioFreeFields"),
+  cleanScenarioIdInput: document.querySelector("#cleanScenarioIdInput"),
+  cleanScenarioTitleInput: document.querySelector("#cleanScenarioTitleInput"),
+  cleanPlayerRoleInput: document.querySelector("#cleanPlayerRoleInput"),
+  cleanScenarioStyleInput: document.querySelector("#cleanScenarioStyleInput"),
+  cleanScenarioFormatInput: document.querySelector("#cleanScenarioFormatInput"),
+  cleanScenarioDifficultyInput: document.querySelector("#cleanScenarioDifficultyInput"),
+  cleanScenarioDetailLevelInput: document.querySelector("#cleanScenarioDetailLevelInput"),
+  cleanOpeningInput: document.querySelector("#cleanOpeningInput"),
+  cleanNarratorNoteInput: document.querySelector("#cleanNarratorNoteInput"),
   worldSelect: document.querySelector("#worldSelect"),
   partyPresetFields: document.querySelector("#partyPresetFields"),
   partyPresetSelect: document.querySelector("#partyPresetSelect"),
@@ -243,6 +269,7 @@ const CHAT_VISIBLE_TURNS = 4;
 const AUTO_START_HISTORY_MESSAGE = "[AUTO_START] Старт партии";
 const ACTIVE_PARTY_STORAGE_KEY = "rp-light-gui-active-party";
 const PENDING_STORAGE_KEY = "rp-light-gui-pending-messages";
+const FAILED_RETRY_STORAGE_KEY = "rp-light-gui-failed-message-retries";
 const PENDING_MAX_AGE_MS = 60 * 60 * 1000;
 const PENDING_RECOVERY_ATTEMPTS = 180;
 const PENDING_RECOVERY_INTERVAL_MS = 5000;
@@ -289,6 +316,16 @@ function bindEvents() {
   els.changePartyModelButton.addEventListener("click", changePartyModel);
   els.resetNarratorSettingsButton.addEventListener("click", resetNarratorSettingsForm);
   els.deletePartyButton.addEventListener("click", deleteActiveParty);
+  els.retryOpeningButton.addEventListener("click", () => void retryOpeningParty());
+  els.administratorProposalList.addEventListener("click", handleAdministratorProposalDecision);
+  els.cleanWorldSelect.addEventListener("change", () => void loadCleanWorldDetail());
+  els.cleanScenarioPresetSelect.addEventListener("change", renderWorldPreview);
+  document.querySelectorAll("input[name='cleanScenarioSource']").forEach((input) =>
+    input.addEventListener("change", () => {
+      renderCleanScenarioSource();
+      renderWorldPreview();
+    }),
+  );
   els.worldSelect.addEventListener("change", () => {
     renderPartyWorldChoices();
     syncAutoPartyTitle();
@@ -335,12 +372,7 @@ function bindEvents() {
   document.querySelectorAll("input[name='worldSource']").forEach((input) => input.addEventListener("change", renderCreationModes));
   document.querySelectorAll("input[name='characterSource']").forEach((input) => input.addEventListener("change", renderCreationModes));
   document.querySelectorAll("input[name='scenarioType']").forEach((input) =>
-    input.addEventListener("change", () => {
-      renderWorldOptions();
-      syncAutoPartyTitle();
-      syncReadyCharacterDescription();
-      renderWorldPreview();
-    }),
+    input.addEventListener("change", () => void handleScenarioTypeChange()),
   );
 }
 
@@ -432,6 +464,8 @@ async function boot() {
       apiGet("/api/parties"),
     ]);
     appState.worldpacks = worldpacks.worldpacks || [];
+    appState.trainingWorldpacks = [];
+    appState.cleanWorldDetail = null;
     appState.modelProfiles = models.model_profiles || [];
     appState.parties = parties.parties || [];
     setGatewayStatus(health.status || "ok", health.status === "ok");
@@ -442,6 +476,8 @@ async function boot() {
     renderPartyList();
     restorePendingMessages();
     prunePendingMessages(appState.parties.map((party) => party.id));
+    restoreFailedMessageRetries();
+    pruneFailedMessageRetries(appState.parties.map((party) => party.id));
     const savedPartyId = localStorage.getItem(ACTIVE_PARTY_STORAGE_KEY);
     const active = appState.parties.find((party) => party.id === savedPartyId) || appState.parties[0] || null;
     if (active) {
@@ -520,6 +556,8 @@ async function logout() {
 
 function clearWorkspaceState() {
   appState.worldpacks = [];
+  appState.trainingWorldpacks = [];
+  appState.cleanWorldDetail = null;
   appState.modelProfiles = [];
   appState.parties = [];
   appState.activeParty = null;
@@ -538,6 +576,8 @@ function clearWorkspaceState() {
   appState.chatArchiveExpanded = false;
   appState.proposals = [];
   appState.pendingMessages = {};
+  appState.failedMessageRetries = {};
+  localStorage.removeItem(FAILED_RETRY_STORAGE_KEY);
   appState.pendingStoryMemoryCorrections = [];
   appState.pendingGmRoute = null;
   appState.pendingGmDraft = null;
@@ -582,7 +622,169 @@ function isAdmin() {
   return appState.currentUser?.role === "admin";
 }
 
+function isCleanWorldpack(pack) {
+  return Boolean(pack?.id && Array.isArray(pack?.scenario_presets));
+}
+
+function hasCleanRpCatalog() {
+  return appState.worldpacks.some(isCleanWorldpack);
+}
+
+function isCleanRpParty(party = appState.activeParty) {
+  return Boolean(
+    party?.scenario_type === "rp"
+      && typeof party?.world_id === "string"
+      && Number.isInteger(Number(party?.current_version)),
+  );
+}
+
+function isCleanRpCreation() {
+  return selectedRadioValue("scenarioType", "") === "rp" && hasCleanRpCatalog();
+}
+
+function dialogWorldpacks() {
+  if (selectedRadioValue("scenarioType", "") === "training" && hasCleanRpCatalog()) {
+    return appState.trainingWorldpacks;
+  }
+  return appState.worldpacks;
+}
+
+async function handleScenarioTypeChange() {
+  const scenarioType = selectedRadioValue("scenarioType", "");
+  if (scenarioType === "training" && hasCleanRpCatalog() && !appState.trainingWorldpacks.length) {
+    try {
+      const result = await apiGet("/api/worldpacks?scenario_type=training");
+      appState.trainingWorldpacks = result.worldpacks || [];
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+  renderPartyFlow();
+  renderWorldOptions();
+  syncAutoPartyTitle();
+  syncReadyCharacterDescription();
+  renderWorldPreview();
+  if (isCleanRpCreation()) await loadCleanWorldDetail();
+}
+
+function renderPartyFlow() {
+  const clean = isCleanRpCreation();
+  els.cleanPartyWizardFields.classList.toggle("hidden", !clean);
+  document.querySelectorAll('[data-party-flow="legacy"]').forEach((node) => {
+    node.toggleAttribute("hidden", clean);
+    node.querySelectorAll("input, textarea, select").forEach((field) => {
+      field.disabled = clean;
+    });
+  });
+  els.cleanPartyWizardFields.querySelectorAll("input, textarea, select").forEach((field) => {
+    field.disabled = !clean;
+  });
+  els.cleanWorldSelect.required = clean;
+  if (clean) {
+    renderCleanWorldOptions();
+    renderCleanScenarioSource();
+  } else {
+    renderCreationModes();
+  }
+}
+
+function renderCleanWorldOptions() {
+  const previous = els.cleanWorldSelect.value;
+  const worlds = appState.worldpacks.filter(isCleanWorldpack);
+  els.cleanWorldSelect.innerHTML = worlds
+    .map((pack) => `<option value="${escapeHtml(pack.id)}">${escapeHtml(pack.title)}</option>`)
+    .join("");
+  if (worlds.some((pack) => pack.id === previous)) els.cleanWorldSelect.value = previous;
+  const selected = worlds.find((pack) => pack.id === els.cleanWorldSelect.value) || worlds[0] || null;
+  const presets = selected?.scenario_presets || [];
+  const previousPreset = els.cleanScenarioPresetSelect.value;
+  els.cleanScenarioPresetSelect.innerHTML = presets
+    .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.title)} · ${escapeHtml(preset.player_role)}</option>`)
+    .join("");
+  if (presets.some((preset) => preset.id === previousPreset)) {
+    els.cleanScenarioPresetSelect.value = previousPreset;
+  }
+}
+
+async function loadCleanWorldDetail() {
+  if (!isCleanRpCreation()) return null;
+  renderCleanWorldOptions();
+  const worldId = els.cleanWorldSelect.value;
+  if (!worldId) return null;
+  if (appState.cleanWorldDetail?.id === worldId) {
+    fillCleanFreeScenario(appState.cleanWorldDetail.free_scenario_seed, worldId);
+    return appState.cleanWorldDetail;
+  }
+  const result = await apiGet(`/api/worldpacks/${encodeURIComponent(worldId)}`);
+  if (els.cleanWorldSelect.value !== worldId) return null;
+  appState.cleanWorldDetail = result.worldpack || null;
+  fillCleanFreeScenario(appState.cleanWorldDetail?.free_scenario_seed, worldId);
+  renderWorldPreview();
+  return appState.cleanWorldDetail;
+}
+
+function fillCleanFreeScenario(seed, worldId) {
+  if (!seed || els.cleanScenarioFreeFields.dataset.worldId === worldId) return;
+  els.cleanScenarioFreeFields.dataset.worldId = worldId;
+  els.cleanScenarioIdInput.value = seed.scenario_id || "free-scenario";
+  els.cleanScenarioTitleInput.value = seed.title || "Свободный сценарий";
+  els.cleanPlayerRoleInput.value = seed.player_role || "";
+  els.cleanScenarioStyleInput.value = seed.style || "";
+  els.cleanScenarioFormatInput.value = seed.format || "plain_scene_text";
+  els.cleanScenarioDifficultyInput.value = seed.difficulty || "";
+  els.cleanScenarioDetailLevelInput.value = seed.detail_level || "default";
+  els.cleanOpeningInput.value = seed.opening || "";
+  els.cleanNarratorNoteInput.value = seed.narrator_note || "";
+}
+
+function renderCleanScenarioSource() {
+  const clean = isCleanRpCreation();
+  const source = selectedRadioValue("cleanScenarioSource", "preset");
+  const free = clean && source === "free";
+  els.cleanScenarioPresetFields.classList.toggle("hidden", !clean || free);
+  els.cleanScenarioFreeFields.classList.toggle("hidden", !free);
+  els.cleanScenarioPresetSelect.required = clean && !free;
+}
+
+function cleanScenarioPayload(seed) {
+  const source = selectedRadioValue("cleanScenarioSource", "preset");
+  if (source === "preset") {
+    const presetId = els.cleanScenarioPresetSelect.value;
+    if (!presetId) throw new Error("Выбери авторский сценарий.");
+    return { source: "preset", preset_id: presetId };
+  }
+  if (!seed) throw new Error("Свободный сценарий ещё не загружен с сервера.");
+  const scenario = {
+    ...seed,
+    source: "free",
+    scenario_id: els.cleanScenarioIdInput.value.trim() || "free-scenario",
+    title: els.cleanScenarioTitleInput.value.trim(),
+    player_role: els.cleanPlayerRoleInput.value.trim(),
+    style: els.cleanScenarioStyleInput.value.trim(),
+    format: els.cleanScenarioFormatInput.value.trim(),
+    difficulty: els.cleanScenarioDifficultyInput.value.trim() || null,
+    detail_level: els.cleanScenarioDetailLevelInput.value.trim(),
+    opening: els.cleanOpeningInput.value.trim(),
+    narrator_note: els.cleanNarratorNoteInput.value.trim(),
+  };
+  const required = ["title", "player_role", "style", "format", "detail_level", "opening", "narrator_note"];
+  if (required.some((key) => !scenario[key])) throw new Error("Заполни все обязательные поля свободного сценария.");
+  return scenario;
+}
+
+function cleanPartyCreatePayload({ title, worldId, scenario, modelProfileId, narratorSettings = null }) {
+  const payload = {
+    title,
+    world_id: worldId,
+    scenario,
+    model_profile_id: modelProfileId,
+  };
+  if (narratorSettings && Object.keys(narratorSettings).length) payload.narrator_settings = narratorSettings;
+  return payload;
+}
+
 async function selectParty(partyId) {
+  const previousPartyId = appState.activeParty?.id || null;
   const party = appState.parties.find((item) => item.id === partyId) || (await apiGet(`/api/parties/${partyId}`)).party;
   if (appState.activeParty?.id !== party.id) {
     appState.loreCards = [];
@@ -599,7 +801,11 @@ async function selectParty(partyId) {
   clearGmDecision();
   localStorage.setItem(ACTIVE_PARTY_STORAGE_KEY, party.id);
   await reloadActiveParty();
-  if (isAdmin()) await reloadAdminAutotestRuns(party.id);
+  const failedRetry = failedMessageRetryForParty(party.id);
+  if (previousPartyId !== party.id || failedRetry) {
+    els.messageInput.value = failedRetry?.text || "";
+  }
+  if (isAdmin() && !isCleanRpParty()) await reloadAdminAutotestRuns(party.id);
 }
 
 async function reloadActiveParty() {
@@ -612,6 +818,31 @@ async function reloadActiveParty() {
   const optionalPartyData = loadOptionalPartyData(partyId, reloadGeneration).catch((error) => {
     console.warn("Optional party data was not refreshed", error);
   });
+  if (isCleanRpParty()) {
+    const [party, history, memory, proposals] = await Promise.all([
+      apiGet(`/api/parties/${partyId}`),
+      apiGet(`/api/parties/${partyId}/history`),
+      apiGet(`/api/parties/${partyId}/memory`),
+      apiGet(`/api/parties/${partyId}/administrator/proposals`),
+    ]);
+    if (appState.activeParty?.id !== partyId || reloadGeneration !== partyReloadGeneration) return;
+    appState.activeParty = party.party;
+    appState.history = history;
+    appState.memory = memory;
+    appState.proposals = proposals.proposals || [];
+    appState.partyState = null;
+    appState.contextEstimate = null;
+    appState.characters = null;
+    appState.checkpoints = [];
+    appState.branches = [];
+    appState.promptPreview = null;
+    appState.chatArchiveExpanded = false;
+    reconcilePendingFromHistory(partyId, history);
+    ensurePendingRecovery(partyId);
+    renderAll();
+    await optionalPartyData;
+    return;
+  }
   const [party, partyState, history, proposals, context, memory, characters] = await Promise.all([
     apiGet(`/api/parties/${partyId}`),
     apiGet(`/api/parties/${partyId}/state`),
@@ -672,6 +903,23 @@ async function reloadActiveBranch() {
 }
 
 async function loadOptionalPartyData(partyId, reloadGeneration) {
+  if (isCleanRpParty()) {
+    const [loreCards, serviceJobs, supervisor, byok] = await Promise.allSettled([
+      apiGet(`/api/parties/${partyId}/lore-cards`),
+      apiGet(`/api/parties/${partyId}/service-jobs`),
+      apiGet(`/api/parties/${partyId}/supervisor`),
+      apiGet(`/api/parties/${partyId}/byok`),
+    ]);
+    if (appState.activeParty?.id !== partyId || reloadGeneration !== partyReloadGeneration) return;
+    appState.loreCards = loreCards.status === "fulfilled" ? loreCards.value.cards || [] : [];
+    appState.serviceJobs = serviceJobs.status === "fulfilled" ? serviceJobs.value.jobs || [] : [];
+    appState.supervisor = supervisor.status === "fulfilled" ? supervisor.value : null;
+    appState.byokKeys = byok.status === "fulfilled" ? byok.value.api_keys || [] : [];
+    renderMemoryTools();
+    renderCleanRuntimeControls();
+    renderByok();
+    return;
+  }
   const [loreCards, checkpoints, branches, serviceJobs, supervisor, byok] = await Promise.allSettled([
     apiGet(`/api/parties/${partyId}/lore-cards`),
     apiGet(`/api/parties/${partyId}/checkpoints`),
@@ -704,10 +952,40 @@ function renderAll() {
   renderPromptPreview();
   renderChat();
   renderProposals();
+  renderCleanRuntimeControls();
   renderMessageControls();
   renderAdminPanel();
   renderByok();
   renderBranchReadOnlyControls();
+}
+
+function renderCleanRuntimeControls() {
+  const clean = isCleanRpParty();
+  document.querySelectorAll("[data-legacy-rp-control]").forEach((node) => {
+    node.toggleAttribute("hidden", clean);
+  });
+  els.cleanRoleStatusPanel.classList.toggle("hidden", !clean);
+  els.cleanAdministratorPanel.classList.toggle("hidden", !clean);
+  const retryOpening = clean && Number(appState.activeParty?.current_version || 0) === 0;
+  els.openingRetryPanel.classList.toggle("hidden", !retryOpening);
+  els.retryOpeningButton.disabled = Boolean(activePendingMessage() || appState.busy);
+  if (retryOpening) {
+    els.openingRetryHint.textContent = "Opening не сохранён. Повтор использует тот же idempotency key и не создаёт второй старт.";
+  }
+  if (!clean) return;
+  const roles = appState.supervisor?.roles || {};
+  els.narratorRoleStatus.innerHTML = rpRoleStatusHtml(roles.narrator);
+  els.atomicServiceRoleStatus.innerHTML = rpRoleStatusHtml(roles.atomic_service);
+  els.administratorRoleStatus.innerHTML = rpRoleStatusHtml(roles.administrator);
+}
+
+function rpRoleStatusHtml(role) {
+  if (!role) return "Нет данных";
+  const model = [role.provider, role.model].filter(Boolean).join(" · ") || "модель не выбрана";
+  const switchState = role.kill_switch ? "kill switch включён" : "работает";
+  const counters = `успешно ${Number(role.success_count || 0)} · ошибок ${Number(role.error_count || 0)}`;
+  const error = role.last_error ? `<br><span class="warning-text">${escapeHtml(role.last_error)}</span>` : "";
+  return `${escapeHtml(model)}<br>${escapeHtml(role.status || "idle")} · ${escapeHtml(switchState)} · ${escapeHtml(counters)}${error}`;
 }
 
 function renderBranchReadOnlyControls() {
@@ -748,7 +1026,7 @@ function renderPartyList() {
   els.partyList.innerHTML = appState.parties
     .map((party) => {
       const active = appState.activeParty?.id === party.id ? " active" : "";
-      const world = party.worldpack?.title || party.worldpack_id;
+      const world = party.world_title || party.worldpack?.title || party.world_id || party.worldpack_id;
       const scenario = scenarioTypeLabels[party.scenario_type] || party.scenario_type;
       return `<button class="party-card${active}" data-party-id="${escapeHtml(party.id)}" title="Открыть партию ${escapeHtml(party.title)}">
         <strong>${escapeHtml(party.title)}</strong>
@@ -769,7 +1047,7 @@ function renderHeader() {
     : "Нет активной партии";
   els.activeWorld.textContent = branch
     ? `${party?.worldpack?.title || party?.worldpack_id || "Мир"} · checkpoint #${branch.source_checkpoint_id}`
-    : party?.worldpack?.title || "Мир не выбран";
+    : party?.world_title || party?.worldpack?.title || "Мир не выбран";
 }
 
 function renderMeta() {
@@ -780,6 +1058,22 @@ function renderMeta() {
   renderPartyModelSelect();
   if (!party) {
     els.partyMeta.innerHTML = `<dt title="Статус выбранной партии">Статус</dt><dd>партия не выбрана</dd>`;
+    return;
+  }
+  if (isCleanRpParty(party)) {
+    const rows = [
+      ["Сценарий", `${party.scenario_title} · ${party.scenario_source}`],
+      ["Мир", party.world_title || party.world_id],
+      ["Провайдер", providerLabel(party.narrator_provider)],
+      ["Модель", party.narrator_model || party.model_profile_id],
+      ["Версия", `v${party.current_version}`],
+      ["ID партии", party.id],
+      ["World hash", party.world_hash],
+      ["Scenario hash", party.scenario_hash],
+    ];
+    els.partyMeta.innerHTML = rows
+      .map(([key, value]) => `<dt title="${escapeHtml(metaHints[key] || "")}">${escapeHtml(key)}</dt><dd title="${escapeHtml(value)}">${escapeHtml(value)}</dd>`)
+      .join("");
     return;
   }
   const rows = [
@@ -799,6 +1093,11 @@ function renderMeta() {
 
 function renderPartyModelSelect() {
   if (!els.partyModelSelect || !els.partyModelProviderSelect) return;
+  if (isCleanRpParty()) {
+    els.partyModelProviderSelect.disabled = true;
+    els.partyModelSelect.disabled = true;
+    return;
+  }
   const currentProvider = normalizeProvider(appState.activeParty?.model_profile?.provider);
   renderProviderOptions(els.partyModelProviderSelect, currentProvider);
   els.partyModelProviderSelect.disabled = !appState.activeParty || Boolean(appState.activeBranch) || !availableProviders().length;
@@ -1044,6 +1343,11 @@ function renderMemory() {
     els.memorySummary.innerHTML = `<div class="state-item">Партия не выбрана.</div>`;
     return;
   }
+  if (isCleanRpParty()) {
+    els.memoryPanelHint.textContent = "Story memory собирается атомарной служебной моделью из подтверждённых ходов и не переписывает RAW историю партии.";
+    els.memorySummary.innerHTML = cleanStoryMemoryHtml(payload.story_memory || null);
+    return;
+  }
   const storyHtml = isRp ? rpStoryMemoryHtml(storyMemory, storyStats) : "";
   if (!memory) {
     const oldTurns = stats.eligible_old_turns ?? 0;
@@ -1072,6 +1376,36 @@ function renderMemory() {
     ${memoryList("Отношения", memory.relationship_changes)}
     ${stateItem("Модель", escapeHtml(memory.model || "unknown"), "Модель, которая сгенерировала сводку.")}
   `;
+}
+
+function cleanStoryMemoryHtml(record) {
+  if (!record?.snapshot) {
+    return stateItem(
+      "Story memory",
+      "пока не создана",
+      "Снимок появится после достаточного числа подтверждённых ходов; RAW история уже доступна наратору.",
+    );
+  }
+  const snapshot = record.snapshot;
+  const facts = [
+    snapshot.situation?.current_situation,
+    ...(snapshot.situation?.canon || []),
+    ...(snapshot.threads?.active_threads || []),
+    ...(snapshot.threads?.resolved_threads || []),
+    ...(snapshot.characters?.characters || []),
+    ...(snapshot.assets_and_rules?.inventory_and_assets || []),
+    ...(snapshot.assets_and_rules?.rules_and_abilities || []),
+    ...(snapshot.chronology_and_hooks?.chronology || []),
+    ...(snapshot.chronology_and_hooks?.unresolved_hooks || []),
+  ].filter((fact) => fact?.status !== "retracted" && String(fact?.text || "").trim());
+  const factHtml = facts.length
+    ? `<div class="state-item memory-list"><strong>Подтверждённые факты</strong><ul>${facts.slice(0, 12).map((fact) => `<li>${escapeHtml(fact.text)}</li>`).join("")}</ul></div>`
+    : `<div class="state-item">Подтверждённых фактов в снимке пока нет.</div>`;
+  return [
+    stateItem("Story memory", `revision ${escapeHtml(record.revision)} · safe coverage v${escapeHtml(record.safe_coverage ?? 0)}`, "Безопасно покрытая версия — минимум покрытия всех пяти секций памяти."),
+    stateItem("Наблюдение", `до версии v${escapeHtml(snapshot.observed_through_version ?? 0)}`, "Последняя версия Party, которую обработала атомарная служебная модель."),
+    factHtml,
+  ].join("");
 }
 
 function rpStoryMemoryHtml(snapshot, stats) {
@@ -1196,15 +1530,21 @@ async function handleStoryMemoryCorrectionAction(event) {
 
 function renderMemoryTools() {
   if (!els.loreCardList || !els.checkpointList) return;
+  const clean = isCleanRpParty();
   const activeJobs = (appState.serviceJobs || []).filter((job) => ["pending", "running", "failed", "stale"].includes(job.status));
   const jobHtml = activeJobs.length
     ? `<div class="state-item"><strong>Служебная LLM</strong>${activeJobs
-        .map((job) => `${escapeHtml(job.job_type)}: ${escapeHtml(job.status)} · попытка ${escapeHtml(job.attempts)}/${escapeHtml(job.max_attempts)}${job.last_error ? ` · ${escapeHtml(job.last_error)}` : ""}`)
+        .map((job) => `${escapeHtml(job.job_type)}: ${escapeHtml(job.status)} · ${clean ? "фактических отказов" : "попытка"} ${escapeHtml(job.attempts)}/${escapeHtml(job.max_attempts)}${job.last_error ? ` · ${escapeHtml(job.last_error)}` : ""}`)
         .join("<br>")}</div>`
     : `<div class="state-item"><strong>Служебная LLM</strong>очередь пуста</div>`;
   const cards = appState.loreCards || [];
-  els.loreCardList.innerHTML = rpSupervisorStatusHtml() + jobHtml + (cards.length
+  const cardsHtml = clean
     ? cards.map((card) => `<div class="state-item lore-card">
+        <strong>${escapeHtml(card.title)}</strong>
+        <div>${escapeHtml(clipText(card.content, 500))}</div>
+        <div class="mini-metrics"><span>${escapeHtml(card.origin || "party")}</span><span>${card.enabled === false ? "выключена" : "доступна"}</span></div>
+      </div>`).join("")
+    : cards.map((card) => `<div class="state-item lore-card">
         <strong>${escapeHtml(card.title)}</strong>
         <div>${escapeHtml(clipText(card.content, 500))}</div>
         <div class="mini-metrics"><span>${card.always_on ? "always-on" : escapeHtml((card.keywords || []).join(", ") || "без триггеров")}</span><span>${card.enabled ? "включена" : "выключена"}</span></div>
@@ -1212,7 +1552,9 @@ function renderMemoryTools() {
           <button class="text-button" type="button" data-lore-action="toggle" data-card-id="${card.id}" data-enabled="${card.enabled}">${card.enabled ? "Выключить" : "Включить"}</button>
           <button class="text-button danger" type="button" data-lore-action="archive" data-card-id="${card.id}">Архивировать</button>
         </div>
-      </div>`).join("")
+      </div>`).join("");
+  els.loreCardList.innerHTML = (clean ? "" : rpSupervisorStatusHtml()) + jobHtml + (cards.length
+    ? cardsHtml
     : `<div class="state-item">Lore Cards пока нет.</div>`);
   const checkpoints = appState.checkpoints || [];
   const checkpointHtml = checkpoints.length
@@ -1234,6 +1576,16 @@ function renderMemoryTools() {
 
 function rpSupervisorStatusHtml() {
   const supervisor = appState.supervisor;
+  if (supervisor?.roles) {
+    const labels = {
+      narrator: "Нарратор",
+      atomic_service: "Атомарная служебная модель",
+      administrator: "Administrator",
+    };
+    return ["narrator", "atomic_service", "administrator"]
+      .map((key) => `<div class="state-item" data-rp-role="${key}"><strong>${labels[key]}</strong><div>${rpRoleStatusHtml(supervisor.roles[key])}</div></div>`)
+      .join("");
+  }
   if (!supervisor?.enabled) return "";
   const mode = supervisor.mode === "enforce" ? "режим рекомендаций" : "наблюдение";
   const storyTurns = Number(supervisor.story_turn_count || 0);
@@ -1579,6 +1931,7 @@ function renderChat({ scrollMode = "bottom" } = {}) {
     messages.push(chatArchiveHtml(hiddenTurnCount));
   }
   const allowLoreDraft = !appState.activeBranch
+    && !isCleanRpParty()
     && appState.activeParty?.scenario_type === "rp"
     && Number(appState.activeParty?.rp_contract_revision || 0) >= 8;
   for (const turn of visibleTurns) {
@@ -1590,14 +1943,14 @@ function renderChat({ scrollMode = "bottom" } = {}) {
     if (autoStart) {
       messages.push(messageHtml("system", "Старт", "Партия началась автоматически.", turn.created_at));
     } else {
-      messages.push(messageHtml("user", "Игрок", turn.player_message, turn.created_at));
+      messages.push(messageHtml("user", "Игрок", turnPlayerText(turn), turn.created_at));
     }
     messages.push(messageHtml(
       "assistant",
       "GM",
-      turn.narrative_response,
+      turnNarratorText(turn),
       turn.created_at,
-      autoStart ? null : {
+      autoStart || isCleanRpParty() ? null : {
         turnId: turn.id,
         rating: turn.player_rating || (turn.player_liked ? "positive" : "none"),
       },
@@ -1681,7 +2034,16 @@ function chatArchiveHtml(hiddenTurnCount) {
 }
 
 function isAutoStartTurn(turn) {
-  return String(turn?.player_message || "").startsWith(AUTO_START_HISTORY_MESSAGE);
+  return turn?.turn_kind === "opening_scene"
+    || String(turn?.player_message || "").startsWith(AUTO_START_HISTORY_MESSAGE);
+}
+
+function turnPlayerText(turn) {
+  return String(turn?.player_text ?? turn?.player_message ?? "");
+}
+
+function turnNarratorText(turn) {
+  return String(turn?.narrator_text ?? turn?.narrative_response ?? "");
 }
 
 async function handleTurnFeedbackClick(event) {
@@ -1757,6 +2119,30 @@ function updateTurnFeedbackControls(controls, rating) {
 }
 
 function renderProposals() {
+  if (isCleanRpParty()) {
+    const proposals = appState.proposals || [];
+    if (!proposals.length) {
+      els.administratorProposalList.innerHTML = `<div class="proposal">Новых предложений нет.</div>`;
+      return;
+    }
+    els.administratorProposalList.innerHTML = proposals.map((proposal) => {
+      const pending = proposal.status === "pending";
+      const actions = pending ? `<div class="inline-actions">
+        <button class="tool-button" type="button" data-administrator-decision="accept" data-proposal-id="${escapeHtml(proposal.id)}">Принять</button>
+        <button class="text-button danger-text" type="button" data-administrator-decision="reject" data-proposal-id="${escapeHtml(proposal.id)}">Отклонить</button>
+      </div>` : "";
+      return `<article class="proposal" data-administrator-proposal="${escapeHtml(proposal.id)}">
+        <strong>${escapeHtml(proposal.kind)} · ${escapeHtml(proposal.target_slot)}</strong>
+        <div class="gm-diff">
+          <div><span>Было</span><p>${escapeHtml(proposal.before_text || "—")}</p></div>
+          <div><span>Станет</span><p>${escapeHtml(proposal.after_text || "—")}</p></div>
+        </div>
+        <p class="panel-hint">${escapeHtml(proposal.status)} · база Party v${escapeHtml(proposal.base_party_version)} · evidence ${escapeHtml((proposal.evidence_versions || []).join(", ") || "—")}</p>
+        ${actions}
+      </article>`;
+    }).join("");
+    return;
+  }
   if (!appState.proposals.length) {
     els.proposalList.innerHTML = `<div class="proposal">Нет черновиков изменений.</div>`;
     return;
@@ -1771,6 +2157,35 @@ function renderProposals() {
     .join("");
 }
 
+async function decideAdministratorProposal(proposalId, decision) {
+  const partyId = appState.activeParty?.id;
+  if (!partyId || !["accept", "reject"].includes(decision)) return null;
+  const result = await apiPost(
+    `/api/parties/${encodeURIComponent(partyId)}/administrator/proposals/${encodeURIComponent(proposalId)}/decision`,
+    { decision },
+  );
+  await reloadPartyIfActive(partyId);
+  return result;
+}
+
+async function handleAdministratorProposalDecision(event) {
+  const button = event.target.closest("[data-administrator-decision]");
+  if (!button || appState.busy) return;
+  const proposalId = Number(button.dataset.proposalId);
+  const decision = button.dataset.administratorDecision;
+  if (!Number.isInteger(proposalId) || proposalId <= 0) return;
+  try {
+    setBusy(true, decision === "accept" ? "Применяю предложение Administrator..." : "Отклоняю предложение Administrator...");
+    await decideAdministratorProposal(proposalId, decision);
+    showToast(decision === "accept" ? "Предложение принято." : "Предложение отклонено.");
+  } catch (error) {
+    if (error.status === 409) await reloadActiveParty().catch(() => {});
+    showToast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function reloadAdminData() {
   if (!isAdmin()) return;
   const [users, worldpacks, serviceModel, autotestModels] = await Promise.all([
@@ -1783,10 +2198,15 @@ async function reloadAdminData() {
   appState.adminWorldpacks = (worldpacks.worldpacks || []).filter((pack) => !pack.owner_user_id);
   appState.serviceModelSettings = serviceModel;
   appState.adminAutotestProfiles = autotestModels.model_profiles || [];
-  await Promise.all([
-    reloadAdminAutotestRuns(appState.activeParty?.id),
-    reloadAdminDatasetTurns(appState.activeParty?.id, appState.activeBranch?.id),
-  ]);
+  if (isCleanRpParty()) {
+    appState.adminAutotestRuns = [];
+    appState.adminDatasetTurns = [];
+  } else {
+    await Promise.all([
+      reloadAdminAutotestRuns(appState.activeParty?.id),
+      reloadAdminDatasetTurns(appState.activeParty?.id, appState.activeBranch?.id),
+    ]);
+  }
   renderAdminPanel();
   renderMessageControls();
 }
@@ -2151,6 +2571,14 @@ function renderByok() {
     els.byokKeysList.innerHTML = `<div class="admin-empty">Сначала выберите партию.</div>`;
     return;
   }
+  if (isCleanRpParty(party)) {
+    const provider = String(party.narrator_provider || "");
+    if (provider && ![...els.byokKeyProviderSelect.options].some((option) => option.value === provider)) {
+      els.byokKeyProviderSelect.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(provider)}">${escapeHtml(providerLabel(provider))}</option>`);
+    }
+    els.byokKeyProviderSelect.value = provider;
+    els.byokKeyProviderSelect.disabled = true;
+  }
   els.byokKeysList.innerHTML = appState.byokKeys.length
     ? appState.byokKeys.map((key) => byokKeyRow(key)).join("")
     : `<div class="admin-empty">У этой партии нет BYOK-ключей.</div>`;
@@ -2200,7 +2628,7 @@ function formatPrice(value) {
 
 function openPartyDialog() {
   renderDialogOptions();
-  renderCreationModes();
+  renderPartyFlow();
   if (typeof els.partyDialog.showModal === "function") {
     els.partyDialog.showModal();
   } else {
@@ -2227,10 +2655,12 @@ function renderDialogOptions() {
   els.worldMarkdownInput.value = "";
   els.worldMarkdownStatus.textContent = WORLD_MARKDOWN_HELP;
   appState.worldMarkdownImport = null;
+  els.cleanScenarioFreeFields.dataset.worldId = "";
   els.characterNameInput.value = "Игрок";
   els.characterDescriptionInput.value = selectedPartyWorldChoices(pack).opening?.player_role || pack?.manifest?.player_role || "";
   renderWorldPreview();
   renderModelPreview();
+  renderPartyFlow();
 }
 
 function renderDialogModelOptions() {
@@ -2248,9 +2678,9 @@ function renderDialogModelOptions() {
 function renderWorldOptions() {
   const scenarioType = selectedRadioValue("scenarioType", "");
   const previous = els.worldSelect.value;
-  const available = appState.worldpacks.filter((pack) => worldSupportsScenario(pack, scenarioType));
+  const available = dialogWorldpacks().filter((pack) => worldSupportsScenario(pack, scenarioType));
   els.worldSelect.innerHTML = available
-    .map((pack) => `<option value="${escapeHtml(pack.id)}">${escapeHtml(pack.title)} · ${escapeHtml(pack.status)}</option>`)
+    .map((pack) => `<option value="${escapeHtml(pack.id)}">${escapeHtml(pack.title)}${pack.status ? ` · ${escapeHtml(pack.status)}` : ""}</option>`)
     .join("");
   if (available.some((pack) => pack.id === previous)) {
     els.worldSelect.value = previous;
@@ -2321,6 +2751,7 @@ function syncAutoPartyTitle() {
 }
 
 function renderCreationModes() {
+  if (isCleanRpCreation()) return;
   const worldSource = selectedRadioValue("worldSource");
   const worldPrompt = worldSource === "prompt";
   const worldMarkdown = worldSource === "markdown_file";
@@ -2348,6 +2779,21 @@ function renderCreationModes() {
 }
 
 function renderWorldPreview() {
+  if (isCleanRpCreation()) {
+    const pack = appState.worldpacks.find((item) => item.id === els.cleanWorldSelect.value)
+      || appState.worldpacks.find(isCleanWorldpack)
+      || null;
+    if (!pack) {
+      els.worldPreview.textContent = "Нет доступного World.";
+      return;
+    }
+    const source = selectedRadioValue("cleanScenarioSource", "preset");
+    const preset = (pack.scenario_presets || []).find((item) => item.id === els.cleanScenarioPresetSelect.value);
+    const scenario = source === "free" ? "Свободный сценарий" : preset?.title || "Авторский пресет";
+    els.worldPreview.innerHTML = `<strong>${escapeHtml(pack.title)}</strong><br>${escapeHtml(pack.premise || "")}<br><span>${escapeHtml(scenario)}</span>`;
+    syncGeneratedWorldPartyTitle(pack.title);
+    return;
+  }
   const worldSource = selectedRadioValue("worldSource");
   if (worldSource === "prompt") {
     const title = els.worldPromptTitleInput.value.trim() || "Свой мир";
@@ -2461,6 +2907,7 @@ function renderModelPreview() {
 }
 
 function syncReadyCharacterDescription() {
+  if (isCleanRpCreation()) return;
   if (selectedRadioValue("characterSource") === "prompt") return;
   const pack = selectedWorldpack();
   els.characterDescriptionInput.value = selectedPartyWorldChoices(pack).opening?.player_role || pack?.manifest?.player_role || "";
@@ -2472,9 +2919,27 @@ async function createParty(event) {
   const scenarioType = selectedRadioValue("scenarioType", "");
   const characterPrompt = selectedRadioValue("characterSource") === "prompt";
   try {
-    setBusy(true, "Создаю партию и стартового персонажа...");
+    setBusy(true, isCleanRpCreation() ? "Создаю RP-партию..." : "Создаю партию и стартового персонажа...");
     if (!modelProfileId) throw new Error("Нет доступной модели для партии.");
     if (!scenarioType) throw new Error("Выбери тип сценария.");
+    if (isCleanRpCreation()) {
+      const detail = await loadCleanWorldDetail();
+      const worldId = els.cleanWorldSelect.value;
+      if (!worldId || !detail) throw new Error("World не загружен.");
+      const payload = cleanPartyCreatePayload({
+        title: els.partyTitleInput.value.trim(),
+        worldId,
+        scenario: cleanScenarioPayload(detail.free_scenario_seed),
+        modelProfileId,
+      });
+      const party = await apiPost("/api/parties", payload);
+      closePartyDialog();
+      await boot();
+      await selectParty(party.party.id);
+      showToast("Партия создана. Нарратор готовит opening...");
+      await autoStartParty(party.party.id);
+      return;
+    }
     const worldpack = await resolveWorldpack();
     const choices = selectedPartyWorldChoices(worldpack);
     const hasPresets = scenarioType === "rp" && Array.isArray(worldpack?.presets) && worldpack.presets.length > 0;
@@ -2515,6 +2980,7 @@ async function createParty(event) {
     showToast(error.message);
   } finally {
     setBusy(false);
+    renderCleanRuntimeControls();
   }
 }
 
@@ -2558,7 +3024,7 @@ async function autoStartParty(partyId) {
       { idempotency_key: requestId },
       { "X-Request-ID": requestId },
     );
-    const content = result.message?.content || result.latest_turn?.narrative_response || "";
+    const content = result.message?.content || turnNarratorText(result.turn || result.latest_turn);
     if (content) {
       replacePendingMessage(partyId, requestId, content);
     }
@@ -2568,15 +3034,21 @@ async function autoStartParty(partyId) {
     } catch (syncError) {
       showToast(`Старт получен, но история не обновилась: ${syncError.message}`);
     }
-    showToast(result.started ? "Стартовая сцена готова." : "Партия уже начата.");
+    showToast(content || result.turn ? "Стартовая сцена готова." : "Партия уже начата.");
   } catch (error) {
     setPendingStatus("Стартовый запрос оборвался. Проверяю историю...", partyId);
     let recoveryError = null;
-    const recovered = await waitForRecoveredMessage(partyId, requestId).catch((recoverError) => {
-      recoveryError = recoverError;
-      return null;
-    });
-    if (recovered?.narrative_response) {
+    const terminalPreclaimStatus = (
+      (error.status >= 400 && error.status < 500)
+      || error.status === 503
+    );
+    const recovered = terminalPreclaimStatus
+      ? null
+      : await waitForRecoveredMessage(partyId, requestId).catch((recoverError) => {
+        recoveryError = recoverError;
+        return null;
+      });
+    if (turnNarratorText(recovered)) {
       showToast("Старт подтянут из истории.");
     } else {
       const message = recoveryError?.message || error.message;
@@ -2585,7 +3057,14 @@ async function autoStartParty(partyId) {
     }
   } finally {
     clearPendingMessage(partyId);
+    renderCleanRuntimeControls();
   }
+}
+
+async function retryOpeningParty() {
+  const party = appState.activeParty;
+  if (!isCleanRpParty(party) || Number(party.current_version) !== 0 || activePendingMessage()) return null;
+  return autoStartParty(party.id);
 }
 
 async function sendMessage(event) {
@@ -2615,20 +3094,36 @@ async function submitComposerMessage(channel) {
   await submitPartyMessage(text, { channel });
 }
 
-async function submitPartyMessage(text, { channel = "auto", targetSlot = null } = {}) {
+async function submitPartyMessage(
+  text,
+  {
+    channel = "auto",
+    targetSlot = null,
+    requestId = null,
+    expectedVersion = null,
+  } = {},
+) {
   if (!text || !appState.activeParty || activePendingMessage()) return;
   const partyId = appState.activeParty.id;
-  const requestId = makeClientRequestId();
+  const clean = isCleanRpParty();
+  const storedFailedRetry = clean ? failedMessageRetryForParty(partyId) : null;
+  const failedRetry = storedFailedRetry?.text === text
+    ? storedFailedRetry
+    : null;
+  const effectiveRequestId = requestId || failedRetry?.requestId || makeClientRequestId();
+  const effectiveExpectedVersion = clean
+    ? Number(expectedVersion ?? failedRetry?.expectedVersion ?? appState.activeParty.current_version)
+    : null;
   const revision = Number(appState.activeParty.rp_contract_revision || 0);
   const submittedCorrections = revision < 9
     ? [...appState.pendingStoryMemoryCorrections]
     : [];
   let turnCommitted = false;
   const mayCommitNarrative = channel !== "gm";
-  startPendingMessage(partyId, requestId, text, {
+  startPendingMessage(partyId, effectiveRequestId, text, {
     status: channel === "gm" ? "Мастер готовит черновик исправления..." : "Определяю маршрут и готовлю ответ...",
   });
-  if (mayCommitNarrative) appendPendingMessage(text, requestId);
+  if (mayCommitNarrative) appendPendingMessage(text, effectiveRequestId);
   try {
     setPendingStatus(
       channel === "gm" ? "Мастер готовит черновик исправления..." : "GM формирует ответ...",
@@ -2636,8 +3131,8 @@ async function submitPartyMessage(text, { channel = "auto", targetSlot = null } 
     );
     const result = await apiPost(
       `/api/parties/${partyId}/messages`,
-      partyMessagePayload(text, requestId, submittedCorrections, channel, targetSlot),
-      { "X-Request-ID": requestId },
+      partyMessagePayload(text, effectiveRequestId, submittedCorrections, channel, targetSlot, effectiveExpectedVersion),
+      { "X-Request-ID": effectiveRequestId },
     );
     if (result.status === "route_required") {
       appState.pendingGmDraft = null;
@@ -2664,10 +3159,11 @@ async function submitPartyMessage(text, { channel = "auto", targetSlot = null } 
       return;
     }
     turnCommitted = true;
+    clearFailedMessageRetry(partyId);
     appState.pendingStoryMemoryCorrections = [];
     const content = result.message?.content || "";
     if (content) {
-      replacePendingMessage(partyId, requestId, content);
+      replacePendingMessage(partyId, effectiveRequestId, content);
     }
     setPendingStatus("Ответ получен. Обновляю историю...", partyId);
     try {
@@ -2680,19 +3176,55 @@ async function submitPartyMessage(text, { channel = "auto", targetSlot = null } 
       showToast(error.message);
       return;
     }
+    if (clean && error.status === 409) {
+      clearFailedMessageRetry(partyId);
+      if (appState.activeParty?.id === partyId) els.messageInput.value = text;
+      replacePendingMessage(partyId, effectiveRequestId, `Версия партии изменилась: ${error.message}`, true);
+      clearPendingMessage(partyId);
+      await reloadPartyIfActive(partyId).catch(() => {});
+      showToast("Партия обновлена. Проверь текст и отправь его снова.");
+      return;
+    }
+    if (clean) {
+      let recovered = null;
+      try {
+        recovered = await recoverTurn(partyId, effectiveRequestId);
+      } catch {
+        recovered = null;
+      }
+      if (turnNarratorText(recovered)) {
+        turnCommitted = true;
+        clearFailedMessageRetry(partyId);
+        appState.pendingStoryMemoryCorrections = [];
+        await reloadPartyIfActive(partyId).catch(() => {});
+        showToast("Ответ подтянут из истории.");
+      } else {
+        setFailedMessageRetry({
+          partyId,
+          text,
+          requestId: effectiveRequestId,
+          expectedVersion: effectiveExpectedVersion,
+          createdAt: Date.now(),
+        });
+        if (appState.activeParty?.id === partyId) els.messageInput.value = text;
+        replacePendingMessage(partyId, effectiveRequestId, `Ответ не получен: ${error.message}`, true);
+        showToast(`${error.message} Текст сохранён для ручного повтора.`);
+      }
+      return;
+    }
     setPendingStatus("Запрос оборвался. Проверяю историю...", partyId);
     let recoveryError = null;
-    const recovered = await waitForRecoveredMessage(partyId, requestId).catch((recoverError) => {
+    const recovered = await waitForRecoveredMessage(partyId, effectiveRequestId).catch((recoverError) => {
       recoveryError = recoverError;
       return null;
     });
-    if (recovered?.narrative_response) {
+    if (turnNarratorText(recovered)) {
       turnCommitted = true;
       appState.pendingStoryMemoryCorrections = [];
       showToast("Ответ подтянут из истории.");
     } else {
       const message = recoveryError?.message || error.message;
-      replacePendingMessage(partyId, requestId, `Ответ не получен: ${message}`, true);
+      replacePendingMessage(partyId, effectiveRequestId, `Ответ не получен: ${message}`, true);
       showToast(message);
     }
   } finally {
@@ -2707,8 +3239,12 @@ function partyMessagePayload(
   corrections = [],
   channel = "auto",
   targetSlot = null,
+  expectedVersion = null,
 ) {
   const payload = { content: text, idempotency_key: requestId };
+  if (expectedVersion !== null && expectedVersion !== undefined) {
+    return { ...payload, expected_version: Number(expectedVersion) };
+  }
   if (channel !== "auto") payload.channel = channel;
   if (targetSlot) payload.gm_target_slot = targetSlot;
   if (Array.isArray(corrections) && corrections.length) {
@@ -3512,9 +4048,9 @@ async function waitForRecoveredMessage(partyId, requestId) {
     if (attempt > 0) await delay(PENDING_RECOVERY_INTERVAL_MS);
     setPendingStatus(`Проверяю уже отправленный ход... ${attempt + 1}/${attempts}`, partyId);
     const turn = await recoverTurn(partyId, requestId);
-    if (turn?.narrative_response) {
+    if (turnNarratorText(turn)) {
       if (appState.activeParty?.id === partyId) {
-        replacePendingMessage(partyId, requestId, turn.narrative_response);
+        replacePendingMessage(partyId, requestId, turnNarratorText(turn));
         clearPendingMessage(partyId);
         await reloadActiveParty().catch(() => {});
       }
@@ -3574,11 +4110,72 @@ function prunePendingMessages(validPartyIds) {
   if (changed) savePendingMessages();
 }
 
+function failedMessageRetryForParty(partyId) {
+  return partyId ? appState.failedMessageRetries[partyId] || null : null;
+}
+
+function setFailedMessageRetry(retry) {
+  appState.failedMessageRetries[retry.partyId] = retry;
+  saveFailedMessageRetries();
+}
+
+function clearFailedMessageRetry(partyId) {
+  if (!partyId || !appState.failedMessageRetries[partyId]) return;
+  delete appState.failedMessageRetries[partyId];
+  saveFailedMessageRetries();
+}
+
+function restoreFailedMessageRetries() {
+  let stored = {};
+  try {
+    stored = JSON.parse(localStorage.getItem(FAILED_RETRY_STORAGE_KEY) || "{}");
+  } catch {
+    stored = {};
+  }
+  const now = Date.now();
+  appState.failedMessageRetries = {};
+  Object.entries(stored || {}).forEach(([partyId, retry]) => {
+    if (!retry || typeof retry !== "object" || !retry.text || !retry.requestId) return;
+    const expectedVersion = Number(retry.expectedVersion);
+    const createdAt = Number(retry.createdAt || 0);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 0) return;
+    if (createdAt && now - createdAt > PENDING_MAX_AGE_MS) return;
+    appState.failedMessageRetries[partyId] = {
+      partyId,
+      text: String(retry.text),
+      requestId: String(retry.requestId),
+      expectedVersion,
+      createdAt: createdAt || now,
+    };
+  });
+  saveFailedMessageRetries();
+}
+
+function saveFailedMessageRetries() {
+  if (Object.keys(appState.failedMessageRetries).length) {
+    localStorage.setItem(FAILED_RETRY_STORAGE_KEY, JSON.stringify(appState.failedMessageRetries));
+  } else {
+    localStorage.removeItem(FAILED_RETRY_STORAGE_KEY);
+  }
+}
+
+function pruneFailedMessageRetries(validPartyIds) {
+  const valid = new Set(validPartyIds);
+  let changed = false;
+  Object.keys(appState.failedMessageRetries).forEach((partyId) => {
+    if (!valid.has(partyId)) {
+      delete appState.failedMessageRetries[partyId];
+      changed = true;
+    }
+  });
+  if (changed) saveFailedMessageRetries();
+}
+
 function reconcilePendingFromHistory(partyId, history) {
   const pending = pendingMessageForParty(partyId);
   if (!pending) return;
   const turn = (history?.turns || []).find((item) => item.request_id === pending.requestId);
-  if (turn?.narrative_response) {
+  if (turnNarratorText(turn)) {
     clearPendingMessage(partyId);
   }
 }
@@ -3589,7 +4186,7 @@ function ensurePendingRecovery(partyId) {
   pendingRecoveryTasks[partyId] = true;
   waitForRecoveredMessage(partyId, pending.requestId)
     .then((turn) => {
-      if (turn?.narrative_response) {
+      if (turnNarratorText(turn)) {
         clearPendingMessage(partyId);
         if (appState.activeParty?.id === partyId) {
           showToast("Ответ восстановлен из истории.");
@@ -3621,7 +4218,7 @@ function ensurePendingRecovery(partyId) {
 async function recoverTurn(partyId, requestId) {
   try {
     const status = await apiGet(`/api/parties/${partyId}/requests/${requestId}`);
-    if (status.turn?.narrative_response) return status.turn;
+    if (turnNarratorText(status.turn)) return status.turn;
     if (status.status === "failed") {
       throw new Error(status.error || "Запрос завершился ошибкой.");
     }
@@ -3640,8 +4237,9 @@ function renderMessageControls() {
     (run) => run.test_party_id === appState.activeParty?.id && ["running", "stopping"].includes(run.status),
   );
   const branchReadOnly = Boolean(appState.activeBranch);
+  const openingMissing = isCleanRpParty() && Number(appState.activeParty?.current_version || 0) < 1;
   const gmDecisionPending = Boolean(appState.pendingGmRoute || appState.pendingGmDraft);
-  const locked = Boolean(pendingMessage || activeAutotest || branchReadOnly || gmDecisionPending);
+  const locked = Boolean(pendingMessage || activeAutotest || branchReadOnly || gmDecisionPending || openingMissing);
   const hasParty = Boolean(appState.activeParty);
   const gmAvailable = hasParty
     && !branchReadOnly
@@ -3666,6 +4264,8 @@ function renderMessageControls() {
     const status = pendingMessage?.status
       || (branchReadOnly
         ? "Открыта изолированная ветка. Вернитесь в основную линию, выбрав партию слева."
+        : openingMissing
+          ? "Сначала получи opening кнопкой «Повторить старт»."
         : gmDecisionPending
           ? "Завершите выбор в панели мастера."
           : "Автотест управляет этой партией; ручной ввод временно отключён.");
@@ -3789,11 +4389,18 @@ function apiErrorMessage(detail, status) {
       : " \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439 \u0447\u0443\u0442\u044c \u043f\u043e\u0437\u0436\u0435 \u0438\u043b\u0438 \u0432\u044b\u0431\u0435\u0440\u0438 \u0434\u0440\u0443\u0433\u0443\u044e \u043c\u043e\u0434\u0435\u043b\u044c.";
     return `\u041c\u043e\u0434\u0435\u043b\u044c ${detail.model || ""} \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0438\u043b\u0430 \u0437\u0430\u043f\u0440\u043e\u0441\u044b.${retryHint}`;
   }
+  if (detail && typeof detail === "object" && typeof detail.message === "string") {
+    return detail.message;
+  }
   return typeof detail === "string" ? detail : `HTTP ${status}`;
 }
 
 function selectedWorldpack() {
-  return appState.worldpacks.find((pack) => pack.id === els.worldSelect.value) || appState.worldpacks[0] || null;
+  const packs = dialogWorldpacks();
+  if (isCleanRpCreation()) {
+    return packs.find((pack) => pack.id === els.cleanWorldSelect.value) || packs.find(isCleanWorldpack) || null;
+  }
+  return packs.find((pack) => pack.id === els.worldSelect.value) || packs[0] || null;
 }
 
 function selectedModelProfile() {

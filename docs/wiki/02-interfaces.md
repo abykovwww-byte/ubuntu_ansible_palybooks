@@ -46,7 +46,23 @@ Narrator profile фиксирует exact provider/base URL/model. Clean BYOK м
 Обычные legacy RP state/world/branch/autotest/dataset/trace операции при cutover
 не становятся compatibility-слоем: они возвращают `410` или фильтруют ordinary
 RP. Training и серверно подтверждённый Showroom продолжают использовать legacy
-контракт. Light GUI пока не переключён на этот API, а production-флаг выключен.
+контракт. Light GUI в source уже понимает clean API, но production-флаг
+выключен, поэтом live UX ещё не переключён и не проверен.
+
+### Light GUI при clean cutover
+
+После активации clean-контура владелец партии видит новый внешний контракт:
+
+- сначала выбирает World, затем авторский preset или собирает free Scenario;
+- несохранённый opening не создаёт ход, а UI оставляет явный retry с тем же
+  idempotency key;
+- обычный ход отправляет exact optimistic version; `409` перечитывает Party без
+  автоматического replay, а retryable отказ сохраняет текст и exact request;
+- панель показывает три раздельные роли: Narrator, atomic service и Administrator;
+- предложения Administrator принимает или отклоняет владелец Party, а не только
+  пользователь с глобальной ролью admin;
+- Training остаётся в том же Light GUI на retained legacy-маршруте до внешнего
+  cutover Plan 018.
 
 ## Light GUI
 

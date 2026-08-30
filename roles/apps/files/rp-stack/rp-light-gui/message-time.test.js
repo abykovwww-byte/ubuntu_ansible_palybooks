@@ -3,6 +3,7 @@ const { formatMessageTime, normalizeMessageDate } = require("./message-time.js")
 
 assert.equal(normalizeMessageDate(1_720_000_000).toISOString(), "2024-07-03T09:46:40.000Z");
 assert.equal(normalizeMessageDate(1_720_000_000_000).toISOString(), "2024-07-03T09:46:40.000Z");
+assert.equal(normalizeMessageDate(1_720_000_000_123_000_000).toISOString(), "2024-07-03T09:46:40.123Z");
 assert.equal(normalizeMessageDate("not-a-date"), null);
 
 const formatted = formatMessageTime("2024-07-03T09:46:40Z", "ru-RU");
