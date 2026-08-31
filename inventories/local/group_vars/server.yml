@@ -246,7 +246,7 @@ rp_stack_journal_auto_min_unsummarized_turns: 16
 rp_stack_journal_max_batch_turns: 32
 
 # Deploy only this exact merged application commit; do not replace it with a branch or tag.
-awareness_showroom_repo_version: "67244432659f6c25a268cbf788a8fa3af0f5b52f"
+awareness_showroom_repo_version: "9ff090eaa0cac8f0278637b90e441118356a261a"
 awareness_showroom_enabled: "{{ (awareness_showroom_repo_version | length) == 40 }}"
 awareness_showroom_repo_url: "https://github.com/abykovwww-byte/tavern-awareness-showroom.git"
 awareness_showroom_project_dir: "{{ app_deploy_base_dir }}/awareness-showroom"
