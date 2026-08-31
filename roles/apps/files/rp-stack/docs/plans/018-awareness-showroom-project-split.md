@@ -1,7 +1,8 @@
 # Plan 018: вынести Awareness и Showroom в training-only project
 
 Date: 2026-08-27 · Owner decision: accepted · Delivery status: zero-window
-C1/O2/N3 source prepared, Ansible apply and live acceptance pending.
+C1/O2/N3 applied; shape/HTTP/browser/SQLite smoke passed, full training live
+acceptance pending.
 
 Rollback window: `0`. Владелец 2026-08-30 явно разрешил немедленное удаление
 legacy Showroom/training source без cold standby. SQLite rows/tables, state и
@@ -156,10 +157,10 @@ I1 применён: отдельные containers, loopback `:18011`, SQLite/st
 
 ### I2 — source-owned scenario catalog
 
-Текущие published training configs и обложки публикуются отдельным PR
-нового application repository. IaC после его merge пинит exact commit и
-включает catalog path. До apply и живого прохождения это только
-source/delivery contract.
+Published training configs и обложки поставлены из отдельного application
+repository. IaC пинит exact commit и включает catalog path; applied startup
+показал пять сценариев на `:8011`. Это подтверждает каталог, но не заменяет
+полное живое прохождение обоих курсов.
 
 ### O1 — freeze and drain
 
@@ -170,7 +171,9 @@ admin mutation не становится authority.
 
 Владелец явно снял перенос истории, visitors/runs и ожидание старых активных
 прохождений как блокеры C1. Поэтому drain и migration не выполняются: новый
-project начинает с собственной БД, а старая RP SQLite остаётся нетронутой.
+project начинает с собственной БД, а C1 не выполняет destructive migration или
+deletion старой RP SQLite. Logical before/after snapshot остаётся acceptance
+gate.
 
 ### C1 — cutover
 
@@ -178,12 +181,15 @@ project начинает с собственной БД, а старая RP SQLi
 старый Showroom из RP Compose. `8010` остаётся RP Light GUI. Никакого cold
 standby, dual-write или proxy между Gateway.
 
-C1 source подготовлен с exact application pin
-`67244432659f6c25a268cbf788a8fa3af0f5b52f`: новый Showroom должен занять
-LAN-only `192.168.1.88:8011`, старый RP Gateway — запускаться только с
-`SCENARIO_TYPE=rp`, а `rp-showcase-gui` — отсутствовать. Это состояние после
-merge, но до apply: живой `:8011`, backup/restore и сквозная training/RP
-приёмка ещё не подтверждены.
+C1 применён с exact application pin
+`67244432659f6c25a268cbf788a8fa3af0f5b52f`: новый Showroom занял
+LAN-only `192.168.1.88:8011`, старый RP Gateway запускается только с
+`SCENARIO_TYPE=rp`, а `rp-showcase-gui` отсутствует. Apply
+`83a90eda9a2465567028e7e58446378e0b10ccc2` завершился с `failed=0`:
+оба проекта healthy, `:8010`/`:8011` отвечают `200`, browser console чистая,
+listener `:18011` и старые RP training source paths отсутствуют. Обе SQLite
+прошли integrity/FK smoke. Backup/test restore и сквозная training/RP приёмка
+ещё не подтверждены.
 
 ### O2 — cleanup
 

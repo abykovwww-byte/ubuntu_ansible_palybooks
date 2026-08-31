@@ -9,20 +9,19 @@
 контракта 0–11 прекращается.
 
 **Delivery status:** в исполнении; срезы 6–7 и acceptance-source среза 8 merged.
-Инертный production baseline
-`bb2562acbbd8526492a6b7f5d045e21428106303` applied; structured-output
-коррекция среза 8 прошла изолированную real-provider приёмку и ожидает повторного
-image apply и финального canary без bind mount. Clean RP schema v7, Narrator,
+Production применил `83a90eda9a2465567028e7e58446378e0b10ccc2`, включая
+structured-output коррекцию среза 8 и zero-window C1/O2. Финальный seeded canary
+прошёл на exact applied Gateway image без bind mount исходников; production RP
+остаётся инертным с `RP_REBUILD_ENABLED=false`. Clean RP schema v7, Narrator,
 persisted role jobs и runner подключены к `main.py`, существующим Party API,
 реальному provider client и Light GUI за серверным флагом
 `RP_REBUILD_ENABLED`. В source флаг включает один World `day-watch-moscow-v2`,
 создание Party из preset или полного `free_scenario_seed`, opening/ходы с exact
 idempotency и optimistic version, отдельные Relationship/Lore/Memory job и
 ручной Administrator `accept/reject`. При включении clean-флага ordinary legacy
-RP fail-closed получает `410`. Zero-window C1/O2 source оставляет RP Gateway и
-Light GUI RP-only, а Training/Showroom передаёт standalone project на целевом
-LAN-only `192.168.1.88:8011`; до apply живой сервер ещё использует прежний общий
-runtime. Acceptance-срез 8 закрепляет public standalone commit
+RP fail-closed получает `410`. Zero-window C1/O2 оставил production RP Gateway
+и Light GUI RP-only, а Training/Showroom передал standalone project на целевой
+LAN-only `192.168.1.88:8011`. Acceptance-срез 8 закрепляет public standalone commit
 `67244432659f6c25a268cbf788a8fa3af0f5b52f` и анонимный HTTPS checkout без
 GitHub token.
 
@@ -49,13 +48,19 @@ loops. Claims сериализуются SQLite-предикатом; restart и
 - **не добавлено:** универсальная queue-платформа, новый сервис, fallback/repair,
   compatibility adapter, автоматический replay пользовательского текста или
   multi-replica lease;
-- **проверено в срезе 8:** инертный apply, изолированный seeded run с реальными
-  provider/runner, четыре исхода §3 и exact duplicate без второго provider call;
-- **ещё не сделано:** apply образа с текущей source-коррекцией, повторный canary
-  уже без bind mount, blind A/B, живая длинная RP-партия, activation, cutover и
-  live verification. Inventory оставляет `RP_REBUILD_ENABLED=false`, поэтому
-  merge среза сам по себе не меняет production UX; C1 cutover и полная standalone
-  training-приёмка также требуют отдельного apply/live proof.
+- **проверено в срезе 8:** applied-image seeded run без bind mount с реальными
+  provider/runner, exact duplicate без второго provider call, memory anchors и
+  ручное принятие Administrator proposal до следующего prompt. Четыре исхода §3
+  прямо предъявил отдельный container probe; применённый image прошёл полный
+  suite, а его runner/provider/service-model файлы byte-identical probe-файлам;
+- **ещё не сделано:** blind A/B, ручные первые 20 ходов и короткий контрастный
+  старт, настоящая длинная RP-партия, полные причинные цепочки Relationships/Lore
+  до последующей сцены, browser proof сохранения failed-текста/retry и видимых
+  role status/error/kill-switch. Консервативный verification budget остаётся
+  `27 897 / 5 000 LOC`, debt `22 897`; это незакрытый cutover gate. Inventory
+  оставляет `RP_REBUILD_ENABLED=false`; полная standalone training-приёмка после
+  уже выполненного C1 cutover также остаётся внешним gate Plan 018. Activation и
+  production RP cutover не выполнены.
 
 ### Brief среза 8: четыре проверяемых исхода §3
 
@@ -168,9 +173,10 @@ provider failure и ручной same-key retry, stale `409` без replay, тр
 test-файлов и пять GitHub checks — PASS. Это source/local evidence: apply,
 production activation и live Party ещё не выполнены. Wiki изменена только из-за
 нового внешнего Light GUI/API-контракта; skills не менялись.
-Последующий O2 source удаляет retained Training path из RP Light GUI/Gateway:
-training UX принадлежит standalone Showroom на `:8011`. Это состояние также
-ожидает C1 apply и отдельной live-приёмки.
+Последующий O2 удалил retained Training path из применённого RP Light
+GUI/Gateway: training UX принадлежит standalone Showroom на `:8011`. Shape,
+HTTP и browser smoke подтверждены; полная training-приёмка остаётся отдельным
+gate Plan 018.
 
 Срез 8 начат от merged `origin/main @ bb2562a`
 (`bb2562acbbd8526492a6b7f5d045e21428106303`). Этот baseline применён Ansible с
@@ -211,6 +217,36 @@ SHA-256 `9369c8a9744a8f142e5030af52fcd728e92cc9528b150e3ab67baebf561ccd89`.
 доказывает реальную границу provider/runner, но не заменяет apply собранного
 образа и финальный canary без mount. Wiki и skills не менялись: внешнего
 пользовательского или операционного контракта этот срез не изменяет.
+
+Финальный apply `83a90eda9a2465567028e7e58446378e0b10ccc2` завершился
+`ok=86 changed=15 failed=0`. Exact production Gateway image
+`sha256:a76184880d696df46e654cbefb98c31e1a944ddfa6544e1b384db1a275d98506`
+прошёл `657 passed, 1 skipped`, standalone Awareness image — `150 passed`.
+RP Light GUI `:8010` остался RP-only, standalone Showroom `:8011` показывает
+пять сценариев; оба browser smoke прошли без console errors. Старый Showroom,
+три training source path и listener `:18011` отсутствуют. Обе live SQLite имеют
+`integrity_check=ok` и ноль foreign-key violations; legacy RP data сохранены,
+clean production `rp_engine.db` не создан.
+
+Final canary `seeded-run-4` использовал этот exact Gateway image, отдельные
+data/state и стандартные read-only worldpacks/scripts mounts; `/app` не
+монтировался. В чистую Party перенесены только первые 50 committed RAW, версии
+51…66 прошли через реальный API, runner и provider. Concurrent exact duplicate
+v52 дал один turn и один Narrator call. На первой v57 provider ответил HTTP 200,
+но Gateway отклонил невалидный strict output с `502` и ничего не закоммитил;
+same-key retry закоммитил v57. Все 48 Relationship/Lore/Memory jobs завершились
+с `attempts=0`; две memory revisions дали safe coverage 51 и 59. Prompt v66
+содержит RAW 17…66, занимает 146698 из 400000 символов hard limit и имеет
+`cached_tokens=47104` по provider metric. Atomic roles шли через OpenRouter/Qwen,
+Administrator — через local Gemma; реальный proposal принят вручную как guidance
+revision 1 и попал в следующий prompt без изменения gameplay v66. Обе canary
+SQLite прошли integrity/FK. Остановленный evidence сохранён в
+`/srv/backups/rp-stack/decision043-acceptance-run4-20260831T062632Z.tar.gz`,
+SHA-256 `e7e9d37069b5d4c6cc2ba0913b5b61cfad177ef94a02a034e069fed13d7de274`.
+После canary production container ID/start time и флаг `false` не изменились.
+Это закрывает artifact parity и seeded-механику, но не заменяет human blind A/B,
+ручные первые 20 ходов, настоящую длинную Party и полную semantic/later-scene
+проверку причинных цепочек.
 
 ## Context
 

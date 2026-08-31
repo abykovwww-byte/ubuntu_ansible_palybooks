@@ -21,43 +21,8 @@ Party = WorldPack
 
 ## Контейнеры и сети
 
-Следующая схема описывает живой runtime до C1 apply. В source переключение уже
-подготовлено, но apply и live verification ещё не выполнены.
-
-```mermaid
-flowchart TB
-    subgraph Clients["Клиенты"]
-        LG["Light GUI\nавторизованный UI"]
-        SG["Showroom\nанонимная витрина"]
-    end
-
-    subgraph RPNet["Docker network: rp-stack"]
-        G["FastAPI RP Gateway"]
-    end
-
-    subgraph LLMNet["Docker network: rp-llm, internal"]
-        LL["llama.cpp Vulkan\nGemma 4 26B A4B Q4"]
-    end
-
-    LG -->|"nginx /api proxy"| G
-    SG -->|"nginx /api proxy"| G
-    G --> LL
-    G --> Cloud["Cloud LLM providers"]
-    G --> DB[("/data/rp_gateway.db")]
-    G --> State["/state/parties"]
-    G --> Packs["/worldpacks, read-only"]
-```
-
-Gateway не публикует host port. Снаружи доступны только nginx-контейнеры Light GUI и Showroom. Local LLM находится в отдельной internal-сети и не принимает запросы с LAN.
-
-### Подготовленная C1-граница
-
-Source C1 закрепляет standalone application exact commit
-`67244432659f6c25a268cbf788a8fa3af0f5b52f`, целевой LAN-only адрес
-`192.168.1.88:8011`, RP-only старый Gateway и RP Compose без старого Showroom.
-Rollback window равен `0`. Эта схема ещё не является live: до Ansible apply
-применённый shadow остаётся на loopback `:18011`, а старый Showroom — на
-`:8011`.
+Следующая схема описывает живой runtime после C1 apply
+`83a90eda9a2465567028e7e58446378e0b10ccc2`.
 
 ```mermaid
 flowchart LR
@@ -73,12 +38,19 @@ flowchart LR
     I -->|"exact public HTTPS commit"| T
 ```
 
+Standalone application закреплён exact commit
+`67244432659f6c25a268cbf788a8fa3af0f5b52f`. Оба Gateway не публикуют host ports:
+снаружи доступны только Light GUI `:8010` и LAN-only Showroom `:8011`.
+Старый Showroom и shadow listener `:18011` отсутствуют. Local LLM находится в
+отдельной internal-сети и не принимает запросы с LAN. Rollback window равен `0`.
+
 Порт не является security boundary для cookie, поэтому новый project использует
 собственные `awareness_gateway_session` и `awareness_showroom_visitor`. На
 новой стороне Git-каталог создаёт только конфигурацию сценариев и covers;
 run/history/auth identity начинается заново. Владелец явно снял перенос старой
-истории как блокер, но старая RP SQLite остаётся нетронутой. Между Gateway нет
-runtime-вызовов, общей БД или dual-write.
+истории как блокер. C1 не выполняет destructive migration/deletion старой RP
+SQLite; logical before/after snapshot остаётся acceptance gate. Между Gateway
+нет runtime-вызовов, общей БД или dual-write.
 
 ### Срез 6 Decision 043: clean RP за cutover-флагом
 
@@ -113,8 +85,8 @@ legacy Party/state/turn tables; обычные legacy RP endpoints при вкл
 возвращают `410`. После C1 RP source не содержит Training/Showroom exception:
 standalone project обслуживает training-only Gateway и Showroom на целевом
 `192.168.1.88:8011`. Нового RP-контейнера, порта или dual-write нет. В inventory
-RP-флаг пока `false`, а C1 apply не выполнен: source интегрирован, но activation,
-браузерный UX и live proof ещё не подтверждены.
+RP-флаг пока `false`. C1 shape/HTTP/browser/SQLite smoke подтверждены, но clean
+RP activation и полная standalone training-приёмка ещё не выполнены.
 
 ## Ответственность компонентов
 
@@ -237,16 +209,16 @@ SQLite/JSON-операцией без LLM. Отдельный фоновый wor
 
 ## Основные границы совместимости
 
-Живой Compose до C1 apply содержит `rp-gateway`, `rp-light-gui`,
-`rp-showcase-gui` и опциональный `rp-local-llm`. SillyTavern-контейнера в нём
-нет.
+Живой RP Compose после C1 apply содержит `rp-gateway`, `rp-light-gui` и
+опциональный `rp-local-llm`; standalone Compose отдельно содержит
+`awareness-gateway` и `showroom`. SillyTavern-контейнера в них нет.
 
-Подготовленный zero-window C1/O2 source удаляет `rp-showcase-gui`, Awareness
-WorldPacks и training runtime из RP checkout/Compose и поставляет Awareness
-Showroom отдельным commit-pinned application через IaC. RP Gateway скрывает
-старые training-партии и принимает только `rp`. Legacy training/Showroom строки
-БД, state и backups остаются сохранёнными, но исполняемого training source в RP
-контуре больше нет.
+Zero-window C1/O2 удалил `rp-showcase-gui`, Awareness WorldPacks и training
+runtime из RP checkout/Compose и поставил Awareness Showroom отдельным
+commit-pinned application через IaC. RP Gateway скрывает
+старые training-партии, запущен с `SCENARIO_TYPE=rp` и не содержит training
+routes/source. Legacy training/Showroom строки БД, state и backups остаются
+сохранёнными, но исполняемого training source в RP-контуре больше нет.
 
 При этом сохранены:
 

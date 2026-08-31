@@ -286,32 +286,32 @@ sudo systemctl status ansible-local-apply.service --no-pager -l
 sudo journalctl -u ansible-local-apply.service -n 100 --no-pager
 ```
 
-Проверка live RP Stack до C1 apply:
+Проверка live RP Stack после C1 apply:
 
 ```bash
 cd /srv/apps/rp-stack
 docker compose ps
-docker compose logs --tail=100 rp-gateway rp-light-gui rp-showcase-gui
+docker compose logs --tail=100 rp-gateway rp-light-gui
 docker compose run --rm rp-gateway pytest
 curl -fsS http://192.168.1.88:8010/health
 curl -fsS http://192.168.1.88:8010/api/worldpacks
+cd /srv/apps/awareness-showroom
+docker compose ps
+docker compose logs --tail=100 awareness-gateway showroom
 curl -fsS http://192.168.1.88:8011/health
 ```
 
-### Zero-window C1/O2 Decision 018: source готов, apply ожидается
+### Zero-window C1/O2 Decision 018: apply подтверждён, полная приёмка впереди
 
-До production cutover старый Showroom остаётся на `:8011`, а I1 shadow
-на loopback `127.0.0.1:18011` уже применён из exact commit public
-repository `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Объединённый C1/O2
-source закрепляет тот же commit для LAN-only `192.168.1.88:8011`,
-`SCENARIO_TYPE=rp` для RP Gateway и RP Compose/source без
-`rp-showcase-gui`, Awareness WorldPacks и training runtime. Standalone принимает
-только `training`, RP Gateway — только `rp`.
-
-Production-переключение не считается применённым до интерактивного
-Ansible apply. Rollback window равен `0`: после cutover сбои исправляются
-fix-forward через application/IaC PR и повторный apply. Legacy RP SQLite
-rows/tables, state, backups и data artifacts сохраняются.
+Apply `83a90eda9a2465567028e7e58446378e0b10ccc2` завершился с `failed=0`.
+Standalone exact commit
+`67244432659f6c25a268cbf788a8fa3af0f5b52f` занял LAN-only
+`192.168.1.88:8011`; RP Gateway запущен с `SCENARIO_TYPE=rp`, а RP
+Compose/source не содержит `rp-showcase-gui`, Awareness WorldPacks и training
+runtime. Wrong-mode no-write/no-provider остаётся отдельным live gate.
+Rollback window равен `0`: сбои исправляются fix-forward через application/IaC
+PR и повторный apply. Legacy RP SQLite rows/tables, state, backups и data
+artifacts сохранены.
 
 ```text
 /srv/apps/awareness-showroom
@@ -325,8 +325,8 @@ rows/tables, state, backups и data artifacts сохраняются.
 `/app/configs/showroom/scenarios.json`, а runtime `.env` включает его через
 `SHOWROOM_CATALOG_PATH`. Gateway при startup идемпотентно согласует
 только объявленные training configs и covers. Он не импортирует legacy
-runs/users/sessions/keys и не удаляет посторонние DB-строки. Сценарии становятся
-видимыми на production `:8011` только после apply и успешного startup.
+runs/users/sessions/keys и не удаляет посторонние DB-строки. После apply и
+успешного startup production `:8011` показывает пять сценариев.
 
 External checkout — единственный явно opt-in ownership exception Apps role:
 
@@ -366,18 +366,19 @@ listener `127.0.0.1:18011`, `SCENARIO_TYPE=rp`, HTTP `:8010`, отсутстви
 Эти shape checks ещё не доказывают provider-turn, scoring, debrief, resume или
 backup/restore.
 
-C1 apply переводит `:8011` на новый Showroom, а старый Compose становится
+C1 apply перевёл `:8011` на новый Showroom, а старый Compose стал
 RP-only. `:8010` не меняется. Проекты не разделяют SQLite/state/cookies/network и
-не вызывают Gateway друг друга. После apply обязательны оба полных Awareness
-курса, реальный provider-turn, artifact/workspace scoring, debrief, resume,
-browser check, SQLite integrity и backup/test-restore.
+не вызывают Gateway друг друга. Shape, HTTP, browser и SQLite smoke пройдены;
+оба полных Awareness курса, реальный provider-turn, artifact/workspace scoring,
+debrief, resume и backup/test-restore остаются обязательными.
 
 Владелец явно снял перенос истории, visitors/runs и ожидание legacy sessions как
-блокеры C1. Старая RP SQLite остаётся нетронутой. Старый Showroom/training source
-удаляется тем же zero-window apply; O2 не удаляет SQLite rows/tables, state,
-backups и не вызывает `delete_user_data`. Оперативного возврата на legacy
-Showroom после apply нет: сбой исправляется новым PR/apply, а standalone SQLite
-не сливается обратно. Полный порядок и
+блокеры C1. Destructive migration/deletion старой RP SQLite не выполнялась; она
+прошла integrity/FK smoke, а logical before/after snapshot остаётся acceptance
+gate. Старый Showroom/training source удалён тем же zero-window apply; O2 не
+вызывает `delete_user_data`. Оперативного возврата на legacy Showroom после apply
+нет: сбой исправляется новым PR/apply, а standalone SQLite не сливается обратно.
+Полный порядок и
 acceptance matrix: [Plan 018](../../roles/apps/files/rp-stack/docs/plans/018-awareness-showroom-project-split.md).
 
 Два ранее скопированных файла
