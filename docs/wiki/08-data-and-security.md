@@ -261,14 +261,14 @@ Showroom использует отдельный visitor token. Run доступ
 runtime API между RP и training Gateway нет. Старые Showroom rows сохраняются в
 legacy RP SQLite, но новый training runtime их не читает.
 
-C1 source закрепляет exact application commit
-`67244432659f6c25a268cbf788a8fa3af0f5b52f` и LAN-only
-`192.168.1.88:8011`, но apply ещё не выполнен. Live I1 shadow продолжает
-использовать отдельные paths на loopback `:18011`, а старый Showroom занимает
-`:8011`. Старая RP SQLite не мигрируется и не изменяется; её training rows не
-являются blocker по явному решению владельца. Полный training flow и restore
-после C1 apply ещё не доказаны. Rollback window равен `0`: старый Showroom и
-training source удаляются при том же apply, а SQLite/state/backups сохраняются.
+C1 применил exact application commit
+`67244432659f6c25a268cbf788a8fa3af0f5b52f` на LAN-only
+`192.168.1.88:8011`. Shadow `:18011`, старый Showroom и исполняемый training
+source в RP checkout отсутствуют. Destructive migration/deletion старой RP
+SQLite не выполнялась; БД прошла integrity/FK smoke, а logical before/after
+snapshot остаётся acceptance gate. Её training rows не являются blocker по
+явному решению владельца. Полный training flow и backup/test-restore ещё не
+доказаны. Rollback window равен `0`; SQLite/state/backups сохранены.
 
 ### Git-каталог Showroom
 
@@ -375,13 +375,13 @@ Party BYOK:
 
 ## Сетевая поверхность
 
-| Сервис | Live до C1 apply | C1 source после apply |
+| Сервис | Live после C1 apply | Граница |
 |---|---|---|
-| Light GUI | LAN + Tailscale, `8010` | Без изменений, RP Gateway auth обязателен |
-| Showroom | Старый Showroom, LAN + Tailscale, `8011` | Standalone, LAN-only `192.168.1.88:8011`, visitor cookie |
-| RP Gateway | Нет host port, общий legacy runtime | Нет host port, только `rp-stack` network и `scenario_type=rp` |
-| Training Gateway | Shadow loopback `127.0.0.1:18011` | Нет отдельного host port; доступ только через standalone Showroom network |
-| Local LLM | Нет host port, internal network | Без изменений; C1 не объединяет Docker networks |
+| Light GUI | LAN + Tailscale, `8010` | RP Gateway auth обязателен |
+| Awareness Showroom | LAN-only `192.168.1.88:8011` | Standalone visitor cookie |
+| RP Gateway | Нет host port | Только `rp-stack` network и `scenario_type=rp` |
+| Training Gateway | Нет host port | Доступ только через standalone Showroom network; `:18011` отсутствует |
+| Local LLM | Нет host port, internal network | C1 не объединяет Docker networks |
 
 Наличие Tailscale binding не делает Showroom или Light GUI интернет-публичными само по себе, но security зависит от ACL и настроек tailnet.
 
