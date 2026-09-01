@@ -198,10 +198,10 @@ rp_stack_gemini_model_catalog_live: true
 rp_stack_openrouter_api_base: "https://openrouter.ai/api/v1"
 rp_stack_openrouter_api_key: ""
 rp_stack_openrouter_models:
-  - "openrouter/auto"
-  - "openrouter/free"
+  - "deepseek/deepseek-v4-flash"
+  - "qwen/qwen3.5-flash-02-23"
 rp_stack_openrouter_fallback_models:
-  - "openrouter/auto"
+  - "deepseek/deepseek-v4-flash"
 rp_stack_openrouter_model_catalog_live: true
 rp_stack_provider_model_catalog_ttl_seconds: 86400
 rp_stack_gateway_port: 8088

@@ -20,6 +20,7 @@ from app.rp.turn_engine import (
     RPAdministratorProposal,
     RPModelOutputRejected,
     RPParty,
+    RPRuntimeLoreCard,
     RPServiceJob,
     RPTurn,
     RPTurnEngine,
@@ -129,6 +130,7 @@ class RPAtomicServiceModel(Protocol):
         party: RPParty,
         turn: RPTurn,
         evidence_spans: tuple[RPEvidenceSpan, ...],
+        existing_runtime_lore: tuple[RPRuntimeLoreCard, ...] = (),
     ) -> RPRuntimeLoreResult: ...
 
     async def update_story_memory(
@@ -205,8 +207,14 @@ class RPAtomicServiceHandler:
                 job=job, causes=accepted, rejected=rejected
             )
         if job.job_type == "runtime_lore":
+            existing_runtime_lore = self.engine.derived_context(
+                owner_user_id=job.owner_user_id, party_id=job.party_id
+            ).runtime_lore_cards
             result = await self.model.extract_runtime_lore(
-                party=party, turn=turn, evidence_spans=spans
+                party=party,
+                turn=turn,
+                evidence_spans=spans,
+                existing_runtime_lore=existing_runtime_lore,
             )
             try:
                 if not isinstance(result, RPRuntimeLoreResult):
@@ -271,7 +279,7 @@ class RPAtomicServiceHandler:
                 },
             )
         snapshot = await self.model.update_story_memory(
-            party=party, turns=turns, previous=previous
+            party=party, turns=uncovered, previous=previous
         )
         try:
             if not isinstance(snapshot, RPStoryMemorySnapshot):

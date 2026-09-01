@@ -30,6 +30,12 @@ Narrator не наследует глобальную служебную мод�
 роли никогда не получают Party BYOK. Включённая служебная роль с недоступной
 моделью блокирует startup, вместо расходования job attempts после запуска.
 
+Clean RP принимает только exact OpenRouter model ID: динамические
+`openrouter/auto` и `openrouter/free`, а также `nvidia/*`, скрыты из активного
+picker и отклоняются до provider call. Для разрешённого exact model Gateway
+дополнительно передаёт OpenRouter `provider.ignore=["nvidia"]`. Сохранённые
+исторические profile/Party/log rows не удаляются и не переназначаются.
+
 Supervisor clean Party показывает модель, enabled/kill switch, текущее
 состояние, success/error и последнюю ошибку каждой роли, но не raw provider
 payload. Этот source-контракт ещё не активирован в production inventory.
@@ -102,7 +108,7 @@ Top P по отдельности, хотя Gateway сознательно не 
 `provider.sort=throughput`: endpoint выбирается по скорости, а не стандартному
 price-first порядку. При `403` (включая model-specific moderation), `410` и
 временных provider-ошибках партия пробует настроенный fallback того же провайдера;
-IaC default для OpenRouter — `openrouter/auto`. Перед fallback ручные параметры
+IaC default для OpenRouter — exact `deepseek/deepseek-v4-flash`. Перед fallback ручные параметры
 primary model удаляются, поэтому несовместимый маршрут не получает их случайно.
 
 `MODEL_ATTEMPT_TIMEOUT_SECONDS=150` является wall-clock deadline одной попытки narrator для обычного хода: он включает получение полного non-streaming ответа. Opening scene использует отдельный `PARTY_START_MODEL_ATTEMPT_TIMEOUT_SECONDS=300`, чтобы большой стартовый prompt, в том числе импортированный из Markdown, успевал завершиться. Для repair используется компактный prompt без повторной истории и memory, но с обязательными `PLAYER_CHARACTER`, active `ИСПРАВЛЕНИЯ ИГРОКА`, absolute rules, relationship pressure и world events; сохранённые параметры primary narrator и DeepSeek throughput policy остаются теми же. Таймаут opening scene становится HTTP `504` и terminal `failed` в `turn_requests`.
@@ -120,7 +126,8 @@ OpenAI-compatible `HTTP 200` с отсутствующим или пустым �
 Доступные типы:
 
 - локальная Gemma через internal llama.cpp/Vulkan;
-- десять недорогих OpenRouter service profiles из статического каталога.
+- восемь недорогих exact OpenRouter service profiles из статического каталога;
+  Gateway предъявляет каждому обязательный strict JSON Schema контракт атомарной роли.
 
 Служебные задачи используют только stack-managed credentials. Пользовательский BYOK не передаётся им даже тогда, когда задача возникла внутри пользовательской Party.
 

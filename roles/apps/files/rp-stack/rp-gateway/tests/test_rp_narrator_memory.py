@@ -179,6 +179,39 @@ def _turns(count: int) -> tuple[RPTurn, ...]:
     )
 
 
+def test_memory_fact_keeps_bounded_provenance_for_a_long_party() -> None:
+    fact = RPMemoryFact(
+        fact_id="long.party.provenance",
+        text="Факт сохраняет проверяемые источники длинной партии.",
+        authority="inference",
+        source_turn_versions=tuple(range(1, 129)),
+    )
+
+    assert len(fact.source_turn_versions) == 128
+    assert len(
+        RPMemoryFact(
+            fact_id="compact.memory.fact",
+            text="x" * 1_024,
+            authority="inference",
+            source_turn_versions=(1,),
+        ).text
+    ) == 1_024
+    with pytest.raises(ValueError):
+        RPMemoryFact(
+            fact_id="oversized.memory.fact",
+            text="x" * 1_025,
+            authority="inference",
+            source_turn_versions=(1,),
+        )
+    with pytest.raises(ValueError):
+        RPMemoryFact(
+            fact_id="too.long.party.provenance",
+            text="Превышенный внутренний bound отклоняется.",
+            authority="inference",
+            source_turn_versions=tuple(range(1, 130)),
+        )
+
+
 def _record(snapshot: RPStoryMemorySnapshot, record_id: int) -> RPStoryMemoryRecord:
     return RPStoryMemoryRecord(
         id=record_id,
@@ -487,11 +520,11 @@ def test_failed_or_oversized_memory_cannot_hide_required_raw(tmp_path: Path) -> 
     oversized_facts = tuple(
         RPMemoryFact(
             fact_id=f"oversized.fact.{index}",
-            text="x" * 2_000,
+            text="x" * 1_024,
             authority="inference",
             source_turn_versions=(1,),
         )
-        for index in range(13)
+        for index in range(25)
     )
     oversized = RPStoryMemorySnapshot(
         schema_version=RP_MEMORY_SCHEMA_VERSION,

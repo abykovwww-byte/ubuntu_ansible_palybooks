@@ -1801,7 +1801,11 @@ def test_admin_selects_one_service_model_for_entire_stack(tmp_path: Path):
     before = admin.get("/api/admin/global-settings/service-model")
     assert before.status_code == 200
     assert before.json()["term"] == "Служебная модель"
-    assert len(before.json()["choices"]) == 11
+    choices = before.json()["choices"]
+    assert len(choices) == 9
+    assert {choice["id"] for choice in choices}.isdisjoint(
+        {"or-qwen-3.7-flash", "or-openrouter-free"}
+    )
 
     selected = admin.patch(
         "/api/admin/global-settings/service-model",
@@ -2320,6 +2324,8 @@ def test_model_profiles_are_grouped_by_supported_providers_and_filter_small_mode
     assert {model["provider"] for model in models} == {"gemini", "openrouter"}
     assert all(model["context_window"] for model in models)
     assert not any(model["model"] == "openai/gpt-oss-20b" for model in models)
+    assert not any(model["model"] in {"openrouter/auto", "openrouter/free"} for model in models)
+    assert not any(model["model"].startswith("nvidia/") for model in models)
 
 
 def test_historical_nvidia_profile_party_and_log_are_readable_but_runtime_is_disabled(tmp_path: Path):
@@ -3088,21 +3094,22 @@ def test_post_turn_helpers_can_run_without_blocking_response(tmp_path: Path, mon
         adjudicator = Adjudicator(settings, store)
         started = asyncio.Event()
         finished = asyncio.Event()
+        release = asyncio.Event()
 
         async def slow_helpers(authorization: str | None, wait_for_retries: bool) -> None:
             _ = authorization, wait_for_retries
             started.set()
-            await asyncio.sleep(0.1)
+            await release.wait()
             finished.set()
 
         monkeypatch.setattr(adjudicator, "drain_service_jobs", slow_helpers)
-        before = time.perf_counter()
-        await adjudicator.after_turn_recorded("Bearer test", "background-helper")
-        elapsed = time.perf_counter() - before
-
-        assert elapsed < 0.05
+        await asyncio.wait_for(
+            adjudicator.after_turn_recorded("Bearer test", "background-helper"),
+            timeout=1,
+        )
         await asyncio.wait_for(started.wait(), timeout=1)
         assert not finished.is_set()
+        release.set()
         await asyncio.wait_for(finished.wait(), timeout=1)
         await asyncio.sleep(0)
         assert store.campaign_id not in Adjudicator._post_turn_helper_campaigns
@@ -3188,6 +3195,7 @@ def test_supported_openrouter_narrator_settings_are_exposed_validated_and_saved(
         "deepseek": "deepseek/deepseek-v4-flash",
         "luna": "openai/gpt-5.6-luna",
         "luna_pro": "openai/gpt-5.6-luna-pro",
+        "dots": "dots-studio/dots-3-note-preview:free",
         "unsupported": "anthropic/claude-opus-5",
     }
     for key, model in model_ids.items():
@@ -3209,6 +3217,13 @@ def test_supported_openrouter_narrator_settings_are_exposed_validated_and_saved(
     )
     assert profiles["test-luna"]["params"]["narrator_controls"]["reasoning_efforts"][-1] == "max"
     assert profiles["test-luna_pro"]["params"]["narrator_controls"]["temperature"] is False
+    assert profiles["test-dots"]["params"]["narrator_controls"] == {
+        "reasoning_efforts": ["none"],
+        "default_reasoning_effort": "none",
+        "temperature": True,
+        "top_p": False,
+        "max_tokens": [1024, 2048, 4096, 8192, 16384],
+    }
     assert "narrator_controls" not in profiles["test-unsupported"]["params"]
 
     character = c.post(
@@ -3267,6 +3282,28 @@ def test_supported_openrouter_narrator_settings_are_exposed_validated_and_saved(
         "reasoning_effort": "max",
         "max_tokens": 16384,
     }
+
+    dots = c.patch(
+        f"/api/parties/{party['id']}/model",
+        json={
+            "model_profile_id": "test-dots",
+            "narrator_settings": {"reasoning_effort": "none", "max_tokens": 4096},
+        },
+    )
+    assert dots.status_code == 200
+    assert dots.json()["party"]["narrator_settings"] == {
+        "reasoning_effort": "none",
+        "max_tokens": 4096,
+    }
+    unsupported_dots_reasoning = c.patch(
+        f"/api/parties/{party['id']}/model",
+        json={
+            "model_profile_id": "test-dots",
+            "narrator_settings": {"reasoning_effort": "high", "max_tokens": 4096},
+        },
+    )
+    assert unsupported_dots_reasoning.status_code == 400
+    assert "reasoning effort 'high' is not supported" in unsupported_dots_reasoning.json()["detail"]
 
     reset_on_model_change = c.patch(
         f"/api/parties/{party['id']}/model",

@@ -20,6 +20,15 @@ from app.rp.mechanics import (
     RPRelationshipResult,
     RPRuntimeLoreResult,
 )
+from app.rp.memory import (
+    RP_MEMORY_SCHEMA_VERSION,
+    RPAssetsAndRulesMemory,
+    RPCharactersMemory,
+    RPChronologyAndHooksMemory,
+    RPSituationMemory,
+    RPStoryMemorySnapshot,
+    RPThreadsMemory,
+)
 from app.rp.narrator import RPNarratorPromptBuilder
 from app.rp.turn_engine import (
     RPAdministratorProposal,
@@ -130,12 +139,16 @@ class _AtomicModelFake:
     ):
         self.relationships = relationships
         self.lore = lore
+        self.runtime_lore_contexts: list[tuple[object, ...]] = []
 
     async def extract_relationships(self, **_: object) -> RPRelationshipResult:
         assert self.relationships is not None
         return self.relationships
 
-    async def extract_runtime_lore(self, **_: object) -> RPRuntimeLoreResult:
+    async def extract_runtime_lore(
+        self, *, existing_runtime_lore: tuple[object, ...] = (), **_: object
+    ) -> RPRuntimeLoreResult:
+        self.runtime_lore_contexts.append(existing_runtime_lore)
         assert self.lore is not None
         return self.lore
 
@@ -155,6 +168,67 @@ class _AdministratorModelFake:
             target_slot="narrator_guidance",
             after=f"Режиссёрская поправка для {party_id}.",
         )
+
+
+class _StoryMemoryModelFake(_AtomicModelFake):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[tuple[tuple[int, ...], int | None]] = []
+
+    async def update_story_memory(
+        self, *, turns: tuple[object, ...], previous: object | None, **_: object
+    ) -> RPStoryMemorySnapshot:
+        versions = tuple(int(getattr(turn, "committed_version")) for turn in turns)
+        previous_coverage = (
+            int(getattr(getattr(previous, "snapshot"), "safe_coverage"))
+            if previous is not None
+            else None
+        )
+        self.calls.append((versions, previous_coverage))
+        coverage = versions[-1]
+        return RPStoryMemorySnapshot(
+            schema_version=RP_MEMORY_SCHEMA_VERSION,
+            observed_through_version=coverage,
+            situation=RPSituationMemory(coverage=coverage, status="fresh"),
+            threads=RPThreadsMemory(coverage=coverage, status="fresh"),
+            characters=RPCharactersMemory(coverage=coverage, status="fresh"),
+            assets_and_rules=RPAssetsAndRulesMemory(
+                coverage=coverage, status="fresh"
+            ),
+            chronology_and_hooks=RPChronologyAndHooksMemory(
+                coverage=coverage, status="fresh"
+            ),
+        )
+
+
+def test_story_memory_model_receives_only_uncovered_committed_raw(
+    tmp_path: Path,
+) -> None:
+    engine = RPTurnEngine(tmp_path / "rp-clean.db")
+    _create_party(engine, "party-incremental-memory")
+    model = _StoryMemoryModelFake()
+    handler = RPAtomicServiceHandler(engine, model, memory_anchor_turns=1)
+
+    for version in (1, 2):
+        engine.commit_turn(
+            owner_user_id="owner-one",
+            party_id="party-incremental-memory",
+            request_id=f"request-memory-{version}",
+            idempotency_key=f"key-memory-{version}",
+            expected_version=version - 1,
+            player_text=f"Игрок {version}.",
+            narrator_text=f"Нарратор {version}.",
+        )
+        job = _claim_service_job(engine, "story_memory")
+        result = asyncio.run(handler.handle(job))
+        assert job.claim_token is not None
+        engine.complete_service_job(
+            job_id=job.id,
+            claim_token=job.claim_token,
+            result=result,
+        )
+
+    assert model.calls == [((1,), None), ((2,), 1)]
 
 
 def test_invalid_relationship_candidate_does_not_erase_valid_sibling(
@@ -267,6 +341,12 @@ def test_runtime_lore_is_persisted_as_typed_runtime_origin(tmp_path: Path) -> No
     )
 
     result = asyncio.run(RPAtomicServiceHandler(engine, model).handle(job))
+    assert job.claim_token is not None
+    engine.complete_service_job(
+        job_id=job.id,
+        claim_token=job.claim_token,
+        result=result,
+    )
 
     assert result["result"] == "draft"
     context = engine.derived_context(
@@ -278,6 +358,30 @@ def test_runtime_lore_is_persisted_as_typed_runtime_origin(tmp_path: Path) -> No
     assert card.origin == "runtime"
     assert card.keywords == ("архив", "Арбат")
     assert card.evidence_span_ids == (2,)
+    assert model.runtime_lore_contexts == [()]
+
+    engine.commit_turn(
+        owner_user_id="owner-one",
+        party_id="party-lore",
+        request_id="request-party-lore-2",
+        idempotency_key="key-party-lore-2",
+        expected_version=1,
+        player_text="Я продолжаю поиск.",
+        narrator_text="Новых устойчивых сведений об архиве нет.",
+    )
+    model.lore = RPRuntimeLoreResult(
+        result="no_candidate",
+        kind="event",
+        title=None,
+        content=None,
+        keywords=None,
+        evidence_span_ids=None,
+    )
+    second_job = _claim_service_job(engine, "runtime_lore")
+    asyncio.run(RPAtomicServiceHandler(engine, model).handle(second_job))
+    assert len(model.runtime_lore_contexts) == 2
+    assert model.runtime_lore_contexts[1][0].id == card.id
+
     prompt = RPNarratorPromptBuilder().build_turn(
         party=engine.get_party(owner_user_id="owner-one", party_id="party-lore"),
         turns=engine.list_turns(owner_user_id="owner-one", party_id="party-lore"),

@@ -28,10 +28,10 @@ class RPMemoryFact(_ClosedMemoryModel):
     """One service-model fact grounded in committed Party RAW."""
 
     fact_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
-    text: str = Field(min_length=1, max_length=2_000)
+    text: str = Field(min_length=1, max_length=1_024)
     status: Literal["active", "superseded", "retracted"] = "active"
     authority: Literal["player", "narrator", "inference"]
-    source_turn_versions: tuple[int, ...] = Field(min_length=1, max_length=20)
+    source_turn_versions: tuple[int, ...] = Field(min_length=1, max_length=128)
 
     @field_validator("text")
     @classmethod
