@@ -167,8 +167,10 @@ rp_stack_light_gui_host_port: 8010
 rp_stack_gateway_port: 8088
 rp_stack_openrouter_api_base: "https://openrouter.ai/api/v1"
 rp_stack_openrouter_models:
-  - "openrouter/auto"
-  - "openrouter/free"
+  - "deepseek/deepseek-v4-flash"
+  - "qwen/qwen3.5-flash-02-23"
+rp_stack_openrouter_fallback_models:
+  - "deepseek/deepseek-v4-flash"
 rp_stack_service_model_choice: "local-gemma"
 ```
 

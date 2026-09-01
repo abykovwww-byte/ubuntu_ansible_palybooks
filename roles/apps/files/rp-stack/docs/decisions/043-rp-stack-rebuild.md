@@ -56,8 +56,12 @@ loops. Claims сериализуются SQLite-предикатом; restart и
 - **ещё не сделано:** blind A/B, ручные первые 20 ходов и короткий контрастный
   старт, настоящая длинная RP-партия, полные причинные цепочки Relationships/Lore
   до последующей сцены, browser proof сохранения failed-текста/retry и видимых
-  role status/error/kill-switch. Консервативный verification budget остаётся
-  `27 897 / 5 000 LOC`, debt `22 897`; это незакрытый cutover gate. Inventory
+  role status/error/kill-switch. Автоматический длинный canary на безопасном
+  fixed-model route пройден на изолированном bind-mounted candidate, но последние
+  source-коррекции ещё не собраны и не применены как image. Консервативный
+  verification budget остаётся `28 272 / 5 000 LOC`, debt `23 272`; полный
+  изолированный Gateway suite занимает `66.93s` при gate `≤60s`. Оба cutover gate
+  незакрыты. Inventory
   оставляет `RP_REBUILD_ENABLED=false`; полная standalone training-приёмка после
   уже выполненного C1 cutover также остаётся внешним gate Plan 018. Activation и
   production RP cutover не выполнены.
@@ -247,6 +251,73 @@ SHA-256 `e7e9d37069b5d4c6cc2ba0913b5b61cfad177ef94a02a034e069fed13d7de274`.
 Это закрывает artifact parity и seeded-механику, но не заменяет human blind A/B,
 ручные первые 20 ходов, настоящую длинную Party и полную semantic/later-scene
 проверку причинных цепочек.
+
+Последующий изолированный `run22` проверил непрерывную механику от opening до
+version 66 на новой Party `party_6398e2598135`: 66 уникальных request дали 66
+committed turn без пропусков и дублей. Все 198 атомарных job
+(Relationship/Lore/Memory, по три на version) и 66 Administrator job завершены;
+63 Administrator job сохранили `attempts=0`, а три получили `attempts=1` только
+после реального отказа. Memory snapshots построили непрерывную base-chain на
+версиях 8, 16, 24, 32, 40, 48, 56 и 64; максимальный сериализованный memory
+prompt — 5 836 символов. На v66 Narrator получил memory coverage 64 и точный RAW
+tail 9…65; действие игрока присутствовало один раз. Обе SQLite прошли
+`integrity_check=ok` и foreign-key check. На отдельном `run20` остановка вернула
+running job в `pending` с `attempts=0`, а после restart тот же job был захвачен
+с тем же счётчиком; только последующий фактический timeout поднял attempts до 1.
+Administrator proposal был принят на gameplay version 8 без её изменения и
+вошёл во все следующие Narrator prompts.
+
+Этот прогон выявил отдельный блокирующий дефект маршрутизации: активный
+`openrouter/free` выбирал модель случайно и в реальных trace встречались
+NVIDIA-authored model id. Поэтому `run22` доказывает механику 65+ ходов, но не
+доказывает соблюдение provider policy. Cutover-gate source скрывает
+`openrouter/auto`, `openrouter/free` и `nvidia/*` из активного каталога, отвергает
+их до provider call, добавляет OpenRouter `provider.ignore=["nvidia"]` и заменяет
+операционные defaults на exact DeepSeek/Qwen routes; исторические profile и log
+rows не мигрируют и остаются читаемыми. Это изменение внешнего модельного и
+операционного контракта, поэтому соответствующие Wiki и deploy-skill обновлены.
+
+Первые fixed-route probes не выданы за приёмку: Qwen и DeepSeek вернули billing
+`402`, Gemma free — quota `429`; Dots free успешно дошёл до version 8, затем на
+v9 вернул `finish_reason=length` и 353 527 символов, которые Gateway отклонил без
+commit. После этого Dots получил только поддержанный reasoning mode `none` и
+явный лимит ответа.
+
+Последующий изолированный `run28` провёл новую Party `party_a3a1c666c679` от
+opening до version 66 через exact narrator route
+`dots-studio/dots-3-note-preview:free`: 66 request/idempotency key дали 66
+committed turn без пропусков и дублей. В trace 67 Narrator call: 66 успешных и
+один фактический upstream HTTP 400 на v51; Party осталась на v50, а разрешённый
+same-key retry после runtime-отказа создал ровно один v51. Неизменённый
+отклонённый semantic output не повторялся. Все 66 Relationship и 66 Runtime Lore
+job завершились с `attempts=0`; из 66 Story Memory job только один завершился с
+`attempts=1`; у Administrator распределение — 63 с `attempts=0`, два с
+`attempts=1` и один с `attempts=2`. Каждый счётчик вырос только после фактической
+ошибки модели. Memory построила непрерывную base-chain на версиях 8, 16, 24, 32,
+40, 48, 56 и 64; coverage не продвигался при отказе v64 и дошёл до 64 только
+после успешного retry. Обе candidate SQLite прошли integrity/FK. Архив run8:
+`/srv/backups/rp-stack/decision043-acceptance-run8-20260901T092919Z.tar.gz`,
+SHA-256 `e36a2eb40b0e559e023f9da3be8e43bca70676443a200f82b3c47ceb3f609ab7`.
+
+Семантический review этого прогона сначала не прошёл gate: v3 ошибочно создал
+`kept_agreement` из подтверждения будущей границы, а Runtime Lore повторял уже
+сохранённые события и включал тезисы вне выбранных evidence spans. Исправление
+осталось модельным, без regex/substrings как предикатов истины: для
+`kept_agreement` модель обязана различить ранее существовавшее обязательство и
+его фактическое исполнение сейчас; Runtime Lore получает существующие runtime
+cards и обязана опираться только на выбранные spans. Реальный `run10` на local
+Gemma с текущим source с первого выполнения вернул для v3 `candidates=[]`, для
+v1 — одну полностью подтверждённую выбранным span карточку, для повторного v57 —
+`no_candidate`. Архив run10:
+`/srv/backups/rp-stack/decision043-acceptance-run10-20260901T094026Z.tar.gz`,
+SHA-256 `edd01c3b8e90f031caffaa08d749b3028b155f8a54a026308b925d3cd72d2867`.
+Full Gateway suite текущего bundle — `665 passed, 1 skipped` за
+`66.93s`; repository/skill/schema/UI gates — PASS. Текущий verification budget —
+`28 272 / 5 000 LOC`, debt `23 272`, поэтому LOC и time gates остаются открыты.
+Production во всех probes сохранял тот же container/image, restart count `0` и
+`RP_REBUILD_ENABLED=false`; candidate data production не использует. Длинный
+run28 доказывает автоматическую механику fixed route, но не заменяет human
+приёмку и applied-image parity последних source-коррекций.
 
 ## Context
 

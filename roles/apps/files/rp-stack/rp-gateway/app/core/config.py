@@ -82,8 +82,13 @@ class Settings:
     # Kept separate so party-scoped BYOK can never become the credential of
     # the stack-wide service model.
     service_openrouter_api_key: str = os.getenv("SERVICE_OPENROUTER_API_KEY", os.getenv("OPENROUTER_API_KEY", ""))
-    openrouter_models: tuple[str, ...] = env_list("OPENROUTER_MODELS", "openrouter/auto,openrouter/free")
-    openrouter_fallback_models: tuple[str, ...] = env_list("OPENROUTER_FALLBACK_MODELS", "openrouter/auto")
+    openrouter_models: tuple[str, ...] = env_list(
+        "OPENROUTER_MODELS",
+        "deepseek/deepseek-v4-flash,qwen/qwen3.5-flash-02-23",
+    )
+    openrouter_fallback_models: tuple[str, ...] = env_list(
+        "OPENROUTER_FALLBACK_MODELS", "deepseek/deepseek-v4-flash"
+    )
     openrouter_model_catalog_live: bool = env_bool("OPENROUTER_MODEL_CATALOG_LIVE", True)
     local_llm_enabled: bool = env_bool("LOCAL_LLM_ENABLED", False)
     local_llm_base_url: str = os.getenv("LOCAL_LLM_BASE_URL", "http://rp-local-llm:8080/v1")
@@ -94,9 +99,13 @@ class Settings:
     # memory, world-edit drafting, and character generation. It never narrates turns.
     service_model_choice: str = os.getenv("SERVICE_MODEL_CHOICE", "local-gemma")
     provider_model_catalog_ttl_seconds: int = env_int("PROVIDER_MODEL_CATALOG_TTL_SECONDS", 86400)
-    narrative_model: str = os.getenv("NARRATIVE_MODEL", "openrouter/auto")
-    intent_model: str = os.getenv("INTENT_MODEL", "openrouter/auto")
-    validator_model: str = os.getenv("VALIDATOR_MODEL", "openrouter/auto")
+    narrative_model: str = os.getenv(
+        "NARRATIVE_MODEL", "deepseek/deepseek-v4-flash"
+    )
+    intent_model: str = os.getenv("INTENT_MODEL", "deepseek/deepseek-v4-flash")
+    validator_model: str = os.getenv(
+        "VALIDATOR_MODEL", "deepseek/deepseek-v4-flash"
+    )
     llm_fallback_models: tuple[str, ...] = env_list("LLM_FALLBACK_MODELS", "")
     llm_disabled_models: tuple[str, ...] = env_list("LLM_DISABLED_MODELS", "")
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

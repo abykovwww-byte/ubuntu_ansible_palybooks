@@ -24,7 +24,13 @@ from app.rp.provider import (
     RPAtomicServiceProvider,
     RPNarratorProvider,
 )
-from app.rp.turn_engine import RPModelOutputRejected, RPParty, RPTurn, RPTurnEngine
+from app.rp.turn_engine import (
+    RPModelOutputRejected,
+    RPParty,
+    RPRuntimeLoreCard,
+    RPTurn,
+    RPTurnEngine,
+)
 from app.services.service_model_client import ServiceCompletion, ServiceModelClient
 
 
@@ -85,11 +91,20 @@ def _party() -> RPParty:
         },
         seed_lore_cards=(
             {
-                "id": "treaty",
-                "kind": "event",
-                "title": "Договор",
-                "content": "Договор ограничивает обе стороны.",
-                "keywords": ["договор"],
+                "cards": [
+                    {
+                        "key": "npc:anton",
+                        "title": "Антон Городецкий",
+                        "content": "Антон — сотрудник Дозора.",
+                        "keywords": ["Антон", "Антона", "Антону"],
+                    },
+                    {
+                        "key": "law:treaty",
+                        "title": "Договор",
+                        "content": "Договор ограничивает обе стороны.",
+                        "keywords": ["договор"],
+                    },
+                ]
             },
         ),
     )
@@ -205,6 +220,7 @@ def test_narrator_sends_exact_messages_once_without_fallback_or_repair(
         {"role": "user", "content": "PLAYER EXACT"},
     ]
     assert call["payload"]["provider"] == {
+        "ignore": ["nvidia"],
         "sort": "throughput",
         "require_parameters": True,
     }
@@ -214,6 +230,39 @@ def test_narrator_sends_exact_messages_once_without_fallback_or_repair(
     }
     assert "fallback" not in call["payload"]
     assert "repair" not in call["payload"]
+
+
+def test_dots_narrator_disables_reasoning_and_caps_completion(tmp_path: Path) -> None:
+    client = RecordingClient(_completion("Сцена продолжается."))
+    provider = RPNarratorProvider(
+        _settings(tmp_path),
+        provider="openrouter",
+        model="dots-studio/dots-3-note-preview:free",
+        narrator_settings={"reasoning_effort": "none", "max_tokens": 4096},
+        party_id="party-one",
+        request_id="request-one",
+        client=client,  # type: ignore[arg-type]
+    )
+    prompt = RPNarratorPrompt(
+        messages=(
+            RPPromptMessage("system", "world", "WORLD EXACT"),
+            RPPromptMessage("assistant", "raw", "RAW EXACT"),
+            RPPromptMessage("user", "player", "PLAYER EXACT"),
+        ),
+        raw_turn_versions=(1,),
+        safe_memory_coverage=0,
+        stable_prefix_hash="stable",
+        input_chars=30,
+    )
+
+    assert asyncio.run(provider.complete(prompt)) == "Сцена продолжается."
+    payload = client.calls[0]["payload"]
+    assert payload["reasoning"] == {"enabled": False}
+    assert payload["max_tokens"] == 4096
+    assert payload["provider"] == {
+        "ignore": ["nvidia"],
+        "require_parameters": True,
+    }
 
 
 @pytest.mark.parametrize(
@@ -295,13 +344,32 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     party = _party()
     turn = _turn()
     spans = _spans()
+    existing_lore = RPRuntimeLoreCard(
+        id=1,
+        party_id=party.id,
+        service_job_id=1,
+        source_turn_id=turn.id,
+        source_version=turn.committed_version,
+        card_key="runtime-card-key",
+        kind="event",
+        origin="runtime",
+        title="Сохранённое событие",
+        content="Уже сохранённый устойчивый факт.",
+        keywords=("событие",),
+        evidence_span_ids=(1,),
+        enabled=True,
+        created_at=1,
+    )
 
     async def exercise() -> None:
         relationships = await atomic.extract_relationships(
             party=party, turn=turn, evidence_spans=spans
         )
         lore = await atomic.extract_runtime_lore(
-            party=party, turn=turn, evidence_spans=spans
+            party=party,
+            turn=turn,
+            evidence_spans=spans,
+            existing_runtime_lore=(existing_lore,),
         )
         story_memory = await atomic.update_story_memory(
             party=party, turns=(turn,), previous=None
@@ -334,8 +402,10 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         call["payload"]["reasoning"] == {"enabled": False}
         for call in atomic_client.calls
     )
+    assert all(call["payload"]["temperature"] == 0 for call in atomic_client.calls)
     assert all(
-        call["payload"]["provider"] == {"require_parameters": True}
+        call["payload"]["provider"]
+        == {"ignore": ["nvidia"], "require_parameters": True}
         for call in atomic_client.calls
     )
     expected_roots = (
@@ -359,9 +429,71 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         assert schema["additionalProperties"] is False
         assert set(schema["properties"]) == expected_root
         assert "OUTPUT_SCHEMA=" in call["payload"]["messages"][0]["content"]
-    assert "max_tokens" not in atomic_client.calls[0]["payload"]
-    assert atomic_client.calls[1]["payload"]["max_tokens"] == 400
-    assert "max_tokens" not in atomic_client.calls[2]["payload"]
+    assert atomic_client.calls[0]["payload"]["max_tokens"] == 2_048
+    relationship_messages = atomic_client.calls[0]["payload"]["messages"]
+    relationship_body = json.loads(relationship_messages[1]["content"])
+    assert relationship_body["extraction_constraints"] == {
+        "selected_evidence_must_identify_character": True,
+        "routine_role_or_current_request_is_not_an_event": True,
+        "honest_warning_requires_material_new_risk_or_limit": True,
+        "kept_agreement_requires_preexisting_obligation": True,
+        "kept_agreement_requires_current_fulfillment": True,
+        "agreement_creation_confirmation_or_future_intent_is_not_fulfillment": True,
+    }
+    assert relationship_body["active_character_references"] == [
+        {
+            "character_id": "anton",
+            "title": "Антон Городецкий",
+            "aliases": ["Антон", "Антона", "Антону"],
+        }
+    ]
+    lore_messages = atomic_client.calls[1]["payload"]["messages"]
+    lore_body = json.loads(lore_messages[1]["content"])
+    assert lore_body["active_character_references"] == relationship_body[
+        "active_character_references"
+    ]
+    assert lore_body["existing_runtime_lore_cards"] == [
+        {
+            "kind": "event",
+            "title": "Сохранённое событие",
+            "content": "Уже сохранённый устойчивый факт.",
+            "keywords": ["событие"],
+            "source_version": 1,
+        }
+    ]
+    assert lore_body["draft_constraints"] == {
+        "every_claim_uses_selected_evidence": True,
+        "duplicate_or_recap_returns_no_candidate": True,
+        "preserve_uncertainty_and_attribution": True,
+    }
+    memory_messages = atomic_client.calls[2]["payload"]["messages"]
+    memory_body = json.loads(memory_messages[1]["content"])
+    assert memory_body["constraints"] == {
+        "memory_fact_text_max_chars": 1_024,
+        "source_turn_versions_max_items": 128,
+        "source_turn_versions_overflow": (
+            "keep origin, latest changes, and strongest RAW evidence"
+        ),
+    }
+    assert memory_body["turns"] == [
+        {
+            "turn_kind": turn.turn_kind,
+            "committed_version": turn.committed_version,
+            "player_text": turn.player_text,
+            "narrator_text": turn.narrator_text,
+        }
+    ]
+    assert atomic_client.calls[1]["payload"]["max_tokens"] == 2_048
+    assert atomic_client.calls[2]["payload"]["max_tokens"] == 16_384
+    memory_schema = atomic_client.calls[2]["payload"]["response_format"][
+        "json_schema"
+    ]["schema"]
+    assert (
+        memory_schema["$defs"]["RPMemoryFact"]["properties"]["text"][
+            "maxLength"
+        ]
+        == 1_024
+    )
     assert len(administrator_client.calls) == 1
     assert administrator_client.calls[0]["provider"] == "local"
     assert administrator_client.calls[0]["model"] == "administrator/model"
@@ -369,7 +501,17 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     assert administrator_client.calls[0]["payload"]["reasoning"] == {
         "enabled": False
     }
+    assert administrator_client.calls[0]["payload"]["temperature"] == 0
+    assert administrator_client.calls[0]["payload"]["max_tokens"] == 2_048
     assert "provider" not in administrator_client.calls[0]["payload"]
+    administrator_body = json.loads(
+        administrator_client.calls[0]["payload"]["messages"][1]["content"]
+    )
+    assert administrator_body["guidance_contract"] == {
+        "future_narrator_instruction_only": True,
+        "scene_or_character_dialogue_forbidden": True,
+        "raw_recap_or_new_canon_forbidden": True,
+    }
     administrator_schema = administrator_client.calls[0]["payload"]["response_format"][
         "json_schema"
     ]["schema"]
@@ -401,7 +543,10 @@ def test_non_reasoning_openrouter_route_requires_schema_without_reasoning(
     )
 
     payload = client.calls[0]["payload"]
-    assert payload["provider"] == {"require_parameters": True}
+    assert payload["provider"] == {
+        "ignore": ["nvidia"],
+        "require_parameters": True,
+    }
     assert payload["response_format"]["type"] == "json_schema"
     assert "reasoning" not in payload
 
@@ -496,6 +641,53 @@ def test_transport_error_remains_generic_and_retryable_by_runner(
     assert failed.value is transport_error
     assert not isinstance(failed.value, RPModelOutputRejected)
     assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("error_location", ["choice", "top_level"])
+def test_upstream_provider_error_remains_generic_and_retryable_by_runner(
+    tmp_path: Path, error_location: str
+) -> None:
+    provider_error = {
+        "code": 504,
+        "message": "Upstream idle timeout exceeded",
+    }
+    if error_location == "choice":
+        response = _completion('{"candidates":[', finish_reason="error")
+        response["choices"][0]["error"] = provider_error
+    else:
+        response = {"id": "provider-error", "error": provider_error}
+    client = RecordingClient(response)
+    provider = RPAtomicServiceProvider(
+        _settings(tmp_path),
+        provider="openrouter",
+        model="atomic/model",
+        client=client,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RuntimeError, match="provider error 504") as failed:
+        asyncio.run(
+            provider.extract_relationships(
+                party=_party(), turn=_turn(), evidence_spans=_spans()
+            )
+        )
+
+    assert not isinstance(failed.value, RPModelOutputRejected)
+    assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["openrouter/auto", "openrouter/free", "nvidia/nemotron-3-super:free"],
+)
+def test_clean_rp_rejects_dynamic_and_nvidia_openrouter_routes(
+    tmp_path: Path, model: str
+) -> None:
+    with pytest.raises(ValueError, match="retired or unsafe"):
+        RPNarratorProvider(
+            _settings(tmp_path),
+            provider="openrouter",
+            model=model,
+        )
 
 
 def test_provider_diagnostics_stay_in_legacy_database(tmp_path: Path) -> None:

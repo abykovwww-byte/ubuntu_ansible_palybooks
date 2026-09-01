@@ -38,7 +38,7 @@ def integration_settings(tmp_path: Path) -> Settings:
         rp_runner_poll_interval_seconds=0.001,
         openrouter_api_key="party-openrouter-key",
         service_openrouter_api_key="service-openrouter-key",
-        openrouter_models=("openrouter/auto",),
+        openrouter_models=("deepseek/deepseek-v4-flash",),
         openrouter_model_catalog_live=False,
         gemini_model_catalog_live=False,
         local_llm_enabled=False,
@@ -61,7 +61,7 @@ def _model_profile_id(client: TestClient) -> str:
         item
         for item in response.json()["model_profiles"]
         if item["provider"] == "openrouter"
-        and item["model"] == "openrouter/auto"
+        and item["model"] == "deepseek/deepseek-v4-flash"
     )
     return str(profile["id"])
 
@@ -363,13 +363,23 @@ def test_rebuilt_turn_http_contract_is_idempotent_retryable_and_fail_open(
     previous_handler = app.state.rp_runner.service_handler
     selected_service_model = client.patch(
         "/api/admin/global-settings/service-model",
-        json={"choice_id": "or-qwen-3.7-flash"},
+        json={"choice_id": "or-qwen-3.5-flash"},
     )
     assert selected_service_model.status_code == 200, selected_service_model.text
-    assert selected_service_model.json()["selected"]["model"] == "qwen/qwen3.7-flash"
+    assert (
+        selected_service_model.json()["selected"]["model"]
+        == "qwen/qwen3.5-flash-02-23"
+    )
+    assert "or-qwen-3.7-flash" not in {
+        choice["id"] for choice in selected_service_model.json()["choices"]
+    }
+    assert "or-openrouter-free" not in {
+        choice["id"] for choice in selected_service_model.json()["choices"]
+    }
     assert app.state.rp_runner.service_handler is not previous_handler
     assert (
-        app.state.rp_runner.service_handler.model.model == "qwen/qwen3.7-flash"
+        app.state.rp_runner.service_handler.model.model
+        == "qwen/qwen3.5-flash-02-23"
     )
 
     unknown_start = client.post(

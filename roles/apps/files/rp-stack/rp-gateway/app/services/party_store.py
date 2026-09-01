@@ -37,6 +37,7 @@ from app.services.provider_catalog import (
     is_quality_rp_model,
     narrator_control_capabilities,
     normalize_provider,
+    openrouter_model_is_active,
     static_model_profiles,
     validate_narrator_settings,
 )
@@ -1428,6 +1429,8 @@ class PartyStore:
     def model_profile_is_visible(self, profile: ModelProfileSummary) -> bool:
         provider = normalize_provider(profile.provider)
         if provider not in {"local", "gemini", "openrouter"}:
+            return False
+        if provider == "openrouter" and not openrouter_model_is_active(profile.model):
             return False
         if provider == "openrouter" and profile.model.lower().endswith(":batch"):
             return False

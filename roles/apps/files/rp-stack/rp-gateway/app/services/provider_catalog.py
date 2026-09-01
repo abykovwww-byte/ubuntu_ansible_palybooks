@@ -15,6 +15,7 @@ PROVIDER_TITLES = {
 }
 
 NARRATOR_MAX_TOKEN_OPTIONS = [1024, 2048, 4096, 8192, 16384]
+UNSAFE_OPENROUTER_MODEL_ROUTES = frozenset({"openrouter/auto", "openrouter/free"})
 NARRATOR_CONTROL_CAPABILITIES: dict[str, dict[str, Any]] = {
     "openai/gpt-5.6-luna": {
         "reasoning_efforts": ["none", "low", "medium", "high", "xhigh", "max"],
@@ -37,6 +38,13 @@ NARRATOR_CONTROL_CAPABILITIES: dict[str, dict[str, Any]] = {
         "top_p": True,
         "max_tokens": NARRATOR_MAX_TOKEN_OPTIONS,
     },
+    "dots-studio/dots-3-note-preview:free": {
+        "reasoning_efforts": ["none"],
+        "default_reasoning_effort": "none",
+        "temperature": True,
+        "top_p": False,
+        "max_tokens": NARRATOR_MAX_TOKEN_OPTIONS,
+    },
 }
 
 
@@ -51,6 +59,15 @@ def narrator_control_capabilities(provider: str, model_id: str) -> dict[str, Any
         "reasoning_efforts": list(capabilities["reasoning_efforts"]),
         "max_tokens": list(capabilities["max_tokens"]),
     }
+
+
+def openrouter_model_is_active(model_id: str) -> bool:
+    """Reject dynamic or NVIDIA-authored routes while preserving stored rows."""
+
+    clean = model_id.strip().casefold()
+    return bool(clean) and clean not in UNSAFE_OPENROUTER_MODEL_ROUTES and not clean.startswith(
+        "nvidia/"
+    )
 
 
 def validate_narrator_settings(provider: str, model_id: str, settings: dict[str, Any]) -> dict[str, Any]:
@@ -98,29 +115,30 @@ STATIC_GEMINI_MODELS: list[dict[str, Any]] = [
 
 STATIC_OPENROUTER_MODELS: list[dict[str, Any]] = [
     {
-        "model": "openrouter/auto",
-        "title": "Auto Router",
-        "publisher": "OpenRouter",
-        "description": "OpenRouter automatically selects a compatible text model.",
-        "rp_fit": "Useful as a broad availability fallback; a specific model is more predictable for a campaign.",
-        "context_window": "131,072 tokens (minimum routed budget)",
-        "context_tokens": 131_072,
-        "tags": ["router", "automatic"],
+        "model": "deepseek/deepseek-v4-flash",
+        "title": "DeepSeek V4 Flash",
+        "publisher": "DeepSeek",
+        "description": "Fixed long-context DeepSeek route through OpenRouter.",
+        "rp_fit": "Fast exact narrator route for long campaigns and ordinary turns.",
+        "context_window": "1,048,576 tokens",
+        "context_tokens": 1_048_576,
+        "tags": ["fixed model", "long context", "fast"],
         "availability": "OpenRouter API",
+        "pricing_prompt": "0.00000008092",
+        "pricing_completion": "0.00000016184",
     },
     {
-        "model": "openrouter/free",
-        "title": "Free Models Router",
-        "publisher": "OpenRouter",
-        "description": "OpenRouter selects a currently available free text model.",
-        "rp_fit": "Zero-cost testing option; model identity and narrative style can change between requests.",
-        "context_window": "131,072 tokens (minimum routed budget)",
-        "context_tokens": 131_072,
-        "tags": ["router", "automatic", "free"],
-        "availability": "OpenRouter free router",
-        "is_free": True,
-        "pricing_prompt": "0",
-        "pricing_completion": "0",
+        "model": "qwen/qwen3.5-flash-02-23",
+        "title": "Qwen3.5 Flash",
+        "publisher": "Qwen",
+        "description": "Fixed long-context Qwen route through OpenRouter.",
+        "rp_fit": "Economical exact route for long campaigns and structured work.",
+        "context_window": "1,000,000 tokens",
+        "context_tokens": 1_000_000,
+        "tags": ["fixed model", "long context", "economical"],
+        "availability": "OpenRouter API",
+        "pricing_prompt": "0.000000065",
+        "pricing_completion": "0.00000026",
     },
 ]
 

@@ -255,10 +255,10 @@ class RPTurnEngine:
         world_snapshot: WorldSnapshot,
         scenario_snapshot: ScenarioSnapshot,
         title: str | None = None,
-        narrator_profile_id: str = "openrouter-openrouter-auto",
+        narrator_profile_id: str = "openrouter-deepseek-deepseek-v4-flash",
         narrator_provider: str = "openrouter",
         narrator_base_url: str | None = None,
-        narrator_model: str = "openrouter/auto",
+        narrator_model: str = "deepseek/deepseek-v4-flash",
         narrator_settings: dict[str, Any] | None = None,
     ) -> RPParty:
         owner_user_id = _required_text(owner_user_id, "owner_user_id")
