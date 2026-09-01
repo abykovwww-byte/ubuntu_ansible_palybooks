@@ -22,9 +22,9 @@ flowchart LR
 Оба GitHub-репозитория публичные. Существующий IaC checkout читается
 сервером по SSH с отдельным read-only deploy key; приватная часть
 ключа хранится только на `abykovserv`, не попадает в Git и не даёт права
-push. Standalone application клонируется по HTTPS без GitHub token на
-exact commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Public visibility не
-добавляет серверу права записи.
+push. Standalone application клонируется по HTTPS без GitHub token на exact
+commit из `awareness_showroom_repo_version`. Public visibility не добавляет
+серверу права записи.
 
 Обычный цикл:
 
@@ -301,14 +301,13 @@ docker compose logs --tail=100 awareness-gateway showroom
 curl -fsS http://192.168.1.88:8011/health
 ```
 
-### Zero-window C1/O2 Decision 018: apply подтверждён, полная приёмка впереди
+### Zero-window C1/O2 Decision 018: apply подтверждён, runtime checks отдельно
 
-Apply `83a90eda9a2465567028e7e58446378e0b10ccc2` завершился с `failed=0`.
-Standalone exact commit
-`67244432659f6c25a268cbf788a8fa3af0f5b52f` занял LAN-only
-`192.168.1.88:8011`; RP Gateway запущен с `SCENARIO_TYPE=rp`, а RP
-Compose/source не содержит `rp-showcase-gui`, Awareness WorldPacks и training
-runtime. Wrong-mode no-write/no-provider остаётся отдельным live gate.
+Pull-based apply завершился с `failed=0`. Standalone exact commit из
+`awareness_showroom_repo_version` занимает LAN-only `192.168.1.88:8011`; RP
+Gateway запущен с `SCENARIO_TYPE=rp`, а RP Compose/source не содержит
+`rp-showcase-gui`, Awareness WorldPacks и training runtime. Wrong-mode
+no-write/no-provider остаётся отдельным live gate.
 Rollback window равен `0`: сбои исправляются fix-forward через application/IaC
 PR и повторный apply. Legacy RP SQLite rows/tables, state, backups и data
 artifacts сохранены.
@@ -347,7 +346,7 @@ cd /srv/apps/awareness-showroom
 git status --short
 stat -c '%U:%G %n' . .git .env.example
 docker compose exec -T awareness-gateway printenv SHOWROOM_CATALOG_PATH
-test "$(git rev-parse HEAD)" = "67244432659f6c25a268cbf788a8fa3af0f5b52f"
+test "$(git rev-parse HEAD)" = "$(grep '^awareness_showroom_repo_version:' /opt/ubuntu_ansible_palybooks/inventories/local/group_vars/server.yml | sed 's/.*"\([0-9a-f]\{40\}\)".*/\1/')"
 curl -fsS http://192.168.1.88:8011/api/showroom/scenarios
 ! ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:18011'
 cd /srv/apps/rp-stack
@@ -363,14 +362,15 @@ owner трёх проверяемых paths — `abykov:abykov`. Отдельн�
 `/srv/apps/rp-stack` проверяются отсутствие legacy container/source и shadow
 listener `127.0.0.1:18011`, `SCENARIO_TYPE=rp`, HTTP `:8010`, отсутствие старых
 `/api/showroom/**` routes и отказ training payload до DB/provider write.
-Эти shape checks ещё не доказывают provider-turn, scoring, debrief, resume или
-backup/restore.
+Эти shape checks сами по себе не доказывают provider-turn, scoring, debrief,
+resume или backup/restore; эти проверки выполняются отдельно после каждого
+application fix-forward.
 
 C1 apply перевёл `:8011` на новый Showroom, а старый Compose стал
 RP-only. `:8010` не меняется. Проекты не разделяют SQLite/state/cookies/network и
 не вызывают Gateway друг друга. Shape, HTTP, browser и SQLite smoke пройдены;
-оба полных Awareness курса, реальный provider-turn, artifact/workspace scoring,
-debrief, resume и backup/test-restore остаются обязательными.
+реальный provider-turn, scoring/debrief, resume и backup/test-restore являются
+отдельными acceptance gates и повторяются после source pin changes.
 
 Владелец явно снял перенос истории, visitors/runs и ожидание legacy sessions как
 блокеры C1. Destructive migration/deletion старой RP SQLite не выполнялась; она
@@ -434,8 +434,8 @@ failure/retry без partial turn, restart с pending jobs без роста att
 owner-scoped Administrator decision и отсутствие ordinary legacy RP в
 state/autotest/dataset/trace. RP Gateway дополнительно должен доказать отсутствие
 Showroom routes и отказ training payload до DB/provider write. Внешний Awareness
-gate закрывается только после C1 apply и полного прохождения обоих курсов на
-standalone `192.168.1.88:8011`, включая provider-turn, scoring, debrief, resume и
+gate закрывается только после C1 apply и standalone runtime checks на
+`192.168.1.88:8011`, включая provider-turn, scoring/debrief, resume и
 backup/test-restore. После этого нужны authenticated Light GUI smoke и настоящая
 RP Party;
 pytest, CI, healthy container и HTTP `200` не являются live gameplay proof.

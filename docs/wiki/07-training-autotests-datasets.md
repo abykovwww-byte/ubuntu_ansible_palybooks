@@ -80,16 +80,17 @@ WorldPack-authored no-link fallback.
 
 WorldPack сам связывает публичный результат с numeric state path через `manifest.showroom_result`. Showroom scenario может включить leaderboard, но не выбирает, откуда взять score. Это сохраняет ownership оценки у authored training world.
 
-C1 source закрепляет этот контракт за отдельным training-only Gateway exact
-commit `67244432659f6c25a268cbf788a8fa3af0f5b52f`. Он начинает с собственной
+C1 source закрепляет этот контракт за отдельным training-only Gateway; deployed
+application revision берётся из `awareness_showroom_repo_version`. Он начинает с собственной
 SQLite: настройки опубликованных сценариев и covers создаются из Git-каталога,
 а visitors, runs, parties, turns, feedback, leaderboard, sessions и BYOK не
 переносятся. Владелец явно снял старую историю как blocker, поэтому `Мои
 прохождения` и рейтинг начинаются с нуля. Старая RP SQLite остаётся нетронутой.
 Rollback window равен `0`, поэтому legacy training source/tests удаляются из RP
 repository в той же поставке, но старые rows/state/backups сохраняются.
-Apply, оба полных курса, provider-turn, scoring/debrief, resume и backup/restore
-нового runtime ещё должны быть подтверждены отдельно.
+Apply, provider-turn, scoring/debrief, resume и backup/restore нового runtime
+подтверждаются отдельными runtime checks и повторяются после fix-forward; merge
+или зелёный CI сами по себе этого не доказывают.
 
 C1 live acceptance требует полные прохождения обоих курсов на одном exact
 application revision с `fallback_turns == 0`. В committed turns и audit не
