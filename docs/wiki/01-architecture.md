@@ -21,8 +21,10 @@ Party = WorldPack
 
 ## Контейнеры и сети
 
-Следующая схема описывает живой runtime после C1 apply
-`83a90eda9a2465567028e7e58446378e0b10ccc2`.
+Следующая схема описывает живой runtime после C1 apply. Текущая source-ревизия
+standalone Awareness не хардкодится в Wiki: её задаёт
+`awareness_showroom_repo_version` в inventory и подтверждает runtime
+`git -C /srv/apps/awareness-showroom rev-parse HEAD`.
 
 ```mermaid
 flowchart LR
@@ -38,9 +40,9 @@ flowchart LR
     I -->|"exact public HTTPS commit"| T
 ```
 
-Standalone application закреплён exact commit
-`67244432659f6c25a268cbf788a8fa3af0f5b52f`. Оба Gateway не публикуют host ports:
-снаружи доступны только Light GUI `:8010` и LAN-only Showroom `:8011`.
+Standalone application закрепляется exact pin в
+`awareness_showroom_repo_version`. Оба Gateway не публикуют host ports: снаружи
+доступны только Light GUI `:8010` и LAN-only Showroom `:8011`.
 Старый Showroom и shadow listener `:18011` отсутствуют. Local LLM находится в
 отдельной internal-сети и не принимает запросы с LAN. Rollback window равен `0`.
 
@@ -85,8 +87,10 @@ legacy Party/state/turn tables; обычные legacy RP endpoints при вкл
 возвращают `410`. После C1 RP source не содержит Training/Showroom exception:
 standalone project обслуживает training-only Gateway и Showroom на целевом
 `192.168.1.88:8011`. Нового RP-контейнера, порта или dual-write нет. В inventory
-RP-флаг пока `false`. C1 shape/HTTP/browser/SQLite smoke подтверждены, но clean
-RP activation и полная standalone training-приёмка ещё не выполнены.
+RP-флаг пока `false`. C1 shape/HTTP/browser/SQLite smoke подтверждены.
+Standalone training-приёмка проверяется отдельно после каждого application
+fix-forward: provider-turn, scoring/debrief, session resume и backup/test-restore
+не выводятся из одного только merge или apply.
 
 ## Ответственность компонентов
 

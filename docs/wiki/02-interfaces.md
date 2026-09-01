@@ -257,11 +257,10 @@ Showroom — отдельная витрина на `:8011` для прохож�
 
 Decision 018 сохраняет этот пользовательский адрес и публичный `run_id` API, но
 меняет deployment ownership: C1 source закрепляет public
-`tavern-awareness-showroom` exact commit
-`67244432659f6c25a268cbf788a8fa3af0f5b52f` с training-only Gateway и
-LAN-only bind `192.168.1.88:8011`. Выбор `rp` и создание мира по prompt в нём
-отсутствуют. До Ansible apply текущий старый Showroom на `:8011` и общий Gateway
-остаются live; source merge сам по себе не доказывает переключение.
+`tavern-awareness-showroom` через `awareness_showroom_repo_version` с
+training-only Gateway и LAN-only bind `192.168.1.88:8011`. Выбор `rp` и создание
+мира по prompt в нём отсутствуют. После Ansible apply старый Showroom на `:8011`
+и общий Gateway больше не являются фактическим runtime для training.
 
 Публичные `/api/showroom/**` и `run_id` не меняются: browser обращается к тому
 же origin `:8011`, а Nginx нового Showroom проксирует `/api/*` только в свой

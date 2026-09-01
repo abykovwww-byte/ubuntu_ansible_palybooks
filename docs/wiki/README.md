@@ -231,10 +231,13 @@ core, но не является runtime authority, readiness oracle или за
 
 ## Главное за минуту
 
-Ниже показана фактическая C1-топология после apply
-`83a90eda9a2465567028e7e58446378e0b10ccc2`. `:8010` и `:8011` отвечают `200`,
-старый listener `:18011` отсутствует. Полная training-приёмка и активация clean
-RP остаются отдельными воротами.
+Ниже показана фактическая C1-топология после pull-based apply. Текущий
+application commit standalone Awareness задаётся в
+`inventories/local/group_vars/server.yml` переменной
+`awareness_showroom_repo_version` и подтверждается на сервере через
+`git -C /srv/apps/awareness-showroom rev-parse HEAD`; Wiki не хардкодит moving
+SHA, потому что каждый fix-forward меняет pin. `:8010` и `:8011` отвечают
+`200`, старый listener `:18011` отсутствует.
 
 ```mermaid
 flowchart LR
@@ -281,14 +284,14 @@ flowchart LR
 | Awareness Gateway | Только внутренняя сеть standalone project, порт `8088` | Training-only runs, scoring, artifacts/workspace и хранение |
 | Local LLM | Только внутренняя сеть `rp-llm`, порт `8080` | Gemma 4 26B A4B Q4 для служебных задач и опционального автотестового игрока |
 
-> **C1 применён:** public `tavern-awareness-showroom` закреплён exact commit
-> `67244432659f6c25a268cbf788a8fa3af0f5b52f`; старый Showroom, training source
-> и routes в RP checkout, а также listener `:18011` отсутствуют. RP Gateway
-> запущен с `SCENARIO_TYPE=rp`; wrong-mode no-write/no-provider остаётся частью
-> полной приёмки. Rollback window по решению владельца равен `0`.
-> Backup/test-restore, logical before/after legacy-data snapshot и сквозная
-> training-приёмка остаются отдельными проверками. C1/O2 не выполняет
-> destructive migration или deletion старой RP SQLite, state и backups.
+> **C1 применён:** public `tavern-awareness-showroom` закрепляется через
+> `awareness_showroom_repo_version`, а старый Showroom, training source/routes в
+> RP checkout и listener `:18011` отсутствуют. RP Gateway запущен с
+> `SCENARIO_TYPE=rp`; standalone Awareness Gateway — с `SCENARIO_TYPE=training`.
+> Rollback window по решению владельца равен `0`. Legacy RP SQLite/state/backups
+> сохранены как отдельная история; standalone provider/debrief acceptance и
+> backup/test-restore выполняются как отдельные runtime checks после каждого
+> fix-forward.
 
 SillyTavern не входит в текущий Compose RP Stack. Lorebook JSON и совместимый `/v1/chat/completions` сохранены как legacy/compatibility-контур, но поддерживаемые браузерные пути — Light GUI и Showroom.
 

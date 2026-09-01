@@ -46,8 +46,9 @@ apply, а existing parties не мигрировались автоматиче�
 В объединённом C1/O2 source ownership уже разделено. RP WorldPacks
 остаются в `ubuntu_ansible_palybooks`, а единственные активные source-копии
 `awareness` и `awareness-one-day` принадлежат public project
-`tavern-awareness-showroom` на exact commit
-`67244432659f6c25a268cbf788a8fa3af0f5b52f`. Standalone принимает только
+`tavern-awareness-showroom`; его deployed revision задаётся
+`awareness_showroom_repo_version` и проверяется на сервере через `git rev-parse
+HEAD`. Standalone принимает только
 `training`, а RP source и Gateway — только `rp`; один активный
 WorldPack не дублируется между repositories. Zero-window apply удаляет
 старые копии из managed checkout, но сохраняет legacy RP SQLite,

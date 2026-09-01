@@ -261,14 +261,14 @@ Showroom использует отдельный visitor token. Run доступ
 runtime API между RP и training Gateway нет. Старые Showroom rows сохраняются в
 legacy RP SQLite, но новый training runtime их не читает.
 
-C1 применил exact application commit
-`67244432659f6c25a268cbf788a8fa3af0f5b52f` на LAN-only
-`192.168.1.88:8011`. Shadow `:18011`, старый Showroom и исполняемый training
+C1 применил standalone application pin из `awareness_showroom_repo_version` на
+LAN-only `192.168.1.88:8011`. Shadow `:18011`, старый Showroom и исполняемый training
 source в RP checkout отсутствуют. Destructive migration/deletion старой RP
 SQLite не выполнялась; БД прошла integrity/FK smoke, а logical before/after
 snapshot остаётся acceptance gate. Её training rows не являются blocker по
-явному решению владельца. Полный training flow и backup/test-restore ещё не
-доказаны. Rollback window равен `0`; SQLite/state/backups сохранены.
+явному решению владельца. Полный training flow и backup/test-restore проверяются
+отдельно после deployment/fix-forward. Rollback window равен `0`;
+SQLite/state/backups сохранены.
 
 ### Git-каталог Showroom
 
