@@ -3094,21 +3094,22 @@ def test_post_turn_helpers_can_run_without_blocking_response(tmp_path: Path, mon
         adjudicator = Adjudicator(settings, store)
         started = asyncio.Event()
         finished = asyncio.Event()
+        release = asyncio.Event()
 
         async def slow_helpers(authorization: str | None, wait_for_retries: bool) -> None:
             _ = authorization, wait_for_retries
             started.set()
-            await asyncio.sleep(0.1)
+            await release.wait()
             finished.set()
 
         monkeypatch.setattr(adjudicator, "drain_service_jobs", slow_helpers)
-        before = time.perf_counter()
-        await adjudicator.after_turn_recorded("Bearer test", "background-helper")
-        elapsed = time.perf_counter() - before
-
-        assert elapsed < 0.05
+        await asyncio.wait_for(
+            adjudicator.after_turn_recorded("Bearer test", "background-helper"),
+            timeout=1,
+        )
         await asyncio.wait_for(started.wait(), timeout=1)
         assert not finished.is_set()
+        release.set()
         await asyncio.wait_for(finished.wait(), timeout=1)
         await asyncio.sleep(0)
         assert store.campaign_id not in Adjudicator._post_turn_helper_campaigns

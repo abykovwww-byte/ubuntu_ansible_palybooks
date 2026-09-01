@@ -59,8 +59,8 @@ loops. Claims сериализуются SQLite-предикатом; restart и
   role status/error/kill-switch. Автоматический длинный canary на безопасном
   fixed-model route пройден на изолированном bind-mounted candidate, но последние
   source-коррекции ещё не собраны и не применены как image. Консервативный
-  verification budget остаётся `28 272 / 5 000 LOC`, debt `23 272`; полный
-  изолированный Gateway suite занимает `66.93s` при gate `≤60s`. Оба cutover gate
+  verification budget остаётся `28 273 / 5 000 LOC`, debt `23 273`; полный
+  изолированный Gateway suite занимает `66.38s` при gate `≤60s`. Оба cutover gate
   незакрыты. Inventory
   оставляет `RP_REBUILD_ENABLED=false`; полная standalone training-приёмка после
   уже выполненного C1 cutover также остаётся внешним gate Plan 018. Activation и
@@ -312,8 +312,8 @@ v1 — одну полностью подтверждённую выбранны
 `/srv/backups/rp-stack/decision043-acceptance-run10-20260901T094026Z.tar.gz`,
 SHA-256 `edd01c3b8e90f031caffaa08d749b3028b155f8a54a026308b925d3cd72d2867`.
 Full Gateway suite текущего bundle — `665 passed, 1 skipped` за
-`66.93s`; repository/skill/schema/UI gates — PASS. Текущий verification budget —
-`28 272 / 5 000 LOC`, debt `23 272`, поэтому LOC и time gates остаются открыты.
+`66.38s`; repository/skill/schema/UI gates — PASS. Текущий verification budget —
+`28 273 / 5 000 LOC`, debt `23 273`, поэтому LOC и time gates остаются открыты.
 Production во всех probes сохранял тот же container/image, restart count `0` и
 `RP_REBUILD_ENABLED=false`; candidate data production не использует. Длинный
 run28 доказывает автоматическую механику fixed route, но не заменяет human
