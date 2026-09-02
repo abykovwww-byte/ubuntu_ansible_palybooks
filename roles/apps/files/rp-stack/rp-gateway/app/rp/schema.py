@@ -6,7 +6,7 @@ import sqlite3
 
 
 RP_DATABASE_APPLICATION_ID = 0x5250454E  # "RPEN"
-RP_SCHEMA_VERSION = 7
+RP_SCHEMA_VERSION = 8
 
 _EXPECTED_TABLES = frozenset(
     {
@@ -15,6 +15,8 @@ _EXPECTED_TABLES = frozenset(
         "rp_administrator_proposals",
         "rp_narration_requests",
         "rp_parties",
+        "rp_player_correction_overlays",
+        "rp_player_correction_proposals",
         "rp_relationship_causes",
         "rp_runtime_lore_cards",
         "rp_service_jobs",
@@ -27,6 +29,8 @@ _EXPECTED_TRIGGERS = frozenset(
         "rp_administrator_guidance_immutable",
         "rp_administrator_guidance_no_delete",
         "rp_parties_snapshots_immutable",
+        "rp_player_correction_overlays_immutable",
+        "rp_player_correction_overlays_no_delete",
         "rp_relationship_causes_immutable",
         "rp_relationship_causes_no_delete",
         "rp_runtime_lore_cards_immutable",
@@ -170,10 +174,15 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY,
             party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
             job_type TEXT NOT NULL CHECK(
-                job_type IN ('story_memory', 'relationships', 'runtime_lore')
+                job_type IN (
+                    'story_memory', 'relationships', 'runtime_lore',
+                    'player_lore', 'player_correction'
+                )
             ),
             source_turn_id INTEGER NOT NULL REFERENCES rp_turns(id) ON DELETE RESTRICT,
             source_version INTEGER NOT NULL CHECK(source_version > 0),
+            operation_id TEXT NOT NULL CHECK(length(trim(operation_id)) > 0),
+            operation_json TEXT NOT NULL CHECK(length(trim(operation_json)) > 0),
             status TEXT NOT NULL DEFAULT 'pending'
                 CHECK(status IN ('pending', 'running', 'succeeded', 'failed')),
             attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
@@ -188,7 +197,7 @@ def _create_schema(connection: sqlite3.Connection) -> None:
                 (status = 'running' AND claim_token IS NOT NULL) OR
                 (status != 'running' AND claim_token IS NULL)
             ),
-            UNIQUE(party_id, job_type, source_turn_id)
+            UNIQUE(party_id, operation_id)
         ) STRICT
         """,
         """
@@ -246,13 +255,70 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             card_key TEXT NOT NULL CHECK(length(card_key) = 64),
             kind TEXT NOT NULL CHECK(kind IN ('character', 'event', 'location')),
             origin TEXT NOT NULL CHECK(origin = 'runtime'),
+            authoring_kind TEXT NOT NULL
+                CHECK(authoring_kind IN ('character', 'event', 'location')),
+            decision_idempotency_key TEXT,
             title TEXT NOT NULL CHECK(length(trim(title)) > 0),
             content TEXT NOT NULL CHECK(length(trim(content)) > 0),
             keywords_json TEXT NOT NULL CHECK(length(trim(keywords_json)) > 0),
             evidence_span_ids_json TEXT NOT NULL CHECK(length(trim(evidence_span_ids_json)) > 0),
             enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
             created_at INTEGER NOT NULL,
-            UNIQUE(party_id, card_key)
+            UNIQUE(party_id, card_key),
+            UNIQUE(party_id, service_job_id),
+            UNIQUE(party_id, decision_idempotency_key),
+            CHECK(authoring_kind = kind),
+            CHECK(
+                decision_idempotency_key IS NULL OR
+                length(trim(decision_idempotency_key)) > 0
+            )
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_player_correction_proposals (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            service_job_id INTEGER NOT NULL UNIQUE
+                REFERENCES rp_service_jobs(id) ON DELETE RESTRICT,
+            base_party_version INTEGER NOT NULL CHECK(base_party_version > 0),
+            catalog_hash TEXT NOT NULL CHECK(length(catalog_hash) = 64),
+            target_slot TEXT NOT NULL CHECK(length(trim(target_slot)) > 0),
+            target_kind TEXT NOT NULL CHECK(target_kind IN ('memory', 'raw', 'rule')),
+            action TEXT NOT NULL CHECK(action IN ('replace', 'retract')),
+            before_text TEXT NOT NULL CHECK(length(trim(before_text)) > 0),
+            after_text TEXT,
+            forbidden_claims_json TEXT NOT NULL
+                CHECK(length(trim(forbidden_claims_json)) > 0),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'accepted', 'rejected', 'stale')),
+            decision_idempotency_key TEXT,
+            created_at INTEGER NOT NULL,
+            decided_at INTEGER,
+            CHECK(
+                (action = 'replace' AND length(trim(after_text)) > 0) OR
+                (action = 'retract' AND after_text IS NULL)
+            ),
+            CHECK(
+                (status = 'pending' AND decision_idempotency_key IS NULL AND decided_at IS NULL) OR
+                (status != 'pending' AND length(trim(decision_idempotency_key)) > 0 AND decided_at IS NOT NULL)
+            ),
+            UNIQUE(party_id, decision_idempotency_key)
+        ) STRICT
+        """,
+        """
+        CREATE TABLE rp_player_correction_overlays (
+            id INTEGER PRIMARY KEY,
+            party_id TEXT NOT NULL REFERENCES rp_parties(id) ON DELETE RESTRICT,
+            proposal_id INTEGER NOT NULL UNIQUE
+                REFERENCES rp_player_correction_proposals(id) ON DELETE RESTRICT,
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            accepted_party_version INTEGER NOT NULL CHECK(accepted_party_version > 0),
+            applies_to_version INTEGER NOT NULL CHECK(applies_to_version > accepted_party_version),
+            content_json TEXT NOT NULL CHECK(length(trim(content_json)) > 0),
+            created_at INTEGER NOT NULL,
+            CHECK(applies_to_version = accepted_party_version + 1),
+            UNIQUE(party_id, revision),
+            UNIQUE(party_id, applies_to_version)
         ) STRICT
         """,
         """
@@ -360,6 +426,20 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         BEFORE DELETE ON rp_runtime_lore_cards
         BEGIN
             SELECT RAISE(ABORT, 'RP runtime Lore cards cannot be deleted');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_player_correction_overlays_immutable
+        BEFORE UPDATE ON rp_player_correction_overlays
+        BEGIN
+            SELECT RAISE(ABORT, 'accepted RP player corrections are immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER rp_player_correction_overlays_no_delete
+        BEFORE DELETE ON rp_player_correction_overlays
+        BEGIN
+            SELECT RAISE(ABORT, 'accepted RP player corrections cannot be deleted');
         END
         """,
         """

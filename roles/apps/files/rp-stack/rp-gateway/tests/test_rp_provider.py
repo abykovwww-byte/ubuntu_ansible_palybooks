@@ -359,6 +359,7 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         evidence_span_ids=(1,),
         enabled=True,
         created_at=1,
+        authoring_kind="event",
     )
 
     async def exercise() -> None:
@@ -748,3 +749,58 @@ def test_provider_diagnostics_stay_in_legacy_database(tmp_path: Path) -> None:
         "provider-response-model",
         "completed",
     )
+
+
+def test_player_operations_use_local_structured_route_with_discriminated_schema(
+    tmp_path: Path,
+) -> None:
+    client = RecordingClient(
+        _completion(
+            '{"result":"draft","kind":"event","title":"Событие",'
+            '"content":"Свидетель подтвердил факт.","keywords":["свидетель"],'
+            '"evidence_span_ids":[1]}'
+        ),
+        _completion(
+            '{"result":"no_target","target_slot":null,"action":null,'
+            '"after":null,"forbidden_claims":[]}'
+        ),
+    )
+    provider = RPAtomicServiceProvider(
+        _settings(tmp_path),
+        provider="local",
+        model="gemma-4-26b-a4b-it-rp-q4",
+        client=client,  # type: ignore[arg-type]
+    )
+
+    async def exercise() -> None:
+        lore = await provider.draft_player_lore(
+            party=_party(),
+            turn=_turn(),
+            kind="event",
+            evidence_spans=_spans(),
+        )
+        correction = await provider.draft_player_correction(
+            party=_party(),
+            instruction="Исправь реакцию свидетеля.",
+            raw_hint="raw:1",
+            candidates=(
+                {
+                    "target_slot": "raw:1:" + "a" * 20,
+                    "target_kind": "raw",
+                    "before": "Свидетель кивает.",
+                },
+            ),
+        )
+        assert lore.result == "draft"
+        assert correction.result == "no_target"
+
+    asyncio.run(exercise())
+    assert [call["role"] for call in client.calls] == [
+        "rp_atomic_player_lore",
+        "rp_atomic_player_correction",
+    ]
+    for call in client.calls:
+        payload = call["payload"]
+        assert payload["reasoning"] == {"enabled": False}
+        schema = payload["response_format"]["json_schema"]["schema"]
+        assert len(schema["oneOf"]) == 2

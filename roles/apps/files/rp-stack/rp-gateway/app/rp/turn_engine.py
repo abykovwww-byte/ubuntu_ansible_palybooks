@@ -70,6 +70,10 @@ class RPAdministratorProposalConflict(RuntimeError):
     """An Administrator proposal cannot be decided from the current Party state."""
 
 
+class RPPlayerCorrectionConflict(RuntimeError):
+    """A PlayerCorrection proposal cannot be decided from the current Party state."""
+
+
 @dataclass(frozen=True, slots=True)
 class RPParty:
     id: str
@@ -135,6 +139,8 @@ class RPServiceJob:
     job_type: str
     source_turn_id: int
     source_version: int
+    operation_id: str
+    operation: dict[str, Any]
     status: str
     attempts: int
     max_attempts: int
@@ -199,6 +205,7 @@ class RPRuntimeLoreCard:
     evidence_span_ids: tuple[int, ...]
     enabled: bool
     created_at: int
+    authoring_kind: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,10 +239,42 @@ class RPAdministratorGuidance:
 
 
 @dataclass(frozen=True, slots=True)
+class RPPlayerCorrectionProposal:
+    id: int
+    party_id: str
+    service_job_id: int
+    base_party_version: int
+    catalog_hash: str
+    target_slot: str
+    target_kind: str
+    action: str
+    before_text: str
+    after_text: str | None
+    forbidden_claims: tuple[str, ...]
+    status: str
+    decision_idempotency_key: str | None
+    created_at: int
+    decided_at: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class RPPlayerCorrectionOverlay:
+    id: int
+    party_id: str
+    proposal_id: int
+    revision: int
+    accepted_party_version: int
+    applies_to_version: int
+    content: dict[str, Any]
+    created_at: int
+
+
+@dataclass(frozen=True, slots=True)
 class RPDerivedContext:
     relationship_causes: tuple[RPRelationshipCause, ...]
     runtime_lore_cards: tuple[RPRuntimeLoreCard, ...]
     administrator_guidance: RPAdministratorGuidance | None
+    player_correction_overlay: RPPlayerCorrectionOverlay | None
 
 
 class RPTurnEngine:
@@ -1259,6 +1298,112 @@ class RPTurnEngine:
             "rp_administrator_jobs", job_id=job_id, claim_token=claim_token
         )
 
+    def enqueue_player_operation(
+        self,
+        *,
+        owner_user_id: str,
+        party_id: str,
+        job_type: str,
+        source_turn_id: int,
+        expected_version: int,
+        operation_id: str,
+        operation: dict[str, Any],
+    ) -> RPServiceJob:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        party_id = _required_text(party_id, "party_id")
+        operation_id = _required_text(operation_id, "operation_id")
+        if job_type not in {"player_lore", "player_correction"}:
+            raise ValueError("unsupported player operation type")
+        if not isinstance(source_turn_id, int) or isinstance(source_turn_id, bool):
+            raise ValueError("source_turn_id must be an integer")
+        if not isinstance(expected_version, int) or isinstance(expected_version, bool):
+            raise ValueError("expected_version must be an integer")
+        operation_json = _canonical_json(operation)
+        timestamp = time.time_ns()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                party = _owned_party(connection, owner_user_id, party_id)
+                if party is None:
+                    raise RPPartyNotFound(party_id)
+                existing = connection.execute(
+                    """
+                    SELECT * FROM rp_service_jobs
+                    WHERE party_id = ? AND operation_id = ?
+                    """,
+                    (party_id, operation_id),
+                ).fetchone()
+                if existing is not None:
+                    if (
+                        str(existing["job_type"]) != job_type
+                        or int(existing["source_turn_id"]) != source_turn_id
+                        or str(existing["operation_json"]) != operation_json
+                    ):
+                        raise RPIdempotencyConflict(
+                            f"operation {operation_id!r} already owns different input"
+                        )
+                    connection.commit()
+                    return _service_job_from_row(existing, owner_user_id)
+                if int(party["current_version"]) != expected_version:
+                    raise RPPartyVersionConflict(
+                        f"party {party_id!r} is at version {party['current_version']}, "
+                        f"not {expected_version}"
+                    )
+                turn = connection.execute(
+                    "SELECT * FROM rp_turns WHERE id = ? AND party_id = ?",
+                    (source_turn_id, party_id),
+                ).fetchone()
+                if turn is None:
+                    raise ValueError("source_turn_id must reference a committed Party turn")
+                cursor = connection.execute(
+                    """
+                    INSERT INTO rp_service_jobs(
+                        party_id, job_type, source_turn_id, source_version,
+                        operation_id, operation_json, status, attempts,
+                        max_attempts, created_at, updated_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+                    """,
+                    (
+                        party_id,
+                        job_type,
+                        source_turn_id,
+                        int(turn["committed_version"]),
+                        operation_id,
+                        operation_json,
+                        RP_JOB_MAX_ATTEMPTS,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM rp_service_jobs WHERE id = ?",
+                    (int(cursor.lastrowid),),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("player operation job could not be read back")
+                connection.commit()
+                return _service_job_from_row(row, owner_user_id)
+            except Exception:
+                connection.rollback()
+                raise
+
+    def get_service_job(
+        self, *, owner_user_id: str, party_id: str, job_id: int
+    ) -> RPServiceJob:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        party_id = _required_text(party_id, "party_id")
+        with closing(self._connect()) as connection:
+            owned_party = _owned_party(connection, owner_user_id, party_id)
+            if owned_party is None:
+                raise RPPartyNotFound(party_id)
+            row = connection.execute(
+                "SELECT * FROM rp_service_jobs WHERE id = ? AND party_id = ?",
+                (job_id, party_id),
+            ).fetchone()
+        if row is None:
+            raise LookupError(job_id)
+        return _service_job_from_row(row, owner_user_id)
+
     def list_service_jobs(
         self, *, owner_user_id: str, party_id: str
     ) -> tuple[RPServiceJob, ...]:
@@ -1511,9 +1656,13 @@ class RPTurnEngine:
                         """
                         INSERT OR IGNORE INTO rp_runtime_lore_cards(
                             party_id, service_job_id, source_turn_id, source_version,
-                            card_key, kind, origin, title, content, keywords_json,
+                            card_key, kind, origin, authoring_kind,
+                            decision_idempotency_key, title, content, keywords_json,
                             evidence_span_ids_json, enabled, created_at
-                        ) VALUES(?, ?, ?, ?, ?, ?, 'runtime', ?, ?, ?, ?, 1, ?)
+                        ) VALUES(
+                            ?, ?, ?, ?, ?, ?, 'runtime', ?, NULL,
+                            ?, ?, ?, ?, 1, ?
+                        )
                         """,
                         (
                             job.party_id,
@@ -1521,6 +1670,7 @@ class RPTurnEngine:
                             job.source_turn_id,
                             job.source_version,
                             str(card["card_key"]),
+                            str(card["kind"]),
                             str(card["kind"]),
                             str(card["title"]),
                             str(card["content"]),
@@ -1543,6 +1693,9 @@ class RPTurnEngine:
                             card_id = int(row["id"])
                 result = {
                     "kind": "runtime_lore",
+                    "authoring_kind": (
+                        str(card["kind"]) if card is not None else None
+                    ),
                     "result": "draft" if card is not None else "no_candidate",
                     "card_id": card_id,
                 }
@@ -1561,6 +1714,447 @@ class RPTurnEngine:
             except Exception:
                 connection.rollback()
                 raise
+
+    def confirm_player_lore_card(
+        self,
+        *,
+        owner_user_id: str,
+        party_id: str,
+        service_job_id: int,
+        expected_version: int,
+        idempotency_key: str,
+        authoring_kind: str,
+        title: str,
+        content: str,
+        keywords: tuple[str, ...],
+        enabled: bool,
+    ) -> RPRuntimeLoreCard:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        party_id = _required_text(party_id, "party_id")
+        idempotency_key = _required_text(idempotency_key, "idempotency_key")
+        authoring_kind = _required_text(authoring_kind, "authoring_kind")
+        title = _required_text(title, "title")
+        content = _required_text(content, "content")
+        if authoring_kind not in {"character", "event", "location"}:
+            raise ValueError("unsupported Lore authoring_kind")
+        if not keywords or any(not keyword.strip() for keyword in keywords):
+            raise ValueError("Lore keywords must contain non-empty text")
+        if len(set(keywords)) != len(keywords):
+            raise ValueError("Lore keywords must be unique")
+        if not isinstance(enabled, bool):
+            raise ValueError("Lore enabled must be a boolean")
+        timestamp = time.time_ns()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                party = _owned_party(connection, owner_user_id, party_id)
+                if party is None:
+                    raise RPPartyNotFound(party_id)
+                repeated = connection.execute(
+                    """
+                    SELECT * FROM rp_runtime_lore_cards
+                    WHERE party_id = ? AND decision_idempotency_key = ?
+                    """,
+                    (party_id, idempotency_key),
+                ).fetchone()
+                if repeated is not None:
+                    if int(repeated["service_job_id"]) != service_job_id:
+                        raise RPIdempotencyConflict(
+                            "Lore decision idempotency key owns another draft"
+                        )
+                    repeated_job = connection.execute(
+                        "SELECT operation_json FROM rp_service_jobs WHERE id = ?",
+                        (service_job_id,),
+                    ).fetchone()
+                    repeated_operation = (
+                        _json_object(
+                            str(repeated_job["operation_json"]),
+                            "player Lore operation",
+                        )
+                        if repeated_job is not None
+                        else {}
+                    )
+                    if (
+                        repeated_operation.get("expected_version") != expected_version
+                        or str(repeated["authoring_kind"]) != authoring_kind
+                        or str(repeated["title"]) != title
+                        or str(repeated["content"]) != content
+                        or _json_str_tuple(
+                            str(repeated["keywords_json"]), "runtime Lore keywords"
+                        )
+                        != keywords
+                        or bool(repeated["enabled"]) != enabled
+                    ):
+                        raise RPIdempotencyConflict(
+                            "Lore decision idempotency key owns different input"
+                        )
+                    connection.commit()
+                    return _runtime_lore_card_from_row(repeated)
+                if int(party["current_version"]) != expected_version:
+                    raise RPPartyVersionConflict(
+                        f"party {party_id!r} is at version {party['current_version']}, "
+                        f"not {expected_version}"
+                    )
+                job = connection.execute(
+                    """
+                    SELECT * FROM rp_service_jobs
+                    WHERE id = ? AND party_id = ? AND job_type = 'player_lore'
+                    """,
+                    (service_job_id, party_id),
+                ).fetchone()
+                if job is None:
+                    raise LookupError(service_job_id)
+                existing_for_job = connection.execute(
+                    """
+                    SELECT * FROM rp_runtime_lore_cards
+                    WHERE party_id = ? AND service_job_id = ?
+                    """,
+                    (party_id, service_job_id),
+                ).fetchone()
+                if existing_for_job is not None:
+                    raise RPIdempotencyConflict(
+                        "Lore draft was already confirmed with another idempotency key"
+                    )
+                if str(job["status"]) != "succeeded" or job["result_json"] is None:
+                    raise RPBackgroundJobConflict("Lore draft job has not succeeded")
+                result = _json_object(str(job["result_json"]), "player Lore result")
+                card = result.get("card")
+                if result.get("result") != "draft" or not isinstance(card, dict):
+                    raise ValueError("player Lore job has no confirmable draft")
+                operation = _json_object(
+                    str(job["operation_json"]), "player Lore operation"
+                )
+                if operation.get("kind") != authoring_kind:
+                    raise ValueError("Lore authoring_kind must match the requested kind")
+                evidence_span_ids = list(card["evidence_span_ids"])
+                card_payload = {
+                    "party_id": party_id,
+                    "source_version": int(job["source_version"]),
+                    "kind": authoring_kind,
+                    "title": title,
+                    "content": content,
+                    "keywords": list(keywords),
+                    "evidence_span_ids": evidence_span_ids,
+                }
+                card_key = hashlib.sha256(
+                    _canonical_json(card_payload).encode("utf-8")
+                ).hexdigest()
+                cursor = connection.execute(
+                    """
+                    INSERT INTO rp_runtime_lore_cards(
+                        party_id, service_job_id, source_turn_id, source_version,
+                        card_key, kind, origin, authoring_kind,
+                        decision_idempotency_key, title, content, keywords_json,
+                        evidence_span_ids_json, enabled, created_at
+                    ) VALUES(
+                        ?, ?, ?, ?, ?, ?, 'runtime', ?, ?,
+                        ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                    (
+                        party_id,
+                        service_job_id,
+                        int(job["source_turn_id"]),
+                        int(job["source_version"]),
+                        card_key,
+                        authoring_kind,
+                        authoring_kind,
+                        idempotency_key,
+                        title,
+                        content,
+                        _canonical_json(list(keywords)),
+                        _canonical_json(evidence_span_ids),
+                        1 if enabled else 0,
+                        timestamp,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM rp_runtime_lore_cards WHERE id = ?",
+                    (int(cursor.lastrowid),),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("confirmed player Lore card could not be read back")
+                connection.commit()
+                return _runtime_lore_card_from_row(row)
+            except Exception:
+                connection.rollback()
+                raise
+
+    def persist_player_correction_result(
+        self, *, job: RPServiceJob, draft: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        timestamp = time.time_ns()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                owned = _owned_running_job(
+                    connection, "rp_service_jobs", job.id, job.claim_token
+                )
+                if owned["result_json"] is not None:
+                    connection.commit()
+                    return _json_object(str(owned["result_json"]), "service job result")
+                if draft is None:
+                    result: dict[str, Any] = {
+                        "kind": "player_correction",
+                        "result": "no_target",
+                        "proposal": None,
+                    }
+                else:
+                    cursor = connection.execute(
+                        """
+                        INSERT INTO rp_player_correction_proposals(
+                            party_id, service_job_id, base_party_version,
+                            catalog_hash, target_slot, target_kind, action,
+                            before_text, after_text, forbidden_claims_json,
+                            status, created_at
+                        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                        """,
+                        (
+                            job.party_id,
+                            job.id,
+                            int(job.operation["expected_version"]),
+                            str(job.operation["catalog_hash"]),
+                            str(draft["target_slot"]),
+                            str(draft["target_kind"]),
+                            str(draft["action"]),
+                            str(draft["before"]),
+                            draft.get("after"),
+                            _canonical_json(list(draft["forbidden_claims"])),
+                            timestamp,
+                        ),
+                    )
+                    row = connection.execute(
+                        "SELECT * FROM rp_player_correction_proposals WHERE id = ?",
+                        (int(cursor.lastrowid),),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("PlayerCorrection proposal could not be read back")
+                    proposal = _player_correction_proposal_from_row(row)
+                    result = {
+                        "kind": "player_correction",
+                        "result": "draft",
+                        "proposal": _player_correction_payload(proposal),
+                    }
+                result_json = _canonical_json(result)
+                changed = connection.execute(
+                    """
+                    UPDATE rp_service_jobs SET result_json = ?, updated_at = ?
+                    WHERE id = ? AND status = 'running' AND claim_token = ?
+                    """,
+                    (result_json, timestamp, job.id, job.claim_token),
+                ).rowcount
+                if changed != 1:
+                    raise RPBackgroundJobConflict("service job is no longer owned")
+                connection.commit()
+                return json.loads(result_json)
+            except Exception:
+                connection.rollback()
+                raise
+
+    def list_player_corrections(
+        self, *, owner_user_id: str, party_id: str
+    ) -> tuple[RPPlayerCorrectionProposal, ...]:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        party_id = _required_text(party_id, "party_id")
+        with closing(self._connect()) as connection:
+            if _owned_party(connection, owner_user_id, party_id) is None:
+                raise RPPartyNotFound(party_id)
+            rows = connection.execute(
+                """
+                SELECT * FROM rp_player_correction_proposals
+                WHERE party_id = ? ORDER BY id
+                """,
+                (party_id,),
+            ).fetchall()
+        return tuple(_player_correction_proposal_from_row(row) for row in rows)
+
+    def decide_player_correction(
+        self,
+        *,
+        owner_user_id: str,
+        party_id: str,
+        proposal_id: int,
+        decision: str,
+        expected_version: int,
+        idempotency_key: str,
+        catalog: tuple[dict[str, Any], ...],
+    ) -> tuple[RPPlayerCorrectionProposal, RPPlayerCorrectionOverlay | None]:
+        owner_user_id = _required_text(owner_user_id, "owner_user_id")
+        party_id = _required_text(party_id, "party_id")
+        idempotency_key = _required_text(idempotency_key, "idempotency_key")
+        if decision not in {"accept", "reject"}:
+            raise ValueError("decision must be accept or reject")
+        catalog_json = _canonical_json(list(catalog))
+        catalog_hash = hashlib.sha256(catalog_json.encode("utf-8")).hexdigest()
+        timestamp = time.time_ns()
+        stale_reason: str | None = None
+        result: tuple[RPPlayerCorrectionProposal, RPPlayerCorrectionOverlay | None]
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                party = _owned_party(connection, owner_user_id, party_id)
+                if party is None:
+                    raise RPPartyNotFound(party_id)
+                row = connection.execute(
+                    """
+                    SELECT * FROM rp_player_correction_proposals
+                    WHERE id = ? AND party_id = ?
+                    """,
+                    (proposal_id, party_id),
+                ).fetchone()
+                if row is None:
+                    raise LookupError(proposal_id)
+                proposal = _player_correction_proposal_from_row(row)
+                overlay_row = connection.execute(
+                    "SELECT * FROM rp_player_correction_overlays WHERE proposal_id = ?",
+                    (proposal_id,),
+                ).fetchone()
+                if proposal.status != "pending":
+                    if proposal.decision_idempotency_key != idempotency_key:
+                        raise RPPlayerCorrectionConflict(
+                            "PlayerCorrection proposal was already decided"
+                        )
+                    expected_status = "accepted" if decision == "accept" else "rejected"
+                    if (
+                        proposal.status != expected_status
+                        or expected_version != proposal.base_party_version
+                    ):
+                        raise RPPlayerCorrectionConflict(
+                            "PlayerCorrection decision conflicts with the recorded result"
+                        )
+                    connection.commit()
+                    return (
+                        proposal,
+                        _player_correction_overlay_from_row(overlay_row)
+                        if overlay_row is not None
+                        else None,
+                    )
+                target = next(
+                    (
+                        item
+                        for item in catalog
+                        if str(item.get("target_slot")) == proposal.target_slot
+                    ),
+                    None,
+                )
+                if int(party["current_version"]) != expected_version:
+                    stale_reason = "Party version changed after the draft"
+                elif expected_version != proposal.base_party_version:
+                    stale_reason = "decision version does not match the draft"
+                elif catalog_hash != proposal.catalog_hash:
+                    stale_reason = "PlayerCorrection target catalog changed"
+                elif target is None or str(target.get("before")) != proposal.before_text:
+                    stale_reason = "PlayerCorrection target changed"
+                if stale_reason is not None:
+                    connection.execute(
+                        """
+                        UPDATE rp_player_correction_proposals
+                        SET status = 'stale', decision_idempotency_key = ?, decided_at = ?
+                        WHERE id = ? AND status = 'pending'
+                        """,
+                        (idempotency_key, timestamp, proposal_id),
+                    )
+                    saved = connection.execute(
+                        "SELECT * FROM rp_player_correction_proposals WHERE id = ?",
+                        (proposal_id,),
+                    ).fetchone()
+                    connection.commit()
+                    if saved is None:
+                        raise RuntimeError("stale PlayerCorrection could not be read back")
+                    result = (_player_correction_proposal_from_row(saved), None)
+                elif decision == "reject":
+                    connection.execute(
+                        """
+                        UPDATE rp_player_correction_proposals
+                        SET status = 'rejected', decision_idempotency_key = ?, decided_at = ?
+                        WHERE id = ? AND status = 'pending'
+                        """,
+                        (idempotency_key, timestamp, proposal_id),
+                    )
+                    saved = connection.execute(
+                        "SELECT * FROM rp_player_correction_proposals WHERE id = ?",
+                        (proposal_id,),
+                    ).fetchone()
+                    if saved is None:
+                        raise RuntimeError("rejected PlayerCorrection could not be read back")
+                    connection.commit()
+                    result = (_player_correction_proposal_from_row(saved), None)
+                else:
+                    pending_overlay = connection.execute(
+                        """
+                        SELECT id FROM rp_player_correction_overlays
+                        WHERE party_id = ? AND applies_to_version = ?
+                        """,
+                        (party_id, expected_version + 1),
+                    ).fetchone()
+                    if pending_overlay is not None:
+                        raise RPPlayerCorrectionConflict(
+                            "another PlayerCorrection already owns the next prompt"
+                        )
+                    revision_row = connection.execute(
+                        """
+                        SELECT COALESCE(MAX(revision), 0) AS revision
+                        FROM rp_player_correction_overlays WHERE party_id = ?
+                        """,
+                        (party_id,),
+                    ).fetchone()
+                    revision = int(revision_row["revision"]) + 1
+                    content = {
+                        "revision": revision,
+                        "target_slot": proposal.target_slot,
+                        "target_kind": proposal.target_kind,
+                        "action": proposal.action,
+                        "before": proposal.before_text,
+                        "after": proposal.after_text,
+                        "forbidden_claims": list(proposal.forbidden_claims),
+                    }
+                    overlay_cursor = connection.execute(
+                        """
+                        INSERT INTO rp_player_correction_overlays(
+                            party_id, proposal_id, revision, accepted_party_version,
+                            applies_to_version, content_json, created_at
+                        ) VALUES(?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            party_id,
+                            proposal_id,
+                            revision,
+                            expected_version,
+                            expected_version + 1,
+                            _canonical_json(content),
+                            timestamp,
+                        ),
+                    )
+                    connection.execute(
+                        """
+                        UPDATE rp_player_correction_proposals
+                        SET status = 'accepted', decision_idempotency_key = ?, decided_at = ?
+                        WHERE id = ? AND status = 'pending'
+                        """,
+                        (idempotency_key, timestamp, proposal_id),
+                    )
+                    saved = connection.execute(
+                        "SELECT * FROM rp_player_correction_proposals WHERE id = ?",
+                        (proposal_id,),
+                    ).fetchone()
+                    overlay_row = connection.execute(
+                        "SELECT * FROM rp_player_correction_overlays WHERE id = ?",
+                        (int(overlay_cursor.lastrowid),),
+                    ).fetchone()
+                    if saved is None or overlay_row is None:
+                        raise RuntimeError("accepted PlayerCorrection could not be read back")
+                    connection.commit()
+                    result = (
+                        _player_correction_proposal_from_row(saved),
+                        _player_correction_overlay_from_row(overlay_row),
+                    )
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+        if stale_reason is not None:
+            raise RPPlayerCorrectionConflict(stale_reason)
+        return result
 
     def create_administrator_proposal(
         self,
@@ -1828,7 +2422,8 @@ class RPTurnEngine:
         owner_user_id = _required_text(owner_user_id, "owner_user_id")
         party_id = _required_text(party_id, "party_id")
         with closing(self._connect()) as connection:
-            if _owned_party(connection, owner_user_id, party_id) is None:
+            owned_party = _owned_party(connection, owner_user_id, party_id)
+            if owned_party is None:
                 raise RPPartyNotFound(party_id)
             cause_rows = connection.execute(
                 """
@@ -1851,6 +2446,14 @@ class RPTurnEngine:
                 """,
                 (party_id,),
             ).fetchone()
+            correction_row = connection.execute(
+                """
+                SELECT * FROM rp_player_correction_overlays
+                WHERE party_id = ? AND applies_to_version = ?
+                ORDER BY revision DESC LIMIT 1
+                """,
+                (party_id, int(owned_party["current_version"]) + 1),
+            ).fetchone()
         return RPDerivedContext(
             relationship_causes=tuple(
                 _relationship_cause_from_row(row) for row in cause_rows
@@ -1861,6 +2464,11 @@ class RPTurnEngine:
             administrator_guidance=(
                 _administrator_guidance_from_row(guidance_row)
                 if guidance_row is not None
+                else None
+            ),
+            player_correction_overlay=(
+                _player_correction_overlay_from_row(correction_row)
+                if correction_row is not None
                 else None
             ),
         )
@@ -1988,14 +2596,16 @@ def _enqueue_post_turn_work(
             """
             INSERT INTO rp_service_jobs(
                 party_id, job_type, source_turn_id, source_version,
-                status, attempts, max_attempts, created_at, updated_at
-            ) VALUES(?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+                operation_id, operation_json, status, attempts, max_attempts,
+                created_at, updated_at
+            ) VALUES(?, ?, ?, ?, ?, '{}', 'pending', 0, ?, ?, ?)
             """,
             (
                 party_id,
                 job_type,
                 turn_id,
                 committed_version,
+                f"automatic:{job_type}:{turn_id}",
                 RP_JOB_MAX_ATTEMPTS,
                 created_at,
                 created_at,
@@ -2193,6 +2803,8 @@ def _service_job_from_row(row: sqlite3.Row, owner_user_id: str) -> RPServiceJob:
         job_type=str(row["job_type"]),
         source_turn_id=int(row["source_turn_id"]),
         source_version=int(row["source_version"]),
+        operation_id=str(row["operation_id"]),
+        operation=_json_object(str(row["operation_json"]), "service job operation"),
         status=str(row["status"]),
         attempts=int(row["attempts"]),
         max_attempts=int(row["max_attempts"]),
@@ -2265,6 +2877,7 @@ def _runtime_lore_card_from_row(row: sqlite3.Row) -> RPRuntimeLoreCard:
         card_key=str(row["card_key"]),
         kind=str(row["kind"]),
         origin=str(row["origin"]),
+        authoring_kind=str(row["authoring_kind"]),
         title=str(row["title"]),
         content=str(row["content"]),
         keywords=_json_str_tuple(str(row["keywords_json"]), "runtime Lore keywords"),
@@ -2312,3 +2925,66 @@ def _administrator_guidance_from_row(row: sqlite3.Row) -> RPAdministratorGuidanc
         content=str(row["content"]),
         created_at=int(row["created_at"]),
     )
+
+
+def _player_correction_proposal_from_row(
+    row: sqlite3.Row,
+) -> RPPlayerCorrectionProposal:
+    return RPPlayerCorrectionProposal(
+        id=int(row["id"]),
+        party_id=str(row["party_id"]),
+        service_job_id=int(row["service_job_id"]),
+        base_party_version=int(row["base_party_version"]),
+        catalog_hash=str(row["catalog_hash"]),
+        target_slot=str(row["target_slot"]),
+        target_kind=str(row["target_kind"]),
+        action=str(row["action"]),
+        before_text=str(row["before_text"]),
+        after_text=str(row["after_text"]) if row["after_text"] is not None else None,
+        forbidden_claims=_json_str_tuple(
+            str(row["forbidden_claims_json"]), "PlayerCorrection forbidden claims"
+        ),
+        status=str(row["status"]),
+        decision_idempotency_key=(
+            str(row["decision_idempotency_key"])
+            if row["decision_idempotency_key"] is not None
+            else None
+        ),
+        created_at=int(row["created_at"]),
+        decided_at=int(row["decided_at"]) if row["decided_at"] is not None else None,
+    )
+
+
+def _player_correction_overlay_from_row(
+    row: sqlite3.Row,
+) -> RPPlayerCorrectionOverlay:
+    return RPPlayerCorrectionOverlay(
+        id=int(row["id"]),
+        party_id=str(row["party_id"]),
+        proposal_id=int(row["proposal_id"]),
+        revision=int(row["revision"]),
+        accepted_party_version=int(row["accepted_party_version"]),
+        applies_to_version=int(row["applies_to_version"]),
+        content=_json_object(str(row["content_json"]), "PlayerCorrection overlay"),
+        created_at=int(row["created_at"]),
+    )
+
+
+def _player_correction_payload(
+    proposal: RPPlayerCorrectionProposal,
+) -> dict[str, Any]:
+    return {
+        "id": proposal.id,
+        "service_job_id": proposal.service_job_id,
+        "base_party_version": proposal.base_party_version,
+        "catalog_hash": proposal.catalog_hash,
+        "target_slot": proposal.target_slot,
+        "target_kind": proposal.target_kind,
+        "action": proposal.action,
+        "before": proposal.before_text,
+        "after": proposal.after_text,
+        "forbidden_claims": list(proposal.forbidden_claims),
+        "status": proposal.status,
+        "created_at": proposal.created_at,
+        "decided_at": proposal.decided_at,
+    }

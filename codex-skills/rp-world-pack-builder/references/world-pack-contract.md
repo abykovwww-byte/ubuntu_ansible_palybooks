@@ -139,7 +139,18 @@ source:
     "maxim",
     "anna-tikhonovna"
   ],
-  "local_overrides": {}
+  "local_overrides": {
+    "lore_cards": [
+      {
+        "key": "scenario:independent-entry",
+        "title": "Независимая точка входа",
+        "keywords": ["независимая точка входа"],
+        "content": "Факт, действующий только для этого Scenario.",
+        "always_on": false,
+        "enabled": true
+      }
+    ]
+  }
 }
 ```
 
@@ -159,8 +170,14 @@ Rules:
   `locations`, and `relationships`.
 - Materialized `starting_relationships` equals
   `initial_state.relationships` exactly.
-- `local_overrides` is an object and contains only deliberate Scenario-local
-  deviations. Do not copy the whole World into it.
+- `local_overrides` is a closed object whose only field is `lore_cards`; unknown
+  keys fail validation. It may be empty when the Scenario has no local Lore.
+- Each Scenario Lore Card has `key`, `title`, non-empty unique `keywords`,
+  `content`, `always_on`, and `enabled`; card keys are unique within the
+  Scenario. Do not copy World Lore into this list.
+- Materialization embeds these cards in the immutable `ScenarioSnapshot`.
+  Runtime consumers expose them with origin `scenario`; World seed cards use
+  `world`, and Party-created cards use `runtime`.
 
 The committed source preserves all twelve combinations of these dimensions:
 
@@ -175,7 +192,8 @@ A preset is complete. It is not a fragment to combine with another preset.
 A free Scenario is runtime input, not another authored file catalog. It must
 materialize through `WorldScenarioLoader.materialize_free_scenario()` into the
 same `ScenarioSnapshot` shape as a preset. It must obey the same state,
-relationship, active-character, and World-ID invariants.
+relationship, active-character, World-ID, player-role, and closed
+`local_overrides` invariants.
 
 Do not add a scenarios database table or a second definition schema for free
 input.

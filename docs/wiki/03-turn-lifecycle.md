@@ -387,6 +387,20 @@ Draft является отдельным пользовательским де�
 Только последующий confirm вызывает существующий create endpoint. Поэтому draft
 failure не меняет turn, canonical state или Lore Cards партии.
 
+В disabled clean path Decision 043 тот же внешний принцип исполняет общий
+service-job runner без отдельной очереди. Lore operation фиксирует `kind`, полный
+committed turn, Party version и idempotency key до model call; отвергнутый
+семантический ответ не повторяется с тем же input. Успешный draft остаётся
+неизменяемым результатом job до отдельного owner confirmation.
+
+`PlayerCorrection` проходит тем же runner как другая typed operation. Gateway
+сначала строит и хеширует bounded catalog из stable memory facts, World rule
+spans и Narrator RAW spans; модель может выбрать только одну переданную цель.
+Proposal не меняет gameplay. При `accept` Gateway ещё раз проверяет exact target
+и текущую версию, создаёт monotonic immutable overlay для версии `current+1`, а
+Narrator включает его один раз и больше не проецирует. `reject`, `no_target`,
+stale proposal и чужой owner не меняют prompt/state.
+
 ### Revision 9: S3 GM correction
 
 [Decision 038](../../roles/apps/files/rp-stack/docs/decisions/038-rp-gm-corrections-and-player-overlay.md)

@@ -87,6 +87,8 @@ def test_fresh_database_is_clean_and_reopens_without_legacy_tables(tmp_path: Pat
         "rp_administrator_proposals",
         "rp_narration_requests",
         "rp_parties",
+        "rp_player_correction_overlays",
+        "rp_player_correction_proposals",
         "rp_relationship_causes",
         "rp_runtime_lore_cards",
         "rp_service_jobs",
@@ -395,3 +397,72 @@ def test_deferred_commit_failure_rolls_back_raw_turn_and_party_version(
 
     assert engine.list_turns(owner_user_id="owner-one", party_id="party-one") == ()
     assert engine.get_party(owner_user_id="owner-one", party_id="party-one").current_version == 0
+
+
+def test_player_operation_input_is_idempotent_and_restart_requeues_without_attempt(
+    tmp_path: Path,
+) -> None:
+    engine = RPTurnEngine(tmp_path / "rp-clean.db")
+    engine.create_party(
+        owner_user_id="owner-one", party_id="party-one", **_party_source()
+    )
+    turn = engine.commit_opening(
+        owner_user_id="owner-one",
+        party_id="party-one",
+        request_id="opening-request",
+        idempotency_key="opening-key",
+        narrator_text="Свидетель входит в комнату.",
+    )
+    operation = {
+        "expected_version": 1,
+        "kind": "event",
+        "source_turn_id": turn.id,
+    }
+    created = engine.enqueue_player_operation(
+        owner_user_id="owner-one",
+        party_id="party-one",
+        job_type="player_lore",
+        source_turn_id=turn.id,
+        expected_version=1,
+        operation_id="player-lore:restart-test",
+        operation=operation,
+    )
+    repeated = engine.enqueue_player_operation(
+        owner_user_id="owner-one",
+        party_id="party-one",
+        job_type="player_lore",
+        source_turn_id=turn.id,
+        expected_version=1,
+        operation_id="player-lore:restart-test",
+        operation=operation,
+    )
+    assert repeated == created
+    with pytest.raises(RPIdempotencyConflict):
+        engine.enqueue_player_operation(
+            owner_user_id="owner-one",
+            party_id="party-one",
+            job_type="player_lore",
+            source_turn_id=turn.id,
+            expected_version=1,
+            operation_id="player-lore:restart-test",
+            operation={**operation, "kind": "location"},
+        )
+
+    while True:
+        claimed = engine.claim_service_job()
+        assert claimed is not None and claimed.claim_token is not None
+        if claimed.id == created.id:
+            break
+        engine.complete_service_job(
+            job_id=claimed.id,
+            claim_token=claimed.claim_token,
+            result={"kind": claimed.job_type, "result": "not_exercised"},
+        )
+    recovered = engine.recover_interrupted_work()
+    restored = engine.get_service_job(
+        owner_user_id="owner-one", party_id="party-one", job_id=created.id
+    )
+    assert recovered["service_jobs"] == 1
+    assert restored.status == "pending"
+    assert restored.attempts == 0
+    assert restored.operation == operation

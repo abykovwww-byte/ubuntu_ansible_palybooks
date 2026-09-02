@@ -26,6 +26,9 @@ assert.deepEqual(JSON.parse(JSON.stringify(cards)), [
 assert.match(source, /data-lore-draft-turn-id/);
 assert.match(source, /\/lore-cards\/draft/);
 assert.match(source, /pendingLoreCardSourceTurnIds/);
+assert.match(source, /pendingLoreCardDraftJobId/);
+assert.match(source, /payload\.kind = kind/);
+assert.match(source, /player-lore-confirm:/);
 assert.match(source, /Черновик готов\. В память партии он ещё не записан/);
 
 console.log("light gui Lore Cards draft and raised-card projection: ok");

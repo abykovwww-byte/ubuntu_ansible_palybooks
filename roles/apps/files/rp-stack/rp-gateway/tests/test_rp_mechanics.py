@@ -16,9 +16,11 @@ from app.rp.mechanics import (
     RPAdministratorHandler,
     RPAdministratorResult,
     RPAtomicServiceHandler,
+    RPPlayerCorrectionResult,
     RPRelationshipCandidate,
     RPRelationshipResult,
     RPRuntimeLoreResult,
+    rank_player_correction_targets,
 )
 from app.rp.memory import (
     RP_MEMORY_SCHEMA_VERSION,
@@ -154,6 +156,13 @@ class _AtomicModelFake:
 
     async def update_story_memory(self, **_: object) -> object:
         raise AssertionError("story-memory model must not be called by these tests")
+
+    async def draft_player_lore(self, **_: object) -> RPRuntimeLoreResult:
+        assert self.lore is not None
+        return self.lore
+
+    async def draft_player_correction(self, **_: object) -> RPPlayerCorrectionResult:
+        raise AssertionError("PlayerCorrection model must not be called by these tests")
 
 
 class _AdministratorModelFake:
@@ -429,6 +438,178 @@ def test_runtime_lore_is_not_marked_successful_when_it_cannot_reach_prompt(
     assert engine.derived_context(
         owner_user_id="owner-one", party_id="party-lore-budget"
     ).runtime_lore_cards == ()
+
+
+def test_player_lore_kind_mismatch_is_rejected_before_persistence(
+    tmp_path: Path,
+) -> None:
+    engine = RPTurnEngine(tmp_path / "rp-clean.db")
+    _create_party(engine, "party-player-lore-reject")
+    _commit_first_turn(engine, "party-player-lore-reject")
+    turn = engine.list_turns(
+        owner_user_id="owner-one", party_id="party-player-lore-reject"
+    )[0]
+    engine.enqueue_player_operation(
+        owner_user_id="owner-one",
+        party_id="party-player-lore-reject",
+        job_type="player_lore",
+        source_turn_id=turn.id,
+        expected_version=1,
+        operation_id="player-lore:kind-mismatch",
+        operation={
+            "expected_version": 1,
+            "kind": "event",
+            "source_turn_id": turn.id,
+        },
+    )
+    job = _claim_service_job(engine, "player_lore")
+    model = _AtomicModelFake(
+        lore=RPRuntimeLoreResult(
+            result="draft",
+            kind="location",
+            title="Неверный тип",
+            content="Модель самовольно изменила тип карточки.",
+            keywords=("тип",),
+            evidence_span_ids=(1,),
+        )
+    )
+
+    with pytest.raises(RPModelOutputRejected, match="kind changed"):
+        asyncio.run(RPAtomicServiceHandler(engine, model).handle(job))
+    assert engine.derived_context(
+        owner_user_id="owner-one", party_id="party-player-lore-reject"
+    ).runtime_lore_cards == ()
+
+
+@pytest.mark.parametrize(
+    ("invalid_result", "expected_error"),
+    [
+        ("outside_target", "outside ranked payload"),
+        ("raw_forbidden_claims", "allowed only for World rule targets"),
+    ],
+)
+def test_player_correction_rejects_unowned_semantic_fields(
+    tmp_path: Path,
+    invalid_result: str,
+    expected_error: str,
+) -> None:
+    engine = RPTurnEngine(tmp_path / "rp-clean.db")
+    _create_party(engine, "party-correction-reject")
+    _commit_first_turn(engine, "party-correction-reject")
+    turn = engine.list_turns(
+        owner_user_id="owner-one", party_id="party-correction-reject"
+    )[0]
+    catalog = [
+        {
+            "target_slot": "raw:1:" + "a" * 20,
+            "target_kind": "raw",
+            "before": "Свидетель кивает.",
+        }
+    ]
+    engine.enqueue_player_operation(
+        owner_user_id="owner-one",
+        party_id="party-correction-reject",
+        job_type="player_correction",
+        source_turn_id=turn.id,
+        expected_version=1,
+        operation_id="player-correction:unknown-target",
+        operation={
+            "expected_version": 1,
+            "instruction": "Исправь реакцию свидетеля.",
+            "raw_hint": None,
+            "catalog_hash": "b" * 64,
+            "catalog": catalog,
+        },
+    )
+    job = _claim_service_job(engine, "player_correction")
+
+    class InvalidCorrectionModel(_AtomicModelFake):
+        async def draft_player_correction(
+            self, **_: object
+        ) -> RPPlayerCorrectionResult:
+            if invalid_result == "raw_forbidden_claims":
+                return RPPlayerCorrectionResult(
+                    result="draft",
+                    target_slot="raw:1:" + "a" * 20,
+                    action="replace",
+                    after="Свидетель покачал головой.",
+                    forbidden_claims=("Свидетель кивнул.",),
+                )
+            return RPPlayerCorrectionResult(
+                result="draft",
+                target_slot="raw:999:" + "c" * 20,
+                action="retract",
+                after=None,
+                forbidden_claims=(),
+            )
+
+    with pytest.raises(RPModelOutputRejected, match=expected_error):
+        asyncio.run(
+            RPAtomicServiceHandler(engine, InvalidCorrectionModel()).handle(job)
+        )
+    assert engine.list_player_corrections(
+        owner_user_id="owner-one", party_id="party-correction-reject"
+    ) == ()
+
+
+def test_player_correction_ranking_preserves_decision_042_boundaries() -> None:
+    catalog = tuple(
+        [
+            {
+                "target_slot": "memory:canon:agreement",
+                "target_kind": "memory",
+                "before": "Свидетель подтвердил договорённость.",
+                "source_versions": [2],
+            },
+            {
+                "target_slot": "rule:" + "f" * 64,
+                "target_kind": "rule",
+                "before": "Свидетель обязан говорить только правду.",
+            },
+        ]
+        + [
+            {
+                "target_slot": f"raw:7:{index:020x}",
+                "target_kind": "raw",
+                "turn_id": 7,
+                "before": f"Свидетель подтвердил факт номер {index}.",
+            }
+            for index in range(6)
+        ]
+        + [
+            {
+                "target_slot": "raw:8:" + "e" * 20,
+                "target_kind": "raw",
+                "turn_id": 8,
+                "before": "Поздняя реплика не относится к договорённости.",
+            }
+        ]
+    )
+
+    selected = rank_player_correction_targets(
+        catalog,
+        instruction="Исправь договорённость и правило правды свидетеля.",
+        raw_hint=None,
+    )
+    assert len(selected) <= 8
+    assert {item["target_kind"] for item in selected} >= {"memory", "rule"}
+    assert sum(item.get("turn_id") == 7 for item in selected) <= 4
+
+    broad = rank_player_correction_targets(
+        catalog,
+        instruction="Исправь свидетеля.",
+        raw_hint="raw:7",
+    )
+    assert len(broad) == 4
+    assert all(str(item["target_slot"]).startswith("raw:7:") for item in broad)
+
+    exact_slot = "raw:7:" + f"{5:020x}"
+    exact = rank_player_correction_targets(
+        catalog,
+        instruction="Исправь пятый span.",
+        raw_hint=exact_slot,
+    )
+    assert [item["target_slot"] for item in exact] == [exact_slot]
 
 
 def test_relationship_jobs_are_source_ordered_and_clamped_transactionally(

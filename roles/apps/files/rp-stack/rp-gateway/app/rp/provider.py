@@ -12,6 +12,7 @@ from app.core.config import Settings
 from app.rp.mechanics import (
     RPAdministratorResult,
     RPEvidenceSpan,
+    RPPlayerCorrectionResult,
     RPRelationshipResult,
     RPRuntimeLoreResult,
 )
@@ -243,6 +244,96 @@ class RPAtomicServiceProvider:
             messages=messages,
             result_type=RPRuntimeLoreResult,
             schema_name="rp_runtime_lore_result",
+            max_tokens=2_048,
+        )
+
+    async def draft_player_lore(
+        self,
+        *,
+        party: RPParty,
+        turn: RPTurn,
+        kind: str,
+        evidence_spans: tuple[RPEvidenceSpan, ...],
+        existing_runtime_lore: tuple[RPRuntimeLoreCard, ...] = (),
+    ) -> RPRuntimeLoreResult:
+        messages = _structured_messages(
+            system=(
+                "Ты атомарная служебная модель player Lore. Вид карточки задан до "
+                "вызова и не может меняться. Используй только один переданный полный "
+                "committed turn и выбранные evidence_span_ids. Не дополняй RAW знаниями "
+                "мира и не создавай карточку из предположения. Для no_candidate верни "
+                "обязательный requested kind и null во всех draft-полях. Для draft "
+                "каждый тезис должен прямо подтверждаться выбранными spans. Корень "
+                "содержит ровно result, kind, title, content, keywords и "
+                "evidence_span_ids. Верни только строгий JSON."
+            ),
+            body={
+                "task": "draft_player_lore",
+                "requested_kind": kind,
+                "turn": _turn_payload(turn),
+                "evidence_spans": _evidence_payload(evidence_spans),
+                "world_lore_cards": list(party.world_snapshot.seed_lore_cards),
+                "scenario_lore_cards": [
+                    card.model_dump(mode="json")
+                    for card in party.scenario_snapshot.local_overrides.lore_cards
+                ],
+                "existing_runtime_lore_cards": [
+                    {
+                        "kind": card.kind,
+                        "title": card.title,
+                        "content": card.content,
+                        "keywords": list(card.keywords),
+                    }
+                    for card in existing_runtime_lore
+                ],
+            },
+        )
+        return await self._complete_result(
+            role="rp_atomic_player_lore",
+            party=party,
+            turn_id=turn.id,
+            messages=messages,
+            result_type=RPRuntimeLoreResult,
+            schema_name="rp_player_lore_result",
+            max_tokens=2_048,
+        )
+
+    async def draft_player_correction(
+        self,
+        *,
+        party: RPParty,
+        instruction: str,
+        raw_hint: str | None,
+        candidates: tuple[dict[str, Any], ...],
+    ) -> RPPlayerCorrectionResult:
+        messages = _structured_messages(
+            system=(
+                "Ты атомарная служебная модель PlayerCorrection. Выбери только один "
+                "точный target_slot из переданного ranked_candidates. Не создавай новые "
+                "targets и не исправляй факты по знаниям вне payload. raw_hint может "
+                "быть широким raw:<turn_id> или точным raw:<turn_id>:<claim_id>, но не "
+                "является доказательством сам по себе. Если ни один candidate не "
+                "соответствует просьбе игрока, верни no_target с null target_slot, "
+                "action, after и пустым forbidden_claims. Для retract after равен null; "
+                "для replace after содержит только исправленный текст. Корень ответа "
+                "плоский: result, target_slot, action, after, forbidden_claims. Для "
+                "memory и raw forbidden_claims всегда пуст; только для rule это полный "
+                "новый список запрещённых формулировок. Верни только строгий JSON."
+            ),
+            body={
+                "task": "draft_player_correction",
+                "instruction": instruction,
+                "raw_hint": raw_hint,
+                "ranked_candidates": list(candidates),
+            },
+        )
+        return await self._complete_result(
+            role="rp_atomic_player_correction",
+            party=party,
+            turn_id=None,
+            messages=messages,
+            result_type=RPPlayerCorrectionResult,
+            schema_name="rp_player_correction_result",
             max_tokens=2_048,
         )
 

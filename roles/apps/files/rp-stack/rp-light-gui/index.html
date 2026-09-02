@@ -258,15 +258,32 @@
           </div>
           <div class="section-label subsection-label">Lore Cards</div>
           <p class="panel-hint">WorldPack-карточки копируются при создании партии. Черновик из хода появляется здесь и попадет в память только после вашего подтверждения.</p>
-          <form id="loreCardForm" class="stack-form" data-legacy-rp-control>
+          <form id="loreCardForm" class="stack-form">
+            <label id="cleanLoreKindRow" class="field-label hidden">Тип карточки
+              <select id="loreCardKind">
+                <option value="character">Персонаж</option>
+                <option value="event">Событие</option>
+                <option value="location">Место</option>
+              </select>
+            </label>
             <input id="loreCardTitle" maxlength="160" placeholder="Название карточки" required>
             <textarea id="loreCardContent" rows="3" maxlength="12000" placeholder="Факт, деталь мира или нить сюжета" required></textarea>
             <input id="loreCardKeywords" maxlength="500" placeholder="Триггеры через запятую" required>
-            <label class="check-row"><input id="loreCardAlwaysOn" type="checkbox"> Всегда добавлять в prompt</label>
+            <label id="loreCardAlwaysOnRow" class="check-row"><input id="loreCardAlwaysOn" type="checkbox"> Всегда добавлять в prompt</label>
             <p id="loreCardDraftHint" class="panel-hint hidden"></p>
             <button id="loreCardSubmitButton" class="tool-button" type="submit">Подтвердить Lore Card</button>
           </form>
           <div id="loreCardList" class="state-summary"></div>
+          <div id="cleanPlayerCorrectionPanel" class="hidden">
+            <div class="section-label subsection-label">Исправление факта</div>
+            <p class="panel-hint">Служебная модель выбирает точную цель из Party memory, RAW или правил. До подтверждения prompt и gameplay state не меняются.</p>
+            <form id="playerCorrectionForm" class="stack-form">
+              <textarea id="playerCorrectionInstruction" rows="3" maxlength="4000" placeholder="Что в истории неверно и как должно быть" required></textarea>
+              <input id="playerCorrectionRawHint" maxlength="280" placeholder="Необязательно: raw:turn_id или raw:turn_id:claim_id">
+              <button class="tool-button" type="submit">Подготовить исправление</button>
+            </form>
+            <div id="playerCorrectionList" class="state-summary"></div>
+          </div>
           <div data-legacy-rp-control>
             <div class="section-label subsection-label">Checkpoints</div>
             <p class="panel-hint">Безопасный снимок state, покрытия памяти и активных карточек. От checkpoint можно создать изолированную ветку внутри партии; основная линия не изменяется.</p>

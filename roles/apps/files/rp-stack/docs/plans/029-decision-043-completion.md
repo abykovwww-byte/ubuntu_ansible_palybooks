@@ -237,6 +237,17 @@ Focused tests обязаны предъявить happy path и fail-closed boun
 пяти gaps, owner/version/idempotency, restart/recovery, no mutation before
 accept и prompt projection after accept. Full suite остаётся отдельным gate.
 
+**Результат source-кандидата 2026-09-02:** пять gaps закрыты в одном disabled
+срезе без новой queue/service/dependency. Focused World/Scenario, engine,
+mechanics, provider и integration набор дал `63 passed`; полный локальный
+repository CI — `674 passed`, включая все Gateway и Light GUI проверки.
+Канонический `rp-world-pack-builder` синхронизирован `Apply`, затем `Check`
+подтвердил отсутствие drift. Консервативный промежуточный budget равен
+`28 962 / 5 000 LOC`, debt `23 962`; mixed local Gateway suite занял `198.5s`.
+Это функциональное доказательство шага 3, но не cutover budget/time gate:
+удаление legacy и RP-only замер принадлежат шагу 4. Production apply, включение
+`RP_REBUILD_ENABLED` и live-приёмка не выполнялись.
+
 ### Шаг 4 — clean-only removal и бюджеты
 
 После зелёного шага 3 удалить из исполняемого candidate:

@@ -69,6 +69,7 @@ class RPPromptLimits:
     memory_chars: int = RP_MEMORY_PROMPT_MAX_CHARS
     lore_chars: int = RP_LORE_PROMPT_MAX_CHARS
     relationship_chars: int = 12_000
+    correction_chars: int = 4_000
     administrator_chars: int = 4_000
     narrator_note_chars: int = 1_500
     opening_chars: int = 4_000
@@ -217,11 +218,13 @@ class RPNarratorPromptBuilder:
         runtime_lore = (
             derived.runtime_lore_cards if derived is not None else ()
         )
-        if world.seed_lore_cards or runtime_lore:
+        scenario_lore = scenario.local_overrides.lore_cards
+        if world.seed_lore_cards or scenario_lore or runtime_lore:
             lore_text = lore_prompt_text(
                 world.seed_lore_cards,
                 runtime_lore,
                 self.limits.lore_chars,
+                scenario_cards=scenario_lore,
             )
             if len(lore_text) > self.limits.lore_chars:
                 raise RPPromptBudgetExceeded(
@@ -229,6 +232,23 @@ class RPNarratorPromptBuilder:
                 )
             volatile_messages.append(
                 RPPromptMessage("system", "lore", lore_text)
+            )
+        if derived is not None and derived.player_correction_overlay is not None:
+            correction_text = self._bounded(
+                "player_correction",
+                "ACCEPTED_PLAYER_CORRECTION_FOR_THIS_RESPONSE\n"
+                + json.dumps(
+                    derived.player_correction_overlay.content,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                self.limits.correction_chars,
+            )
+            volatile_messages.append(
+                RPPromptMessage(
+                    "system", "player_correction_overlay", correction_text
+                )
             )
         if derived is not None and derived.administrator_guidance is not None:
             administrator_text = self._bounded(

@@ -148,6 +148,24 @@ backfill-ятся и не мигрируются; поздний WorldPack edit 
 или prompt. Checksums служат аудитной сверкой и не создают телеметрию или новый
 readiness signal.
 
+### Decision 043: fresh clean schema 8
+
+Disabled clean candidate создаёт только новую SQLite с exact `user_version=8`;
+миграции legacy Party и backfill не предусмотрены. Existing `rp_service_jobs`
+получает immutable `operation_id`/`operation_json` и unique boundary по Party,
+поэтому typed Lore/PlayerCorrection восстанавливаются после restart без новой
+очереди и без расхода model attempt до фактического вызова.
+
+`rp_runtime_lore_cards.authoring_kind` сохраняет выбранный тип
+`character|event|location` и равен `kind`; подтверждение игрока связывается с
+decision idempotency key, а тип нельзя сменить между draft и confirm.
+`rp_player_correction_proposals` хранит owner, expected version, catalog hash,
+exact target, decision и idempotency. Accepted proposal порождает одну строку в
+`rp_player_correction_overlays` с monotonic revision и `applies_to_version`;
+UPDATE/DELETE overlays запрещены triggers. Draft/reject не создают overlay и не
+меняют gameplay state. Public API дополнительно проверяет owner, версию и exact
+target, не доверяя model output как authority.
+
 ### RP supervisor: typed retention без raw trace
 
 Decision 040 добавляет `rp_supervisor_evaluations`, изолированную по

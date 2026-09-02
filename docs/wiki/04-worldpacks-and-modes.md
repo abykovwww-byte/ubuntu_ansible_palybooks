@@ -330,6 +330,32 @@ Gateway лишь валидирует и копирует cards в её party st
 duplicate key, missing NPC aliases и меньше 15 карточек у «Купца» останавливают
 repository validation.
 
+Disabled clean contract Decision 043 добавляет Scenario-local Lore без нового
+файлового каталога. `ScenarioPresetDefinition.local_overrides` и free Scenario
+input имеют одну закрытую форму:
+
+```json
+{
+  "lore_cards": [
+    {
+      "key": "scenario:entry-condition",
+      "title": "Условие начала",
+      "keywords": ["условие начала"],
+      "content": "Факт, принадлежащий только этому сценарию.",
+      "always_on": false,
+      "enabled": true
+    }
+  ]
+}
+```
+
+Другие ключи fail-closed, `key` внутри списка уникален. Карточки входят в
+immutable `ScenarioSnapshot`; World cards остаются в `WorldSnapshot`, а
+созданные во время Party — в clean SQLite. Lore API и narrator поэтому
+различают ровно три origin: `world`, `scenario`, `runtime`. Единственный источник
+роли игрока — `ScenarioSnapshot.player_role`; clean V2 narrator assets не
+ожидают отдельный `PlayerCharacter`.
+
 ### Revision 10: authored world clock
 
 [Decision 039](../../roles/apps/files/rp-stack/docs/decisions/039-rp-world-clock-and-authored-events.md)
@@ -437,7 +463,7 @@ pack обязан объявить `training_runtime` и хранить расп
 | `awareness` | Awareness | `training` | `training` | Активный и единственный source authority — standalone project; WorldPack-owned runtime v3, 10 многоканальных ходов, 6 интерактивных site turns, corporate portal и собственный `awareness-score` |
 | `awareness-one-day` | Awareness. One day | `training` | `training` | Активный и единственный source authority — standalone project; 10 LLM-сообщений, site turns 4/6/9, 7 ходов без ссылок и score 60/30/10 |
 | `day-watch-moscow` | Дневной Дозор: Москва в начале книги | `rp` | `rp` | Revision 10 без authored-календаря: свободный персонаж, точка входа из PlayerCharacter, authored Lore Cards и закрытые мотивации NPC |
-| `day-watch-moscow-v2` | Дневной Дозор: Москва — четыре начала | `rp` | `rp` | Revision 11: presets `book/action/strategic`, четыре независимых opening seeds, 20 Lore Cards и те же 11 активных NPC; world clock не добавлен |
+| `day-watch-moscow-v2` | Дневной Дозор: Москва — четыре начала | `rp` | `rp` | Revision 11: presets `book/action/strategic`, четыре независимых opening seeds, 20 World Lore Cards и те же 11 активных NPC; disabled clean-кандидат дополнительно поддерживает typed Scenario Lore, world clock не добавлен |
 | `ellinoid` | Эллиноид | `rp` | `rp` | Совместный литературный сценарий |
 | `incident-50` | Инцидент-50 | `rp` | `rp` | Киберинцидент остаётся в RP project как ролевая партия |
 | `mechanist-new-world` | Механист Нового Мира | `rp` | `rp` | Долгая приключенческая партия |

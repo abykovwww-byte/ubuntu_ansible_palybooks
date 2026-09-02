@@ -129,6 +129,44 @@ def test_preset_and_free_scenario_use_the_same_snapshot_boundary() -> None:
     assert free.starting_relationships == preset.starting_relationships
 
 
+def test_scenario_lore_materializes_and_unknown_override_fails_closed(
+    tmp_path: Path,
+) -> None:
+    copied_world_root = tmp_path / SUPPORTED_WORLD_ID
+    shutil.copytree(WORLD_ROOT, copied_world_root)
+    preset_path = copied_world_root / "scenario-presets" / "action-independent.json"
+    source = json.loads(preset_path.read_text(encoding="utf-8"))
+    source["local_overrides"] = {
+        "lore_cards": [
+            {
+                "key": "scenario:test-location",
+                "title": "Закрытый кабинет",
+                "keywords": ["кабинет"],
+                "content": "В этом Scenario кабинет опечатан до полуночи.",
+                "always_on": False,
+                "enabled": True,
+            }
+        ]
+    }
+    preset_path.write_text(
+        json.dumps(source, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    scenario = WorldScenarioLoader(copied_world_root).materialize_preset(
+        "action-independent"
+    )
+    assert scenario.local_overrides.lore_cards[0].key == "scenario:test-location"
+
+    source["local_overrides"]["unknown"] = True
+    preset_path.write_text(
+        json.dumps(source, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    with pytest.raises(WorldSourceError, match="Extra inputs are not permitted"):
+        WorldScenarioLoader(copied_world_root).materialize_preset(
+            "action-independent"
+        )
+
+
 def test_party_snapshots_survive_source_edits_and_cannot_be_rebound(
     tmp_path: Path,
 ) -> None:
