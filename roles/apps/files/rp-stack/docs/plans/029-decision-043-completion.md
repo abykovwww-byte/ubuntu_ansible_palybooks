@@ -308,6 +308,20 @@ runner invariants зафиксированы в
 
 Это mechanical/artifact proof, ещё не human quality proof.
 
+**Результат 2026-09-02.** Exact candidate image
+`sha256:fe3a8568b2e1aac2d04824e9438952cb27a94ed4d8cf42007703cd7d130034fd`
+собран на abykovserv из merged source `d61e8f78`, без Ansible apply и
+bind mount `/app`. Внутри read-only/network-none test container full suite дал
+`97 passed in 2.36s`; девять явно сопоставленных с gate tests повторно
+дали `9 passed in 1.30s`. Тот же image в реальном Uvicorn process на
+Docker-assigned `127.0.0.1` port вернул healthy и создал в новой
+SQLite preset/free Party. Обе DB прошли integrity/FK; пять
+source/image hashes совпали. Канонические fingerprints production
+Gateway/Light GUI/local LLM до и после probe совпали; restart count везде
+остался 0. Полное доказательство и границы — в
+[evidence](../decisions/evidence/043-mechanical-candidate-2026-09-02.md). Живые
+provider calls, human quality proof, apply и activation не выполнялись.
+
 ### Шаг 6 — human acceptance в исправленном порядке
 
 #### 6.1 Blind A/B
