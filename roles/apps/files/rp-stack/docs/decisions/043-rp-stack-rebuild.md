@@ -63,7 +63,8 @@ loops. Claims сериализуются SQLite-предикатом; restart и
   до последующей сцены. Автоматический длинный canary на безопасном fixed-model
   route пройден на изолированном candidate. Консервативный
   verification budget остаётся `28 273 / 5 000 LOC`, debt `23 273`; полный
-  applied-image Gateway suite занимает `66.29s` при gate `≤60s`. Оба cutover gate
+  applied-image Gateway suite занимает `66.29s` на сервере, а тот же набор тестов
+  в PR 126 — `95.02s` на GitHub runner при gate `≤60s`. Оба cutover gate
   незакрыты. Inventory
   оставляет `RP_REBUILD_ENABLED=false`; полная standalone training-приёмка после
   уже выполненного C1 cutover также остаётся внешним gate Plan 018. Activation и
@@ -315,12 +316,22 @@ v1 — одну полностью подтверждённую выбранны
 `/srv/backups/rp-stack/decision043-acceptance-run10-20260901T094026Z.tar.gz`,
 SHA-256 `edd01c3b8e90f031caffaa08d749b3028b155f8a54a026308b925d3cd72d2867`.
 Full Gateway suite текущего bundle — `665 passed, 1 skipped` за
-`66.38s`; repository/skill/schema/UI gates — PASS. Текущий verification budget —
+`66.38s`; repository/skill/schema/UI gates — PASS. Тот же набор из 666 тестов в
+PR 126 занял `95.02s` на current GitHub runner. Текущий verification budget —
 `28 273 / 5 000 LOC`, debt `23 273`, поэтому LOC и time gates остаются открыты.
 Production во всех probes сохранял тот же container/image, restart count `0` и
 `RP_REBUILD_ENABLED=false`; candidate data production не использует. Длинный
 run28 доказывает автоматическую механику fixed route, но не заменяет human
 приёмку и applied-image parity последних source-коррекций.
+
+Read-only causal audit `run28` подтвердил проводку обоих производных слоёв:
+полное содержимое Lore card из source version 56 вошло в narrator prompt v57 и
+его факты появились в сцене; Relationship cause `shared_risk` из v61 вошла в
+prompt v62. Но сцена v62 повторила прежний шаблон и не предъявила отдельного
+последствия, а сам `run28` уже отклонён семантическим review. Исправленные
+Gemma-probes `run10` выполнены после последнего narrator turn, поэтому они не
+дают последующей сцены. Полные причинные gates Relationships/Lore остаются
+открытыми.
 
 Последующий изолированный browser proof поднял exact production Gateway image и
 Light GUI на временном LAN-порту с сохранённой candidate DB `run11`; production
