@@ -98,6 +98,8 @@ def test_fresh_database_is_clean_and_reopens_without_legacy_tables(tmp_path: Pat
     assert application_id == RP_DATABASE_APPLICATION_ID
     assert schema_version == RP_SCHEMA_VERSION
     assert foreign_key_errors == []
+    assert created.narrator_provider == "openrouter"
+    assert created.narrator_model == "openai/gpt-5.6-luna-pro"
     reopened = RPTurnEngine(database)
     assert reopened.get_party(owner_user_id="owner-one", party_id="party-one") == created
     assert reopened.list_turns(owner_user_id="owner-one", party_id="party-one") == ()

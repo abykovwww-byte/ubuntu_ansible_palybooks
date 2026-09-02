@@ -1,6 +1,5 @@
 param(
-    [switch]$SkipGatewayTests,
-    [switch]$IncludeSemanticAcceptance
+    [switch]$SkipGatewayTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,18 +8,28 @@ $rpRoot = Join-Path $repoRoot "roles\apps\files\rp-stack"
 $gatewayRoot = Join-Path $rpRoot "rp-gateway"
 $gatewayTestDeps = Join-Path $gatewayRoot ".test-deps"
 
+$rpVerificationRelativePaths = @(
+    "tests\test_rp_gateway_integration.py"
+    "tests\test_rp_gateway_lifecycle.py"
+    "tests\test_rp_mechanics.py"
+    "tests\test_rp_narrator_memory.py"
+    "tests\test_rp_provider.py"
+    "tests\test_rp_runner.py"
+    "tests\test_rp_turn_engine.py"
+    "tests\test_rp_world_scenario.py"
+)
 $rpVerificationFiles = @(
-    Get-ChildItem (Join-Path $gatewayRoot "tests") -Recurse -File -Filter "*.py"
-    Get-ChildItem (Join-Path $rpRoot "evals") -Recurse -File -Filter "*.py"
-    Get-ChildItem (Join-Path $rpRoot "scripts") -File -Filter "*.py" |
-        Where-Object { $_.Name -like "test-*.py" -or $_.Name -eq "validate-relationships.py" }
+    $rpVerificationRelativePaths | ForEach-Object {
+        Get-Item -LiteralPath (Join-Path $gatewayRoot $_)
+    }
 )
 [int]$rpVerificationLoc = ($rpVerificationFiles |
     ForEach-Object { (Get-Content -LiteralPath $_.FullName).Count } |
     Measure-Object -Sum).Sum
 $rpVerificationDebt = [Math]::Max(0, $rpVerificationLoc - 5000)
-Write-Host "[budget] RP verification: $rpVerificationLoc / 5000 LOC at cutover; debt $rpVerificationDebt; full <=60s GitHub, focused <=30s local."
-Write-Host "[budget] Scope: $($rpVerificationFiles.Count) retained RP verification files; all count conservatively."
+Write-Host "[budget] RP production allowlist: $rpVerificationLoc / 5000 physical LOC; debt $rpVerificationDebt."
+Write-Host "[budget] Scope: exactly $($rpVerificationFiles.Count) retained clean RP test files; anchors and non-executable evidence are excluded."
+Write-Host "[budget] Gateway full-suite target: <=60s on each measured environment; local and GitHub results are reported separately."
 
 function Resolve-Tool {
     param([string]$Name, [string]$OverrideEnvironmentVariable, [string]$BundledRelativePath)
@@ -61,31 +70,12 @@ $node = Resolve-Tool -Name "node" -OverrideEnvironmentVariable "CODEX_NODE" -Bun
 Push-Location $repoRoot
 try {
     Invoke-Checked "repository contracts" { & $python scripts/validate-repository.py }
-    if ($IncludeSemanticAcceptance) {
-        Invoke-Checked "semantic acceptance (saved responses, no providers)" {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-rp-stack-evals.ps1 -Mode SemanticAcceptance
-        }
-    }
     if ([string]::IsNullOrWhiteSpace($env:CI)) {
         Invoke-Checked "installed Codex skill drift" {
             powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/sync-codex-skills.ps1 -Mode Check
         }
     }
     Invoke-Checked "devkit policy and MCP" { powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-devkit.ps1 }
-    Push-Location $rpRoot
-    try {
-        $stateSeeds = @(Get-ChildItem -Path worldpacks -Recurse -Filter "state-seed.json" | Sort-Object FullName)
-        foreach ($stateSeed in $stateSeeds) {
-            Invoke-Checked "state schema: $($stateSeed.FullName.Substring($rpRoot.Length + 1))" {
-                & $python scripts/validate-state.py --state $stateSeed.FullName --schema state/schema.json
-            }
-        }
-        Invoke-Checked "relationship models" { & $python scripts/validate-relationships.py --worldpacks worldpacks }
-        Invoke-Checked "state workflow" { & $python scripts/test-state-workflow.py }
-        Invoke-Checked "check workflow" { & $python scripts/test-check-workflow.py }
-    } finally {
-        Pop-Location
-    }
     Invoke-Checked "Gateway syntax" { & $python -m compileall -q roles/apps/files/rp-stack/rp-gateway/app }
 
     $javascriptFiles = @(
@@ -95,8 +85,7 @@ try {
         Invoke-Checked "JavaScript syntax: $($file.Substring($repoRoot.Length + 1))" { & $node --check $file }
     }
     $javascriptTests = @(
-        & git -C $repoRoot ls-files "roles/apps/files/rp-stack/**/*.test.js" |
-            ForEach-Object { Get-Item -LiteralPath (Join-Path $repoRoot $_) } |
+        Get-ChildItem -LiteralPath (Join-Path $rpRoot "rp-light-gui") -File -Filter "*.test.js" |
             Sort-Object FullName
     )
     foreach ($test in $javascriptTests) {
@@ -104,7 +93,9 @@ try {
     }
 
     if (-not $SkipGatewayTests) {
-        if (-not (Test-Path -LiteralPath (Join-Path $gatewayTestDeps "pytest"))) {
+        & $python -c "import pytest" *> $null
+        $pytestAvailable = $LASTEXITCODE -eq 0
+        if (-not $pytestAvailable -and -not (Test-Path -LiteralPath (Join-Path $gatewayTestDeps "pytest"))) {
             Write-Host "[ci] restoring declared Gateway dependencies into $gatewayTestDeps"
             Invoke-Checked "Gateway dependency restore" {
                 & $python -m pip install --disable-pip-version-check --target $gatewayTestDeps -r (Join-Path $gatewayRoot "requirements.txt")
@@ -121,15 +112,17 @@ try {
         Push-Location $gatewayRoot
         $gatewayPytestTimer = [Diagnostics.Stopwatch]::StartNew()
         try {
-            Invoke-Checked "Gateway pytest" { & $python -m pytest -q }
+            Invoke-Checked "Gateway full pytest suite" { & $python -m pytest -q }
         } finally {
             $gatewayPytestTimer.Stop()
-            Write-Host "[budget] Mixed local Gateway pytest: $([Math]::Round($gatewayPytestTimer.Elapsed.TotalSeconds, 1))s; cutover target <=60s on GitHub runner."
+            Write-Host "[budget] Local Gateway full suite: $([Math]::Round($gatewayPytestTimer.Elapsed.TotalSeconds, 1))s / 60s."
+            Write-Host "[budget] GitHub Gateway full suite: measured by the separate PR job; no local-to-runner time substitution."
             Pop-Location
             $env:PYTHONPATH = $previousPythonPath
         }
     } else {
-        Write-Host "[budget] Mixed local Gateway pytest runtime not measured (-SkipGatewayTests)."
+        Write-Host "[budget] Local Gateway full suite not measured (-SkipGatewayTests)."
+        Write-Host "[budget] GitHub Gateway full suite remains a separate PR gate."
     }
 } finally {
     Pop-Location

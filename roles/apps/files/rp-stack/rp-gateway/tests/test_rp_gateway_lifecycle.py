@@ -22,18 +22,13 @@ PARTY_ID = "party-one"
 
 
 def _settings(tmp_path: Path) -> Settings:
-    state_path = tmp_path / "state" / "current.json"
     return Settings(
         app_env="test",
-        campaign_id="default",
         database_url=f"sqlite:///{tmp_path / 'rp_gateway.db'}",
         rp_database_url=f"sqlite:///{tmp_path / 'rp_engine.db'}",
-        world_state_path=str(state_path),
-        party_state_root=str(tmp_path / "state" / "parties"),
         worldpacks_path=str(tmp_path / "worldpacks"),
         auth_enabled=False,
         local_llm_enabled=False,
-        rp_rebuild_enabled=True,
         rp_narrator_enabled=False,
         rp_atomic_service_enabled=False,
         rp_administrator_enabled=False,
@@ -81,7 +76,7 @@ def _party_source() -> dict[str, WorldSnapshot | ScenarioSnapshot]:
     return {"world_snapshot": world, "scenario_snapshot": scenario}
 
 
-def test_rebuild_lifespan_owns_runner_and_recovery_does_not_spend_attempts(
+def test_lifespan_owns_runner_and_recovery_does_not_spend_attempts(
     tmp_path: Path,
 ) -> None:
     app = create_app(_settings(tmp_path))
@@ -136,39 +131,30 @@ def test_rebuild_lifespan_owns_runner_and_recovery_does_not_spend_attempts(
 
 
 @pytest.mark.parametrize(
-    ("enabled_role", "expected_role"),
+    "enabled_role",
     (
-        ("atomic", "atomic service"),
-        ("administrator", "Administrator"),
+        "atomic",
+        "administrator",
     ),
 )
-def test_rebuild_startup_rejects_enabled_but_unavailable_role_model(
+def test_startup_rejects_enabled_but_unavailable_local_role(
     tmp_path: Path,
     enabled_role: str,
-    expected_role: str,
 ) -> None:
     settings = replace(
         _settings(tmp_path),
-        service_model_choice="or-qwen-3.5-flash",
-        rp_administrator_model_choice="or-qwen-3.5-flash",
-        service_openrouter_api_key="",
         rp_atomic_service_enabled=enabled_role == "atomic",
         rp_administrator_enabled=enabled_role == "administrator",
     )
 
-    with pytest.raises(
-        ValueError,
-        match=rf"{expected_role} model choice is unavailable",
-    ):
-        app = create_app(settings)
-        with TestClient(app):
-            pass
+    with pytest.raises(ValueError, match="LOCAL_LLM_ENABLED=true"):
+        create_app(settings)
 
 
-def test_user_delete_stays_blocked_by_clean_party_during_runtime_rollback(
+def test_user_delete_stays_blocked_by_clean_party(
     tmp_path: Path,
 ) -> None:
-    settings = replace(_settings(tmp_path), rp_rebuild_enabled=False)
+    settings = _settings(tmp_path)
     RPTurnEngine(settings.rp_sqlite_path).create_party(
         owner_user_id=OWNER_ID,
         party_id=PARTY_ID,
@@ -180,8 +166,8 @@ def test_user_delete_stays_blocked_by_clean_party_during_runtime_rollback(
         response = client.request(
             "DELETE",
             f"/api/admin/users/{OWNER_ID}",
-            json={"delete_data": True},
+            json={"delete_data": False},
         )
 
     assert response.status_code == 400, response.text
-    assert response.json()["detail"] == "user still owns rebuilt RP parties"
+    assert response.json()["detail"] == "user still owns RP parties"

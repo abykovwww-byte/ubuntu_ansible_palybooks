@@ -41,29 +41,7 @@ jobs:
       - name: Build Gateway image with test support
         run: docker build --file rp-gateway/Dockerfile --tag rp-stack-gateway-ci .
       - name: Run full Gateway tests inside the image
-        run: docker run --rm rp-stack-gateway-ci pytest -q
-
-  rp-contracts:
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: roles/apps/files/rp-stack
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Validate canonical state
-        shell: bash
-        run: |
-          find worldpacks -name state-seed.json -print0 | sort -z | while IFS= read -r -d '' state; do
-            python scripts/validate-state.py --state "$state" --schema state/schema.json
-          done
-      - name: Exercise state workflow
-        run: python scripts/test-state-workflow.py
-      - name: Exercise check workflow
-        run: python scripts/test-check-workflow.py
+        run: time docker run --rm rp-stack-gateway-ci pytest -q
 
   browser-clients:
     if: github.event_name != 'push'

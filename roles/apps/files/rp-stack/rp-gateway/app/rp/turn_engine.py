@@ -294,10 +294,10 @@ class RPTurnEngine:
         world_snapshot: WorldSnapshot,
         scenario_snapshot: ScenarioSnapshot,
         title: str | None = None,
-        narrator_profile_id: str = "openrouter-deepseek-deepseek-v4-flash",
+        narrator_profile_id: str = "openrouter-openai-gpt-5-6-luna-pro",
         narrator_provider: str = "openrouter",
         narrator_base_url: str | None = None,
-        narrator_model: str = "deepseek/deepseek-v4-flash",
+        narrator_model: str = "openai/gpt-5.6-luna-pro",
         narrator_settings: dict[str, Any] | None = None,
     ) -> RPParty:
         owner_user_id = _required_text(owner_user_id, "owner_user_id")
@@ -307,7 +307,7 @@ class RPTurnEngine:
             narrator_profile_id, "narrator_profile_id"
         )
         narrator_provider = _required_text(narrator_provider, "narrator_provider")
-        if narrator_provider not in {"local", "gemini", "openrouter"}:
+        if narrator_provider != "openrouter":
             raise ValueError("narrator_provider is retired or unsupported")
         if narrator_base_url is None:
             if narrator_provider != "openrouter":
@@ -315,6 +315,11 @@ class RPTurnEngine:
             narrator_base_url = "https://openrouter.ai/api/v1"
         narrator_base_url = _required_text(narrator_base_url, "narrator_base_url")
         narrator_model = _required_text(narrator_model, "narrator_model")
+        if (
+            narrator_profile_id != "openrouter-openai-gpt-5-6-luna-pro"
+            or narrator_model != "openai/gpt-5.6-luna-pro"
+        ):
+            raise ValueError("narrator profile or model is retired or unsafe")
         if narrator_settings is None:
             narrator_settings = {}
         if not isinstance(narrator_settings, dict):

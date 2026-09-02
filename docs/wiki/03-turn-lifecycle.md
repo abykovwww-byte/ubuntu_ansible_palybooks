@@ -994,19 +994,18 @@ IaC рендерит это из `rp_stack_gateway_service_call_log_retention_da
 
 ## Код
 
-- [Adjudicator](../../roles/apps/files/rp-stack/rp-gateway/app/services/adjudicator.py)
-- [Rule Engine](../../roles/apps/files/rp-stack/rp-gateway/app/services/rule_engine.py)
-- [Narrative client](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
-- [Validator](../../roles/apps/files/rp-stack/rp-gateway/app/services/validator.py)
-- [State store](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
-- [RP story memory](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
-- [Revision-8 history selection](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_history.py)
+- [Clean turn engine](../../roles/apps/files/rp-stack/rp-gateway/app/rp/turn_engine.py)
+- [Deterministic mechanics](../../roles/apps/files/rp-stack/rp-gateway/app/rp/mechanics.py)
+- [Narrator prompt and response boundary](../../roles/apps/files/rp-stack/rp-gateway/app/rp/narrator.py)
+- [Clean SQLite schema](../../roles/apps/files/rp-stack/rp-gateway/app/rp/schema.py)
+- [Clean memory projection](../../roles/apps/files/rp-stack/rp-gateway/app/rp/memory.py)
+- [Role runner](../../roles/apps/files/rp-stack/rp-gateway/app/rp/runner.py)
 - [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
 - [Standalone Training Gateway source](https://github.com/abykovwww-byte/tavern-awareness-showroom)
 - Legacy training modules удалены из RP source zero-window поставкой; старые
   SQLite rows остаются только под read-only quarantine guards.
 - [Decision 017](../../roles/apps/files/rp-stack/docs/decisions/017-worldpack-owned-training-runtime.md)
-- [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
+- [Clean API handlers](../../roles/apps/files/rp-stack/rp-gateway/app/main.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 029](../../roles/apps/files/rp-stack/docs/decisions/029-scene-scoped-relationship-pressure.md)

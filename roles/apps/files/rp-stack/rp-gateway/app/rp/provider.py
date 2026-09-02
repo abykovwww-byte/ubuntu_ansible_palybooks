@@ -25,12 +25,12 @@ from app.rp.turn_engine import (
     RPTurn,
 )
 from app.services.provider_catalog import (
+    NARRATOR_MODEL,
     normalize_provider,
     openrouter_model_is_active,
     validate_narrator_settings,
 )
 from app.services.service_model_client import ServiceModelClient, service_prompt_text
-from app.services.service_models import OPENROUTER_OPTIONAL_REASONING_MODELS
 
 
 _ACTIVE_PROVIDERS = frozenset({"local", "gemini", "openrouter"})
@@ -52,13 +52,15 @@ class RPNarratorProvider:
         client: ServiceModelClient | None = None,
     ) -> None:
         self.provider, self.model = _validated_route(provider, model)
+        if (self.provider, self.model) != ("openrouter", NARRATOR_MODEL):
+            raise ValueError("Narrator requires the fixed OpenRouter model route")
         self.narrator_settings = validate_narrator_settings(
             self.provider, self.model, narrator_settings or {}
         )
         self.party_id = party_id
         self.request_id = request_id
-        # Settings.sqlite_path remains the legacy diagnostic database. The clean
-        # RP engine is owned separately through Settings.rp_sqlite_path.
+        # The shared database stores auth and redacted call diagnostics. Party
+        # state is owned separately through Settings.rp_sqlite_path.
         narrator_client_settings = settings
         if self.provider == "openrouter":
             narrator_client_settings = replace(
@@ -103,6 +105,8 @@ class RPAtomicServiceProvider:
         client: ServiceModelClient | None = None,
     ) -> None:
         self.provider, self.model = _validated_route(provider, model)
+        if (self.provider, self.model) != ("local", "gemma-4-26b-a4b-it-rp-q4"):
+            raise ValueError("atomic service requires the fixed local model route")
         self.client = client or ServiceModelClient(settings)
 
     async def extract_relationships(
@@ -449,6 +453,8 @@ class RPAdministratorProvider:
         client: ServiceModelClient | None = None,
     ) -> None:
         self.provider, self.model = _validated_route(provider, model)
+        if (self.provider, self.model) != ("local", "gemma-4-26b-a4b-it-rp-q4"):
+            raise ValueError("Administrator requires the fixed local model route")
         self.client = client or ServiceModelClient(settings)
 
     async def review_party(
@@ -545,9 +551,7 @@ def _apply_narrator_settings(
         payload["reasoning"] = {"effort": effort, "exclude": True}
     if provider != "openrouter":
         return
-    provider_preferences: dict[str, Any] = {"ignore": ["nvidia"]}
-    if model.casefold() == "deepseek/deepseek-v4-flash":
-        provider_preferences["sort"] = "throughput"
+    provider_preferences: dict[str, Any] = _exact_openrouter_provider(model)
     if narrator_settings:
         provider_preferences["require_parameters"] = True
     payload["provider"] = provider_preferences
@@ -594,16 +598,25 @@ def _structured_payload(
     }
     if provider == "openrouter":
         payload["provider"] = {
-            "ignore": ["nvidia"],
+            **_exact_openrouter_provider(model),
             "require_parameters": True,
         }
-        if model in OPENROUTER_OPTIONAL_REASONING_MODELS:
-            payload["reasoning"] = {"enabled": False}
+        payload["reasoning"] = {"enabled": False}
     else:
         payload["reasoning"] = {"enabled": False}
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
     return payload
+
+
+def _exact_openrouter_provider(model: str) -> dict[str, Any]:
+    if model.casefold() != NARRATOR_MODEL:
+        raise ValueError(f"OpenRouter model has no accepted exact provider route: {model}")
+    return {
+        "order": ["openai"],
+        "only": ["openai"],
+        "allow_fallbacks": False,
+    }
 
 
 def _strict_result(

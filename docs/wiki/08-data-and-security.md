@@ -478,9 +478,9 @@ declarations. Он не удаляет строки или таблицы SQLite
 ## Источники
 
 - [AuthStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/auth_store.py)
-- [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
+- [Clean SQLite schema](../../roles/apps/files/rp-stack/rp-gateway/app/rp/schema.py)
 - [Standalone Awareness Showroom source](https://github.com/abykovwww-byte/tavern-awareness-showroom)
-- [Turn trace read model](../../roles/apps/files/rp-stack/rp-gateway/app/services/turn_trace.py)
+- [Clean turn engine and persistence](../../roles/apps/files/rp-stack/rp-gateway/app/rp/turn_engine.py)
 - [Decision 027](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 028](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)
 - [Decision 031](../../roles/apps/files/rp-stack/docs/decisions/031-rp-scene-state-and-atomic-continuity.md)
