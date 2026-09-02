@@ -140,6 +140,17 @@ Stop condition: нет баланса, exact route/NVIDIA proof или канд�
 strict schema — следующие функциональные/acceptance шаги не маскируют этот
 дефект другой моделью.
 
+**Результат 2026-09-02:** balance gate открыт, а bounded canary сохранён в
+[043-provider-canary-2026-09-02.md](../decisions/evidence/043-provider-canary-2026-09-02.md).
+Оба DeepSeek Flash и Qwen отклонены для atomic роли по semantic/strict gates;
+`gpt-oss-120b` не допускает требуемый reasoning-off. Четыре typed Lore исхода
+4/4 прошла existing local `gemma-4-26b-a4b-it-rp-q4`, поэтому функциональный
+срез использует её без cloud fallback. Administrator V4 Pro прошёл
+`no_proposal`/`suggest` на exact `alibaba/fp8` только с фактическим budget 2 048,
+но остаётся сравнительным кандидатом до human acceptance. Narrator Luna не
+менялся и остаётся blind A/B anchor. Это закрывает pre-flight для начала шага 2,
+но не является API/runner/storage/UI или activation proof.
+
 ### Шаг 2 — заморозить внешний контракт и file map
 
 Перед кодом составить consumer map `endpoint → handler → storage → prompt/UI →
