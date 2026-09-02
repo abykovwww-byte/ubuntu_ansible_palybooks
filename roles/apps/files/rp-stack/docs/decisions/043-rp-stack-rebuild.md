@@ -351,6 +351,66 @@ foreign-key violations — 0. Полный applied-image Gateway suite посл�
 Ansible: `665 passed, 1 skipped` за `66.29s`; функционально зелёный, time gate
 `≤60s` всё ещё открыт.
 
+### Незакрытый clean contract §4–§5 на baseline `66f0808`
+
+Перед human acceptance требуется ещё один disabled функциональный срез. Read-only
+аудит current `main` выявил пять разрывов между принятым контрактом и clean path:
+
+1. **Нет операции `PlayerCorrection`.** В `app/rp/**` нет ни одного упоминания
+   `PlayerCorrection`; clean API в `app/main.py:1335-1617` обслуживает Party,
+   opening, turn и роли, но не объявляет correction endpoints. Существующий
+   `/api/parties/{party_id}/gm-corrections/decide` в
+   `app/main.py:3658-3694` остаётся legacy `PartyStore`/`RPGMService` path и не
+   является clean implementation.
+2. **Нет `authoring_kind` в clean audit.** Clean schema и `app/rp/**` не содержат
+   это поле. Сохраняющий `lore_card_created` legacy handler
+   (`app/main.py:2078-2093`) записывает card ID, title, source turns и confirm,
+   но не kind; на clean Party эти draft/create handlers не переключаются на
+   `RPTurnEngine` (`app/main.py:2000-2094`).
+3. **Нет Lore origin `scenario`.** Clean read собирает только World cards с
+   принудительным `origin=world` и `derived.runtime_lore_cards`
+   (`app/main.py:1961-1993`). Storage создаёт производную карту только с
+   `origin='runtime'` (`app/rp/turn_engine.py:1508-1530`), а prompt объединяет
+   только World и runtime (`app/rp/narrator.py:217-231`).
+4. **`local_overrides` сохраняется, но не исполняется.** Поле остаётся открытым
+   `dict` в `ScenarioPresetDefinition` и `ScenarioSnapshot`
+   (`app/rp/content.py:84-99,121-138`), копируется при preset/free materialization
+   (`app/rp/content.py:255-272,275-313`) и принимается clean API
+   (`app/main.py:1231-1245,1352-1368`; `app/models/schemas.py:375-391`). Других
+   чтений поля в production clean path нет.
+5. **V2-пресеты ссылаются на удаляемый `PlayerCharacter`.** Все три пары
+   `worldpacks/day-watch-moscow-v2/presets/{book,action,strategic}/gm-system.md:7-8`
+   и `authors-note.md:3` ставят эту legacy-сущность выше художественного текста.
+   Clean preset creation при этом берёт неизменяемый `player_role` напрямую из
+   preset (`app/main.py:1370-1373`), в отличие от free Scenario, где поле можно
+   передать (`app/main.py:1352-1368`).
+
+Исправление следует плану
+[Plan 029](../plans/029-decision-043-completion.md): единый
+`ScenarioSnapshot.player_role`, закрытый `local_overrides.lore_cards`, три Lore
+origin, typed player Lore и явная `PlayerCorrection` на существующей atomic
+service role/runner. Production остаётся за `RP_REBUILD_ENABLED=false` до
+закрытия всех ворот.
+
+### Разбор `run28` / `run10` и порядок следующей приёмки
+
+Причины разделяются, чтобы не исправлять механику вместо harness или наоборот:
+
+| Слой | Что доказано или сломано |
+| --- | --- |
+| Механика | `run28` дошёл до version 66 на exact route, провёл jobs, retries, memory chain и передал runtime Lore из v56 в prompt/scene v57, а Relationship cause v61 — в prompt v62. Значит storage/runner/prompt wiring существует. |
+| Качество кандидатов | `run28` отклонён: v3 ложно создал `kept_agreement`, Runtime Lore повторял сохранённое и выходил за evidence spans; сцена v62 не дала отдельного последствия Relationship. |
+| Порядок harness | Исправленные `run10` probes вернули ожидаемые `candidates=[]`, grounded Lore и `no_candidate`, но были запущены после последнего narrator turn. Следующего prompt и последующей сцены уже не существовало, поэтому причинная цепочка не могла закрыться независимо от качества output. |
+
+Следующий acceptance harness обязан выполнить relationship/runtime-Lore probe и
+correction **внутри** ещё продолжающейся Party, дождаться deterministic apply,
+провести следующий narrator turn и затем отдельный последующий turn для видимого
+следствия. Administrator accept/reject, `PlayerCorrection` и player Lore также
+выполняются до последней сцены. Post-final probes не засчитываются в §6.3.
+
+Актуальный публичный snapshot цен и endpoint-провайдеров сохранён отдельно:
+[043-model-pricing-2026-09-02.md](evidence/043-model-pricing-2026-09-02.md).
+
 ## Context
 
 - Партия навсегда закреплена за `rp_contract_revision` и не мигрирует.
