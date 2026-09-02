@@ -8,16 +8,19 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** clean-only source-кандидат шага 4 собран в PR #131 на
-`0bc9177d8e79c7b188d4ce56c5bc09d37734153c` от merged-базы
-`d3d7d6e1933c3596b49ba7bc2df3b866bffb402e`. Candidate содержит один
-движок без `RP_REBUILD_ENABLED`/compatibility branch и один World
-`day-watch-moscow-v2`; exact Gateway allowlist равен `4 966 / 5 000 LOC`, debt
-`0`. Full suite дал `97 passed in 6.40s` локально и
-`97 passed in 5.07s` на GitHub runner; все четыре global CI checks green.
-Source, push и PR CI выполнены; на момент этой записи merge, apply,
-activation и live verification ещё не выполнялись. Точная методика и исключения:
-[clean-only evidence](evidence/043-clean-only-budget-2026-09-02.md).
+**Delivery status:** clean-only шаг 4 merged PR #131 в `main` как
+`d61e8f78ef3be9e45e48b99355fccbbd225d7db1`. Шаг 5 собрал на abykovserv
+из этого merge exact image
+`sha256:fe3a8568b2e1aac2d04824e9438952cb27a94ed4d8cf42007703cd7d130034fd`
+без Ansible apply и `/app` bind mount. Внутри image full suite дал
+`97 passed in 2.36s`; реальный Uvicorn process на isolated data и
+Docker-assigned `127.0.0.1` port вернул healthy и создал preset/free Party.
+Обе candidate SQLite прошли integrity/FK, source/image hashes совпали,
+а normalized production container fingerprints до и после probe одинаковы.
+Механические source и exact-image gate закрыты; human quality acceptance,
+production apply, activation и live verification не выполнялись. Evidence:
+[clean-only budget](evidence/043-clean-only-budget-2026-09-02.md) и
+[mechanical candidate](evidence/043-mechanical-candidate-2026-09-02.md).
 
 **Исторический applied baseline до clean-only candidate.**
 Последний IaC apply `2ad61019fcad7693ce620d1f158bcb3353b6eb1b` завершился
