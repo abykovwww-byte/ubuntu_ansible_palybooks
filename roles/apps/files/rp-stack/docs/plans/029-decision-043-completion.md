@@ -282,6 +282,16 @@ human acceptance/cutover. Разрешены удаление мёртвых т�
 поверхностью и сокращение дублирования; запрещено ослаблять assertions или
 подменять full suite focused набором.
 
+**Результат source-кандидата 2026-09-02.** PR #131 на head
+`0bc9177d8e79c7b188d4ce56c5bc09d37734153c` содержит один clean-only движок и
+один World `day-watch-moscow-v2`. Точный allowlist равен
+`4 966 / 5 000 LOC`, debt `0`; full suite дал `97 passed in 6.40s`
+локально и `97 passed in 5.07s` на GitHub runner. Browser,
+repository, Gateway и Ansible checks green. Методика, исключения и
+runner invariants зафиксированы в
+[evidence](../decisions/evidence/043-clean-only-budget-2026-09-02.md). На момент
+этой записи merge, apply, activation и live-проверка ещё не выполнялись.
+
 ### Шаг 5 — собрать механический candidate
 
 Собрать exact candidate image из merged source, без bind mount `/app`. На

@@ -58,9 +58,7 @@ services:
       - .env
     volumes:
       - "{{ rp_stack_gateway_data_dir }}:/data:rw"
-      - "{{ rp_stack_state_dir }}:/state:rw"
       - "./worldpacks:/worldpacks:ro"
-      - "./scripts:/scripts:ro"
     expose:
       - "{{ rp_stack_gateway_port }}"
     security_opt:

@@ -887,99 +887,6 @@ def markdown_command_fragments(text: str) -> list[str]:
 
 
 def validate_environment_contracts(errors: list[str]) -> None:
-    inventory = ROOT / "inventories" / "local" / "group_vars" / "server.yml"
-    production_env_template = ROOT / "roles" / "apps" / "templates" / "rp-stack.env.j2"
-    env_templates = (
-        production_env_template,
-        ROOT / "roles" / "apps" / "templates" / "rp-stack.env.example.j2",
-    )
-    retention_variable = "rp_stack_gateway_service_call_log_retention_days: 0"
-    retention_mapping = (
-        "SERVICE_CALL_LOG_RETENTION_DAYS="
-        "{{ rp_stack_gateway_service_call_log_retention_days | default(0) }}"
-    )
-    if (
-        not inventory.is_file()
-        or retention_variable not in inventory.read_text(encoding="utf-8")
-    ):
-        fail(errors, "RP Stack inventory must default service-call log retention to unlimited (0)")
-    for path in env_templates:
-        if not path.is_file() or retention_mapping not in path.read_text(encoding="utf-8"):
-            fail(
-                errors,
-                f"RP Stack env template does not render service-call log retention: {path.relative_to(ROOT)}",
-            )
-
-    observed_revision_assignments = (
-        re.findall(
-            r"(?m)^rp_stack_gateway_rp_contract_observed_revision:\s*([0-9]+)\s*(?:#.*)?$",
-            inventory.read_text(encoding="utf-8"),
-        )
-        if inventory.is_file()
-        else []
-    )
-    observed_revision_mapping = (
-        "RP_CONTRACT_OBSERVED_REVISION="
-        "{{ rp_stack_gateway_rp_contract_observed_revision }}"
-    )
-    has_revision_11_pack = False
-    worldpacks_root = ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks"
-    for manifest_path in worldpacks_root.glob("*/manifest.json"):
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            rp_contract = manifest.get("rp_contract") if isinstance(manifest, dict) else None
-            if (
-                isinstance(rp_contract, dict)
-                and rp_contract.get("schema_version") == "rp-core.v2"
-                and int(rp_contract.get("revision", -1)) == 11
-            ):
-                has_revision_11_pack = True
-                break
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            continue
-    expected_observed_revision = "11" if has_revision_11_pack else "10"
-    if observed_revision_assignments != [expected_observed_revision]:
-        fail(
-            errors,
-            "RP Stack inventory must observe revision 10 until a revision-11 pack is "
-            "committed, then observe revision 11, exactly once",
-        )
-    if (
-        not production_env_template.is_file()
-        or observed_revision_mapping not in production_env_template.read_text(encoding="utf-8")
-    ):
-        fail(errors, "RP Stack production env must render the explicit observed RP revision")
-
-    gateway_config = (
-        ROOT / "roles" / "apps" / "files" / "rp-stack" / "rp-gateway" / "app" / "core" / "config.py"
-    )
-    if (
-        not gateway_config.is_file()
-        or f"RP_CONTRACT_MAX_REVISION = {RP_CONTRACT_SOURCE_MAX_REVISION}"
-        not in gateway_config.read_text(encoding="utf-8")
-    ):
-        fail(errors, "RP Gateway source must accept candidate rp-core.v2 revision 11")
-
-    canary_wrapper = ROOT / "scripts" / "run-rp-stack-evals.ps1"
-    canary_markers = (
-        "[ValidateRange(0, 11)]",
-        "[Nullable[int]]$RpContractRevision = $null",
-        "if ($null -ne $RpContractRevision)",
-        '$arguments += @("--rp-contract-revision", [string]$RpContractRevision)',
-    )
-    if not canary_wrapper.is_file():
-        fail(errors, "missing RP Stack eval wrapper")
-    else:
-        canary_source = canary_wrapper.read_text(encoding="utf-8-sig")
-        if any(marker not in canary_source for marker in canary_markers):
-            fail(errors, "RP Stack provider canary must forward explicit candidate revision 0..11")
-
-    canary_runner = ROOT / "roles" / "apps" / "files" / "rp-stack" / "evals" / "run_evals.py"
-    if not canary_runner.is_file():
-        fail(errors, "missing RP Stack eval runner")
-    elif 'choices=range(0, 12)' not in canary_runner.read_text(encoding="utf-8"):
-        fail(errors, "RP Stack provider canary evaluator must accept candidate revision 0..11")
-
     marketplace = Path(".agents/plugins/marketplace.json")
     old_profile = b"C:" + b"\\Users\\" + b"albykov"
     old_plugin_path = b".agents/plugins/" + b"rp-stack-devkit/"
@@ -1032,9 +939,6 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     ci_workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
     rp_light_gui_path = ROOT / "roles" / "apps" / "files" / "rp-stack" / "rp-light-gui" / "index.html"
     rp_light_gui_app_path = ROOT / "roles" / "apps" / "files" / "rp-stack" / "rp-light-gui" / "app.js"
-    incident_manifest_path = (
-        ROOT / "roles" / "apps" / "files" / "rp-stack" / "worldpacks" / "incident-50" / "manifest.json"
-    )
     required_paths = (
         inventory_path,
         production_env_path,
@@ -1047,7 +951,6 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         ci_workflow_path,
         rp_light_gui_path,
         rp_light_gui_app_path,
-        incident_manifest_path,
     )
     for path in required_paths:
         if not path.is_file():
@@ -1066,7 +969,6 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     ci_workflow = ci_workflow_path.read_text(encoding="utf-8")
     rp_light_gui = rp_light_gui_path.read_text(encoding="utf-8")
     rp_light_gui_app = rp_light_gui_app_path.read_text(encoding="utf-8")
-    incident_manifest = json.loads(incident_manifest_path.read_text(encoding="utf-8"))
     placeholder = "_".join(("ROOT", "FINAL", "PIN"))
 
     pin_values = re.findall(
@@ -1232,16 +1134,8 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
     for marker in ("scripts/validate-training-runtime.py", "rp-showcase-gui/app.js"):
         if marker in ci_workflow:
             fail(errors, f"CI must not invoke retired RP training source: {marker}")
-    for path, content in ((rp_env_path, rp_env), (rp_example_env_path, rp_example_env)):
-        if "SCENARIO_TYPE=rp" not in content:
-            fail(errors, f"RP-only Gateway env missing SCENARIO_TYPE=rp: {path.relative_to(ROOT)}")
     if 'name="scenarioType" value="training"' in rp_light_gui:
         fail(errors, "RP Light GUI must not offer training party creation after C1")
-    if 'scenario_type: "rp"' not in rp_light_gui_app:
-        fail(errors, "RP Light GUI must hardcode the sole RP scenario type in party creation")
-    if incident_manifest.get("scenario_types") != {"recommended": "rp", "supported": ["rp"]}:
-        fail(errors, "incident-50 must be RP-only after C1")
-
     collector_match = re.search(
         r"(?ms)^- name: Collect changed Docker apps from app-level tasks\n(?P<body>.*?)(?=^- name:|\Z)",
         apps_tasks,

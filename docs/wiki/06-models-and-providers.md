@@ -398,10 +398,10 @@ Gateway сохраняет из live-каталога OpenRouter цены обы
 
 ## Источники
 
-- [Service models](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_models.py)
+- [Clean provider routing](../../roles/apps/files/rp-stack/rp-gateway/app/rp/provider.py)
 - [Model catalog](../../roles/apps/files/rp-stack/rp-gateway/app/services/provider_catalog.py)
 - [Provider auth](../../roles/apps/files/rp-stack/rp-gateway/app/services/provider_auth.py)
-- [Narrative client](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
+- [Narrator client](../../roles/apps/files/rp-stack/rp-gateway/app/rp/narrator.py)
 - [Service model client](../../roles/apps/files/rp-stack/rp-gateway/app/services/service_model_client.py)
 - [Turn Trace Workbench](../../roles/apps/files/rp-stack/docs/decisions/027-turn-trace-workbench.md)
 - [Decision 032: explicit rev8 memory routing](../../roles/apps/files/rp-stack/docs/decisions/032-rp-history-first-prompt-and-sectioned-memory.md)

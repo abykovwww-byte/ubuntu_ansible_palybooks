@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -31,21 +30,16 @@ from app.rp.provider import RPNarratorProvider
 
 RP_STACK_ROOT = Path(__file__).resolve().parents[2]
 WORLD_PACKS_ROOT = RP_STACK_ROOT / "worldpacks"
-STATE_SCHEMA = RP_STACK_ROOT / "state" / "schema.json"
 
 
 @pytest.fixture
 def integration_settings(tmp_path: Path) -> Settings:
     return Settings(
         app_env="test",
-        database_url=f"sqlite:///{tmp_path / 'legacy.db'}",
+        database_url=f"sqlite:///{tmp_path / 'shared.db'}",
         rp_database_url=f"sqlite:///{tmp_path / 'rp_engine.db'}",
-        world_state_path=str(tmp_path / "legacy-state.json"),
-        party_state_root=str(tmp_path / "legacy-parties"),
-        state_schema_path=str(STATE_SCHEMA),
         worldpacks_path=str(WORLD_PACKS_ROOT),
         auth_enabled=False,
-        rp_rebuild_enabled=True,
         rp_narrator_enabled=True,
         rp_atomic_service_enabled=False,
         rp_administrator_enabled=False,
@@ -53,9 +47,6 @@ def integration_settings(tmp_path: Path) -> Settings:
         rp_runner_poll_interval_seconds=0.001,
         openrouter_api_key="party-openrouter-key",
         service_openrouter_api_key="service-openrouter-key",
-        openrouter_models=("deepseek/deepseek-v4-flash",),
-        openrouter_model_catalog_live=False,
-        gemini_model_catalog_live=False,
         local_llm_enabled=False,
     )
 
@@ -76,7 +67,7 @@ def _model_profile_id(client: TestClient) -> str:
         item
         for item in response.json()["model_profiles"]
         if item["provider"] == "openrouter"
-        and item["model"] == "deepseek/deepseek-v4-flash"
+        and item["model"] == "openai/gpt-5.6-luna-pro"
     )
     return str(profile["id"])
 
@@ -221,137 +212,8 @@ def test_world_detail_seed_creates_free_party_without_filesystem_helper(
     assert party["scenario_source"] == "free"
 
 
-def test_hidden_model_profile_cannot_be_selected_by_direct_clean_party_post(
-    integration_client: tuple[TestClient, Any],
-) -> None:
-    client, app = integration_client
-    hidden_profile_id = "hidden-openrouter-batch"
-    app.state.party_store.upsert_model_profile(
-        {
-            "id": hidden_profile_id,
-            "title": "Hidden batch profile",
-            "provider": "openrouter",
-            "base_url": "https://openrouter.ai/api/v1",
-            "model": "example/hidden-roleplay-model:batch",
-            "params": {
-                "context_tokens": 131_072,
-                "rp_specialized": True,
-                "source": "test",
-            },
-            "api_key_source": "server_env_or_managed_key",
-        }
-    )
-    listed_ids = {
-        item["id"]
-        for item in client.get("/api/model-profiles").json()["model_profiles"]
-    }
-    assert hidden_profile_id not in listed_ids
-
-    payload = _preset_create_payload(client, title="Hidden profile must fail")
-    payload["model_profile_id"] = hidden_profile_id
-    response = client.post("/api/parties", json=payload)
-
-    assert response.status_code == 400, response.text
-    assert "profile" in response.json()["detail"].lower()
-
-
-def test_custom_base_byok_uses_immutable_exact_endpoint_and_secret_or_fails_closed(
-    integration_client: tuple[TestClient, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client, app = integration_client
-    custom_profile_id = "custom-base-roleplay"
-    custom_base_url = "https://rp-provider.example.test/v1"
-    app.state.party_store.upsert_model_profile(
-        {
-            "id": custom_profile_id,
-            "title": "Custom-base RP model",
-            "provider": "openrouter",
-            "base_url": custom_base_url,
-            "model": "example/custom-roleplay-model",
-            "params": {
-                "context_tokens": 131_072,
-                "rp_specialized": True,
-                "source": "test",
-            },
-            "api_key_source": "managed_key",
-        }
-    )
-    payload = _preset_create_payload(client, title="Custom-base BYOK party")
-    payload["model_profile_id"] = custom_profile_id
-    party = _create_party(client, payload)
-    party_id = party["id"]
-
-    stored_party = app.state.rp_engine.get_party(
-        owner_user_id=RP_ANONYMOUS_OWNER,
-        party_id=party_id,
-    )
-    assert stored_party.narrator_base_url == custom_base_url
-
-    provider_routes: list[tuple[str, str]] = []
-
-    async def complete(
-        provider: RPNarratorProvider, _prompt: Any
-    ) -> str:
-        provider_routes.append(
-            (
-                provider.client.settings.openrouter_api_base,
-                provider.client.settings.service_openrouter_api_key,
-            )
-        )
-        return "Нарратор отвечает через точный пользовательский маршрут."
-
-    monkeypatch.setattr(RPNarratorProvider, "complete", complete)
-    no_exact_secret = client.post(
-        f"/api/parties/{party_id}/start",
-        json={"idempotency_key": "custom-base-no-exact-secret"},
-    )
-    assert no_exact_secret.status_code == 400, no_exact_secret.text
-    assert provider_routes == []
-
-    wrong_key = client.post(
-        f"/api/parties/{party_id}/byok",
-        json={
-            "label": "Wrong endpoint key",
-            "api_key": "wrong-endpoint-secret",
-            "provider": "openrouter",
-            "base_url": "https://other-provider.example.test/v1",
-            "is_default": True,
-        },
-    )
-    assert wrong_key.status_code == 400, wrong_key.text
-    assert "binding" in wrong_key.json()["detail"].lower()
-
-    exact_key = client.post(
-        f"/api/parties/{party_id}/byok",
-        json={
-            "label": "Exact endpoint key",
-            "api_key": "exact-custom-base-secret",
-            "provider": "openrouter",
-            "base_url": custom_base_url,
-            "is_default": True,
-        },
-    )
-    assert exact_key.status_code == 200, exact_key.text
-    started = client.post(
-        f"/api/parties/{party_id}/start",
-        json={"idempotency_key": "custom-base-exact-secret"},
-    )
-
-    assert started.status_code == 200, started.text
-    assert provider_routes == [(custom_base_url, "exact-custom-base-secret")]
-    assert (
-        app.state.rp_engine.get_party(
-            owner_user_id=RP_ANONYMOUS_OWNER,
-            party_id=party_id,
-        ).narrator_base_url
-        == custom_base_url
-    )
-
-
 def test_rebuilt_create_list_get_are_clean_and_owner_scoped(
     integration_client: tuple[TestClient, Any],
-    integration_settings: Settings,
 ) -> None:
     client, app = integration_client
     preset_party = _create_party(
@@ -364,21 +226,6 @@ def test_rebuilt_create_list_get_are_clean_and_owner_scoped(
     assert preset_party["scenario_source"] == "preset"
     assert free_party["scenario_source"] == "free"
     assert preset_party["world_id"] == free_party["world_id"] == SUPPORTED_WORLD_ID
-
-    with sqlite3.connect(integration_settings.rp_sqlite_path) as connection:
-        stored = connection.execute(
-            "SELECT id, owner_user_id FROM rp_parties ORDER BY id"
-        ).fetchall()
-    with sqlite3.connect(integration_settings.sqlite_path) as connection:
-        legacy_party_count = connection.execute(
-            "SELECT count(*) FROM parties"
-        ).fetchone()[0]
-
-    assert {row[0] for row in stored} == {preset_party["id"], free_party["id"]}
-    assert {row[1] for row in stored} == {RP_ANONYMOUS_OWNER}
-    assert legacy_party_count == 0
-    legacy_party_root = Path(integration_settings.party_state_root)
-    assert not legacy_party_root.exists() or list(legacy_party_root.iterdir()) == []
 
     listed = client.get("/api/parties")
     assert listed.status_code == 200, listed.text
@@ -416,7 +263,6 @@ def test_rebuilt_create_list_get_are_clean_and_owner_scoped(
 
 def test_rebuilt_turn_http_contract_is_idempotent_retryable_and_fail_open(
     integration_client: tuple[TestClient, Any],
-    integration_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, app = integration_client
@@ -438,52 +284,11 @@ def test_rebuilt_turn_http_contract_is_idempotent_retryable_and_fail_open(
     )
     party_id = party["id"]
 
-    previous_handler = app.state.rp_runner.service_handler
-    selected_service_model = client.patch(
-        "/api/admin/global-settings/service-model",
-        json={"choice_id": "or-qwen-3.5-flash"},
-    )
-    assert selected_service_model.status_code == 200, selected_service_model.text
-    assert (
-        selected_service_model.json()["selected"]["model"]
-        == "qwen/qwen3.5-flash-02-23"
-    )
-    assert "or-qwen-3.7-flash" not in {
-        choice["id"] for choice in selected_service_model.json()["choices"]
-    }
-    assert "or-openrouter-free" not in {
-        choice["id"] for choice in selected_service_model.json()["choices"]
-    }
-    assert app.state.rp_runner.service_handler is not previous_handler
-    assert (
-        app.state.rp_runner.service_handler.model.model
-        == "qwen/qwen3.5-flash-02-23"
-    )
-
     unknown_start = client.post(
         f"/api/parties/{party_id}/start",
         json={"expected_version": 0},
     )
     assert unknown_start.status_code == 422, unknown_start.text
-
-    with sqlite3.connect(integration_settings.sqlite_path) as connection:
-        connection.execute(
-            "UPDATE model_profiles SET provider = 'nvidia' WHERE id = ?",
-            (party["model_profile_id"],),
-        )
-        connection.commit()
-    retired = client.post(
-        f"/api/parties/{party_id}/start",
-        json={"idempotency_key": "retired-binding"},
-    )
-    assert retired.status_code == 409, retired.text
-    assert provider_calls == []
-    with sqlite3.connect(integration_settings.sqlite_path) as connection:
-        connection.execute(
-            "UPDATE model_profiles SET provider = 'openrouter' WHERE id = ?",
-            (party["model_profile_id"],),
-        )
-        connection.commit()
 
     start_headers = {"X-Request-ID": "request-start"}
     start_payload = {"idempotency_key": "start-key"}
@@ -624,7 +429,7 @@ def test_rebuilt_turn_http_contract_is_idempotent_retryable_and_fail_open(
         f"/api/parties/{party_id}/checks",
         json={"skill": 1, "difficulty": 10},
     )
-    assert legacy_mutation.status_code == 410, legacy_mutation.text
+    assert legacy_mutation.status_code == 404, legacy_mutation.text
 
 
 def test_clean_player_lore_and_correction_are_confirmed_owner_operations(

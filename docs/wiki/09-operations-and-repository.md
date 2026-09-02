@@ -276,7 +276,7 @@ Provider canary запускается только с `-ConfirmProviderRun`, и
 autotest branch, принимает повторные `-SemanticResponsesFile` и проверяет, что
 source history/state не изменились. Полные
 правила трёх уровней находятся в
-[RP Stack evals](../../roles/apps/files/rp-stack/evals/README.md).
+[Decision 043 completion plan](../../roles/apps/files/rp-stack/docs/plans/029-decision-043-completion.md).
 
 ## Серверные команды
 

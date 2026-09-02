@@ -180,9 +180,6 @@ rp_stack_local_llm_base_url: "http://rp-local-llm:8080/v1"
 rp_stack_local_llm_context_tokens: 32768
 rp_stack_local_llm_gpu_layers: 99
 rp_stack_local_llm_timeout_seconds: 240
-rp_stack_state_dir: "{{ rp_stack_project_dir }}/state"
-rp_stack_state_history_dir: "{{ rp_stack_state_dir }}/history"
-rp_stack_state_proposed_dir: "{{ rp_stack_state_dir }}/proposed"
 rp_stack_bind_host: "192.168.1.88"
 rp_stack_bind_hosts:
   - "{{ rp_stack_bind_host }}"
@@ -191,59 +188,20 @@ rp_stack_puid: 1000
 rp_stack_pgid: 1000
 rp_stack_gemini_api_base: "https://generativelanguage.googleapis.com/v1beta/openai"
 rp_stack_gemini_api_key: ""
-rp_stack_gemini_models:
-  - "gemini-3.6-flash"
-  - "gemini-3.5-flash"
-rp_stack_gemini_model_catalog_live: true
 rp_stack_openrouter_api_base: "https://openrouter.ai/api/v1"
 rp_stack_openrouter_api_key: ""
-rp_stack_openrouter_models:
-  - "deepseek/deepseek-v4-flash"
-  - "qwen/qwen3.5-flash-02-23"
-rp_stack_openrouter_fallback_models:
-  - "deepseek/deepseek-v4-flash"
-rp_stack_openrouter_model_catalog_live: true
-rp_stack_provider_model_catalog_ttl_seconds: 86400
+rp_stack_service_openrouter_api_key: ""
 rp_stack_gateway_port: 8088
 rp_stack_light_gui_host_port: 8010
 rp_stack_gateway_database_url: "sqlite:////data/rp_gateway.db"
 rp_stack_gateway_rp_database_url: "sqlite:////data/rp_engine.db"
-rp_stack_rp_rebuild_enabled: false
 rp_stack_rp_narrator_enabled: true
 rp_stack_rp_atomic_service_enabled: true
 rp_stack_rp_administrator_enabled: true
-rp_stack_rp_administrator_model_choice: "local-gemma"
 rp_stack_rp_derived_wait_seconds: 15
 rp_stack_rp_runner_poll_interval_seconds: 0.05
 rp_stack_gateway_log_level: INFO
-rp_stack_gateway_log_prompts: "false"
-rp_stack_gateway_max_repair_attempts: 1
-rp_stack_gateway_request_timeout_seconds: 900
 rp_stack_gateway_model_attempt_timeout_seconds: 150
-rp_stack_gateway_party_start_model_attempt_timeout_seconds: 300
-rp_stack_gateway_service_call_log_retention_days: 0
-rp_stack_gateway_rp_contract_observed_revision: 11
-rp_stack_post_turn_helpers_inline: false
-rp_stack_party_context_max_tokens: 131072
-rp_stack_party_context_completion_reserve_tokens: 16384
-rp_stack_party_context_system_reserve_tokens: 32768
-rp_stack_party_context_min_history_tokens: 8192
-rp_stack_service_model_choice: "local-gemma"
-rp_stack_memory_summary_batch_tokens: 10000
-rp_stack_party_memory_chapter_max_tokens: 6000
-rp_stack_party_memory_chapter_max_chars: 24000
-rp_stack_party_memory_prompt_max_chars: 60000
-rp_stack_party_memory_retrieval_enabled: true
-rp_stack_party_memory_retrieval_limit: 3
-rp_stack_party_memory_retrieval_max_chars: 9000
-rp_stack_rp_story_memory_update_turns: 4
-rp_stack_rp_story_memory_batch_tokens: 6000
-rp_stack_rp_story_memory_max_tokens: 6000
-rp_stack_rp_story_memory_max_chars: 24000
-rp_stack_rp_story_memory_prompt_max_chars: 24000
-rp_stack_rp_story_memory_reserve_tokens: 10000
-rp_stack_journal_auto_min_unsummarized_turns: 16
-rp_stack_journal_max_batch_turns: 32
 
 # Deploy only this exact merged application commit; do not replace it with a branch or tag.
 awareness_showroom_repo_version: "3804d483452e6082eb2079790cf10d3dcc02107f"
@@ -411,178 +369,6 @@ docker_apps:
       - "{{ rp_stack_local_llm_models_dir }}"
       - "{{ rp_stack_local_llm_model_dir }}"
       - "{{ rp_stack_backup_dir }}"
-      - "{{ rp_stack_data_dir }}/default-user/QuickReplies"
-      - "{{ rp_stack_data_dir }}/default-user/worlds"
-      - "{{ rp_stack_state_dir }}"
-      - "{{ rp_stack_state_dir }}/parties"
-      - "{{ rp_stack_state_history_dir }}"
-      - "{{ rp_stack_state_proposed_dir }}"
-    runtime_source_files:
-      - src: "rp-stack/worldpacks/starosta/sillytavern/starosta.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/starosta.json"
-        mode: "0640"
-        force: false
-      - src: "rp-stack/worldpacks/merchant-sviatoslav/sillytavern/merchant-sviatoslav.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/merchant-sviatoslav.json"
-        mode: "0640"
-        force: false
-      - src: "rp-stack/worldpacks/day-watch-moscow/sillytavern/day-watch-moscow.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/day-watch-moscow.json"
-        mode: "0640"
-        force: false
-      - src: "rp-stack/worldpacks/day-watch-moscow-v2/sillytavern/day-watch-moscow-v2.json"
-        path: "{{ rp_stack_data_dir }}/default-user/worlds/day-watch-moscow-v2.json"
-        mode: "0640"
-        force: false
-    runtime_files:
-      - path: "{{ rp_stack_state_dir }}/current.json"
-        mode: "0640"
-        content: |
-          {
-            "meta": {
-              "campaign_id": "default",
-              "schema_version": "1.0.0",
-              "state_version": 1,
-              "turn": 0,
-              "last_updated": "1970-01-01T00:00:00Z"
-            },
-            "player": {
-              "location": "unknown",
-              "status": "active",
-              "reputation": {},
-              "resources": {},
-              "known_abilities": [],
-              "constraints": [],
-              "known_world_facts": []
-            },
-            "characters": {},
-            "factions": {},
-            "locations": {},
-            "resources": {},
-            "relationships": {},
-            "active_threads": [],
-            "completed_threads": [],
-            "world_constraints": [],
-            "timeline": [],
-            "last_turn": {
-              "turn": 0,
-              "player_message": "",
-              "narrator_response": "",
-              "state_patch_id": ""
-            },
-            "uncertain_facts": []
-          }
-      - path: "{{ rp_stack_state_dir }}/audit.log"
-        mode: "0640"
-        content: ""
-      - path: "{{ rp_stack_state_dir }}/checks.log"
-        mode: "0640"
-        content: ""
-      - path: "{{ rp_stack_data_dir }}/default-user/QuickReplies/RP World.json"
-        mode: "0640"
-        content: |
-          {
-            "version": 2,
-            "name": "RP World",
-            "disableSend": false,
-            "placeBeforeInput": false,
-            "injectInput": false,
-            "color": "rgba(0, 0, 0, 0)",
-            "onlyBorderColor": false,
-            "qrList": [
-              {
-                "id": 1,
-                "showLabel": true,
-                "label": "Мир",
-                "title": "Draft a world-state patch from natural language",
-                "message": "/input rows=6 wide=on large=on okButton=\"Preview\" Что изменить или запомнить в мире? | /setvar key=rp_world_instruction | /send /world {{ '{{' }}getvar::rp_world_instruction{{ '}}' }} | /trigger",
-                "contextList": [],
-                "preventAutoExecute": true,
-                "isHidden": false,
-                "executeOnStartup": false,
-                "executeOnUser": false,
-                "executeOnAi": false,
-                "executeOnChatChange": false,
-                "executeOnGroupMemberDraft": false,
-                "executeOnNewChat": false,
-                "executeBeforeGeneration": false,
-                "automationId": ""
-              },
-              {
-                "id": 2,
-                "showLabel": true,
-                "label": "Применить мир",
-                "title": "Apply the latest pending world proposal",
-                "message": "/send /world apply latest | /trigger",
-                "contextList": [],
-                "preventAutoExecute": true,
-                "isHidden": false,
-                "executeOnStartup": false,
-                "executeOnUser": false,
-                "executeOnAi": false,
-                "executeOnChatChange": false,
-                "executeOnGroupMemberDraft": false,
-                "executeOnNewChat": false,
-                "executeBeforeGeneration": false,
-                "automationId": ""
-              },
-              {
-                "id": 3,
-                "showLabel": true,
-                "label": "Отменить preview",
-                "title": "Discard the latest pending world proposal",
-                "message": "/send /world discard latest | /trigger",
-                "contextList": [],
-                "preventAutoExecute": true,
-                "isHidden": false,
-                "executeOnStartup": false,
-                "executeOnUser": false,
-                "executeOnAi": false,
-                "executeOnChatChange": false,
-                "executeOnGroupMemberDraft": false,
-                "executeOnNewChat": false,
-                "executeBeforeGeneration": false,
-                "automationId": ""
-              },
-              {
-                "id": 4,
-                "showLabel": true,
-                "label": "Показать мир",
-                "title": "Show compact world-state status",
-                "message": "/send /world show | /trigger",
-                "contextList": [],
-                "preventAutoExecute": true,
-                "isHidden": false,
-                "executeOnStartup": false,
-                "executeOnUser": false,
-                "executeOnAi": false,
-                "executeOnChatChange": false,
-                "executeOnGroupMemberDraft": false,
-                "executeOnNewChat": false,
-                "executeBeforeGeneration": false,
-                "automationId": ""
-              },
-              {
-                "id": 5,
-                "showLabel": true,
-                "label": "Откат мира",
-                "title": "Roll back one world-state version",
-                "message": "/send /world rollback | /trigger",
-                "contextList": [],
-                "preventAutoExecute": true,
-                "isHidden": false,
-                "executeOnStartup": false,
-                "executeOnUser": false,
-                "executeOnAi": false,
-                "executeOnChatChange": false,
-                "executeOnGroupMemberDraft": false,
-                "executeOnNewChat": false,
-                "executeBeforeGeneration": false,
-                "automationId": ""
-              }
-            ],
-            "idIndex": 5
-          }
   - name: awareness-showroom
     enabled: "{{ awareness_showroom_enabled }}"
     repo_url: "{{ awareness_showroom_repo_url }}"

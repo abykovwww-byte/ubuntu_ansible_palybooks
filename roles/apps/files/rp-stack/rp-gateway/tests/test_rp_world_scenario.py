@@ -84,7 +84,7 @@ def test_world_definition_rejects_scenario_and_runtime_fields(
 def test_loader_never_falls_back_to_a_legacy_manifest(tmp_path: Path) -> None:
     legacy_root = tmp_path / SUPPORTED_WORLD_ID
     legacy_root.mkdir()
-    shutil.copyfile(WORLD_ROOT / "manifest.json", legacy_root / "manifest.json")
+    (legacy_root / "manifest.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(WorldSourceError, match="world.json"):
         WorldScenarioLoader(legacy_root).load_world_definition()

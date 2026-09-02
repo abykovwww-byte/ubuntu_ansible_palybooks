@@ -8,7 +8,18 @@
 чистом хранилище. Совместимость с существующими RP-партиями, мирами и ревизиями
 контракта 0–11 прекращается.
 
-**Delivery status:** в исполнении; срезы 6–7 и acceptance-source среза 8 merged.
+**Delivery status:** clean-only source-кандидат шага 4 собран в PR #131 на
+`0bc9177d8e79c7b188d4ce56c5bc09d37734153c` от merged-базы
+`d3d7d6e1933c3596b49ba7bc2df3b866bffb402e`. Candidate содержит один
+движок без `RP_REBUILD_ENABLED`/compatibility branch и один World
+`day-watch-moscow-v2`; exact Gateway allowlist равен `4 966 / 5 000 LOC`, debt
+`0`. Full suite дал `97 passed in 6.40s` локально и
+`97 passed in 5.07s` на GitHub runner; все четыре global CI checks green.
+Source, push и PR CI выполнены; на момент этой записи merge, apply,
+activation и live verification ещё не выполнялись. Точная методика и исключения:
+[clean-only evidence](evidence/043-clean-only-budget-2026-09-02.md).
+
+**Исторический applied baseline до clean-only candidate.**
 Последний IaC apply `2ad61019fcad7693ce620d1f158bcb3353b6eb1b` завершился
 успешно. Production RP Gateway сохраняет exact image
 `sha256:9321777d9db87da6ac5b2b23c4c085a5d28a51199a90b2ec16d922b4b85295c4`;
@@ -58,22 +69,22 @@ loops. Claims сериализуются SQLite-предикатом; restart и
   suite, а его runner/provider/service-model файлы byte-identical probe-файлам.
   Изолированный browser proof предъявил сохранение failed-текста, same-key retry,
    три role status/model/error/kill-switch карточки и ручные `accept/reject`;
-- **собран disabled source-кандидат §4–§5:** единый
+- **clean-only candidate шага 4:** legacy executable поверхность, флаг и
+  обе ветки выбора удалены; принятые Party/Auth/BYOK/storage контракты,
+  legacy SQLite, state и backups сохранены;
+- **исторический disabled source-срез §4–§5:** единый
   `ScenarioSnapshot.player_role`, закрытый `local_overrides.lore_cards`, ровно
   три Lore origin, typed player Lore с `authoring_kind` и явная
   `PlayerCorrection` на существующем service runner; focused набор —
   `63 passed`, полный локальный CI — `674 passed`;
-- **ещё не сделано:** blind A/B, ручные первые 20 ходов и короткий контрастный
-  старт, настоящая длинная RP-партия, полные причинные цепочки Relationships/Lore
-  до последующей сцены. Автоматический длинный canary на безопасном fixed-model
-  route пройден на изолированном candidate. Консервативный
-  verification budget остаётся `28 273 / 5 000 LOC`, debt `23 273`; полный
-  applied-image Gateway suite занимает `66.29s` на сервере, а тот же набор тестов
-  в PR 126 — `95.02s` на GitHub runner при gate `≤60s`. Оба cutover gate
-  незакрыты. Inventory
-  оставляет `RP_REBUILD_ENABLED=false`; полная standalone training-приёмка после
-  уже выполненного C1 cutover также остаётся внешним gate Plan 018. Activation и
-  production RP cutover не выполнены.
+- **ещё не сделано:** exact-image механическая приёмка, blind A/B,
+  ручные первые 20 ходов и короткий контрастный старт, настоящая длинная
+  RP-партия и полные причинные цепочки Relationships/Lore до последующей сцены.
+  Автоматический длинный canary на безопасном fixed-model route пройден на
+  изолированном предыдущем candidate. Механические LOC/time gate нового candidate
+  закрыты; merge, apply, activation и production live verification ещё не
+  выполнены. Полная standalone training-приёмка остаётся внешним gate
+  Plan 018.
 
 ### Brief среза 8: четыре проверяемых исхода §3
 

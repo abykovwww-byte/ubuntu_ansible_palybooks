@@ -31,6 +31,7 @@ from app.rp.turn_engine import (
     RPTurn,
     RPTurnEngine,
 )
+from app.services.provider_catalog import NARRATOR_MODEL
 from app.services.service_model_client import ServiceCompletion, ServiceModelClient
 
 
@@ -136,10 +137,10 @@ def _party() -> RPParty:
         id="party-one",
         owner_user_id="owner-one",
         title="Первая смена",
-        narrator_profile_id="openrouter-narrator",
+        narrator_profile_id="openrouter-openai-gpt-5-6-luna-pro",
         narrator_provider="openrouter",
         narrator_base_url="https://openrouter.ai/api/v1",
-        narrator_model="narrator/model",
+        narrator_model=NARRATOR_MODEL,
         narrator_settings={},
         world_snapshot=world,
         world_hash="a" * 64,
@@ -184,11 +185,9 @@ def test_narrator_sends_exact_messages_once_without_fallback_or_repair(
     provider = RPNarratorProvider(
         _settings(tmp_path),
         provider="openrouter",
-        model="deepseek/deepseek-v4-flash",
+        model=NARRATOR_MODEL,
         narrator_settings={
             "reasoning_effort": "xhigh",
-            "temperature": 0.7,
-            "top_p": 0.9,
             "max_tokens": 4096,
         },
         party_id="party-one",
@@ -213,15 +212,16 @@ def test_narrator_sends_exact_messages_once_without_fallback_or_repair(
     assert len(client.calls) == 1
     call = client.calls[0]
     assert call["provider"] == "openrouter"
-    assert call["model"] == "deepseek/deepseek-v4-flash"
+    assert call["model"] == NARRATOR_MODEL
     assert call["payload"]["messages"] == [
         {"role": "system", "content": "WORLD EXACT"},
         {"role": "assistant", "content": "RAW EXACT"},
         {"role": "user", "content": "PLAYER EXACT"},
     ]
     assert call["payload"]["provider"] == {
-        "ignore": ["nvidia"],
-        "sort": "throughput",
+        "order": ["openai"],
+        "only": ["openai"],
+        "allow_fallbacks": False,
         "require_parameters": True,
     }
     assert call["payload"]["reasoning"] == {
@@ -230,39 +230,6 @@ def test_narrator_sends_exact_messages_once_without_fallback_or_repair(
     }
     assert "fallback" not in call["payload"]
     assert "repair" not in call["payload"]
-
-
-def test_dots_narrator_disables_reasoning_and_caps_completion(tmp_path: Path) -> None:
-    client = RecordingClient(_completion("Сцена продолжается."))
-    provider = RPNarratorProvider(
-        _settings(tmp_path),
-        provider="openrouter",
-        model="dots-studio/dots-3-note-preview:free",
-        narrator_settings={"reasoning_effort": "none", "max_tokens": 4096},
-        party_id="party-one",
-        request_id="request-one",
-        client=client,  # type: ignore[arg-type]
-    )
-    prompt = RPNarratorPrompt(
-        messages=(
-            RPPromptMessage("system", "world", "WORLD EXACT"),
-            RPPromptMessage("assistant", "raw", "RAW EXACT"),
-            RPPromptMessage("user", "player", "PLAYER EXACT"),
-        ),
-        raw_turn_versions=(1,),
-        safe_memory_coverage=0,
-        stable_prefix_hash="stable",
-        input_chars=30,
-    )
-
-    assert asyncio.run(provider.complete(prompt)) == "Сцена продолжается."
-    payload = client.calls[0]["payload"]
-    assert payload["reasoning"] == {"enabled": False}
-    assert payload["max_tokens"] == 4096
-    assert payload["provider"] == {
-        "ignore": ["nvidia"],
-        "require_parameters": True,
-    }
 
 
 @pytest.mark.parametrize(
@@ -279,7 +246,7 @@ def test_narrator_malformed_or_truncated_response_is_terminal_at_boundary(
     provider = RPNarratorProvider(
         _settings(tmp_path),
         provider="openrouter",
-        model="narrator/model",
+        model=NARRATOR_MODEL,
         client=client,  # type: ignore[arg-type]
     )
     prompt = RPNarratorPrompt(
@@ -331,14 +298,14 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     )
     atomic = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="openrouter",
-        model="qwen/qwen3.5-flash-02-23",
+        provider="local",
+        model="gemma-4-26b-a4b-it-rp-q4",
         client=atomic_client,  # type: ignore[arg-type]
     )
     administrator = RPAdministratorProvider(
         _settings(tmp_path),
         provider="local",
-        model="administrator/model",
+        model="gemma-4-26b-a4b-it-rp-q4",
         client=administrator_client,  # type: ignore[arg-type]
     )
     party = _party()
@@ -390,9 +357,9 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     asyncio.run(exercise())
 
     assert [call["model"] for call in atomic_client.calls] == [
-        "qwen/qwen3.5-flash-02-23",
-        "qwen/qwen3.5-flash-02-23",
-        "qwen/qwen3.5-flash-02-23",
+        "gemma-4-26b-a4b-it-rp-q4",
+        "gemma-4-26b-a4b-it-rp-q4",
+        "gemma-4-26b-a4b-it-rp-q4",
     ]
     assert [call["role"] for call in atomic_client.calls] == [
         "rp_atomic_relationships",
@@ -404,11 +371,7 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         for call in atomic_client.calls
     )
     assert all(call["payload"]["temperature"] == 0 for call in atomic_client.calls)
-    assert all(
-        call["payload"]["provider"]
-        == {"ignore": ["nvidia"], "require_parameters": True}
-        for call in atomic_client.calls
-    )
+    assert all("provider" not in call["payload"] for call in atomic_client.calls)
     expected_roots = (
         {"candidates"},
         {"result", "kind", "title", "content", "keywords", "evidence_span_ids"},
@@ -497,7 +460,7 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     )
     assert len(administrator_client.calls) == 1
     assert administrator_client.calls[0]["provider"] == "local"
-    assert administrator_client.calls[0]["model"] == "administrator/model"
+    assert administrator_client.calls[0]["model"] == "gemma-4-26b-a4b-it-rp-q4"
     assert administrator_client.calls[0]["role"] == "rp_administrator"
     assert administrator_client.calls[0]["payload"]["reasoning"] == {
         "enabled": False
@@ -526,32 +489,6 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     ]
 
 
-def test_non_reasoning_openrouter_route_requires_schema_without_reasoning(
-    tmp_path: Path,
-) -> None:
-    client = RecordingClient(_completion('{"candidates":[]}'))
-    provider = RPAtomicServiceProvider(
-        _settings(tmp_path),
-        provider="openrouter",
-        model="qwen/qwen3-30b-a3b-instruct-2507",
-        client=client,  # type: ignore[arg-type]
-    )
-
-    asyncio.run(
-        provider.extract_relationships(
-            party=_party(), turn=_turn(), evidence_spans=_spans()
-        )
-    )
-
-    payload = client.calls[0]["payload"]
-    assert payload["provider"] == {
-        "ignore": ["nvidia"],
-        "require_parameters": True,
-    }
-    assert payload["response_format"]["type"] == "json_schema"
-    assert "reasoning" not in payload
-
-
 @pytest.mark.parametrize(
     ("operation", "content"),
     [
@@ -566,8 +503,8 @@ def test_live_wrong_envelopes_are_rejected_without_normalization(
     client = RecordingClient(_completion(content))
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="openrouter",
-        model="atomic/model",
+        provider="local",
+        model="gemma-4-26b-a4b-it-rp-q4",
         client=client,  # type: ignore[arg-type]
     )
 
@@ -604,8 +541,8 @@ def test_semantic_reject_is_terminal_model_output(
     client = RecordingClient(_completion(content, finish_reason=finish_reason))
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="openrouter",
-        model="atomic/model",
+        provider="local",
+        model="gemma-4-26b-a4b-it-rp-q4",
         client=client,  # type: ignore[arg-type]
     )
 
@@ -627,8 +564,8 @@ def test_transport_error_remains_generic_and_retryable_by_runner(
     client = RecordingClient(transport_error)
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="openrouter",
-        model="atomic/model",
+        provider="local",
+        model="gemma-4-26b-a4b-it-rp-q4",
         client=client,  # type: ignore[arg-type]
     )
 
@@ -660,8 +597,8 @@ def test_upstream_provider_error_remains_generic_and_retryable_by_runner(
     client = RecordingClient(response)
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="openrouter",
-        model="atomic/model",
+        provider="local",
+        model="gemma-4-26b-a4b-it-rp-q4",
         client=client,  # type: ignore[arg-type]
     )
 
@@ -678,7 +615,12 @@ def test_upstream_provider_error_remains_generic_and_retryable_by_runner(
 
 @pytest.mark.parametrize(
     "model",
-    ["openrouter/auto", "openrouter/free", "nvidia/nemotron-3-super:free"],
+    [
+        "openrouter/auto",
+        "openrouter/free",
+        "nvidia/nemotron-3-super:free",
+        "deepseek/deepseek-v4-flash",
+    ],
 )
 def test_clean_rp_rejects_dynamic_and_nvidia_openrouter_routes(
     tmp_path: Path, model: str
@@ -691,7 +633,7 @@ def test_clean_rp_rejects_dynamic_and_nvidia_openrouter_routes(
         )
 
 
-def test_provider_diagnostics_stay_in_legacy_database(tmp_path: Path) -> None:
+def test_provider_diagnostics_stay_in_shared_database(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     RPTurnEngine(settings.rp_sqlite_path)
     captured_authorization: list[str] = []
@@ -714,7 +656,7 @@ def test_provider_diagnostics_stay_in_legacy_database(tmp_path: Path) -> None:
     provider = RPNarratorProvider(
         settings,
         provider="openrouter",
-        model="narrator/model",
+        model=NARRATOR_MODEL,
         party_id="party-one",
         client=narrator_client,
     )

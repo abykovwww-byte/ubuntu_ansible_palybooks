@@ -683,11 +683,10 @@ Embedding endpoint, vector store и cross-party semantic index не исполь
 
 ## Источники
 
-- [RP story memory service](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_story_memory.py)
-- [Episodic memory service](../../roles/apps/files/rp-stack/rp-gateway/app/services/memory.py)
-- [Prompt assembly](../../roles/apps/files/rp-stack/rp-gateway/app/services/narrative.py)
-- [StateStore](../../roles/apps/files/rp-stack/rp-gateway/app/services/state_store.py)
-- [Revision-8 history selection](../../roles/apps/files/rp-stack/rp-gateway/app/services/rp_history.py)
+- [Clean memory projection](../../roles/apps/files/rp-stack/rp-gateway/app/rp/memory.py)
+- [Prompt assembly](../../roles/apps/files/rp-stack/rp-gateway/app/rp/narrator.py)
+- [Clean turn engine and persistence](../../roles/apps/files/rp-stack/rp-gateway/app/rp/turn_engine.py)
+- [Clean SQLite schema](../../roles/apps/files/rp-stack/rp-gateway/app/rp/schema.py)
 - [RP living-memory ADR](../../roles/apps/files/rp-stack/docs/decisions/016-rp-living-story-memory.md)
 - [Long-context ADR](../../roles/apps/files/rp-stack/docs/decisions/009-long-context-memory-policy.md)
 - [Decision 028: uncovered tail и overflow](../../roles/apps/files/rp-stack/docs/decisions/028-rp-uncovered-tail-and-overflow.md)

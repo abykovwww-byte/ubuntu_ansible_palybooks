@@ -257,6 +257,49 @@
     - app.repo_normalize_ownership | default(false) | bool
   tags: [apps, source, git]
 
+- name: Check retired Decision 043 source in managed RP Stack checkout
+  ansible.builtin.stat:
+    path: "{{ rp_stack_project_dir }}/{{ item }}"
+  loop:
+    - rp-gateway/app/services/party_store.py
+    - rp-gateway/tests/test_rp_gateway_mode_guard.py
+    - rp-light-gui/trace.html
+    - worldpacks/starosta/manifest.json
+    - evals/run_evals.py
+  when: rp_stack_enabled | default(false) | bool
+  register: rp_stack_retired_rp_source_state
+  tags: [apps, preflight, source, rp-stack]
+
+- name: Resolve retired Decision 043 source presence
+  ansible.builtin.set_fact:
+    rp_stack_retired_rp_source_present: >-
+      {{
+        (
+          rp_stack_retired_rp_source_state.results | default([])
+          | selectattr('stat', 'defined')
+          | selectattr('stat.exists', 'defined')
+          | selectattr('stat.exists', 'equalto', true)
+          | list
+          | length
+        ) > 0
+      }}
+  tags: [apps, preflight, source, rp-stack]
+
+- name: Remove retired Decision 043 build-context source before clean copy
+  ansible.builtin.file:
+    path: "{{ rp_stack_project_dir }}/{{ item }}"
+    state: absent
+  loop:
+    - rp-gateway/app
+    - rp-gateway/tests
+    - rp-light-gui
+    - worldpacks
+    - evals
+  when:
+    - rp_stack_enabled | default(false) | bool
+    - rp_stack_retired_rp_source_present | default(false) | bool
+  tags: [apps, source, rp-stack]
+
 - name: Copy Docker app source
   ansible.builtin.copy:
     src: "{{ app.source_dir }}/"
