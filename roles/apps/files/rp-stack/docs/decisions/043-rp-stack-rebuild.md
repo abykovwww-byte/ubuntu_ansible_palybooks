@@ -9,10 +9,13 @@
 контракта 0–11 прекращается.
 
 **Delivery status:** в исполнении; срезы 6–7 и acceptance-source среза 8 merged.
-Production применил `83a90eda9a2465567028e7e58446378e0b10ccc2`, включая
-structured-output коррекцию среза 8 и zero-window C1/O2. Финальный seeded canary
-прошёл на exact applied Gateway image без bind mount исходников; production RP
-остаётся инертным с `RP_REBUILD_ENABLED=false`. Clean RP schema v7, Narrator,
+Последний IaC apply `2ad61019fcad7693ce620d1f158bcb3353b6eb1b` завершился
+успешно. Production RP Gateway сохраняет exact image
+`sha256:9321777d9db87da6ac5b2b23c4c085a5d28a51199a90b2ec16d922b4b85295c4`;
+его `runner.py`, `provider.py` и `mechanics.py` byte-identical current source при
+LF-normalизации. Финальный seeded canary и browser proof прошли на этом image без
+bind mount исходников; production RP остаётся инертным с
+`RP_REBUILD_ENABLED=false`. Clean RP schema v7, Narrator,
 persisted role jobs и runner подключены к `main.py`, существующим Party API,
 реальному provider client и Light GUI за серверным флагом
 `RP_REBUILD_ENABLED`. В source флаг включает один World `day-watch-moscow-v2`,
@@ -22,7 +25,7 @@ idempotency и optimistic version, отдельные Relationship/Lore/Memory j
 RP fail-closed получает `410`. Zero-window C1/O2 оставил production RP Gateway
 и Light GUI RP-only, а Training/Showroom передал standalone project на целевой
 LAN-only `192.168.1.88:8011`. Acceptance-срез 8 закрепляет public standalone commit
-`67244432659f6c25a268cbf788a8fa3af0f5b52f` и анонимный HTTPS checkout без
+`3804d483452e6082eb2079790cf10d3dcc02107f` и анонимный HTTPS checkout без
 GitHub token.
 
 Party неизменяемо связывает Narrator с exact `(profile, provider, base_url,
@@ -52,15 +55,15 @@ loops. Claims сериализуются SQLite-предикатом; restart и
   provider/runner, exact duplicate без второго provider call, memory anchors и
   ручное принятие Administrator proposal до следующего prompt. Четыре исхода §3
   прямо предъявил отдельный container probe; применённый image прошёл полный
-  suite, а его runner/provider/service-model файлы byte-identical probe-файлам;
+  suite, а его runner/provider/service-model файлы byte-identical probe-файлам.
+  Изолированный browser proof предъявил сохранение failed-текста, same-key retry,
+  три role status/model/error/kill-switch карточки и ручные `accept/reject`;
 - **ещё не сделано:** blind A/B, ручные первые 20 ходов и короткий контрастный
   старт, настоящая длинная RP-партия, полные причинные цепочки Relationships/Lore
-  до последующей сцены, browser proof сохранения failed-текста/retry и видимых
-  role status/error/kill-switch. Автоматический длинный canary на безопасном
-  fixed-model route пройден на изолированном bind-mounted candidate, но последние
-  source-коррекции ещё не собраны и не применены как image. Консервативный
+  до последующей сцены. Автоматический длинный canary на безопасном fixed-model
+  route пройден на изолированном candidate. Консервативный
   verification budget остаётся `28 273 / 5 000 LOC`, debt `23 273`; полный
-  изолированный Gateway suite занимает `66.38s` при gate `≤60s`. Оба cutover gate
+  applied-image Gateway suite занимает `66.29s` при gate `≤60s`. Оба cutover gate
   незакрыты. Inventory
   оставляет `RP_REBUILD_ENABLED=false`; полная standalone training-приёмка после
   уже выполненного C1 cutover также остаётся внешним gate Plan 018. Activation и
@@ -318,6 +321,24 @@ Production во всех probes сохранял тот же container/image, re
 `RP_REBUILD_ENABLED=false`; candidate data production не использует. Длинный
 run28 доказывает автоматическую механику fixed route, но не заменяет human
 приёмку и applied-image parity последних source-коррекций.
+
+Последующий изолированный browser proof поднял exact production Gateway image и
+Light GUI на временном LAN-порту с сохранённой candidate DB `run11`; production
+контейнер, БД и `RP_REBUILD_ENABLED=false` не менялись. На Party
+`party_8a986fa0efd2` реальный DeepSeek request `ui_mtk0c8jy_f91s1fin` дважды
+получил upstream `402`: оба provider call использовали один `request_id`, Party
+осталась на version 8, число turns осталось 8, а текст с SHA-256
+`38783e41791130df3f240f21668d38211d95ee3cfbf8a0316af01882991a2509`
+остался в поле для ручного retry. GUI показал отдельные Narrator, atomic service
+и Administrator model/status/success/error/last-error/kill-switch карточки и
+`Принять`/`Отклонить` для pending Administrator proposal; console errors — 0.
+После проверки временные GUI, сеть и listener удалены, candidate остановлен.
+Архив `/srv/backups/rp-stack/decision043-browser-proof-20260902T112743Z.tar.gz`,
+SHA-256 `dc4f482a5704fb9fb73ea3f6873db6532aecf90a679a6e80ad16ab9bd4498847`,
+успешно восстановлен во временный каталог: обе SQLite `integrity_check=ok`,
+foreign-key violations — 0. Полный applied-image Gateway suite после последнего
+Ansible: `665 passed, 1 skipped` за `66.29s`; функционально зелёный, time gate
+`≤60s` всё ещё открыт.
 
 ## Context
 
