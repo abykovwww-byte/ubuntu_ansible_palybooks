@@ -146,8 +146,8 @@ configuration:
 - complete narrator-system and author-note asset references;
 - one opening and one full initial-state reference;
 - a non-empty, unique list of active character IDs;
-- bounded `local_overrides` when a Scenario deliberately deviates from World
-  defaults.
+- closed `local_overrides` containing only typed `lore_cards` when facts belong
+  to this Scenario rather than the World; unknown override keys are invalid.
 
 New Scenario narrator assets live under `scenario-experience/`. The legacy
 `presets/**` assets remain inputs of the still-active manifest runtime until

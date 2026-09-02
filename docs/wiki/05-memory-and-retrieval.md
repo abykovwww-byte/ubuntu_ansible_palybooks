@@ -367,6 +367,20 @@ turns. Его строгий JSON только заполняет форму; pe
 после ручного confirm. Draft не становится canonical state и не запускается
 автоматически из обычной реплики.
 
+В disabled clean path origin карточки является частью сборки, а не эвристикой:
+seed cards из immutable World snapshot получают `world`, карточки закрытого
+`ScenarioSnapshot.local_overrides.lore_cards` — `scenario`, Party cards —
+`runtime`. Immutable runtime record сохраняет явно выбранный до model call
+`authoring_kind` (`character`, `event` или `location`). Player draft видит ровно
+один committed turn и до отдельного confirm ничего не сохраняет в Lore storage;
+проверенные title/content/keywords можно исправить перед сохранением.
+
+Clean `PlayerCorrection` не переписывает RAW и stable story memory. Atomic role
+получает только bounded ranked targets; Gateway проверяет schema, IDs, hash,
+ownership и текущую Party version. Accepted proposal создаёт отдельный immutable
+overlay для следующей версии prompt и после неё перестаёт выбираться. Это
+одноходовая prompt projection, а не durable слой памяти и не state patch.
+
 ### S3: player correction overlay и поглощение одной секцией
 
 Candidate rev9 хранит confirmed correction не в новом JSON мира, а как typed
@@ -476,6 +490,7 @@ revision-11 pack отсутствует. Поэтому этот раздел о
 | Legacy RP story memory | Живой кумулятивный реестр всей истории | Только RP revisions 0..7 | Нет |
 | Sectioned RP story memory v3 | Пять независимо покрываемых секций; safe coverage равен минимуму | Только RP revision 8+ | Нет |
 | Rev9 player correction overlay | Подтверждённый replacement/retraction поверх RAW и story memory до absorption | Только RP revision 9+ | Player authority; ниже canonical absolute rules/current action |
+| Decision 043 clean correction overlay | Неизменяемая явная поправка ровно к следующему narrator prompt; RAW и stable memory не переписываются | Только disabled clean candidate | Player decision; ниже World rules и current action |
 | Rev10 world clock | Canonical date, authored event statuses/facts и одноразовая narrator/UI projection | Только RP revision 10+ с `world-clock.json` | Gateway authority; модель задаёт только elapsed |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
 | Memory chapters | Неизменяемые сжатые эпизоды старых сцен | Все | Нет |

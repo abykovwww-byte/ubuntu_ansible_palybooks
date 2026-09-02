@@ -11,6 +11,7 @@ const appState = {
   contextEstimate: null,
   memory: null,
   loreCards: [],
+  playerCorrections: [],
   checkpoints: [],
   branches: [],
   serviceJobs: [],
@@ -28,6 +29,10 @@ const appState = {
   pendingGmRoute: null,
   pendingGmDraft: null,
   pendingLoreCardSourceTurnIds: [],
+  pendingLoreCardDraftJobId: null,
+  pendingLoreCardKind: null,
+  pendingLoreCardVersion: null,
+  pendingLoreCardRequestKey: null,
   adminUsers: [],
   adminWorldpacks: [],
   byokKeys: [],
@@ -85,12 +90,20 @@ const els = {
   memoryClearButton: document.querySelector("#memoryClearButton"),
   loreCardForm: document.querySelector("#loreCardForm"),
   loreCardTitle: document.querySelector("#loreCardTitle"),
+  loreCardKind: document.querySelector("#loreCardKind"),
+  cleanLoreKindRow: document.querySelector("#cleanLoreKindRow"),
   loreCardContent: document.querySelector("#loreCardContent"),
   loreCardKeywords: document.querySelector("#loreCardKeywords"),
   loreCardAlwaysOn: document.querySelector("#loreCardAlwaysOn"),
+  loreCardAlwaysOnRow: document.querySelector("#loreCardAlwaysOnRow"),
   loreCardDraftHint: document.querySelector("#loreCardDraftHint"),
   loreCardSubmitButton: document.querySelector("#loreCardSubmitButton"),
   loreCardList: document.querySelector("#loreCardList"),
+  cleanPlayerCorrectionPanel: document.querySelector("#cleanPlayerCorrectionPanel"),
+  playerCorrectionForm: document.querySelector("#playerCorrectionForm"),
+  playerCorrectionInstruction: document.querySelector("#playerCorrectionInstruction"),
+  playerCorrectionRawHint: document.querySelector("#playerCorrectionRawHint"),
+  playerCorrectionList: document.querySelector("#playerCorrectionList"),
   checkpointForm: document.querySelector("#checkpointForm"),
   checkpointLabel: document.querySelector("#checkpointLabel"),
   checkpointList: document.querySelector("#checkpointList"),
@@ -304,6 +317,8 @@ function bindEvents() {
   els.memorySummary.addEventListener("click", handleStoryMemoryCorrectionAction);
   els.loreCardForm.addEventListener("submit", createLoreCard);
   els.loreCardList.addEventListener("click", handleLoreCardAction);
+  els.playerCorrectionForm.addEventListener("submit", draftPlayerCorrection);
+  els.playerCorrectionList.addEventListener("click", decidePlayerCorrection);
   els.checkpointForm.addEventListener("submit", createCheckpoint);
   els.checkpointList.addEventListener("click", handleBranchAction);
   els.characterEditTarget.addEventListener("change", fillCharacterEditorFromSelection);
@@ -558,6 +573,7 @@ function clearWorkspaceState() {
   appState.contextEstimate = null;
   appState.memory = null;
   appState.loreCards = [];
+  appState.playerCorrections = [];
   appState.checkpoints = [];
   appState.branches = [];
   appState.serviceJobs = [];
@@ -574,6 +590,10 @@ function clearWorkspaceState() {
   appState.pendingGmRoute = null;
   appState.pendingGmDraft = null;
   appState.pendingLoreCardSourceTurnIds = [];
+  appState.pendingLoreCardDraftJobId = null;
+  appState.pendingLoreCardKind = null;
+  appState.pendingLoreCardVersion = null;
+  appState.pendingLoreCardRequestKey = null;
   appState.adminUsers = [];
   appState.byokKeys = [];
   appState.serviceModelSettings = null;
@@ -755,6 +775,7 @@ async function selectParty(partyId) {
   const party = appState.parties.find((item) => item.id === partyId) || (await apiGet(`/api/parties/${partyId}`)).party;
   if (appState.activeParty?.id !== party.id) {
     appState.loreCards = [];
+    appState.playerCorrections = [];
     appState.checkpoints = [];
     appState.branches = [];
     appState.serviceJobs = [];
@@ -871,18 +892,21 @@ async function reloadActiveBranch() {
 
 async function loadOptionalPartyData(partyId, reloadGeneration) {
   if (isCleanRpParty()) {
-    const [loreCards, serviceJobs, supervisor, byok] = await Promise.allSettled([
+    const [loreCards, playerCorrections, serviceJobs, supervisor, byok] = await Promise.allSettled([
       apiGet(`/api/parties/${partyId}/lore-cards`),
+      apiGet(`/api/parties/${partyId}/player-corrections`),
       apiGet(`/api/parties/${partyId}/service-jobs`),
       apiGet(`/api/parties/${partyId}/supervisor`),
       apiGet(`/api/parties/${partyId}/byok`),
     ]);
     if (appState.activeParty?.id !== partyId || reloadGeneration !== partyReloadGeneration) return;
     appState.loreCards = loreCards.status === "fulfilled" ? loreCards.value.cards || [] : [];
+    appState.playerCorrections = playerCorrections.status === "fulfilled" ? playerCorrections.value.proposals || [] : [];
     appState.serviceJobs = serviceJobs.status === "fulfilled" ? serviceJobs.value.jobs || [] : [];
     appState.supervisor = supervisor.status === "fulfilled" ? supervisor.value : null;
     appState.byokKeys = byok.status === "fulfilled" ? byok.value.api_keys || [] : [];
     renderMemoryTools();
+    renderPlayerCorrections();
     renderCleanRuntimeControls();
     renderByok();
     return;
@@ -931,6 +955,9 @@ function renderCleanRuntimeControls() {
   document.querySelectorAll("[data-legacy-rp-control]").forEach((node) => {
     node.toggleAttribute("hidden", clean);
   });
+  els.cleanLoreKindRow.classList.toggle("hidden", !clean);
+  els.loreCardAlwaysOnRow.classList.toggle("hidden", clean);
+  els.cleanPlayerCorrectionPanel.classList.toggle("hidden", !clean);
   els.cleanRoleStatusPanel.classList.toggle("hidden", !clean);
   els.cleanAdministratorPanel.classList.toggle("hidden", !clean);
   const retryOpening = clean && Number(appState.activeParty?.current_version || 0) === 0;
@@ -1898,9 +1925,11 @@ function renderChat({ scrollMode = "bottom" } = {}) {
     messages.push(chatArchiveHtml(hiddenTurnCount));
   }
   const allowLoreDraft = !appState.activeBranch
-    && !isCleanRpParty()
     && appState.activeParty?.scenario_type === "rp"
-    && Number(appState.activeParty?.rp_contract_revision || 0) >= 8;
+    && (
+      isCleanRpParty()
+      || Number(appState.activeParty?.rp_contract_revision || 0) >= 8
+    );
   for (const turn of visibleTurns) {
     if (turn.turn_kind === "gm_correction") {
       messages.push(gmCorrectionMessageHtml(turn));
@@ -3665,6 +3694,10 @@ async function rollbackParty() {
 
 function resetLoreCardDraft() {
   appState.pendingLoreCardSourceTurnIds = [];
+  appState.pendingLoreCardDraftJobId = null;
+  appState.pendingLoreCardKind = null;
+  appState.pendingLoreCardVersion = null;
+  appState.pendingLoreCardRequestKey = null;
   els.loreCardForm?.reset();
   if (els.loreCardDraftHint) {
     els.loreCardDraftHint.textContent = "";
@@ -3679,15 +3712,41 @@ async function draftLoreCardFromTurn(event) {
   if (!Number.isInteger(turnId) || turnId <= 0) return;
   try {
     setBusy(true, `Служебная модель готовит Lore Card из хода ${turnId}...`);
-    const response = await apiPost(`/api/parties/${appState.activeParty.id}/lore-cards/draft`, {
-      source_turn_ids: [turnId],
-    });
-    const draft = response.draft || {};
+    const clean = isCleanRpParty();
+    const kind = els.loreCardKind.value || "character";
+    const version = Number(appState.activeParty.current_version);
+    if (clean && (
+      !appState.pendingLoreCardRequestKey
+      || appState.pendingLoreCardSourceTurnIds[0] !== turnId
+      || appState.pendingLoreCardKind !== kind
+      || appState.pendingLoreCardVersion !== version
+    )) {
+      appState.pendingLoreCardRequestKey = `player-lore:${appState.activeParty.id}:${turnId}:${kind}:${Date.now()}`;
+      appState.pendingLoreCardSourceTurnIds = [turnId];
+      appState.pendingLoreCardKind = kind;
+      appState.pendingLoreCardVersion = version;
+    }
+    const payload = { source_turn_ids: [turnId] };
+    if (clean) {
+      payload.kind = kind;
+      payload.expected_version = version;
+      payload.idempotency_key = appState.pendingLoreCardRequestKey;
+    }
+    const response = await apiPost(`/api/parties/${appState.activeParty.id}/lore-cards/draft`, payload);
+    if (clean && response.result === "no_candidate") {
+      appState.pendingLoreCardRequestKey = null;
+      showToast("В выбранном ходе нет подтверждённого факта этого типа.");
+      return;
+    }
+    const draft = clean ? response : response.draft || {};
     els.loreCardTitle.value = draft.title || "";
     els.loreCardContent.value = draft.content || "";
     els.loreCardKeywords.value = (draft.keywords || []).join(", ");
     els.loreCardAlwaysOn.checked = false;
     appState.pendingLoreCardSourceTurnIds = draft.source_turn_ids || [turnId];
+    appState.pendingLoreCardDraftJobId = clean ? response.job_id : null;
+    appState.pendingLoreCardKind = clean ? response.kind : null;
+    appState.pendingLoreCardVersion = clean ? version : null;
     els.loreCardDraftHint.textContent = `Черновик по ходу ${turnId}. Проверьте текст и подтвердите сохранение.`;
     els.loreCardDraftHint.classList.remove("hidden");
     openInspector();
@@ -3707,14 +3766,23 @@ async function createLoreCard(event) {
   const keywords = els.loreCardKeywords.value.split(",").map((item) => item.trim()).filter(Boolean);
   try {
     setBusy(true, "Сохраняю Lore Card...");
-    await apiPost(`/api/parties/${appState.activeParty.id}/lore-cards`, {
+    const clean = isCleanRpParty();
+    const payload = {
       title: els.loreCardTitle.value.trim(),
       content: els.loreCardContent.value.trim(),
       keywords,
-      always_on: els.loreCardAlwaysOn.checked,
+      always_on: clean ? false : els.loreCardAlwaysOn.checked,
       enabled: true,
       source_turn_ids: appState.pendingLoreCardSourceTurnIds,
-    });
+    };
+    if (clean) {
+      if (!appState.pendingLoreCardDraftJobId) throw new Error("Сначала подготовьте typed Lore draft из одного хода.");
+      payload.kind = appState.pendingLoreCardKind;
+      payload.draft_job_id = appState.pendingLoreCardDraftJobId;
+      payload.expected_version = appState.pendingLoreCardVersion;
+      payload.idempotency_key = `player-lore-confirm:${appState.pendingLoreCardDraftJobId}`;
+    }
+    await apiPost(`/api/parties/${appState.activeParty.id}/lore-cards`, payload);
     els.loreCardForm.reset();
     resetLoreCardDraft();
     await reloadActiveParty();
@@ -3740,6 +3808,83 @@ async function handleLoreCardAction(event) {
     await reloadActiveParty();
     openPanelFor(els.loreCardList);
   } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderPlayerCorrections() {
+  if (!els.playerCorrectionList) return;
+  const proposals = appState.playerCorrections || [];
+  els.playerCorrectionList.innerHTML = proposals.length
+    ? proposals.slice().reverse().map((proposal) => `<div class="state-item">
+        <strong>${escapeHtml(proposal.target_slot)}</strong>
+        <div>${escapeHtml(clipText(proposal.before, 300))}</div>
+        ${proposal.after ? `<div>→ ${escapeHtml(clipText(proposal.after, 300))}</div>` : `<div>→ убрать утверждение</div>`}
+        <div class="mini-metrics"><span>${escapeHtml(proposal.target_kind)}</span><span>${escapeHtml(proposal.status)}</span><span>Party v${escapeHtml(proposal.base_party_version)}</span></div>
+        ${proposal.status === "pending" ? `<div class="inline-actions">
+          <button class="text-button" type="button" data-player-correction-decision="accept" data-proposal-id="${escapeHtml(proposal.id)}">Принять</button>
+          <button class="text-button danger" type="button" data-player-correction-decision="reject" data-proposal-id="${escapeHtml(proposal.id)}">Отклонить</button>
+        </div>` : ""}
+      </div>`).join("")
+    : `<div class="state-item">Исправлений пока нет.</div>`;
+}
+
+async function draftPlayerCorrection(event) {
+  event.preventDefault();
+  if (!appState.activeParty || !isCleanRpParty() || appState.activeBranch) return;
+  const instruction = els.playerCorrectionInstruction.value.trim();
+  if (!instruction) return;
+  const rawHint = els.playerCorrectionRawHint.value.trim();
+  const requestKey = `player-correction:${appState.activeParty.id}:${Date.now()}`;
+  try {
+    setBusy(true, "Служебная модель ищет точную цель исправления...");
+    const response = await apiPost(
+      `/api/parties/${appState.activeParty.id}/player-corrections/draft`,
+      {
+        instruction,
+        raw_hint: rawHint || null,
+        expected_version: Number(appState.activeParty.current_version),
+        idempotency_key: requestKey,
+      },
+    );
+    if (response.result === "no_target") {
+      showToast("Подходящей точной цели в Party memory, RAW и правилах не найдено.");
+    } else {
+      showToast("Черновик исправления готов. До принятия prompt не изменён.");
+    }
+    els.playerCorrectionForm.reset();
+    await reloadActiveParty();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function decidePlayerCorrection(event) {
+  const button = event.target.closest("[data-player-correction-decision]");
+  if (!button || !appState.activeParty || appState.activeBranch) return;
+  const proposalId = Number(button.dataset.proposalId);
+  const decision = button.dataset.playerCorrectionDecision;
+  if (!Number.isInteger(proposalId) || !["accept", "reject"].includes(decision)) return;
+  try {
+    setBusy(true, decision === "accept" ? "Принимаю исправление..." : "Отклоняю исправление...");
+    await apiPost(
+      `/api/parties/${appState.activeParty.id}/player-corrections/${proposalId}/decision`,
+      {
+        decision,
+        expected_version: Number(appState.activeParty.current_version),
+        idempotency_key: `player-correction-${decision}:${proposalId}`,
+      },
+    );
+    await reloadActiveParty();
+    showToast(decision === "accept"
+      ? "Исправление войдёт ровно в следующий prompt. RAW и стабильная память не переписаны."
+      : "Исправление отклонено; prompt и state не изменились.");
+  } catch (error) {
+    await reloadActiveParty().catch(() => {});
     showToast(error.message);
   } finally {
     setBusy(false);

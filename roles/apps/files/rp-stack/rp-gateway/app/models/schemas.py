@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
 from app.core.config import RP_CONTRACT_MAX_REVISION
+from app.rp.content import ScenarioLocalOverrides
 
 
 WORLD_PROMPT_MAX_CHARS = 6_000
@@ -388,7 +389,9 @@ class RPScenarioFreeCreate(BaseModel):
     opening: str = Field(min_length=1, max_length=12000)
     initial_state: dict[str, Any]
     active_character_ids: list[WorldChoiceId] = Field(min_length=1, max_length=100)
-    local_overrides: dict[str, Any] = Field(default_factory=dict)
+    local_overrides: ScenarioLocalOverrides = Field(
+        default_factory=ScenarioLocalOverrides
+    )
 
 
 RPScenarioCreate = Annotated[
@@ -464,10 +467,17 @@ class PartyLoreCardCreate(BaseModel):
     always_on: bool = False
     enabled: bool = True
     source_turn_ids: list[int] = Field(default_factory=list, max_length=100)
+    kind: Literal["character", "event", "location"] | None = None
+    draft_job_id: int | None = Field(default=None, ge=1)
+    expected_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class PartyLoreCardDraftRequest(BaseModel):
     source_turn_ids: list[int] = Field(min_length=1, max_length=8)
+    kind: Literal["character", "event", "location"] | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("source_turn_ids")
     @classmethod
@@ -501,6 +511,27 @@ class PartyLoreCardUpdate(BaseModel):
     always_on: bool | None = None
     enabled: bool | None = None
     archived: bool | None = None
+
+
+class RPPlayerCorrectionDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instruction: str = Field(min_length=1, max_length=4_000)
+    raw_hint: str | None = Field(
+        default=None,
+        max_length=280,
+        pattern=r"^raw:[1-9][0-9]*(?::[a-f0-9]{20})?$",
+    )
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+
+class RPPlayerCorrectionDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["accept", "reject"]
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=200)
 
 
 class PartyCheckpointCreate(BaseModel):

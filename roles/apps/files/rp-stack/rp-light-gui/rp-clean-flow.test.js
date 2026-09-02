@@ -376,6 +376,10 @@ async function testAdministratorDecisions() {
 assert.match(html, /id="retryOpeningButton"/);
 assert.match(html, /data-administrator-decision="accept"/);
 assert.match(html, /data-administrator-decision="reject"/);
+assert.match(html, /id="playerCorrectionForm"/);
+assert.match(source, /\/player-corrections\/draft/);
+assert.match(source, /data-player-correction-decision="accept"/);
+assert.match(source, /Исправление войдёт ровно в следующий prompt/);
 assert.match(html, /message-time\.js\?v=20260830-rp-clean-time/);
 assert.match(html, /app\.js\?v=20260830-rp-clean-cutover/);
 assert.match(

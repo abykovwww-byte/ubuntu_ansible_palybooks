@@ -38,6 +38,8 @@ from app.models.schemas import (
     RPPartyCreate,
     RPPartyMessageRequest,
     RPPartyStartRequest,
+    RPPlayerCorrectionDecision,
+    RPPlayerCorrectionDraftRequest,
     RPScenarioFreeCreate,
     PartyDatasetUpdate,
     PartyLoreCardDraft,
@@ -77,7 +79,12 @@ from app.rp.content import (
     WorldScenarioLoader,
     WorldSourceError,
 )
-from app.rp.mechanics import RPAdministratorHandler, RPAtomicServiceHandler
+from app.rp.mechanics import (
+    RPAdministratorHandler,
+    RPAtomicServiceHandler,
+    player_correction_catalog,
+    player_correction_catalog_hash,
+)
 from app.rp.narrator import (
     RPNarratorService,
     RPNarratorUnavailable,
@@ -90,9 +97,11 @@ from app.rp.provider import (
 from app.rp.runner import RPRunner
 from app.rp.turn_engine import (
     RPAdministratorProposalConflict,
+    RPBackgroundJobConflict,
     RPIdempotencyConflict,
     RPPartyNotFound,
     RPPartyVersionConflict,
+    RPPlayerCorrectionConflict,
     RPTurnEngine,
 )
 from app.services.auth_store import AuthStore, AuthUser
@@ -674,6 +683,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "decided_at": proposal.decided_at,
         }
 
+    def rp_runtime_lore_payload(card: Any) -> dict[str, Any]:
+        return {
+            "id": card.id,
+            "kind": card.kind,
+            "origin": card.origin,
+            "authoring_kind": card.authoring_kind,
+            "title": card.title,
+            "content": card.content,
+            "keywords": list(card.keywords),
+            "source_turn_id": card.source_turn_id,
+            "source_version": card.source_version,
+            "evidence_span_ids": list(card.evidence_span_ids),
+            "enabled": card.enabled,
+            "created_at": card.created_at,
+        }
+
+    def rp_player_correction_payload(proposal: Any) -> dict[str, Any]:
+        return {
+            "id": proposal.id,
+            "service_job_id": proposal.service_job_id,
+            "base_party_version": proposal.base_party_version,
+            "catalog_hash": proposal.catalog_hash,
+            "target_slot": proposal.target_slot,
+            "target_kind": proposal.target_kind,
+            "action": proposal.action,
+            "before": proposal.before_text,
+            "after": proposal.after_text,
+            "forbidden_claims": list(proposal.forbidden_claims),
+            "status": proposal.status,
+            "created_at": proposal.created_at,
+            "decided_at": proposal.decided_at,
+        }
+
+    async def await_player_operation(
+        *, owner_user_id: str, party_id: str, job_id: int
+    ) -> Any:
+        engine = require_rp_engine()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(30.0, settings.rp_derived_wait_seconds)
+        while True:
+            job = engine.get_service_job(
+                owner_user_id=owner_user_id, party_id=party_id, job_id=job_id
+            )
+            if job.status == "succeeded":
+                return job
+            if job.status == "failed":
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "code": "rp_player_operation_failed",
+                        "job_id": job.id,
+                        "message": job.last_error or "atomic service rejected the draft",
+                    },
+                )
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise HTTPException(
+                    status_code=504,
+                    detail={
+                        "code": "rp_player_operation_pending",
+                        "job_id": job.id,
+                        "retryable": True,
+                    },
+                )
+            await asyncio.sleep(
+                min(settings.rp_runner_poll_interval_seconds, remaining)
+            )
+
     def rp_role_status(
         *,
         role: str,
@@ -774,6 +851,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allowed = (
             ("GET", r"/api/parties/[^/]+"),
             ("GET", r"/api/parties/[^/]+/(history|memory|service-jobs|lore-cards|supervisor)"),
+            ("POST", r"/api/parties/[^/]+/lore-cards(?:/draft)?"),
+            ("GET", r"/api/parties/[^/]+/player-corrections"),
+            (
+                "POST",
+                r"/api/parties/[^/]+/player-corrections(?:/draft)?",
+            ),
+            (
+                "POST",
+                r"/api/parties/[^/]+/player-corrections/[0-9]+/decision",
+            ),
             ("GET", r"/api/parties/[^/]+/requests/[^/]+"),
             ("POST", r"/api/parties/[^/]+/(start|messages)"),
             ("GET", r"/api/parties/[^/]+/byok"),
@@ -1972,22 +2059,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=404, detail="party not found") from exc
             cards = [
                 {**card, "origin": "world"}
-                for card in party.world_snapshot.seed_lore_cards
+                for bundle in party.world_snapshot.seed_lore_cards
+                for card in (
+                    bundle.get("cards", [])
+                    if isinstance(bundle.get("cards"), list)
+                    else []
+                )
+                if isinstance(card, dict)
             ]
             cards.extend(
                 {
-                    "id": card.id,
-                    "kind": card.kind,
-                    "origin": card.origin,
-                    "title": card.title,
-                    "content": card.content,
-                    "keywords": list(card.keywords),
-                    "source_turn_id": card.source_turn_id,
-                    "source_version": card.source_version,
-                    "evidence_span_ids": list(card.evidence_span_ids),
-                    "enabled": card.enabled,
-                    "created_at": card.created_at,
+                    **card.model_dump(mode="json"),
+                    "origin": "scenario",
                 }
+                for card in party.scenario_snapshot.local_overrides.lore_cards
+            )
+            cards.extend(
+                rp_runtime_lore_payload(card)
                 for card in derived.runtime_lore_cards
             )
             return {"party_id": party_id, "cards": cards}
@@ -2003,6 +2091,91 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         party_id: str,
         draft_request: PartyLoreCardDraftRequest,
     ) -> dict[str, Any]:
+        if rebuilt_rp_request(request):
+            if not settings.rp_atomic_service_enabled or rp_runner is None:
+                raise HTTPException(
+                    status_code=503, detail="RP atomic service is disabled"
+                )
+            if (
+                len(draft_request.source_turn_ids) != 1
+                or draft_request.kind is None
+                or draft_request.expected_version is None
+                or draft_request.idempotency_key is None
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "clean Lore draft requires one source_turn_id, kind, "
+                        "expected_version, and idempotency_key"
+                    ),
+                )
+            engine = require_rp_engine()
+            owner_id = rp_owner_user_id(request)
+            source_turn_id = draft_request.source_turn_ids[0]
+            try:
+                party = engine.get_party(owner_user_id=owner_id, party_id=party_id)
+                source_turn = next(
+                    (
+                        turn
+                        for turn in engine.list_turns(
+                            owner_user_id=owner_id, party_id=party_id
+                        )
+                        if turn.id == source_turn_id
+                    ),
+                    None,
+                )
+                if source_turn is None:
+                    raise ValueError(
+                        "source_turn_ids must reference one complete committed turn"
+                    )
+                operation = {
+                    "expected_version": draft_request.expected_version,
+                    "kind": draft_request.kind,
+                    "source_turn_id": source_turn_id,
+                }
+                job = engine.enqueue_player_operation(
+                    owner_user_id=owner_id,
+                    party_id=party.id,
+                    job_type="player_lore",
+                    source_turn_id=source_turn_id,
+                    expected_version=draft_request.expected_version,
+                    operation_id=f"player-lore:{draft_request.idempotency_key}",
+                    operation=operation,
+                )
+                job = await await_player_operation(
+                    owner_user_id=owner_id, party_id=party_id, job_id=job.id
+                )
+            except RPPartyNotFound as exc:
+                raise HTTPException(status_code=404, detail="party not found") from exc
+            except (RPIdempotencyConflict, RPPartyVersionConflict) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            result = job.result or {}
+            card = result.get("card")
+            if result.get("result") == "no_candidate" or not isinstance(card, dict):
+                return {
+                    "party_id": party_id,
+                    "job_id": job.id,
+                    "result": "no_candidate",
+                    "kind": draft_request.kind,
+                    "title": None,
+                    "content": None,
+                    "keywords": None,
+                    "evidence_span_ids": None,
+                    "source_turn_ids": [source_turn_id],
+                }
+            return {
+                "party_id": party_id,
+                "job_id": job.id,
+                "result": "draft",
+                "kind": card["kind"],
+                "title": card["title"],
+                "content": card["content"],
+                "keywords": card["keywords"],
+                "evidence_span_ids": card["evidence_span_ids"],
+                "source_turn_ids": [source_turn_id],
+            }
         try:
             party = party_store.get_party(party_id, owner_user_id=owner_user_id(request))
             ensure_party_playable(party)
@@ -2077,9 +2250,75 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/parties/{party_id}/lore-cards")
     def create_party_lore_card(request: Request, party_id: str, card: PartyLoreCardCreate) -> dict[str, Any]:
+        if rebuilt_rp_request(request):
+            if (
+                card.kind is None
+                or card.draft_job_id is None
+                or card.expected_version is None
+                or card.idempotency_key is None
+                or len(card.source_turn_ids) != 1
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "clean Lore confirmation requires kind, draft_job_id, one "
+                        "source_turn_id, expected_version, and idempotency_key"
+                    ),
+                )
+            engine = require_rp_engine()
+            owner_id = rp_owner_user_id(request)
+            try:
+                draft_job = engine.get_service_job(
+                    owner_user_id=owner_id,
+                    party_id=party_id,
+                    job_id=card.draft_job_id,
+                )
+                draft_result = draft_job.result or {}
+                draft_card = draft_result.get("card")
+                if not isinstance(draft_card, dict):
+                    raise ValueError("Lore draft job has no confirmable card")
+                if card.source_turn_ids != [draft_job.source_turn_id]:
+                    raise ValueError("Lore confirmation must keep the draft source turn")
+                if card.always_on:
+                    raise ValueError("clean runtime Lore does not support always_on")
+                reviewed = PartyLoreCardDraft(
+                    title=card.title,
+                    content=card.content,
+                    keywords=card.keywords,
+                )
+                created = engine.confirm_player_lore_card(
+                    owner_user_id=owner_id,
+                    party_id=party_id,
+                    service_job_id=card.draft_job_id,
+                    expected_version=card.expected_version,
+                    idempotency_key=card.idempotency_key,
+                    authoring_kind=card.kind,
+                    title=reviewed.title,
+                    content=reviewed.content,
+                    keywords=tuple(reviewed.keywords),
+                    enabled=card.enabled,
+                )
+            except RPPartyNotFound as exc:
+                raise HTTPException(status_code=404, detail="party not found") from exc
+            except LookupError as exc:
+                raise HTTPException(status_code=404, detail="Lore draft not found") from exc
+            except (RPIdempotencyConflict, RPPartyVersionConflict) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except (RPBackgroundJobConflict, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return {"party_id": party_id, "card": rp_runtime_lore_payload(created)}
         try:
             party_state_store = party_store.store_for_party(party_id, owner_user_id=owner_user_id(request))
-            created = party_state_store.create_lore_card(**card.model_dump())
+            created = party_state_store.create_lore_card(
+                **card.model_dump(
+                    exclude={
+                        "kind",
+                        "draft_job_id",
+                        "expected_version",
+                        "idempotency_key",
+                    }
+                )
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         party_state_store.audit(
@@ -2092,6 +2331,181 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
         return {"party_id": party_id, "card": created}
+
+    @app.get("/api/parties/{party_id}/player-corrections")
+    def list_party_player_corrections(
+        request: Request, party_id: str
+    ) -> dict[str, Any]:
+        if not rebuilt_rp_request(request):
+            raise HTTPException(
+                status_code=404, detail="PlayerCorrection is unavailable"
+            )
+        try:
+            proposals = require_rp_engine().list_player_corrections(
+                owner_user_id=rp_owner_user_id(request), party_id=party_id
+            )
+        except RPPartyNotFound as exc:
+            raise HTTPException(status_code=404, detail="party not found") from exc
+        return {
+            "party_id": party_id,
+            "proposals": [rp_player_correction_payload(item) for item in proposals],
+        }
+
+    @app.post("/api/parties/{party_id}/player-corrections/draft")
+    async def draft_party_player_correction(
+        request: Request,
+        party_id: str,
+        payload: RPPlayerCorrectionDraftRequest,
+    ) -> dict[str, Any]:
+        if not rebuilt_rp_request(request):
+            raise HTTPException(
+                status_code=404, detail="PlayerCorrection is unavailable"
+            )
+        if not settings.rp_atomic_service_enabled or rp_runner is None:
+            raise HTTPException(status_code=503, detail="RP atomic service is disabled")
+        engine = require_rp_engine()
+        owner_id = rp_owner_user_id(request)
+        operation_id = f"player-correction:{payload.idempotency_key}"
+        try:
+            party = engine.get_party(owner_user_id=owner_id, party_id=party_id)
+            existing = next(
+                (
+                    job
+                    for job in engine.list_service_jobs(
+                        owner_user_id=owner_id, party_id=party_id
+                    )
+                    if job.operation_id == operation_id
+                ),
+                None,
+            )
+            if existing is not None:
+                if (
+                    existing.job_type != "player_correction"
+                    or existing.operation.get("instruction") != payload.instruction
+                    or existing.operation.get("raw_hint") != payload.raw_hint
+                    or existing.operation.get("expected_version")
+                    != payload.expected_version
+                ):
+                    raise RPIdempotencyConflict(
+                        "PlayerCorrection idempotency key owns different input"
+                    )
+                job = existing
+            else:
+                turns = engine.list_turns(
+                    owner_user_id=owner_id, party_id=party_id
+                )
+                if not turns:
+                    raise ValueError(
+                        "PlayerCorrection requires at least one committed turn"
+                    )
+                catalog = player_correction_catalog(
+                    party=party,
+                    turns=turns,
+                    memory=engine.latest_story_memory(
+                        owner_user_id=owner_id, party_id=party_id
+                    ),
+                )
+                if payload.raw_hint is not None and not any(
+                    str(item["target_slot"]) == payload.raw_hint
+                    or (
+                        payload.raw_hint.count(":") == 1
+                        and str(item["target_slot"]).startswith(
+                            payload.raw_hint + ":"
+                        )
+                    )
+                    for item in catalog
+                ):
+                    raise ValueError("raw_hint does not match the Party RAW catalog")
+                operation = {
+                    "expected_version": payload.expected_version,
+                    "instruction": payload.instruction,
+                    "raw_hint": payload.raw_hint,
+                    "catalog_hash": player_correction_catalog_hash(catalog),
+                    "catalog": list(catalog),
+                }
+                job = engine.enqueue_player_operation(
+                    owner_user_id=owner_id,
+                    party_id=party_id,
+                    job_type="player_correction",
+                    source_turn_id=turns[-1].id,
+                    expected_version=payload.expected_version,
+                    operation_id=operation_id,
+                    operation=operation,
+                )
+            job = await await_player_operation(
+                owner_user_id=owner_id, party_id=party_id, job_id=job.id
+            )
+        except RPPartyNotFound as exc:
+            raise HTTPException(status_code=404, detail="party not found") from exc
+        except (RPIdempotencyConflict, RPPartyVersionConflict) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        result = job.result or {}
+        return {
+            "party_id": party_id,
+            "job_id": job.id,
+            "result": result.get("result"),
+            "proposal": result.get("proposal"),
+        }
+
+    @app.post(
+        "/api/parties/{party_id}/player-corrections/{proposal_id}/decision"
+    )
+    def decide_party_player_correction(
+        request: Request,
+        party_id: str,
+        proposal_id: int,
+        payload: RPPlayerCorrectionDecision,
+    ) -> dict[str, Any]:
+        if not rebuilt_rp_request(request):
+            raise HTTPException(
+                status_code=404, detail="PlayerCorrection is unavailable"
+            )
+        engine = require_rp_engine()
+        owner_id = rp_owner_user_id(request)
+        try:
+            party = engine.get_party(owner_user_id=owner_id, party_id=party_id)
+            catalog = player_correction_catalog(
+                party=party,
+                turns=engine.list_turns(
+                    owner_user_id=owner_id, party_id=party_id
+                ),
+                memory=engine.latest_story_memory(
+                    owner_user_id=owner_id, party_id=party_id
+                ),
+            )
+            proposal, overlay = engine.decide_player_correction(
+                owner_user_id=owner_id,
+                party_id=party_id,
+                proposal_id=proposal_id,
+                decision=payload.decision,
+                expected_version=payload.expected_version,
+                idempotency_key=payload.idempotency_key,
+                catalog=catalog,
+            )
+        except RPPartyNotFound as exc:
+            raise HTTPException(status_code=404, detail="party not found") from exc
+        except LookupError as exc:
+            raise HTTPException(
+                status_code=404, detail="PlayerCorrection proposal not found"
+            ) from exc
+        except RPPlayerCorrectionConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "party_id": party_id,
+            "proposal": rp_player_correction_payload(proposal),
+            "overlay": (
+                {
+                    "revision": overlay.revision,
+                    "applies_to_version": overlay.applies_to_version,
+                }
+                if overlay is not None
+                else None
+            ),
+        }
 
     @app.patch("/api/parties/{party_id}/lore-cards/{card_id}")
     def update_party_lore_card(

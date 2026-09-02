@@ -55,6 +55,32 @@ class _ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class ScenarioLoreCard(_ClosedModel):
+    key: Text = Field(max_length=160)
+    title: Text = Field(max_length=160)
+    keywords: tuple[Text, ...] = Field(min_length=1, max_length=40)
+    content: Text = Field(max_length=12_000)
+    always_on: bool = False
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def keywords_are_unique(self) -> ScenarioLoreCard:
+        if len(self.keywords) != len(set(self.keywords)):
+            raise ValueError("Scenario Lore keywords must be unique")
+        return self
+
+
+class ScenarioLocalOverrides(_ClosedModel):
+    lore_cards: tuple[ScenarioLoreCard, ...] = ()
+
+    @model_validator(mode="after")
+    def lore_card_keys_are_unique(self) -> ScenarioLocalOverrides:
+        keys = [card.key for card in self.lore_cards]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Scenario Lore card keys must be unique")
+        return self
+
+
 class WorldDefinition(_ClosedModel):
     schema_version: Literal[WORLD_SCHEMA_VERSION]
     id: Slug
@@ -96,7 +122,9 @@ class ScenarioPresetDefinition(_ClosedModel):
     opening_file: AssetPath
     initial_state_file: AssetPath
     active_character_ids: tuple[Identifier, ...] = Field(min_length=1)
-    local_overrides: dict[str, JsonValue] = Field(default_factory=dict)
+    local_overrides: ScenarioLocalOverrides = Field(
+        default_factory=ScenarioLocalOverrides
+    )
 
     @model_validator(mode="after")
     def active_character_ids_are_unique(self) -> ScenarioPresetDefinition:
@@ -135,7 +163,9 @@ class ScenarioSnapshot(_ClosedModel):
     initial_state: dict[str, JsonValue]
     active_character_ids: tuple[Identifier, ...] = Field(min_length=1)
     starting_relationships: dict[str, JsonValue]
-    local_overrides: dict[str, JsonValue] = Field(default_factory=dict)
+    local_overrides: ScenarioLocalOverrides = Field(
+        default_factory=ScenarioLocalOverrides
+    )
 
     @model_validator(mode="after")
     def state_references_are_consistent(self) -> ScenarioSnapshot:
@@ -287,7 +317,7 @@ class WorldScenarioLoader:
         opening: str,
         initial_state: dict[str, JsonValue],
         active_character_ids: tuple[str, ...],
-        local_overrides: dict[str, JsonValue] | None = None,
+        local_overrides: ScenarioLocalOverrides | dict[str, JsonValue] | None = None,
     ) -> ScenarioSnapshot:
         world = self.load_world_definition()
         relationships = initial_state.get("relationships")
@@ -310,7 +340,7 @@ class WorldScenarioLoader:
             initial_state=initial_state,
             active_character_ids=active_character_ids,
             starting_relationships=relationships,
-            local_overrides=local_overrides or {},
+            local_overrides=local_overrides or ScenarioLocalOverrides(),
         )
 
     def _load_model(self, relative_path: str, model: type[BaseModel]):

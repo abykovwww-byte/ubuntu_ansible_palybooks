@@ -15,7 +15,7 @@
 его `runner.py`, `provider.py` и `mechanics.py` byte-identical current source при
 LF-normalизации. Финальный seeded canary и browser proof прошли на этом image без
 bind mount исходников; production RP остаётся инертным с
-`RP_REBUILD_ENABLED=false`. Clean RP schema v7, Narrator,
+`RP_REBUILD_ENABLED=false`. В source clean RP schema v8, Narrator,
 persisted role jobs и runner подключены к `main.py`, существующим Party API,
 реальному provider client и Light GUI за серверным флагом
 `RP_REBUILD_ENABLED`. В source флаг включает один World `day-watch-moscow-v2`,
@@ -57,7 +57,12 @@ loops. Claims сериализуются SQLite-предикатом; restart и
   прямо предъявил отдельный container probe; применённый image прошёл полный
   suite, а его runner/provider/service-model файлы byte-identical probe-файлам.
   Изолированный browser proof предъявил сохранение failed-текста, same-key retry,
-  три role status/model/error/kill-switch карточки и ручные `accept/reject`;
+   три role status/model/error/kill-switch карточки и ручные `accept/reject`;
+- **собран disabled source-кандидат §4–§5:** единый
+  `ScenarioSnapshot.player_role`, закрытый `local_overrides.lore_cards`, ровно
+  три Lore origin, typed player Lore с `authoring_kind` и явная
+  `PlayerCorrection` на существующем service runner; focused набор —
+  `63 passed`, полный локальный CI — `674 passed`;
 - **ещё не сделано:** blind A/B, ручные первые 20 ходов и короткий контрастный
   старт, настоящая длинная RP-партия, полные причинные цепочки Relationships/Lore
   до последующей сцены. Автоматический длинный canary на безопасном fixed-model
@@ -391,6 +396,16 @@ Ansible: `665 passed, 1 skipped` за `66.29s`; функционально зе�
 origin, typed player Lore и явная `PlayerCorrection` на существующей atomic
 service role/runner. Production остаётся за `RP_REBUILD_ENABLED=false` до
 закрытия всех ворот.
+
+**Результат source-кандидата 2026-09-02:** все пять разрывов закрыты за прежним
+флагом. Lore draft использует один committed turn, заранее известный
+`character|event|location`, immutable job input и отдельный редактируемый
+confirm; immutable runtime record сохраняет `authoring_kind`. Correction
+сохраняет полный catalog для confirm, передаёт модели только ranked `8 / 4 000`,
+поддерживает broad/exact RAW hint, повторно проверяет owner/version/hash/target и
+проецирует accepted overlay только в следующую Party version. Focused тесты:
+`63 passed`; полный локальный repository CI: `674 passed`. Apply, activation и
+live proof не выполнялись; LOC/time gates остаются шагу 4.
 
 ### Разбор `run28` / `run10` и порядок следующей приёмки
 

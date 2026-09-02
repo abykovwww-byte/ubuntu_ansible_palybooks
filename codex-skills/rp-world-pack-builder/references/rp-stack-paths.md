@@ -65,13 +65,14 @@ Existing runtime paths include:
 Do not create or edit `/opt` or `/srv` paths on Windows. Do not manually copy
 the new definitions to the server.
 
-The Decision 043 World/Scenario source is not currently consumed by Light GUI,
-its API, or the deployed Gateway. Therefore server files, container health, and
-the existing `/api/worldpacks` response cannot prove this slice works live.
+The Decision 043 World/Scenario source has a Gateway and Light GUI candidate
+behind `RP_REBUILD_ENABLED=false`, but it is not active in production. Source
+tests, server files, container health, and the legacy `/api/worldpacks` response
+cannot prove the clean path works live.
 
 ## Later Deployment
 
 Deployment is owned by `abykovserv-iac-deploy`. Use it only after a later task
-integrates the new loader with the product surface and explicitly authorizes
-cutover. Then verify the applied Git revision, containers, HTTP discovery,
-actual party creation, persisted World/Scenario snapshots, and a real turn.
+explicitly authorizes apply and activation. Then verify the applied Git
+revision, effective flag, containers, HTTP discovery, actual party creation,
+persisted World/Scenario snapshots, and a real turn.

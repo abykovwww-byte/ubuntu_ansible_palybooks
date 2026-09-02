@@ -145,6 +145,34 @@ Gateway возвращает только draft и заполняет им су�
 не вызывается и карточки в party storage нет. Свободный текст чата не запускает
 draft classifier. Provider key и request остаются на стороне Gateway.
 
+### Disabled clean Lore и PlayerCorrection
+
+Кандидат [Decision 043](../../roles/apps/files/rp-stack/docs/decisions/043-rp-stack-rebuild.md)
+за `RP_REBUILD_ENABLED=false` сохраняет публичные Lore paths, но делает их
+типизированными Party operations. Явный
+`POST /api/parties/{party_id}/lore-cards/draft` принимает один complete turn,
+`kind`, ожидаемую версию и idempotency key. Existing async runner возвращает
+плоский draft либо `no_candidate`; только отдельный
+`POST /api/parties/{party_id}/lore-cards` сохраняет проверенную игроком карту.
+`GET /api/parties/{party_id}/lore-cards` различает ровно `world`, `scenario` и
+`runtime`, а immutable runtime-запись сохраняет выбранный до вызова
+`authoring_kind=character|event|location`. Игрок может отредактировать содержимое
+draft перед confirm; job, kind и единственный source turn при этом не меняются.
+
+Явная коррекция использует три owner-scoped endpoint:
+
+- `POST /api/parties/{party_id}/player-corrections/draft`;
+- `GET /api/parties/{party_id}/player-corrections`;
+- `POST /api/parties/{party_id}/player-corrections/{proposal_id}/decision`.
+
+Draft получает только bounded ranked catalog целей и не меняет RAW, memory или
+state. `accept` повторно проверяет Party version, catalog hash и exact target,
+после чего создаёт неизменяемый overlay ровно для следующего narrator prompt;
+`reject` ничего не проецирует. Exact duplicate и повтор того же решения
+идемпотентны, stale decision возвращает `409`. Этот интерфейс ещё не является
+production activation: нужны merge, apply, включение флага и отдельная live-
+приёмка.
+
 ### Обращение к мастеру в revision 9
 
 Composer rev9 RP party показывает отдельную кнопку «Мастеру». Она отправляет
