@@ -620,6 +620,7 @@ def test_raw_anchor_safe_coverage_stable_prefix_and_source_ownership(
             message.content for message in at_two.messages if message.block_id == block_id
         )
         for block_id in {
+            "gateway_narrator_rules",
             "world",
             "scenario_experience",
             "story_memory",
@@ -631,6 +632,19 @@ def test_raw_anchor_safe_coverage_stable_prefix_and_source_ownership(
     assert "SCENARIO_SYSTEM_TOKEN" in contents["scenario_experience"]
     assert "WORLD_CANON_TOKEN" not in contents["scenario_experience"]
     assert "PARTY_MEMORY_TOKEN" in contents["story_memory"]
+    assert "Незакрытая задача не сюжетная рельса" in contents[
+        "gateway_narrator_rules"
+    ]
+    assert "текст действия — служебны, не знания персонажей" in contents[
+        "gateway_narrator_rules"
+    ]
+    assert "о герое пиши во втором лице" in contents["gateway_narrator_rules"]
+    assert "речь сопровождает, но не заменяет действие" in contents[
+        "gateway_narrator_rules"
+    ]
+    assert "Не проси через NPC уточнить, отменить или перенаправить" in contents[
+        "gateway_narrator_rules"
+    ]
     assert "SCENARIO_STATE_NOT_PROMPTED" not in "\n".join(
         message.content for message in at_two.messages
     )

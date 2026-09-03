@@ -50,6 +50,11 @@ def test_committed_v2_world_and_all_scenarios_materialize() -> None:
     }
 
     scenarios = [loader.materialize_preset(preset.id) for preset in presets]
+    trainee_opening = loader.materialize_preset("action-night-trainee").opening
+    assert "проводит вводный разбор для стажёра" in trainee_opening
+    assert "вместо наставника" not in trainee_opening
+    assert "возможный пострадавший не найден" in trainee_opening
+    assert "участковый видел выходящего" in trainee_opening
     assert len({scenario.narrator_system for scenario in scenarios}) == len(EXPECTED_STYLES)
     assert len({scenario.narrator_note for scenario in scenarios}) == len(EXPECTED_STYLES)
     for style in EXPECTED_STYLES:
