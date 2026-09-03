@@ -17,10 +17,15 @@
 Docker-assigned `127.0.0.1` port вернул healthy и создал preset/free Party.
 Обе candidate SQLite прошли integrity/FK, source/image hashes совпали,
 а normalized production container fingerprints до и после probe одинаковы.
-Механические source и exact-image gate закрыты; human quality acceptance,
+Механические source и exact-image gate закрыты. Human narrator A/B принял
+универсальный clean contract revision
+`89bcc7f4409155c28601fa03a10265af468bbaaa`: в финальном сравнении двух
+clean-версий он выиграл `8–1` при трёх ничьих после исходной победы clean над
+legacy `11–0` при одной ничьей. Ручные 20 ходов, контрастный старт, 65+ Party,
 production apply, activation и live verification не выполнялись. Evidence:
 [clean-only budget](evidence/043-clean-only-budget-2026-09-02.md) и
-[mechanical candidate](evidence/043-mechanical-candidate-2026-09-02.md).
+[mechanical candidate](evidence/043-mechanical-candidate-2026-09-02.md),
+[narrator human A/B](evidence/043-narrator-human-ab-2026-09-03.md).
 
 **Исторический applied baseline до clean-only candidate.**
 Последний IaC apply `2ad61019fcad7693ce620d1f158bcb3353b6eb1b` завершился
@@ -80,8 +85,7 @@ loops. Claims сериализуются SQLite-предикатом; restart и
   три Lore origin, typed player Lore с `authoring_kind` и явная
   `PlayerCorrection` на существующем service runner; focused набор —
   `63 passed`, полный локальный CI — `674 passed`;
-- **ещё не сделано:** exact-image механическая приёмка, blind A/B,
-  ручные первые 20 ходов и короткий контрастный старт, настоящая длинная
+- **ещё не сделано:** ручные первые 20 ходов и короткий контрастный старт, настоящая длинная
   RP-партия и полные причинные цепочки Relationships/Lore до последующей сцены.
   Автоматический длинный canary на безопасном fixed-model route пройден на
   изолированном предыдущем candidate. Механические LOC/time gate нового candidate
