@@ -30,6 +30,21 @@
 - revision 11 выбирает authored full-prompt preset и полный opening seed до
   создания партии и закрепляет их в immutable party snapshot.
 
+Clean-only движок Decision 043 больше не выбирает эти cumulative revision paths.
+После каждого успешного committed хода он ставит три независимых atomic job в
+одну существующую очередь. Claim приоритизирует `relationships`, затем
+`runtime_lore`, затем `story_memory`, поэтому тяжёлое сжатие не задерживает
+причины отношений и факты текущей сцены.
+
+Story Memory до версии 57 только фиксирует `not_due`. На версии 58 она сжимает
+RAW `1–8`, на версии 66 — `9–16`; между границами Narrator видит 51–57 RAW
+ходов, а на границе снова ровно 50. Каждая следующая memory-job выполняет не
+более одного model call. При общем story-контексте от 130 000 символов вместо
+новой пачки может быть объединена старейшая группа из восьми соседних chunks
+одного уровня; входом служат заново прочитанные canonical RAW, а не прежние
+summary. Сбой не откатывает committed ход и не удаляет RAW, но terminal
+semantic failure останавливает дальнейшее автоматическое сжатие этой Party.
+
 Все DC1–DC4 readiness rows имеют уровень `подключено`; отдельный pull-based
 activation и post-apply stamp proof подтвердили effective observed `7` для новых
 ordinary RP-parties. Код revision `8` / S1 слит и применён; отдельный

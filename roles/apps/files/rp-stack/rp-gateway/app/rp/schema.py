@@ -6,7 +6,7 @@ import sqlite3
 
 
 RP_DATABASE_APPLICATION_ID = 0x5250454E  # "RPEN"
-RP_SCHEMA_VERSION = 8
+RP_SCHEMA_VERSION = 9
 
 _EXPECTED_TABLES = frozenset(
     {
@@ -118,18 +118,9 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             base_snapshot_id INTEGER,
             update_id TEXT NOT NULL CHECK(length(trim(update_id)) > 0),
             snapshot_json TEXT NOT NULL CHECK(length(trim(snapshot_json)) > 0),
-            observed_through_version INTEGER NOT NULL CHECK(observed_through_version >= 0),
-            situation_coverage INTEGER NOT NULL CHECK(situation_coverage >= 0),
-            threads_coverage INTEGER NOT NULL CHECK(threads_coverage >= 0),
-            characters_coverage INTEGER NOT NULL CHECK(characters_coverage >= 0),
-            assets_and_rules_coverage INTEGER NOT NULL CHECK(assets_and_rules_coverage >= 0),
-            chronology_and_hooks_coverage INTEGER NOT NULL CHECK(chronology_and_hooks_coverage >= 0),
+            covered_through_version INTEGER NOT NULL
+                CHECK(covered_through_version >= 0),
             created_at INTEGER NOT NULL,
-            CHECK(situation_coverage <= observed_through_version),
-            CHECK(threads_coverage <= observed_through_version),
-            CHECK(characters_coverage <= observed_through_version),
-            CHECK(assets_and_rules_coverage <= observed_through_version),
-            CHECK(chronology_and_hooks_coverage <= observed_through_version),
             CHECK(
                 (revision = 1 AND base_snapshot_id IS NULL) OR
                 (revision > 1 AND base_snapshot_id IS NOT NULL)

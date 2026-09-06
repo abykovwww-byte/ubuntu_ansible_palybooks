@@ -131,6 +131,9 @@ def test_claims_are_atomic_role_specific_and_do_not_spend_attempts(
 
     first_two = (engine.claim_service_job(), engine.claim_service_job())
     assert all(job is not None for job in first_two)
+    assert tuple(
+        job.job_type for job in first_two if isinstance(job, RPServiceJob)
+    ) == ("relationships", "runtime_lore")
     service_results = _concurrent_claims(engine.claim_service_job)
     administrator_results = _concurrent_claims(engine.claim_administrator_job)
 
@@ -141,6 +144,11 @@ def test_claims_are_atomic_role_specific_and_do_not_spend_attempts(
         for job in (*first_two, *service_results)
         if isinstance(job, RPServiceJob)
     } == {"story_memory", "relationships", "runtime_lore"}
+    assert next(
+        job
+        for job in service_results
+        if isinstance(job, RPServiceJob)
+    ).job_type == "story_memory"
     assert all(
         job.status == "running" and job.attempts == 0
         for job in engine.list_service_jobs(

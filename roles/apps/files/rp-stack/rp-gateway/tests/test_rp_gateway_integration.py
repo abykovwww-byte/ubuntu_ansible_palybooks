@@ -16,15 +16,6 @@ from app.rp.mechanics import (
     RPRelationshipResult,
     RPRuntimeLoreResult,
 )
-from app.rp.memory import (
-    RP_MEMORY_SCHEMA_VERSION,
-    RPAssetsAndRulesMemory,
-    RPCharactersMemory,
-    RPChronologyAndHooksMemory,
-    RPSituationMemory,
-    RPStoryMemorySnapshot,
-    RPThreadsMemory,
-)
 from app.rp.provider import RPNarratorProvider
 
 
@@ -135,21 +126,8 @@ class _PlayerOperationModel:
 
     async def update_story_memory(
         self, *, turns: tuple[Any, ...], **_: Any
-    ) -> RPStoryMemorySnapshot:
-        coverage = int(turns[-1].committed_version)
-        return RPStoryMemorySnapshot(
-            schema_version=RP_MEMORY_SCHEMA_VERSION,
-            observed_through_version=coverage,
-            situation=RPSituationMemory(coverage=coverage, status="fresh"),
-            threads=RPThreadsMemory(coverage=coverage, status="fresh"),
-            characters=RPCharactersMemory(coverage=coverage, status="fresh"),
-            assets_and_rules=RPAssetsAndRulesMemory(
-                coverage=coverage, status="fresh"
-            ),
-            chronology_and_hooks=RPChronologyAndHooksMemory(
-                coverage=coverage, status="fresh"
-            ),
-        )
+    ) -> str:
+        return "Краткая narrative memory для переданного диапазона RAW."
 
     async def draft_player_lore(
         self, *, kind: str, **_: Any

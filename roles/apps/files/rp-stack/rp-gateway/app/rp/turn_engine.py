@@ -946,18 +946,14 @@ class RPTurnEngine:
                 "story memory exceeds its prompt budget: "
                 f"{len(prompt_text)} > {RP_MEMORY_PROMPT_MAX_CHARS}"
             )
-        coverages = {
-            key: section.coverage for key, section in snapshot.sections().items()
-        }
-
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 party = _owned_party(connection, owner_user_id, party_id)
                 if party is None:
                     raise RPPartyNotFound(party_id)
-                if snapshot.observed_through_version > int(party["current_version"]):
-                    raise ValueError("memory cannot observe beyond the current Party version")
+                if snapshot.covered_through_version > int(party["current_version"]):
+                    raise ValueError("memory cannot cover beyond the current Party version")
 
                 existing = connection.execute(
                     """
@@ -991,45 +987,10 @@ class RPTurnEngine:
                     raise RPMemoryVersionConflict(
                         f"memory base is {latest_id!r}, not {expected_base_snapshot_id!r}"
                     )
-                latest_sections = (
-                    latest.snapshot.sections() if latest is not None else {}
-                )
-                for key, section in snapshot.sections().items():
-                    if section.status != "stale":
-                        continue
-                    previous = latest_sections.get(key)
-                    if previous is None:
-                        if section.coverage != 0:
-                            raise ValueError(
-                                f"stale memory section {key!r} cannot advance without a base"
-                            )
-                    elif section.model_dump(exclude={"status"}) != previous.model_dump(
-                        exclude={"status"}
-                    ):
-                        raise ValueError(
-                            f"stale memory section {key!r} must preserve its base content"
-                        )
                 if latest is not None:
-                    if (
-                        snapshot.observed_through_version
-                        < latest.snapshot.observed_through_version
-                    ):
+                    if snapshot.safe_coverage < latest.snapshot.safe_coverage:
                         raise ValueError(
-                            "memory observed Party version cannot regress"
-                        )
-                    previous_coverages = {
-                        key: section.coverage
-                        for key, section in latest_sections.items()
-                    }
-                    regressed = [
-                        key
-                        for key in coverages
-                        if coverages[key] < previous_coverages[key]
-                    ]
-                    if regressed:
-                        raise ValueError(
-                            "memory section coverage cannot regress: "
-                            + ", ".join(sorted(regressed))
+                            "story-memory covered Party version cannot regress"
                         )
 
                 revision = (latest.revision if latest is not None else 0) + 1
@@ -1038,11 +999,8 @@ class RPTurnEngine:
                     """
                     INSERT INTO rp_story_memory_snapshots(
                         party_id, revision, base_snapshot_id, update_id,
-                        snapshot_json, observed_through_version,
-                        situation_coverage, threads_coverage, characters_coverage,
-                        assets_and_rules_coverage, chronology_and_hooks_coverage,
-                        created_at
-                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        snapshot_json, covered_through_version, created_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         party_id,
@@ -1050,12 +1008,7 @@ class RPTurnEngine:
                         latest_id,
                         update_id,
                         snapshot_json,
-                        snapshot.observed_through_version,
-                        coverages["situation"],
-                        coverages["threads"],
-                        coverages["characters"],
-                        coverages["assets_and_rules"],
-                        coverages["chronology_and_hooks"],
+                        snapshot.covered_through_version,
                         created_at,
                     ),
                 )
@@ -1150,7 +1103,16 @@ class RPTurnEngine:
                                 AND earlier.source_version < candidate.source_version
                                 AND earlier.status IN ('pending', 'running')
                           )
-                        ORDER BY candidate.id LIMIT 1
+                        ORDER BY
+                            CASE candidate.job_type
+                                WHEN 'player_lore' THEN 0
+                                WHEN 'player_correction' THEN 0
+                                WHEN 'relationships' THEN 1
+                                WHEN 'runtime_lore' THEN 2
+                                WHEN 'story_memory' THEN 3
+                            END,
+                            candidate.id
+                        LIMIT 1
                     ) AND status = 'pending'
                     RETURNING *
                     """,
@@ -2564,15 +2526,8 @@ def _memory_from_row(row: sqlite3.Row) -> RPStoryMemoryRecord:
         raise RPSchemaError("stored RP story-memory snapshot is invalid") from exc
     if canonical_memory_json(snapshot) != snapshot_json:
         raise RPSchemaError("stored RP story-memory snapshot is not canonical")
-    expected = {
-        "observed_through_version": snapshot.observed_through_version,
-        **{
-            f"{key}_coverage": section.coverage
-            for key, section in snapshot.sections().items()
-        },
-    }
-    if any(int(row[column]) != value for column, value in expected.items()):
-        raise RPSchemaError("stored RP story-memory coverage columns do not match JSON")
+    if int(row["covered_through_version"]) != snapshot.covered_through_version:
+        raise RPSchemaError("stored RP story-memory coverage does not match JSON")
     return RPStoryMemoryRecord(
         id=int(row["id"]),
         party_id=str(row["party_id"]),
@@ -2596,7 +2551,7 @@ def _enqueue_post_turn_work(
     committed_version: int,
     created_at: int,
 ) -> None:
-    for job_type in ("story_memory", "relationships", "runtime_lore"):
+    for job_type in ("relationships", "runtime_lore", "story_memory"):
         connection.execute(
             """
             INSERT INTO rp_service_jobs(

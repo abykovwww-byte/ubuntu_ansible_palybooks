@@ -2,6 +2,43 @@
 
 [← WorldPacks и режимы](04-worldpacks-and-modes.md) · [Главная](README.md) · [Далее: модели →](06-models-and-providers.md)
 
+## Clean Story Memory Decision 043
+
+Clean RP хранит полный RAW transcript в SQLite как единственный источник для
+повторного сжатия. Первые 50 committed ходов Narrator получает без сжатия. Затем
+Atomic Service двигает границу памяти только завершёнными пачками по восемь
+ходов и возвращает связный narrative-текст, а не JSON/state:
+
+| Версия Party | Story Memory | Дословный RAW в следующем prompt |
+|---:|---|---|
+| `1–50` | отсутствует | все сохранённые ходы |
+| `51–57` | отсутствует | все сохранённые ходы |
+| `58` | summary `1–8` | `9–58` — ровно 50 ходов |
+| `59–65` | summary `1–8` | от `9` до текущей версии — 51–57 ходов |
+| `66` | summaries `1–8`, `9–16` | `17–66` — ровно 50 ходов |
+
+Неполная следующая пачка никогда не исчезает: пока восемь старых ходов не
+собраны целиком, они остаются RAW. Summary первого уровня ограничен 2 000
+символами и должен быть короче источника. Метаданные диапазона и уровня задаёт
+Gateway; модель пишет только прозу.
+
+Когда фактический блок Story Memory вместе с активным RAW достигает 130 000
+символов, Gateway берёт первые восемь соседних summary одного уровня и заново
+читает из SQLite весь их исходный RAW-диапазон. Из него строится один summary
+следующего уровня: сначала 64 хода, затем 512 и далее по основанию восемь.
+Summary предыдущего уровня модели не передаются, поэтому ошибки не накапливаются
+как «пересказ пересказа». Archive summary ограничен 6 000 символами, source
+одного вызова — 800 000 символами; превышение и невалидная проза завершаются
+fail-closed, сохраняя предыдущую память и весь RAW.
+
+Relationships и runtime Lore забираются общей служебной очередью раньше Story
+Memory. Неудачный semantic результат памяти не повторяется с тем же вводом:
+job становится terminal failed, а следующие memory-job блокируются до явного
+операторского решения. Игровые ходы при этом продолжают храниться в RAW.
+
+Разделы ниже про revisions `0..11` описывают исторические контракты до clean-only
+Decision 043; они не определяют формат новой `rp-story-memory.v2`.
+
 ## Correction-aware RP story memory
 
 Начиная с RP revision 2 каждая запись living-memory имеет стабильный `fact_id`,
@@ -490,7 +527,8 @@ revision-11 pack отсутствует. Поэтому этот раздел о
 | Legacy RP story memory | Живой кумулятивный реестр всей истории | Только RP revisions 0..7 | Нет |
 | Sectioned RP story memory v3 | Пять независимо покрываемых секций; safe coverage равен минимуму | Только RP revision 8+ | Нет |
 | Rev9 player correction overlay | Подтверждённый replacement/retraction поверх RAW и story memory до absorption | Только RP revision 9+ | Player authority; ниже canonical absolute rules/current action |
-| Decision 043 clean correction overlay | Неизменяемая явная поправка ровно к следующему narrator prompt; RAW и stable memory не переписываются | Только disabled clean candidate | Player decision; ниже World rules и current action |
+| Decision 043 clean Story Memory | Narrative chunks по 8/64/512 RAW-ходов; последние 50–57 ходов остаются дословными | Clean candidate source | Нет; полный RAW остаётся source history |
+| Decision 043 clean correction overlay | Неизменяемая явная поправка ровно к следующему narrator prompt; RAW и stable memory не переписываются | Clean candidate source | Player decision; ниже World rules и current action |
 | Rev10 world clock | Canonical date, authored event statuses/facts и одноразовая narrator/UI projection | Только RP revision 10+ с `world-clock.json` | Gateway authority; модель задаёт только elapsed |
 | RP relationship causes | Неизменяемые причины, производная полоса и активные пограничные события | Только `rp` | Да, внутри механики отношений |
 | Memory chapters | Неизменяемые сжатые эпизоды старых сцен | Все | Нет |

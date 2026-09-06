@@ -16,7 +16,11 @@ from app.rp.mechanics import (
     RPRelationshipResult,
     RPRuntimeLoreResult,
 )
-from app.rp.memory import RPStoryMemoryRecord, RPStoryMemorySnapshot
+from app.rp.memory import (
+    RP_MEMORY_BATCH_TURNS,
+    RP_MEMORY_CHUNK_MAX_CHARS,
+    RP_MEMORY_RAW_CHUNK_MAX_CHARS,
+)
 from app.rp.narrator import RPNarratorPrompt
 from app.rp.turn_engine import (
     RPModelOutputRejected,
@@ -348,69 +352,88 @@ class RPAtomicServiceProvider:
         *,
         party: RPParty,
         turns: tuple[RPTurn, ...],
-        previous: RPStoryMemoryRecord | None,
-    ) -> RPStoryMemorySnapshot:
-        messages = _structured_messages(
-            system=(
-                "Ты атомарная служебная модель памяти. Обнови пять секций памяти только "
-                "по committed RAW. Не меняй RAW и не утверждай safe coverage за пределами "
-                "переданных ходов. Верни сам полный snapshot без обёртки party_id или "
-                "memory_snapshot. Корень содержит schema_version, observed_through_version, "
-                "situation, threads, characters, assets_and_rules и chronology_and_hooks. "
-                "schema_version равен rp-story-memory.v1; observed_through_version равен "
-                "наибольшему переданному committed_version. coverage каждой секции — это "
-                "номер committed-версии Party, а не процент; после проверки всех ходов он "
-                "равен observed_through_version. Каждый элемент массива фактов внутри "
-                "секций — JSON-объект по OUTPUT_SCHEMA; не добавляй в массивы фактов "
-                "голые строки. "
-                "Для успешного полного обновления status каждой секции равен fresh. "
-                "Каждый факт содержит ровно fact_id, text, status, authority и "
-                "source_turn_versions: status факта — active, superseded или retracted; "
-                "authority — player, narrator или inference; text — не более 1024 "
-                "символов; source_turn_versions — "
-                "положительные уникальные версии по возрастанию, не выше coverage и не "
-                "более 128 версий в одном факте. Если подтверждающих ходов больше, "
-                "сохрани первую версию возникновения, последние изменения и наиболее "
-                "сильные промежуточные RAW-доказательства, удалив из списка избыточные "
-                "повторы. "
-                "fact_id уникален во всём snapshot и соответствует OUTPUT_SCHEMA. "
-                "Верни строгий JSON."
-            ),
-            body={
-                "task": "update_story_memory",
-                "constraints": {
-                    "memory_fact_text_max_chars": 1_024,
-                    "source_turn_versions_max_items": 128,
-                    "source_turn_versions_overflow": (
-                        "keep origin, latest changes, and strongest RAW evidence"
-                    ),
-                },
-                "party_id": party.id,
-                "previous": (
-                    previous.snapshot.model_dump(mode="json")
-                    if previous is not None
-                    else None
+    ) -> str:
+        if not turns:
+            raise ValueError("story-memory compression requires RAW turns")
+        expected_versions = tuple(
+            range(turns[0].committed_version, turns[-1].committed_version + 1)
+        )
+        if tuple(turn.committed_version for turn in turns) != expected_versions:
+            raise ValueError("story-memory RAW turns must be contiguous")
+        level = 1
+        expected_count = RP_MEMORY_BATCH_TURNS
+        while expected_count < len(turns):
+            level += 1
+            expected_count *= RP_MEMORY_BATCH_TURNS
+        if expected_count != len(turns):
+            raise ValueError("story-memory RAW span must contain a base-eight batch")
+        max_chars = (
+            RP_MEMORY_RAW_CHUNK_MAX_CHARS
+            if level == 1
+            else RP_MEMORY_CHUNK_MAX_CHARS
+        )
+        target_chars = "600–1200" if level == 1 else "2000–4000"
+        source = "\n\n".join(
+            (
+                f"[TURN {turn.committed_version}]\n"
+                f"PLAYER\n{turn.player_text}\n"
+                f"NARRATOR\n{turn.narrator_text}"
+            )
+            for turn in turns
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Ты сжимаешь старые RAW-ходы ролевой партии в связную narrative "
+                    "memory для будущего Narrator. Сохраняй причинно значимые действия, "
+                    "решения, обещания, последствия, изменения отношений, появления и "
+                    "утраты возможностей. Удаляй повторы, декоративные реплики и уже "
+                    "исчерпанные подробности. Не придумывай факты и не исправляй RAW. "
+                    "Верни только компактный связный текст из нескольких абзацев: без "
+                    "JSON, таблиц, списков, заголовков, служебных полей и комментариев."
                 ),
-                "turns": [
-                    {
-                        "turn_kind": turn.turn_kind,
-                        "committed_version": turn.committed_version,
-                        "player_text": turn.player_text,
-                        "narrator_text": turn.narrator_text,
-                    }
-                    for turn in turns
-                ],
             },
-        )
-        return await self._complete_result(
+            {
+                "role": "user",
+                "content": (
+                    f"Сожми RAW-ходы {turns[0].committed_version}-"
+                    f"{turns[-1].committed_version}. Ориентир — {target_chars} символов; "
+                    "сохраняй больше только ради причинно значимых событий. Итог должен "
+                    "быть короче источника "
+                    f"и не длиннее {max_chars} символов.\n\n{source}"
+                ),
+            },
+        ]
+        payload: dict[str, Any] = {
+            "messages": messages,
+            "stream": False,
+            "temperature": 0,
+            "max_tokens": 1_024 if level == 1 else 2_048,
+            "reasoning": {"enabled": False},
+            "provider": {
+                **_exact_openrouter_provider(self.model),
+                "require_parameters": True,
+            },
+        }
+        completion = await self.client.complete(
             role="rp_atomic_story_memory",
-            party=party,
-            turn_id=turns[-1].id if turns else None,
-            messages=messages,
-            result_type=RPStoryMemorySnapshot,
-            schema_name="rp_story_memory_snapshot",
-            max_tokens=16_384,
+            provider=self.provider,  # type: ignore[arg-type]
+            model=self.model,
+            party_id=party.id,
+            turn_id=turns[-1].id,
+            request_id=None,
+            prompt=service_prompt_text(payload),
+            payload=payload,
         )
+        narrative = _completion_content(
+            completion.data, role="rp_atomic_story_memory"
+        ).strip()
+        if narrative.startswith(("```", "{", "[")):
+            raise RPModelOutputRejected(
+                "rp_atomic_story_memory returned structured data instead of prose"
+            )
+        return narrative
 
     async def _complete_result(
         self,

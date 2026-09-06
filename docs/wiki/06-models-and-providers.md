@@ -37,7 +37,9 @@ overrides может явно развести credentials без изменен
 Clean RP принимает только закреплённые OpenRouter model ID и endpoint tag.
 Narrator отправляет `provider.order/only=["openai"]`, Atomic Service —
 `provider.order/only=["baidu/fp8"]`; оба задают `allow_fallbacks=false`, а
-Atomic дополнительно требует поддержку переданных schema parameters.
+Atomic дополнительно требует поддержку переданных parameters. Structured
+операции получают JSON Schema; Story Memory является намеренным исключением и
+возвращает только narrative prose.
 Динамические `openrouter/auto` и `openrouter/free`, `nvidia/*` и любой другой
 endpoint отклоняются до provider call. Сохранённые исторические
 profile/Party/log rows не удаляются и не переназначаются.
@@ -45,6 +47,21 @@ profile/Party/log rows не удаляются и не переназначаю�
 Supervisor clean Party показывает модель, enabled/kill switch, текущее
 состояние, success/error и последнюю ошибку каждой роли, но не raw provider
 payload. Этот source-контракт ещё не активирован в production inventory.
+
+### Clean Atomic Story Memory
+
+Story Memory использует ту же exact Atomic route
+`deepseek/deepseek-v4-pro` → `baidu/fp8`, но не просит модель вернуть state,
+факты или JSON. В запрос входит только один полный contiguous RAW-диапазон:
+восемь ходов для обычного summary либо `8^N` ходов при укрупнении. Предыдущие
+summary не входят в model input.
+
+Для пачки из восьми ходов Gateway задаёт `max_tokens=1024` и принимает не более
+2 000 символов прозы. Для archive-пачки — `max_tokens=2048` и не более 6 000
+символов. В обоих случаях `temperature=0`, reasoning выключен, provider fallback
+запрещён. Пустой ответ, JSON вместо прозы, текст не короче RAW или превышение
+лимита отклоняются без изменения snapshot. Transport-вызов и итог остаются
+видимыми в `service_call_log` под role `rp_atomic_story_memory`.
 
 ## Провайдеры narrator
 
