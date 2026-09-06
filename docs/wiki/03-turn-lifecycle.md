@@ -538,6 +538,8 @@ sequenceDiagram
     participant Narrator as exact Narrator route
     participant DB as Clean SQLite
     participant Runner as role runner
+    participant Atomic as OpenRouter Atomic route
+    participant Admin as Local Administrator
 
     Client->>API: content + idempotency_key + expected_version
     API->>Engine: claim persisted narration request
@@ -549,6 +551,10 @@ sequenceDiagram
             Engine->>DB: turn + version + 3 service jobs + admin job
             API-->>Client: committed turn
             Runner->>DB: claim role-specific jobs
+            Runner->>Atomic: Relationships / Lore / Memory
+            Atomic-->>DB: strict result or typed failure
+            Runner->>Admin: independent review job
+            Admin-->>DB: proposal or no_proposal
         else provider failure
             API->>Engine: mark request retryable
             API-->>Client: 502 + unchanged player text
@@ -571,7 +577,10 @@ Runner сохраняет четыре обязательных свойства
 фактического отказа, а не claim; startup/shutdown, cancel и await принадлежат
 runner; Administrator и атомарная служебная модель имеют разные очереди, роли и
 handlers. Restart/shutdown возвращает claimed job в `pending` без расхода
-attempt. Эта source-интеграция ещё не является живой игровой приёмкой: Light GUI
+attempt. Atomic handler использует exact server-managed OpenRouter route
+`deepseek/deepseek-v4-pro` → `baidu/fp8` без provider fallback; Administrator
+остаётся на локальной Gemma и не делит с Atomic её provider или credentials.
+Эта source-интеграция ещё не является production-приёмкой: Light GUI
 подключён в source, но inventory выключен, production не активирован, seeded и
 live Party не пройдены.
 

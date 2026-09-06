@@ -208,7 +208,9 @@ endurance для более высоких ступеней не заявлен�
 provider client, FastAPI lifespan и Light GUI за `RP_REBUILD_ENABLED`. Новый
 source-контракт возвращает один World, создаёт preset/free Party, коммитит
 opening/ход только после успешного Narrator и ведёт три раздельные роли без
-raw/fallback. После C1 RP UI/Gateway не имеют training path: обучение обслуживает
+raw/fallback. Atomic Service закреплён за server-managed OpenRouter route
+`deepseek/deepseek-v4-pro` → `baidu/fp8`; локальная Gemma остаётся отдельной
+моделью Administrator. После C1 RP UI/Gateway не имеют training path: обучение обслуживает
 standalone Showroom. C1 apply выполнен; RP activation и новый production RP
 runtime ещё не выполнены. Inventory сохраняет флаг выключенным, поэтому страницы
 ниже явно различают applied C1-топологию и инертный clean RP-контур.

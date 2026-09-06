@@ -166,6 +166,17 @@ UPDATE/DELETE overlays запрещены triggers. Draft/reject не созда
 меняют gameplay state. Public API дополнительно проверяет owner, версию и exact
 target, не доверяя model output как authority.
 
+Atomic Service Decision 043 является внешним stack-managed контуром: bounded
+RAW/evidence, предыдущая story memory и необходимые World/Scenario anchors его
+операции отправляются через OpenRouter в exact endpoint `baidu/fp8` модели
+`deepseek/deepseek-v4-pro`. Для этого используется только server-managed
+`SERVICE_OPENROUTER_API_KEY`; Party BYOK, browser Authorization и ключ Narrator
+в atomic payload не попадают. Payload запрещает fallback и любой другой
+endpoint, включая NVIDIA. Request/response остаются под существующей
+redaction/retention политикой `service_call_log`; отдельное хранилище или новый
+retention-контракт не создаётся. Production cutover Decision 043 по-прежнему
+выключен и требует отдельного apply/live proof.
+
 ### RP supervisor: typed retention без raw trace
 
 Decision 040 добавляет `rp_supervisor_evaluations`, изолированную по

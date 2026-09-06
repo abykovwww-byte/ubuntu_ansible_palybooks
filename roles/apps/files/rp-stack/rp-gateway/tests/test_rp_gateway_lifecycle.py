@@ -130,22 +130,35 @@ def test_lifespan_owns_runner_and_recovery_does_not_spend_attempts(
     assert runner.running is False
 
 
-@pytest.mark.parametrize(
-    "enabled_role",
-    (
-        "atomic",
-        "administrator",
-    ),
-)
-def test_startup_rejects_enabled_but_unavailable_local_role(
+def test_atomic_service_uses_server_openrouter_without_local_runner(
     tmp_path: Path,
-    enabled_role: str,
 ) -> None:
     settings = replace(
         _settings(tmp_path),
-        rp_atomic_service_enabled=enabled_role == "atomic",
-        rp_administrator_enabled=enabled_role == "administrator",
+        rp_atomic_service_enabled=True,
+        service_openrouter_api_key="server-service-key",
     )
+
+    app = create_app(settings)
+
+    assert app.state.rp_runner.service_handler.model.provider == "openrouter"
+    assert (
+        app.state.rp_runner.service_handler.model.model
+        == "deepseek/deepseek-v4-pro"
+    )
+
+
+def test_startup_rejects_atomic_service_without_server_openrouter_key(
+    tmp_path: Path,
+) -> None:
+    settings = replace(_settings(tmp_path), rp_atomic_service_enabled=True)
+
+    with pytest.raises(ValueError, match="SERVICE_OPENROUTER_API_KEY"):
+        create_app(settings)
+
+
+def test_startup_rejects_administrator_without_local_runner(tmp_path: Path) -> None:
+    settings = replace(_settings(tmp_path), rp_administrator_enabled=True)
 
     with pytest.raises(ValueError, match="LOCAL_LLM_ENABLED=true"):
         create_app(settings)

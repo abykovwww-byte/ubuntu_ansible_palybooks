@@ -34,6 +34,8 @@ from app.services.service_model_client import ServiceModelClient, service_prompt
 
 
 _ACTIVE_PROVIDERS = frozenset({"local", "gemini", "openrouter"})
+RP_ATOMIC_MODEL = "deepseek/deepseek-v4-pro"
+RP_ATOMIC_OPENROUTER_PROVIDER = "baidu/fp8"
 _ResultT = TypeVar("_ResultT", bound=BaseModel)
 
 
@@ -105,8 +107,8 @@ class RPAtomicServiceProvider:
         client: ServiceModelClient | None = None,
     ) -> None:
         self.provider, self.model = _validated_route(provider, model)
-        if (self.provider, self.model) != ("local", "gemma-4-26b-a4b-it-rp-q4"):
-            raise ValueError("atomic service requires the fixed local model route")
+        if (self.provider, self.model) != ("openrouter", RP_ATOMIC_MODEL):
+            raise ValueError("atomic service requires the fixed OpenRouter model route")
         self.client = client or ServiceModelClient(settings)
 
     async def extract_relationships(
@@ -526,7 +528,10 @@ def _validated_route(provider: str, model: str) -> tuple[str, str]:
     clean_model = model.strip()
     if not clean_model:
         raise ValueError("model must contain text")
-    if clean_provider == "openrouter" and not openrouter_model_is_active(clean_model):
+    if clean_provider == "openrouter" and not (
+        openrouter_model_is_active(clean_model)
+        or clean_model.casefold() == RP_ATOMIC_MODEL
+    ):
         raise ValueError(f"OpenRouter model route is retired or unsafe: {clean_model}")
     return clean_provider, clean_model
 
@@ -610,11 +615,16 @@ def _structured_payload(
 
 
 def _exact_openrouter_provider(model: str) -> dict[str, Any]:
-    if model.casefold() != NARRATOR_MODEL:
+    clean_model = model.casefold()
+    if clean_model == NARRATOR_MODEL:
+        exact_provider = "openai"
+    elif clean_model == RP_ATOMIC_MODEL:
+        exact_provider = RP_ATOMIC_OPENROUTER_PROVIDER
+    else:
         raise ValueError(f"OpenRouter model has no accepted exact provider route: {model}")
     return {
-        "order": ["openai"],
-        "only": ["openai"],
+        "order": [exact_provider],
+        "only": [exact_provider],
         "allow_fallbacks": False,
     }
 
