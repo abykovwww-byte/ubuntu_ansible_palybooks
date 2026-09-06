@@ -49,6 +49,7 @@ from app.rp.mechanics import (
 )
 from app.rp.narrator import RPNarratorService, RPNarratorUnavailable
 from app.rp.provider import (
+    RP_ATOMIC_MODEL,
     RPAdministratorProvider,
     RPAtomicServiceProvider,
     RPNarratorProvider,
@@ -82,14 +83,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.scenario_type != "rp":
         raise RuntimeError("RP gateway requires SCENARIO_TYPE=rp")
     if (
-        settings.rp_atomic_service_enabled or settings.rp_administrator_enabled
-    ) and not settings.local_llm_enabled:
-        raise ValueError("enabled local RP roles require LOCAL_LLM_ENABLED=true")
+        settings.rp_atomic_service_enabled
+        and not settings.service_openrouter_api_key
+    ):
+        raise ValueError(
+            "enabled RP atomic service requires SERVICE_OPENROUTER_API_KEY"
+        )
+    if settings.rp_administrator_enabled and not settings.local_llm_enabled:
+        raise ValueError("enabled RP Administrator requires LOCAL_LLM_ENABLED=true")
 
     auth_store = AuthStore(settings)
     engine = RPTurnEngine(settings.rp_sqlite_path)
     atomic_model = RPAtomicServiceProvider(
-        settings, provider="local", model=settings.local_llm_model_alias
+        settings, provider="openrouter", model=RP_ATOMIC_MODEL
     )
     administrator_model = RPAdministratorProvider(
         settings, provider="local", model=settings.local_llm_model_alias

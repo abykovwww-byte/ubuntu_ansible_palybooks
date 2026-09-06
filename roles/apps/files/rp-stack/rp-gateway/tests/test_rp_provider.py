@@ -20,6 +20,8 @@ from app.rp.content import (
 from app.rp.mechanics import RPEvidenceSpan
 from app.rp.narrator import RPNarratorPrompt, RPPromptMessage
 from app.rp.provider import (
+    RP_ATOMIC_MODEL,
+    RP_ATOMIC_OPENROUTER_PROVIDER,
     RPAdministratorProvider,
     RPAtomicServiceProvider,
     RPNarratorProvider,
@@ -298,8 +300,8 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     )
     atomic = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="local",
-        model="gemma-4-26b-a4b-it-rp-q4",
+        provider="openrouter",
+        model=RP_ATOMIC_MODEL,
         client=atomic_client,  # type: ignore[arg-type]
     )
     administrator = RPAdministratorProvider(
@@ -357,9 +359,9 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     asyncio.run(exercise())
 
     assert [call["model"] for call in atomic_client.calls] == [
-        "gemma-4-26b-a4b-it-rp-q4",
-        "gemma-4-26b-a4b-it-rp-q4",
-        "gemma-4-26b-a4b-it-rp-q4",
+        RP_ATOMIC_MODEL,
+        RP_ATOMIC_MODEL,
+        RP_ATOMIC_MODEL,
     ]
     assert [call["role"] for call in atomic_client.calls] == [
         "rp_atomic_relationships",
@@ -371,7 +373,17 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         for call in atomic_client.calls
     )
     assert all(call["payload"]["temperature"] == 0 for call in atomic_client.calls)
-    assert all("provider" not in call["payload"] for call in atomic_client.calls)
+    assert all(call["provider"] == "openrouter" for call in atomic_client.calls)
+    assert all(
+        call["payload"]["provider"]
+        == {
+            "order": [RP_ATOMIC_OPENROUTER_PROVIDER],
+            "only": [RP_ATOMIC_OPENROUTER_PROVIDER],
+            "allow_fallbacks": False,
+            "require_parameters": True,
+        }
+        for call in atomic_client.calls
+    )
     expected_roots = (
         {"candidates"},
         {"result", "kind", "title", "content", "keywords", "evidence_span_ids"},
@@ -489,6 +501,24 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     ]
 
 
+def test_atomic_service_rejects_superseded_local_gemma(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="fixed OpenRouter model route"):
+        RPAtomicServiceProvider(
+            _settings(tmp_path),
+            provider="local",
+            model="gemma-4-26b-a4b-it-rp-q4",
+        )
+
+
+def test_narrator_rejects_atomic_service_model(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="fixed OpenRouter model route"):
+        RPNarratorProvider(
+            _settings(tmp_path),
+            provider="openrouter",
+            model=RP_ATOMIC_MODEL,
+        )
+
+
 @pytest.mark.parametrize(
     ("operation", "content"),
     [
@@ -503,8 +533,8 @@ def test_live_wrong_envelopes_are_rejected_without_normalization(
     client = RecordingClient(_completion(content))
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="local",
-        model="gemma-4-26b-a4b-it-rp-q4",
+        provider="openrouter",
+        model=RP_ATOMIC_MODEL,
         client=client,  # type: ignore[arg-type]
     )
 
@@ -541,8 +571,8 @@ def test_semantic_reject_is_terminal_model_output(
     client = RecordingClient(_completion(content, finish_reason=finish_reason))
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="local",
-        model="gemma-4-26b-a4b-it-rp-q4",
+        provider="openrouter",
+        model=RP_ATOMIC_MODEL,
         client=client,  # type: ignore[arg-type]
     )
 
@@ -564,8 +594,8 @@ def test_transport_error_remains_generic_and_retryable_by_runner(
     client = RecordingClient(transport_error)
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="local",
-        model="gemma-4-26b-a4b-it-rp-q4",
+        provider="openrouter",
+        model=RP_ATOMIC_MODEL,
         client=client,  # type: ignore[arg-type]
     )
 
@@ -597,8 +627,8 @@ def test_upstream_provider_error_remains_generic_and_retryable_by_runner(
     client = RecordingClient(response)
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="local",
-        model="gemma-4-26b-a4b-it-rp-q4",
+        provider="openrouter",
+        model=RP_ATOMIC_MODEL,
         client=client,  # type: ignore[arg-type]
     )
 
@@ -693,7 +723,7 @@ def test_provider_diagnostics_stay_in_shared_database(tmp_path: Path) -> None:
     )
 
 
-def test_player_operations_use_local_structured_route_with_discriminated_schema(
+def test_player_operations_use_openrouter_structured_route_with_discriminated_schema(
     tmp_path: Path,
 ) -> None:
     client = RecordingClient(
@@ -709,8 +739,8 @@ def test_player_operations_use_local_structured_route_with_discriminated_schema(
     )
     provider = RPAtomicServiceProvider(
         _settings(tmp_path),
-        provider="local",
-        model="gemma-4-26b-a4b-it-rp-q4",
+        provider="openrouter",
+        model=RP_ATOMIC_MODEL,
         client=client,  # type: ignore[arg-type]
     )
 

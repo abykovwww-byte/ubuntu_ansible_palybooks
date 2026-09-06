@@ -190,7 +190,7 @@ rp_stack_gemini_api_base: "https://generativelanguage.googleapis.com/v1beta/open
 rp_stack_gemini_api_key: ""
 rp_stack_openrouter_api_base: "https://openrouter.ai/api/v1"
 rp_stack_openrouter_api_key: ""
-rp_stack_service_openrouter_api_key: ""
+rp_stack_service_openrouter_api_key: "{{ rp_stack_openrouter_api_key }}"
 rp_stack_gateway_port: 8088
 rp_stack_light_gui_host_port: 8010
 rp_stack_gateway_database_url: "sqlite:////data/rp_gateway.db"

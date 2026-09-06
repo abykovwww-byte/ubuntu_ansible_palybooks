@@ -19,22 +19,28 @@
 
 | Роль | Scope | Маршрут |
 |---|---|---|
-| Narrator | Одна Party | Exact immutable provider/base URL/model Party; один вызов на opening/ход |
-| Атомарная служебная модель | Stack-managed | Story memory, Relationships и runtime Lore через свою очередь/handler |
-| Administrator | Stack-managed | Отдельная очередь/handler, только proposal; применение делает владелец Party |
+| Narrator | Одна Party | `openai/gpt-5.6-luna-pro` через exact OpenRouter provider `openai`; один вызов на opening/ход |
+| Атомарная служебная модель | Stack-managed | `deepseek/deepseek-v4-pro` через exact OpenRouter provider `baidu/fp8`; Story memory, Relationships, runtime/player Lore и PlayerCorrection |
+| Administrator | Stack-managed | Local `gemma-4-26b-a4b-it-rp-q4`; отдельная очередь/handler, только proposal |
 
 Narrator не наследует глобальную служебную модель, не меняет provider и не
 использует fallback/repair. Party-scoped BYOK допустим только при точном
 совпадении provider и base URL immutable binding; ключ custom endpoint без exact
 совпадения не отправляется ни на canonical, ни на custom endpoint. Служебные
-роли никогда не получают Party BYOK. Включённая служебная роль с недоступной
-моделью блокирует startup, вместо расходования job attempts после запуска.
+роли никогда не получают Party BYOK. Включённый Atomic Service без
+`SERVICE_OPENROUTER_API_KEY` блокирует startup; включённый Administrator без
+local runner блокирует startup отдельно, вместо расходования job attempts после
+запуска. Inventory по умолчанию берёт service key из существующего server
+OpenRouter key; отдельный `rp_stack_service_openrouter_api_key` в local
+overrides может явно развести credentials без изменения source.
 
-Clean RP принимает только exact OpenRouter model ID: динамические
-`openrouter/auto` и `openrouter/free`, а также `nvidia/*`, скрыты из активного
-picker и отклоняются до provider call. Для разрешённого exact model Gateway
-дополнительно передаёт OpenRouter `provider.ignore=["nvidia"]`. Сохранённые
-исторические profile/Party/log rows не удаляются и не переназначаются.
+Clean RP принимает только закреплённые OpenRouter model ID и endpoint tag.
+Narrator отправляет `provider.order/only=["openai"]`, Atomic Service —
+`provider.order/only=["baidu/fp8"]`; оба задают `allow_fallbacks=false`, а
+Atomic дополнительно требует поддержку переданных schema parameters.
+Динамические `openrouter/auto` и `openrouter/free`, `nvidia/*` и любой другой
+endpoint отклоняются до provider call. Сохранённые исторические
+profile/Party/log rows не удаляются и не переназначаются.
 
 Supervisor clean Party показывает модель, enabled/kill switch, текущее
 состояние, success/error и последнюю ошибку каждой роли, но не raw provider
@@ -58,7 +64,7 @@ Party может по-прежнему показывать прежний provi
 поддерживаемой модели. Новый запрос никогда не использует его как endpoint,
 fallback или retry target.
 
-Для обычного narrator picker Gateway скрывает модели с известным context меньше `131072`. Локальная Gemma имеет рабочее окно `32768`, поэтому не предлагается как narrator длинной партии. Она остаётся доступна для bounded auto-player и служебных задач.
+Для обычного narrator picker Gateway скрывает модели с известным context меньше `131072`. Локальная Gemma имеет рабочее окно `32768`, поэтому не предлагается как narrator длинной партии. Она остаётся доступна для bounded auto-player, legacy service paths и clean Administrator, но clean Atomic Service её больше не использует.
 
 ## Модель партии
 
@@ -351,6 +357,10 @@ local route и следует обычной retry/error policy без смен�
 party BYOK для него всё равно не используется. Выведенная или неизвестная
 сохранённая service choice показывается как недоступная и не подменяется другой
 моделью.
+
+В clean Decision 043 это описание относится к Administrator. Atomic Service
+имеет отдельную фиксированную cloud-привязку и не ждёт local runner; его отказ не
+переключает задачу обратно на Gemma.
 
 Окна 32768 tokens достаточно для legacy RP story-memory updater revisions
 `0..7`: предыдущий snapshot ограничен 24000 символов, state excerpt — 8000

@@ -151,6 +151,19 @@ strict schema — следующие функциональные/acceptance ш�
 менялся и остаётся blind A/B anchor. Это закрывает pre-flight для начала шага 2,
 но не является API/runner/storage/UI или activation proof.
 
+**Повторная оценка 2026-09-06.** Короткий canary Gemma не выдержал длинную
+acceptance Party: при version `60` Relationships завершились `60/60`, но Runtime
+Lore — `0/60`, а Story Memory остановилась на safe coverage `32`; версии
+`40..60` исчерпали по три попытки, и `64` memory calls дошли до 150-секундного
+timeout. Поэтому Gemma больше не является принятым Atomic route. На неизменённых
+strict schemas синтетический canary выбрал `deepseek/deepseek-v4-pro` через
+exact `baidu/fp8`: Relationships, Runtime Lore и Story Memory прошли `3/3` за
+`1.634..3.511 s`, суммарная фактическая стоимость составила около `$0.003`.
+Маршрут использует server-managed key, `provider.order/only`,
+`allow_fallbacks=false`, `require_parameters=true` и не содержит NVIDIA.
+Administrator и Narrator этим изменением не переназначаются. Детали и границы —
+в [датированном evidence](../decisions/evidence/043-atomic-model-replacement-2026-09-06.md).
+
 ### Шаг 2 — заморозить внешний контракт и file map
 
 Перед кодом составить consumer map `endpoint → handler → storage → prompt/UI →
