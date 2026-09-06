@@ -30,7 +30,9 @@ Narrator не наследует глобальную служебную мод�
 роли никогда не получают Party BYOK. Включённый Atomic Service без
 `SERVICE_OPENROUTER_API_KEY` блокирует startup; включённый Administrator без
 local runner блокирует startup отдельно, вместо расходования job attempts после
-запуска.
+запуска. Inventory по умолчанию берёт service key из существующего server
+OpenRouter key; отдельный `rp_stack_service_openrouter_api_key` в local
+overrides может явно развести credentials без изменения source.
 
 Clean RP принимает только закреплённые OpenRouter model ID и endpoint tag.
 Narrator отправляет `provider.order/only=["openai"]`, Atomic Service —

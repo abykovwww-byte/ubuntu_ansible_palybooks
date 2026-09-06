@@ -8,7 +8,9 @@ Atomic Service clean RP закрепляется за:
 - OpenRouter endpoint tag: `baidu/fp8`;
 - `provider.order` и `provider.only`: только `baidu/fp8`;
 - `allow_fallbacks=false`, `require_parameters=true`, reasoning off;
-- credentials: только server-managed `SERVICE_OPENROUTER_API_KEY`.
+- credentials: только server-managed `SERVICE_OPENROUTER_API_KEY`; inventory
+  по умолчанию использует существующий server OpenRouter key, а local override
+  может задать отдельный service key.
 
 Narrator остаётся на `openai/gpt-5.6-luna-pro` → `openai`, Administrator — на
 local `gemma-4-26b-a4b-it-rp-q4`. Публичный Party API и job/storage schemas не
@@ -84,8 +86,8 @@ Canary выполнялся из acceptance Gateway container с искусст�
 
 ## Границы доказательства
 
-На source-кандидате пройдены focused provider/lifecycle tests `25 passed`, полный
-Gateway suite `99 passed` и aggregate `scripts/ci.ps1`, включая repository,
+На source-кандидате пройдены focused provider/lifecycle tests `26 passed`, полный
+Gateway suite `100 passed` и aggregate `scripts/ci.ps1`, включая repository,
 Wiki, devkit, JavaScript и Gateway gates. Merge, acceptance image, live job rows
 и production apply фиксируются отдельно после выполнения; production inventory
 Decision 043 остаётся выключенным.

@@ -170,8 +170,10 @@ Atomic Service Decision 043 является внешним stack-managed кон
 RAW/evidence, предыдущая story memory и необходимые World/Scenario anchors его
 операции отправляются через OpenRouter в exact endpoint `baidu/fp8` модели
 `deepseek/deepseek-v4-pro`. Для этого используется только server-managed
-`SERVICE_OPENROUTER_API_KEY`; Party BYOK, browser Authorization и ключ Narrator
-в atomic payload не попадают. Payload запрещает fallback и любой другой
+`SERVICE_OPENROUTER_API_KEY`; Party BYOK и browser Authorization в atomic
+payload не попадают. Inventory по умолчанию задаёт service credential тем же
+существующим server OpenRouter key, что и Narrator; отдельный local override
+может развести эти credentials. Payload запрещает fallback и любой другой
 endpoint, включая NVIDIA. Request/response остаются под существующей
 redaction/retention политикой `service_call_log`; отдельное хранилище или новый
 retention-контракт не создаётся. Production cutover Decision 043 по-прежнему
