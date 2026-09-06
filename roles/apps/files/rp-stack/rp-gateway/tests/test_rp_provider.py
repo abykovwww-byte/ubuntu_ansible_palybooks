@@ -169,6 +169,24 @@ def _turn() -> RPTurn:
     )
 
 
+def _memory_turns() -> tuple[RPTurn, ...]:
+    turn = _turn()
+    return tuple(
+        replace(
+            turn,
+            id=version,
+            request_id=f"memory-request-{version}",
+            idempotency_key=f"memory-key-{version}",
+            expected_version=version - 1,
+            committed_version=version,
+            player_text=f"Действие игрока {version}." * 4,
+            narrator_text=f"Последствие действия {version}." * 4,
+            created_at=version,
+        )
+        for version in range(1, 9)
+    )
+
+
 def _spans() -> tuple[RPEvidenceSpan, ...]:
     return (
         RPEvidenceSpan(
@@ -266,32 +284,13 @@ def test_narrator_malformed_or_truncated_response_is_terminal_at_boundary(
 
 
 def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> None:
-    memory = {
-        "schema_version": "rp-story-memory.v1",
-        "observed_through_version": 1,
-        "situation": {"coverage": 1, "status": "fresh", "current_situation": None, "canon": []},
-        "threads": {"coverage": 1, "status": "fresh", "active_threads": [], "resolved_threads": []},
-        "characters": {"coverage": 1, "status": "fresh", "characters": []},
-        "assets_and_rules": {
-            "coverage": 1,
-            "status": "fresh",
-            "inventory_and_assets": [],
-            "rules_and_abilities": [],
-        },
-        "chronology_and_hooks": {
-            "coverage": 1,
-            "status": "fresh",
-            "chronology": [],
-            "unresolved_hooks": [],
-        },
-    }
     atomic_client = RecordingClient(
         _completion('{"candidates":[]}'),
         _completion(
             '{"result":"no_candidate","kind":"event","title":null,'
             '"content":null,"keywords":null,"evidence_span_ids":null}'
         ),
-        _completion(json.dumps(memory, ensure_ascii=False)),
+        _completion("Антон принял помощь игрока, и их сотрудничество укрепилось."),
     )
     administrator_client = RecordingClient(
         _completion(
@@ -312,6 +311,7 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     )
     party = _party()
     turn = _turn()
+    memory_turns = _memory_turns()
     spans = _spans()
     existing_lore = RPRuntimeLoreCard(
         id=1,
@@ -342,7 +342,7 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
             existing_runtime_lore=(existing_lore,),
         )
         story_memory = await atomic.update_story_memory(
-            party=party, turns=(turn,), previous=None
+            party=party, turns=memory_turns
         )
         review = await administrator.review_party(
             party=party,
@@ -353,7 +353,7 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         )
         assert relationships.candidates == ()
         assert lore.result == "no_candidate"
-        assert story_memory.safe_coverage == 1
+        assert story_memory.startswith("Антон принял помощь")
         assert review.result == "no_proposal"
 
     asyncio.run(exercise())
@@ -387,17 +387,8 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     expected_roots = (
         {"candidates"},
         {"result", "kind", "title", "content", "keywords", "evidence_span_ids"},
-        {
-            "schema_version",
-            "observed_through_version",
-            "situation",
-            "threads",
-            "characters",
-            "assets_and_rules",
-            "chronology_and_hooks",
-        },
     )
-    for call, expected_root in zip(atomic_client.calls, expected_roots, strict=True):
+    for call, expected_root in zip(atomic_client.calls[:2], expected_roots, strict=True):
         response_format = call["payload"]["response_format"]
         assert response_format["type"] == "json_schema"
         assert response_format["json_schema"]["strict"] is True
@@ -442,34 +433,16 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         "duplicate_or_recap_returns_no_candidate": True,
         "preserve_uncertainty_and_attribution": True,
     }
-    memory_messages = atomic_client.calls[2]["payload"]["messages"]
-    memory_body = json.loads(memory_messages[1]["content"])
-    assert memory_body["constraints"] == {
-        "memory_fact_text_max_chars": 1_024,
-        "source_turn_versions_max_items": 128,
-        "source_turn_versions_overflow": (
-            "keep origin, latest changes, and strongest RAW evidence"
-        ),
-    }
-    assert memory_body["turns"] == [
-        {
-            "turn_kind": turn.turn_kind,
-            "committed_version": turn.committed_version,
-            "player_text": turn.player_text,
-            "narrator_text": turn.narrator_text,
-        }
-    ]
+    memory_payload = atomic_client.calls[2]["payload"]
+    memory_messages = memory_payload["messages"]
+    assert "[TURN 1]" in memory_messages[1]["content"]
+    assert "[TURN 8]" in memory_messages[1]["content"]
+    assert "Ориентир — 600–1200 символов" in memory_messages[1]["content"]
+    assert "Верни только компактный связный текст" in memory_messages[0]["content"]
+    assert "OUTPUT_SCHEMA=" not in memory_messages[0]["content"]
+    assert "response_format" not in memory_payload
     assert atomic_client.calls[1]["payload"]["max_tokens"] == 2_048
-    assert atomic_client.calls[2]["payload"]["max_tokens"] == 16_384
-    memory_schema = atomic_client.calls[2]["payload"]["response_format"][
-        "json_schema"
-    ]["schema"]
-    assert (
-        memory_schema["$defs"]["RPMemoryFact"]["properties"]["text"][
-            "maxLength"
-        ]
-        == 1_024
-    )
+    assert memory_payload["max_tokens"] == 1_024
     assert len(administrator_client.calls) == 1
     assert administrator_client.calls[0]["provider"] == "local"
     assert administrator_client.calls[0]["model"] == "gemma-4-26b-a4b-it-rp-q4"
@@ -525,6 +498,7 @@ def test_narrator_rejects_atomic_service_model(tmp_path: Path) -> None:
         ("relationships", '{"relationships":[],"events":[],"notes":[]}'),
         ("runtime_lore", '{"cards":[]}'),
         ("story_memory", '{"party_id":"party-one","memory_snapshot":{}}'),
+        ("story_memory", "```json\n{}\n```"),
     ],
 )
 def test_live_wrong_envelopes_are_rejected_without_normalization(
@@ -548,7 +522,7 @@ def test_live_wrong_envelopes_are_rejected_without_normalization(
                 party=_party(), turn=_turn(), evidence_spans=_spans()
             )
         return await provider.update_story_memory(
-            party=_party(), turns=(_turn(),), previous=None
+            party=_party(), turns=_memory_turns()
         )
 
     with pytest.raises(RPModelOutputRejected):

@@ -13,15 +13,11 @@ from app.rp.content import (
     WorldSnapshot,
 )
 from app.rp.memory import (
+    RP_MEMORY_CHUNK_MAX_CHARS,
     RP_MEMORY_SCHEMA_VERSION,
-    RPAssetsAndRulesMemory,
-    RPCharactersMemory,
-    RPChronologyAndHooksMemory,
-    RPMemoryFact,
-    RPSituationMemory,
     RPStoryMemoryRecord,
+    RPStoryMemoryChunk,
     RPStoryMemorySnapshot,
-    RPThreadsMemory,
 )
 from app.rp.narrator import (
     RPNarratorPrompt,
@@ -114,50 +110,27 @@ def _create_engine(tmp_path: Path, party_id: str = "party-one") -> RPTurnEngine:
 
 
 def _snapshot(
-    observed: int,
-    coverage: int | dict[str, int],
+    coverage: int,
     *,
     memory_text: str | None = None,
 ) -> RPStoryMemorySnapshot:
-    values = (
-        {key: coverage for key in (
-            "situation",
-            "threads",
-            "characters",
-            "assets_and_rules",
-            "chronology_and_hooks",
-        )}
-        if isinstance(coverage, int)
-        else coverage
-    )
-    fact = (
-        RPMemoryFact(
-            fact_id="party.memory.fact",
-            text=memory_text,
-            authority="inference",
-            source_turn_versions=(1,),
+    chunks = tuple(
+        RPStoryMemoryChunk(
+            start_version=start,
+            end_version=start + 7,
+            level=1,
+            narrative=(
+                memory_text
+                if memory_text is not None and start + 7 == coverage
+                else f"Память ходов {start}–{start + 7}."
+            ),
         )
-        if memory_text is not None
-        else None
+        for start in range(1, coverage + 1, 8)
     )
     return RPStoryMemorySnapshot(
         schema_version=RP_MEMORY_SCHEMA_VERSION,
-        observed_through_version=observed,
-        situation=RPSituationMemory(
-            coverage=values["situation"],
-            status="fresh",
-            current_situation=fact,
-        ),
-        threads=RPThreadsMemory(coverage=values["threads"], status="fresh"),
-        characters=RPCharactersMemory(
-            coverage=values["characters"], status="fresh"
-        ),
-        assets_and_rules=RPAssetsAndRulesMemory(
-            coverage=values["assets_and_rules"], status="fresh"
-        ),
-        chronology_and_hooks=RPChronologyAndHooksMemory(
-            coverage=values["chronology_and_hooks"], status="fresh"
-        ),
+        covered_through_version=coverage,
+        chunks=chunks,
     )
 
 
@@ -179,36 +152,27 @@ def _turns(count: int) -> tuple[RPTurn, ...]:
     )
 
 
-def test_memory_fact_keeps_bounded_provenance_for_a_long_party() -> None:
-    fact = RPMemoryFact(
-        fact_id="long.party.provenance",
-        text="Факт сохраняет проверяемые источники длинной партии.",
-        authority="inference",
-        source_turn_versions=tuple(range(1, 129)),
+def test_story_memory_is_bounded_narrative_not_a_fact_registry() -> None:
+    chunk = RPStoryMemoryChunk(
+        start_version=1,
+        end_version=8,
+        level=1,
+        narrative="x" * RP_MEMORY_CHUNK_MAX_CHARS,
     )
-
-    assert len(fact.source_turn_versions) == 128
-    assert len(
-        RPMemoryFact(
-            fact_id="compact.memory.fact",
-            text="x" * 1_024,
-            authority="inference",
-            source_turn_versions=(1,),
-        ).text
-    ) == 1_024
+    assert len(chunk.narrative) == RP_MEMORY_CHUNK_MAX_CHARS
     with pytest.raises(ValueError):
-        RPMemoryFact(
-            fact_id="oversized.memory.fact",
-            text="x" * 1_025,
-            authority="inference",
-            source_turn_versions=(1,),
+        RPStoryMemoryChunk(
+            start_version=1,
+            end_version=8,
+            level=1,
+            narrative="x" * (RP_MEMORY_CHUNK_MAX_CHARS + 1),
         )
-    with pytest.raises(ValueError):
-        RPMemoryFact(
-            fact_id="too.long.party.provenance",
-            text="Превышенный внутренний bound отклоняется.",
-            authority="inference",
-            source_turn_versions=tuple(range(1, 130)),
+    with pytest.raises(ValueError, match="base-eight level"):
+        RPStoryMemoryChunk(
+            start_version=1,
+            end_version=7,
+            level=1,
+            narrative="Неверный диапазон.",
         )
 
 
@@ -379,7 +343,7 @@ def test_opening_is_one_assistant_only_raw_unit(tmp_path: Path) -> None:
 
 def test_story_memory_is_append_only_monotonic_and_party_scoped(tmp_path: Path) -> None:
     engine = _create_engine(tmp_path)
-    for version in range(3):
+    for version in range(16):
         engine.commit_turn(
             owner_user_id="owner-one",
             party_id="party-one",
@@ -389,16 +353,7 @@ def test_story_memory_is_append_only_monotonic_and_party_scoped(tmp_path: Path) 
             player_text=f"Игрок {version}",
             narrator_text=f"Нарратор {version}",
         )
-    first_snapshot = _snapshot(
-        3,
-        {
-            "situation": 2,
-            "threads": 2,
-            "characters": 2,
-            "assets_and_rules": 2,
-            "chronology_and_hooks": 1,
-        },
-    )
+    first_snapshot = _snapshot(8)
     first = engine.append_story_memory(
         owner_user_id="owner-one",
         party_id="party-one",
@@ -406,7 +361,7 @@ def test_story_memory_is_append_only_monotonic_and_party_scoped(tmp_path: Path) 
         update_id="memory-one",
         snapshot=first_snapshot,
     )
-    second_snapshot = _snapshot(3, 2)
+    second_snapshot = _snapshot(16)
     second = engine.append_story_memory(
         owner_user_id="owner-one",
         party_id="party-one",
@@ -415,8 +370,8 @@ def test_story_memory_is_append_only_monotonic_and_party_scoped(tmp_path: Path) 
         snapshot=second_snapshot,
     )
 
-    assert first.snapshot.safe_coverage == 1
-    assert second.snapshot.safe_coverage == 2
+    assert first.snapshot.safe_coverage == 8
+    assert second.snapshot.safe_coverage == 16
     assert engine.latest_story_memory(
         owner_user_id="owner-one", party_id="party-one"
     ) == second
@@ -457,40 +412,6 @@ def test_story_memory_is_append_only_monotonic_and_party_scoped(tmp_path: Path) 
             update_id="memory-two",
             snapshot=first_snapshot,
         )
-    stale_advanced = second_snapshot.model_copy(
-        update={"threads": RPThreadsMemory(coverage=3, status="stale")}
-    )
-    with pytest.raises(ValueError, match="stale memory section"):
-        engine.append_story_memory(
-            owner_user_id="owner-one",
-            party_id="party-one",
-            expected_base_snapshot_id=second.id,
-            update_id="stale-advanced",
-            snapshot=stale_advanced,
-        )
-    stale_rewritten = second_snapshot.model_copy(
-        update={
-            "situation": RPSituationMemory(
-                coverage=2,
-                status="stale",
-                current_situation=RPMemoryFact(
-                    fact_id="rewritten.stale.fact",
-                    text="Неподтверждённая замена.",
-                    authority="inference",
-                    source_turn_versions=(1,),
-                ),
-            )
-        }
-    )
-    with pytest.raises(ValueError, match="must preserve its base content"):
-        engine.append_story_memory(
-            owner_user_id="owner-one",
-            party_id="party-one",
-            expected_base_snapshot_id=second.id,
-            update_id="stale-rewritten",
-            snapshot=stale_rewritten,
-        )
-
     with sqlite3.connect(engine.sqlite_path) as connection:
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             connection.execute(
@@ -503,56 +424,6 @@ def test_story_memory_is_append_only_monotonic_and_party_scoped(tmp_path: Path) 
             )
 
 
-def test_failed_or_oversized_memory_cannot_hide_required_raw(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="cannot claim safe coverage"):
-        RPThreadsMemory(coverage=1, status="failed")
-
-    engine = _create_engine(tmp_path)
-    engine.commit_turn(
-        owner_user_id="owner-one",
-        party_id="party-one",
-        request_id="seed-request",
-        idempotency_key="seed-key",
-        expected_version=0,
-        player_text="Я запоминаю.",
-        narrator_text="Память закрепляется.",
-    )
-    oversized_facts = tuple(
-        RPMemoryFact(
-            fact_id=f"oversized.fact.{index}",
-            text="x" * 1_024,
-            authority="inference",
-            source_turn_versions=(1,),
-        )
-        for index in range(25)
-    )
-    oversized = RPStoryMemorySnapshot(
-        schema_version=RP_MEMORY_SCHEMA_VERSION,
-        observed_through_version=1,
-        situation=RPSituationMemory(
-            coverage=1, status="fresh", canon=oversized_facts
-        ),
-        threads=RPThreadsMemory(coverage=1, status="fresh"),
-        characters=RPCharactersMemory(coverage=1, status="fresh"),
-        assets_and_rules=RPAssetsAndRulesMemory(coverage=1, status="fresh"),
-        chronology_and_hooks=RPChronologyAndHooksMemory(
-            coverage=1, status="fresh"
-        ),
-    )
-
-    with pytest.raises(ValueError, match="exceeds its prompt budget"):
-        engine.append_story_memory(
-            owner_user_id="owner-one",
-            party_id="party-one",
-            expected_base_snapshot_id=None,
-            update_id="oversized-memory",
-            snapshot=oversized,
-        )
-    assert engine.latest_story_memory(
-        owner_user_id="owner-one", party_id="party-one"
-    ) is None
-
-
 def test_raw_anchor_safe_coverage_stable_prefix_and_source_ownership(
     tmp_path: Path,
 ) -> None:
@@ -563,45 +434,51 @@ def test_raw_anchor_safe_coverage_stable_prefix_and_source_ownership(
     assert tuple(
         turn.committed_version
         for turn in select_raw_turns(
-            turns_66[:57], safe_coverage=57, window_turns=50, anchor_turns=8
+            turns_66[:57], safe_coverage=0, window_turns=50, anchor_turns=8
         )
     ) == tuple(range(1, 58))
     assert tuple(
         turn.committed_version
         for turn in select_raw_turns(
-            turns_66[:58], safe_coverage=58, window_turns=50, anchor_turns=8
+            turns_66[:58], safe_coverage=8, window_turns=50, anchor_turns=8
         )
     ) == tuple(range(9, 59))
     assert tuple(
         turn.committed_version
         for turn in select_raw_turns(
-            turns_66, safe_coverage=66, window_turns=50, anchor_turns=8
+            turns_66[:65], safe_coverage=8, window_turns=50, anchor_turns=8
+        )
+    ) == tuple(range(9, 66))
+    assert tuple(
+        turn.committed_version
+        for turn in select_raw_turns(
+            turns_66, safe_coverage=16, window_turns=50, anchor_turns=8
         )
     ) == tuple(range(17, 67))
     lagging = select_raw_turns(
-        turns_66, safe_coverage=10, window_turns=50, anchor_turns=8
+        turns_66, safe_coverage=8, window_turns=50, anchor_turns=8
     )
-    assert tuple(turn.committed_version for turn in lagging) == tuple(range(11, 67))
+    assert tuple(turn.committed_version for turn in lagging) == tuple(range(9, 67))
 
     builder = RPNarratorPromptBuilder(
         RPPromptLimits(raw_window_turns=2, raw_anchor_turns=2)
     )
     at_two = builder.build_turn(
         party=party,
-        turns=turns_66[:2],
-        memory=_record(_snapshot(2, 2, memory_text="PARTY_MEMORY_TOKEN"), 1),
+        turns=turns_66[:16],
+        memory=_record(_snapshot(16, memory_text="PARTY_MEMORY_TOKEN"), 1),
         player_text="CURRENT_ACTION_TWO",
     )
     at_three = builder.build_turn(
         party=party,
-        turns=turns_66[:3],
-        memory=_record(_snapshot(3, 3, memory_text="CHANGED_MEMORY_TOKEN"), 2),
+        turns=turns_66[:17],
+        memory=_record(_snapshot(16, memory_text="CHANGED_MEMORY_TOKEN"), 2),
         player_text="CURRENT_ACTION_THREE",
     )
     at_four = builder.build_turn(
         party=party,
-        turns=turns_66[:4],
-        memory=_record(_snapshot(4, 4, memory_text="CHANGED_AGAIN_TOKEN"), 3),
+        turns=turns_66[:18],
+        memory=_record(_snapshot(16, memory_text="CHANGED_AGAIN_TOKEN"), 3),
         player_text="CURRENT_ACTION_FOUR",
     )
 
@@ -675,7 +552,7 @@ def test_each_protected_prompt_layer_fails_closed_before_provider_or_commit(
             party_id="party-one",
             expected_base_snapshot_id=None,
             update_id="memory-zero",
-            snapshot=_snapshot(0, 0),
+            snapshot=_snapshot(0),
         )
     narrator = RecordingNarrator("Этот ответ не должен быть вызван.")
     limit_field = "relationship" if layer == "relationships" else layer
@@ -716,28 +593,29 @@ def test_persisted_raw_and_latest_memory_feed_the_narrator_boundary(
     tmp_path: Path,
 ) -> None:
     engine = _create_engine(tmp_path)
-    engine.commit_turn(
-        owner_user_id="owner-one",
-        party_id="party-one",
-        request_id="seed-request",
-        idempotency_key="seed-key",
-        expected_version=0,
-        player_text="Я запоминаю знак.",
-        narrator_text="Знак остаётся на двери.",
-    )
+    for version in range(1, 9):
+        engine.commit_turn(
+            owner_user_id="owner-one",
+            party_id="party-one",
+            request_id=f"seed-request-{version}",
+            idempotency_key=f"seed-key-{version}",
+            expected_version=version - 1,
+            player_text=f"Я запоминаю знак {version}.",
+            narrator_text=f"Знак {version} остаётся на двери.",
+        )
     first = engine.append_story_memory(
         owner_user_id="owner-one",
         party_id="party-one",
         expected_base_snapshot_id=None,
         update_id="memory-one",
-        snapshot=_snapshot(1, 1, memory_text="OLD_MEMORY_TOKEN"),
+        snapshot=_snapshot(8, memory_text="OLD_MEMORY_TOKEN"),
     )
     engine.append_story_memory(
         owner_user_id="owner-one",
         party_id="party-one",
         expected_base_snapshot_id=first.id,
         update_id="memory-two",
-        snapshot=_snapshot(1, 1, memory_text="LATEST_MEMORY_TOKEN"),
+        snapshot=_snapshot(8, memory_text="LATEST_MEMORY_TOKEN"),
     )
     narrator = RecordingNarrator("Сцена продолжается.")
     service = RPNarratorService(engine, narrator)
@@ -748,16 +626,16 @@ def test_persisted_raw_and_latest_memory_feed_the_narrator_boundary(
             party_id="party-one",
             request_id="live-request",
             idempotency_key="live-key",
-            expected_version=1,
+            expected_version=8,
             player_text="Я проверяю дверь.",
         )
     )
 
-    assert committed.committed_version == 2
+    assert committed.committed_version == 9
     assert len(narrator.prompts) == 1
     prompt = narrator.prompts[0]
-    assert prompt.raw_turn_versions == (1,)
-    assert prompt.safe_memory_coverage == 1
+    assert prompt.raw_turn_versions == tuple(range(1, 9))
+    assert prompt.safe_memory_coverage == 8
     memory_blocks = [
         message.content
         for message in prompt.messages
@@ -772,15 +650,16 @@ def test_narrator_waits_for_previous_raw_jobs_then_rereads_prompt_inputs(
     tmp_path: Path,
 ) -> None:
     engine = _create_engine(tmp_path)
-    engine.commit_turn(
-        owner_user_id="owner-one",
-        party_id="party-one",
-        request_id="seed-request",
-        idempotency_key="seed-key",
-        expected_version=0,
-        player_text="Я замечаю знак.",
-        narrator_text="Знак остаётся на стене.",
-    )
+    for version in range(1, 9):
+        engine.commit_turn(
+            owner_user_id="owner-one",
+            party_id="party-one",
+            request_id=f"seed-request-{version}",
+            idempotency_key=f"seed-key-{version}",
+            expected_version=version - 1,
+            player_text=f"Я замечаю знак {version}.",
+            narrator_text=f"Знак {version} остаётся на стене.",
+        )
     claimed_jobs = []
     while True:
         job = engine.claim_service_job()
@@ -839,7 +718,7 @@ def test_narrator_waits_for_previous_raw_jobs_then_rereads_prompt_inputs(
                 party_id="party-one",
                 expected_base_snapshot_id=None,
                 update_id="waited-memory",
-                snapshot=_snapshot(1, 1, memory_text="WAITED_MEMORY_TOKEN"),
+                snapshot=_snapshot(8, memory_text="WAITED_MEMORY_TOKEN"),
             )
             for job in claimed_jobs:
                 assert job.claim_token is not None
@@ -847,6 +726,13 @@ def test_narrator_waits_for_previous_raw_jobs_then_rereads_prompt_inputs(
                     job_id=job.id,
                     claim_token=job.claim_token,
                     result={"kind": job.job_type, "result": "completed"},
+                )
+            while pending := engine.claim_service_job():
+                assert pending.claim_token is not None
+                engine.complete_service_job(
+                    job_id=pending.id,
+                    claim_token=pending.claim_token,
+                    result={"kind": pending.job_type, "result": "completed"},
                 )
             terminal = True
 
@@ -856,7 +742,7 @@ def test_narrator_waits_for_previous_raw_jobs_then_rereads_prompt_inputs(
                 party_id="party-one",
                 request_id="live-request",
                 idempotency_key="live-key",
-                expected_version=1,
+                expected_version=8,
                 player_text="Я изучаю знак.",
             )
         )
@@ -865,9 +751,9 @@ def test_narrator_waits_for_previous_raw_jobs_then_rereads_prompt_inputs(
 
     committed = asyncio.run(exercise())
 
-    assert committed.committed_version == 2
+    assert committed.committed_version == 9
     assert history_reads >= 2
-    assert narrator.prompts[0].raw_turn_versions == (1,)
+    assert narrator.prompts[0].raw_turn_versions == tuple(range(1, 9))
     memory_block = next(
         message.content
         for message in narrator.prompts[0].messages

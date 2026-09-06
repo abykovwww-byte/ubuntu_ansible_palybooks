@@ -11,9 +11,16 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.rp.memory import (
+    RP_MEMORY_ARCHIVE_SOURCE_MAX_CHARS,
+    RP_MEMORY_BATCH_TURNS,
+    RP_MEMORY_CHUNK_MAX_CHARS,
+    RP_MEMORY_HIERARCHY_CONTEXT_CHARS,
     RP_MEMORY_PROMPT_MAX_CHARS,
-    RPMemoryFact,
+    RP_MEMORY_RAW_WINDOW_TURNS,
+    RP_MEMORY_RAW_CHUNK_MAX_CHARS,
+    RP_MEMORY_SCHEMA_VERSION,
     RPStoryMemoryRecord,
+    RPStoryMemoryChunk,
     RPStoryMemorySnapshot,
     memory_prompt_text,
 )
@@ -223,8 +230,7 @@ class RPAtomicServiceModel(Protocol):
         *,
         party: RPParty,
         turns: tuple[RPTurn, ...],
-        previous: RPStoryMemoryRecord | None,
-    ) -> RPStoryMemorySnapshot: ...
+    ) -> str: ...
 
     async def draft_player_lore(
         self,
@@ -268,11 +274,11 @@ class RPAtomicServiceHandler:
         engine: RPTurnEngine,
         model: RPAtomicServiceModel,
         *,
-        memory_anchor_turns: int = 8,
+        memory_anchor_turns: int = RP_MEMORY_BATCH_TURNS,
         lore_prompt_chars: int = RP_LORE_PROMPT_MAX_CHARS,
     ):
-        if memory_anchor_turns <= 0:
-            raise ValueError("memory_anchor_turns must be positive")
+        if memory_anchor_turns != RP_MEMORY_BATCH_TURNS:
+            raise ValueError("story-memory batches must contain exactly eight turns")
         if lore_prompt_chars <= 0:
             raise ValueError("lore_prompt_chars must be positive")
         self.engine = engine
@@ -434,6 +440,32 @@ class RPAtomicServiceHandler:
                     "snapshot_id": existing.id,
                 },
             )
+        previous = self.engine.latest_story_memory(
+            owner_user_id=job.owner_user_id, party_id=job.party_id
+        )
+        safe_coverage = previous.snapshot.safe_coverage if previous is not None else 0
+        failed_predecessor = next(
+            (
+                candidate
+                for candidate in self.engine.list_service_jobs(
+                    owner_user_id=job.owner_user_id, party_id=job.party_id
+                )
+                if candidate.id < job.id
+                and candidate.job_type == "story_memory"
+                and candidate.status == "failed"
+                and candidate.source_version > safe_coverage
+            ),
+            None,
+        )
+        if failed_predecessor is not None:
+            return self.engine.record_service_job_result(
+                job=job,
+                result={
+                    "kind": "story_memory",
+                    "result": "blocked",
+                    "blocked_by_job_id": failed_predecessor.id,
+                },
+            )
         turns = tuple(
             turn
             for turn in self.engine.list_turns(
@@ -441,30 +473,90 @@ class RPAtomicServiceHandler:
             )
             if turn.committed_version <= job.source_version
         )
-        previous = self.engine.latest_story_memory(
-            owner_user_id=job.owner_user_id, party_id=job.party_id
-        )
-        safe_coverage = previous.snapshot.safe_coverage if previous is not None else 0
-        uncovered = tuple(
-            turn for turn in turns if turn.committed_version > safe_coverage
-        )
-        if len(uncovered) < self.memory_anchor_turns:
-            return self.engine.record_service_job_result(
-                job=job,
-                result={
-                    "kind": "story_memory",
-                    "result": "not_due",
-                    "uncovered_units": len(uncovered),
-                },
+        current = (
+            previous.snapshot
+            if previous is not None
+            else RPStoryMemorySnapshot(
+                schema_version=RP_MEMORY_SCHEMA_VERSION,
+                covered_through_version=0,
+                chunks=(),
             )
-        snapshot = await self.model.update_story_memory(
-            party=party, turns=uncovered, previous=previous
+        )
+        hierarchy_batch = _first_hierarchy_batch(current)
+        context_chars = _story_context_chars(current, turns)
+        operation = "raw_batch"
+        replacement_start: int | None = None
+        new_level = 1
+        if (
+            context_chars >= RP_MEMORY_HIERARCHY_CONTEXT_CHARS
+            and hierarchy_batch is not None
+        ):
+            replacement_start, selected_chunks = hierarchy_batch
+            start_version = selected_chunks[0].start_version
+            end_version = selected_chunks[-1].end_version
+            new_level = selected_chunks[0].level + 1
+            operation = "raw_archive"
+        else:
+            compressible_through = max(
+                job.source_version - RP_MEMORY_RAW_WINDOW_TURNS, 0
+            )
+            if compressible_through - safe_coverage < self.memory_anchor_turns:
+                return self.engine.record_service_job_result(
+                    job=job,
+                    result={
+                        "kind": "story_memory",
+                        "result": "not_due",
+                        "covered_through_version": safe_coverage,
+                        "raw_turns": len(turns) - safe_coverage,
+                    },
+                )
+            start_version = safe_coverage + 1
+            end_version = safe_coverage + self.memory_anchor_turns
+        source_turns = _turns_for_memory_span(
+            turns, start_version=start_version, end_version=end_version
+        )
+        source_chars = sum(
+            len(turn.player_text) + len(turn.narrator_text) for turn in source_turns
+        )
+        if source_chars > RP_MEMORY_ARCHIVE_SOURCE_MAX_CHARS:
+            raise RPModelOutputRejected(
+                "story-memory RAW source exceeds the archive compression limit"
+            )
+        narrative = await self.model.update_story_memory(
+            party=party, turns=source_turns
         )
         try:
-            if not isinstance(snapshot, RPStoryMemorySnapshot):
-                snapshot = RPStoryMemorySnapshot.model_validate(snapshot)
-            if snapshot.observed_through_version > job.source_version:
-                raise ValueError("story memory cannot observe beyond its source job")
+            max_chars = (
+                RP_MEMORY_RAW_CHUNK_MAX_CHARS
+                if new_level == 1
+                else RP_MEMORY_CHUNK_MAX_CHARS
+            )
+            narrative = _validated_memory_narrative(
+                narrative, source_chars=source_chars, max_chars=max_chars
+            )
+            new_chunk = RPStoryMemoryChunk(
+                start_version=start_version,
+                end_version=end_version,
+                level=new_level,
+                narrative=narrative,
+            )
+            if replacement_start is None:
+                chunks = (*current.chunks, new_chunk)
+                covered_through_version = end_version
+            else:
+                chunks = (
+                    *current.chunks[:replacement_start],
+                    new_chunk,
+                    *current.chunks[
+                        replacement_start + self.memory_anchor_turns :
+                    ],
+                )
+                covered_through_version = current.covered_through_version
+            snapshot = RPStoryMemorySnapshot(
+                schema_version=RP_MEMORY_SCHEMA_VERSION,
+                covered_through_version=covered_through_version,
+                chunks=chunks,
+            )
             prompt_text = memory_prompt_text(snapshot)
             if len(prompt_text) > RP_MEMORY_PROMPT_MAX_CHARS:
                 raise ValueError("story memory exceeds its protected prompt budget")
@@ -485,8 +577,75 @@ class RPAtomicServiceHandler:
                 "kind": "story_memory",
                 "result": "updated",
                 "snapshot_id": saved.id,
+                "operation": operation,
+                "start_version": start_version,
+                "end_version": end_version,
+                "level": new_level,
+                "source_chars": source_chars,
+                "summary_chars": len(narrative),
             },
         )
+
+
+def _first_hierarchy_batch(
+    snapshot: RPStoryMemorySnapshot,
+) -> tuple[int, tuple[RPStoryMemoryChunk, ...]] | None:
+    for index in range(len(snapshot.chunks) - RP_MEMORY_BATCH_TURNS + 1):
+        chunks = snapshot.chunks[index : index + RP_MEMORY_BATCH_TURNS]
+        if len({chunk.level for chunk in chunks}) == 1:
+            return index, chunks
+    return None
+
+
+def _story_context_chars(
+    snapshot: RPStoryMemorySnapshot, turns: tuple[RPTurn, ...]
+) -> int:
+    desired_start = max(len(turns) - RP_MEMORY_RAW_WINDOW_TURNS, 0)
+    anchored_start = (
+        desired_start // RP_MEMORY_BATCH_TURNS
+    ) * RP_MEMORY_BATCH_TURNS
+    first_uncovered = next(
+        (
+            index
+            for index, turn in enumerate(turns)
+            if turn.committed_version > snapshot.safe_coverage
+        ),
+        len(turns),
+    )
+    raw_turns = turns[min(anchored_start, first_uncovered) :]
+    return len(memory_prompt_text(snapshot)) + sum(
+        len(turn.player_text) + len(turn.narrator_text) for turn in raw_turns
+    )
+
+
+def _turns_for_memory_span(
+    turns: tuple[RPTurn, ...], *, start_version: int, end_version: int
+) -> tuple[RPTurn, ...]:
+    selected = tuple(
+        turn
+        for turn in turns
+        if start_version <= turn.committed_version <= end_version
+    )
+    if tuple(turn.committed_version for turn in selected) != tuple(
+        range(start_version, end_version + 1)
+    ):
+        raise RPModelOutputRejected(
+            "story-memory compression source is not a complete RAW span"
+        )
+    return selected
+
+
+def _validated_memory_narrative(
+    value: object, *, source_chars: int, max_chars: int
+) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("story-memory narrative must contain text")
+    narrative = value.strip()
+    if len(narrative) > max_chars:
+        raise ValueError("story-memory narrative exceeds its level limit")
+    if len(narrative) >= source_chars:
+        raise ValueError("story-memory narrative must be shorter than its RAW source")
+    return narrative
 
 
 class RPAdministratorHandler:
@@ -878,33 +1037,24 @@ def player_correction_catalog(
     """Build the exact immutable target catalog; the model only ranks a subset."""
     catalog: list[dict[str, Any]] = []
     if memory is not None:
-        for section_key, section in memory.snapshot.sections().items():
-            for field_name in type(section).model_fields:
-                value = getattr(section, field_name)
-                facts = (
-                    (value,)
-                    if isinstance(value, RPMemoryFact)
-                    else tuple(
-                        item
-                        for item in value
-                        if isinstance(item, RPMemoryFact)
-                    )
-                    if isinstance(value, tuple)
-                    else ()
-                )
-                for fact in facts:
-                    if fact.status != "active":
-                        continue
-                    catalog.append(
-                        {
-                            "target_slot": f"memory:{field_name}:{fact.fact_id}",
-                            "target_kind": "memory",
-                            "section": section_key,
-                            "field": field_name,
-                            "before": fact.text,
-                            "source_versions": list(fact.source_turn_versions),
-                        }
-                    )
+        for chunk in memory.snapshot.chunks:
+            chunk_id = hashlib.sha256(
+                _canonical_json(
+                    [chunk.start_version, chunk.end_version, chunk.narrative]
+                ).encode("utf-8")
+            ).hexdigest()[:20]
+            catalog.append(
+                {
+                    "target_slot": (
+                        f"memory:{chunk.start_version}-{chunk.end_version}:{chunk_id}"
+                    ),
+                    "target_kind": "memory",
+                    "start_version": chunk.start_version,
+                    "end_version": chunk.end_version,
+                    "level": chunk.level,
+                    "before": chunk.narrative,
+                }
+            )
     for start, end, text in _bounded_claims(party.world_snapshot.setting_rules):
         claim_id = hashlib.sha256(
             _canonical_json(
@@ -989,9 +1139,7 @@ def rank_player_correction_targets(
         if candidate.get("target_kind") == "raw":
             return int(candidate.get("turn_id") or 0)
         if candidate.get("target_kind") == "memory":
-            versions = candidate.get("source_versions")
-            if isinstance(versions, list):
-                return max((int(item) for item in versions), default=0)
+            return int(candidate.get("end_version") or 0)
         return 0
 
     ranked = sorted(

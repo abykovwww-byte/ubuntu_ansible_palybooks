@@ -24,12 +24,6 @@ from app.rp.mechanics import (
 )
 from app.rp.memory import (
     RP_MEMORY_SCHEMA_VERSION,
-    RPAssetsAndRulesMemory,
-    RPCharactersMemory,
-    RPChronologyAndHooksMemory,
-    RPSituationMemory,
-    RPStoryMemorySnapshot,
-    RPThreadsMemory,
 )
 from app.rp.narrator import RPNarratorPromptBuilder
 from app.rp.turn_engine import (
@@ -180,45 +174,34 @@ class _AdministratorModelFake:
 
 
 class _StoryMemoryModelFake(_AtomicModelFake):
-    def __init__(self) -> None:
+    def __init__(self, *, oversized: bool = False) -> None:
         super().__init__()
-        self.calls: list[tuple[tuple[int, ...], int | None]] = []
+        self.calls: list[tuple[int, ...]] = []
+        self.oversized = oversized
 
     async def update_story_memory(
-        self, *, turns: tuple[object, ...], previous: object | None, **_: object
-    ) -> RPStoryMemorySnapshot:
+        self, *, turns: tuple[object, ...], **_: object
+    ) -> str:
         versions = tuple(int(getattr(turn, "committed_version")) for turn in turns)
-        previous_coverage = (
-            int(getattr(getattr(previous, "snapshot"), "safe_coverage"))
-            if previous is not None
-            else None
-        )
-        self.calls.append((versions, previous_coverage))
-        coverage = versions[-1]
-        return RPStoryMemorySnapshot(
-            schema_version=RP_MEMORY_SCHEMA_VERSION,
-            observed_through_version=coverage,
-            situation=RPSituationMemory(coverage=coverage, status="fresh"),
-            threads=RPThreadsMemory(coverage=coverage, status="fresh"),
-            characters=RPCharactersMemory(coverage=coverage, status="fresh"),
-            assets_and_rules=RPAssetsAndRulesMemory(
-                coverage=coverage, status="fresh"
-            ),
-            chronology_and_hooks=RPChronologyAndHooksMemory(
-                coverage=coverage, status="fresh"
-            ),
-        )
+        self.calls.append(versions)
+        if self.oversized:
+            return "x" * sum(
+                len(str(getattr(turn, "player_text")))
+                + len(str(getattr(turn, "narrator_text")))
+                for turn in turns
+            )
+        return f"Краткая история ходов {versions[0]}–{versions[-1]}."
 
 
-def test_story_memory_model_receives_only_uncovered_committed_raw(
+def test_story_memory_keeps_fifty_raw_turns_and_compresses_older_eights(
     tmp_path: Path,
 ) -> None:
     engine = RPTurnEngine(tmp_path / "rp-clean.db")
     _create_party(engine, "party-incremental-memory")
     model = _StoryMemoryModelFake()
-    handler = RPAtomicServiceHandler(engine, model, memory_anchor_turns=1)
+    handler = RPAtomicServiceHandler(engine, model)
 
-    for version in (1, 2):
+    for version in range(1, 67):
         engine.commit_turn(
             owner_user_id="owner-one",
             party_id="party-incremental-memory",
@@ -228,16 +211,122 @@ def test_story_memory_model_receives_only_uncovered_committed_raw(
             player_text=f"Игрок {version}.",
             narrator_text=f"Нарратор {version}.",
         )
-        job = _claim_service_job(engine, "story_memory")
-        result = asyncio.run(handler.handle(job))
+    while job := engine.claim_service_job():
         assert job.claim_token is not None
+        if job.job_type != "story_memory":
+            engine.complete_service_job(
+                job_id=job.id,
+                claim_token=job.claim_token,
+                result={"kind": job.job_type, "result": "not_exercised"},
+            )
+            continue
+        result = asyncio.run(handler.handle(job))
         engine.complete_service_job(
             job_id=job.id,
             claim_token=job.claim_token,
             result=result,
         )
 
-    assert model.calls == [((1,), None), ((2,), 1)]
+    assert model.calls == [tuple(range(1, 9)), tuple(range(9, 17))]
+    memory = engine.latest_story_memory(
+        owner_user_id="owner-one", party_id="party-incremental-memory"
+    )
+    assert memory is not None
+    assert memory.snapshot.schema_version == RP_MEMORY_SCHEMA_VERSION
+    assert memory.snapshot.safe_coverage == 16
+    assert [(item.start_version, item.end_version) for item in memory.snapshot.chunks] == [
+        (1, 8),
+        (9, 16),
+    ]
+
+
+def test_story_memory_rebuilds_eight_oldest_chunks_from_canonical_raw(
+    tmp_path: Path,
+) -> None:
+    engine = RPTurnEngine(tmp_path / "rp-clean.db")
+    _create_party(engine, "party-hierarchy")
+    model = _StoryMemoryModelFake()
+    handler = RPAtomicServiceHandler(engine, model)
+    for version in range(1, 116):
+        engine.commit_turn(
+            owner_user_id="owner-one",
+            party_id="party-hierarchy",
+            request_id=f"request-hierarchy-{version}",
+            idempotency_key=f"key-hierarchy-{version}",
+            expected_version=version - 1,
+            player_text="И" * 1_500,
+            narrator_text="Н" * 1_500,
+        )
+
+    while job := engine.claim_service_job():
+        assert job.claim_token is not None
+        if job.job_type == "story_memory":
+            result = asyncio.run(handler.handle(job))
+        else:
+            result = {"kind": job.job_type, "result": "not_exercised"}
+        engine.complete_service_job(
+            job_id=job.id, claim_token=job.claim_token, result=result
+        )
+
+    assert model.calls[:8] == [
+        tuple(range(start, start + 8)) for start in range(1, 65, 8)
+    ]
+    assert model.calls[8] == tuple(range(1, 65))
+    memory = engine.latest_story_memory(
+        owner_user_id="owner-one", party_id="party-hierarchy"
+    )
+    assert memory is not None
+    assert len(memory.snapshot.chunks) == 1
+    assert memory.snapshot.chunks[0].level == 2
+    assert (memory.snapshot.chunks[0].start_version, memory.snapshot.chunks[0].end_version) == (
+        1,
+        64,
+    )
+
+
+def test_rejected_story_memory_batch_is_not_repeated_or_allowed_to_grow(
+    tmp_path: Path,
+) -> None:
+    engine = RPTurnEngine(tmp_path / "rp-clean.db")
+    _create_party(engine, "party-memory-rejection")
+    model = _StoryMemoryModelFake(oversized=True)
+    handler = RPAtomicServiceHandler(engine, model)
+    for version in range(1, 60):
+        engine.commit_turn(
+            owner_user_id="owner-one",
+            party_id="party-memory-rejection",
+            request_id=f"request-rejection-{version}",
+            idempotency_key=f"key-rejection-{version}",
+            expected_version=version - 1,
+            player_text=f"Игрок подробно действует в ходе {version}." * 10,
+            narrator_text=f"Нарратор подробно отвечает в ходе {version}." * 10,
+        )
+
+    failed_job = _claim_service_job(engine, "story_memory")
+    while failed_job.source_version < 58:
+        result = asyncio.run(handler.handle(failed_job))
+        assert failed_job.claim_token is not None
+        engine.complete_service_job(
+            job_id=failed_job.id,
+            claim_token=failed_job.claim_token,
+            result=result,
+        )
+        failed_job = _claim_service_job(engine, "story_memory")
+    with pytest.raises(RPModelOutputRejected, match="exceeds its level limit"):
+        asyncio.run(handler.handle(failed_job))
+    assert failed_job.claim_token is not None
+    engine.fail_service_job(
+        job_id=failed_job.id,
+        claim_token=failed_job.claim_token,
+        error="story-memory narrative must be shorter than its RAW source",
+        retryable=False,
+    )
+
+    next_job = _claim_service_job(engine, "story_memory")
+    blocked = asyncio.run(handler.handle(next_job))
+
+    assert blocked["result"] == "blocked"
+    assert model.calls == [tuple(range(1, 9))]
 
 
 def test_invalid_relationship_candidate_does_not_erase_valid_sibling(
