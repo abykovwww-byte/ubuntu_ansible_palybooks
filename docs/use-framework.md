@@ -1,70 +1,139 @@
 # USE Framework на abykovserv
 
-## Состояние доставки
+Приложение управляется элементом `use-framework` роли `apps`. Полная принятая
+ревизия задаётся в `inventories/local/group_vars/server.yml` переменной
+`use_framework_repo_version`. IaC получает этот commit, создаёт приватный `.env`,
+собирает образ и запускает Compose. Сервис опубликован на порту 8765 для LAN и
+Tailscale; отдельные nginx и DNS не создаются.
 
-Приложение управляется элементом `use-framework` роли `apps`. IaC клонирует ровно commit `5e3c8530a6681928ab5220acf2f89d5c7ebd9c14`, создаёт server-only `.env`, собирает образ и запускает Compose. По решению владельца сервис публикуется как `0.0.0.0:8765`, включая LAN и Tailscale; nginx и DNS не создаются.
+## Граф и происхождение данных
 
-Данные хранятся отдельно от checkout:
+В разделе «Граф» режим «Срез источников» показывает активы и связи из приватных
+редакций реестров. Для каждого свойства сохраняются источник, дата, область,
+история выбора и допустимый замещающий слой. Приоритет WIKI → корпоративный
+GitLab → применимая свежая телеметрия действует только для сопоставимого свойства
+и области. GitHub здесь хранит код приложения и правила доставки.
 
-| Путь | Назначение |
+В текущем режиме свежесть оценивается на время запроса. Исторический выбор
+оценивает данные на дату среза. Явное отрицательное значение сохраняется;
+неизвестность, ошибка, неоднозначность и устаревшее наблюдение не получают смысл
+актуального отрицательного результата. Прежние документы и диаграммы доступны
+среди сопровождающих записей без превращения в новые активы.
+
+Процессная модель остаётся отдельным режимом со своими контрактами и метриками.
+Назначение машины в NetBox не доказывает выполнение процесса, а GitLab-схема —
+передачу сообщения. Правила и процедура обновления принадлежат репозиторию
+приложения:
+
+- [Политика источников](https://github.com/abykovwww-byte/Unacceptable-security-event-USE-Framework/blob/main/docs/architecture/SOURCE_LAYERS.md).
+- [Импорт, предварительная проверка и восстановление](https://github.com/abykovwww-byte/Unacceptable-security-event-USE-Framework/blob/main/docs/source-layers-operations.md).
+
+## Приватное состояние
+
+| Путь сервера | Назначение |
 |---|---|
-| `/srv/apps/use-framework` | закреплённый исходный код и Compose |
-| `/srv/app-data/use-framework` | канонический YAML, snapshots, mapping-профили, отчёты и SQLite |
-| `/srv/app-data/use-framework/import/ns1-assets.xlsx` | приватная серверная копия сохранённого реестра НС1; не хранится в Git |
-| `/srv/app-data/use-framework/import/ns1-ad-accounts.json` | приватный нормализованный AD-срез 4 учётных записей; не хранится в Git |
-| `/srv/app-data/use-framework/import/ns1-ad-computers.json` | приватный нормализованный AD-срез 14 компьютеров; не хранится в Git |
-| `/srv/app-data/use-framework/operational-registry` | immutable operational registry snapshots и атомарный current pointer; item-level данные не хранятся в Git |
-| `/srv/backups/use-framework` | архивы backup/restore |
+| `/srv/apps/use-framework` | Закреплённый код и Compose |
+| `/srv/app-data/use-framework` | Том `/data`: каноника, инвентарь, реестры, отчёты и SQLite |
+| `/srv/app-data/use-framework/import` | Явно переданные входные файлы; сохраняемые редакции реестров |
+| `/srv/app-data/use-framework/provenance/snapshots` | Неизменяемые срезы источников |
+| `/srv/app-data/use-framework/provenance/current.json` | Атомарный указатель текущего среза |
+| `/srv/app-data/use-framework/provenance/artifacts` | Первичные файлы с именами SHA-256 |
+| `/srv/app-data/use-framework/operational-registry` | Существующий отдельный operational registry |
+| `/srv/backups/use-framework` | Том `/backups`: архивы резервного копирования |
 
-GitHub-репозиторий закрытый. До первого apply значение `use_framework_github_token` должно быть задано только в `/etc/ansible/local-overrides.yml`. Токен в Git и в этот документ не добавляется. Для этого app включён изолированный режим `repo_version_is_commit`: clone выполняется без checkout, затем роль делает fetch/reset на полный закреплённый SHA. Поведение остальных branch/tag-приложений не меняется.
+Реальные строки, исходные внутренние документы и персональные значения остаются
+в приватном томе. Код, схема и синтетические проверки хранятся в Git. Импорт
+срезов не входит в образ и не выполняется автоматически при старте контейнера.
 
-Ansible preflight требует приватный `ns1-assets.xlsx` до пересборки контейнера. Application entry point импортирует его через минимальный production mapping: сохраняет только нормализованные host/EDR-поля и переносит прежний `example.test` snapshot в quarantine. Если приватный источник отсутствует, ложная тестовая фикстура не обслуживается. AD JSON импортируются отдельно статическими production-профилями с `preserve_free_fields: false`; они остаются inventory-only до появления точного подтверждённого binding. Operational registry импортируется отдельно через authenticated preview/commit API, сохраняется только в private runtime и не меняет канонический граф. Токен операций записи генерируется локально на сервере в `/etc/ansible/use-framework-api-token`, передаётся только через runtime `.env` и не хранится в Git.
+Доступ к закрытому репозиторию и токен операций записи настраиваются только
+сервером. Не читать и не переносить секреты из local overrides или `.env`.
+Режим роли `repo_version_is_commit` закрепляет приложение по полному SHA.
+Существующий preflight требует приватный `/data/import/ns1-assets.xlsx`; новый
+режим источников не отменяет этот потребитель старого inventory. Прежние AD и
+operational-registry импорты сохраняют собственные контракты.
 
-## Apply владельцем сервера
+## Обновить код
 
-После merge в `main` прошедшего зелёный CI non-draft pull request с IaC:
+Изменить pin на принятый SHA приложения, пройти зелёный CI и влить non-draft PR
+IaC в `main`. Затем владелец сервера запускает применение интерактивно:
 
-```text
+```bash
 sudo systemctl start ansible-local-apply.service
 sudo systemctl status ansible-local-apply.service --no-pager
-sudo journalctl -u ansible-local-apply.service -n 200 --no-pager
 ```
 
-Повторный запуск должен быть успешным и не пересобирать приложение без изменения Git revision, `.env` или принудительного флага роли.
+Пароль sudo не передаётся агенту. Успешный merge не является доказательством
+apply. После завершения сверить `/health` с закреплённой ревизией и проверить
+контейнер. Повторный apply без изменения pin или конфигурации не должен
+пересобирать приложение.
 
-После первого успешного apply этого revision выполнить read-only preview двух AD-срезов, проверить `instances: 4` и `instances: 14`, затем повторить те же команды с `--apply` и штатно перезапустить контейнер, чтобы API перечитал snapshots:
+## Доставить редакцию реестров
 
-```text
-docker exec use-framework nsgraph --root /data inventory import /data/import/ns1-ad-accounts.json --profile /app/inventory/mappings/ns1-ad-accounts-production.yaml --source-id ns1-ad-accounts --captured-at 2026-08-14 --freshness-days 30
-docker exec use-framework nsgraph --root /data inventory import /data/import/ns1-ad-computers.json --profile /app/inventory/mappings/ns1-ad-computers-production.yaml --source-id ns1-ad-computers --captured-at 2026-08-14 --freshness-days 30
-docker exec use-framework nsgraph --root /data inventory import /data/import/ns1-ad-accounts.json --profile /app/inventory/mappings/ns1-ad-accounts-production.yaml --source-id ns1-ad-accounts --captured-at 2026-08-14 --freshness-days 30 --apply
-docker exec use-framework nsgraph --root /data inventory import /data/import/ns1-ad-computers.json --profile /app/inventory/mappings/ns1-ad-computers-production.yaml --source-id ns1-ad-computers --captured-at 2026-08-14 --freshness-days 30 --apply
-docker restart use-framework
+Пакет готовится адаптером приложения вне любого Git worktree. Передать только
+проверенный JSON и названные им первичные артефакты; сохранить даты и точность
+источников. Разместить JSON в отдельном каталоге внутри `/data/import`, а
+артефакты — в `/data/provenance/artifacts/<sha256>`. Сверить хэши после доставки.
+
+После применения совместимой версии выполнить предварительную проверку:
+
+```bash
+docker exec use-framework python -m nsgraph.provenance --root /data import \
+  --bundle /data/import/source-layers/edition.json
 ```
 
-## Live-приёмка
+Без `--apply` операция ничего не активирует. Проверка должна подтвердить схему,
+ссылки, неизменность идентификаторов и фактические байты артефактов. Перед
+изменением указателя создать backup:
 
-```text
-docker ps --filter name=use-framework
-curl --fail http://192.168.1.88:8765/health
-curl --fail http://100.117.52.16:8765/health
-curl --fail 'http://192.168.1.88:8765/api/graph?event=ns1'
-curl --fail 'http://192.168.1.88:8765/api/graph?event=ns1&view=scenario'
-curl --fail 'http://192.168.1.88:8765/api/instances?type=host'
-curl --fail 'http://192.168.1.88:8765/api/snapshots'
-curl --fail 'http://192.168.1.88:8765/api/registry/entities'
-curl --fail 'http://192.168.1.88:8765/api/registry/snapshots'
-curl --fail 'http://192.168.1.88:8765/api/quality'
-docker exec use-framework nsgraph --root /data/canonical validate
+```bash
 docker exec use-framework /app/docker/backup.sh
 ```
 
-Открыть `http://192.168.1.88:8765` из LAN и `http://100.117.52.16:8765` через Tailscale и проверить НС1. Представление API по умолчанию `view=landscape`: 21 вершина, 19 рёбер, `scenario_projection=0`; неподтверждённое e1 доступно только в явном `view=scenario`, где сохраняются 34 вершины и 43 ребра. Общая repository health остаётся 35/43: inventory-only `host_ts1c_bc` с `event_scope: []` не входит ни в одно event-filtered представление. GUI-карточки и `/api/instances` обязаны использовать только latest snapshot каждого source, сохраняя старые snapshots как историю. Карточки показывают canonical attributes, identity и нормализованные instance fields с source/date; процессы `supplier-payment` и `payroll` подписаны как «Оплата поставщику» и «Выплата зарплаты».
+Для первого среза передать `--expected-current none --apply`; для последующих —
+точный `current_snapshot_id` из предварительной проверки. При конфликте текущего
+указателя сначала повторить проверку. Импорт старой редакции сохраняет историю
+и не переключает текущую назад. Повтор того же пакета идемпотентен.
 
-Для текущих приватных источников ожидаются: 82 current host instances, `example.test=0`, source id `ns1-hosts`, `captured_at=2026-08-14`, `stale=0`; EDR `69 yes / 0 no / 13 unknown`, Sysmon `34 yes / 29 no / 19 unknown`, Security `40 yes / 23 no / 19 unknown`. `host_banking_app` должен иметь ровно одну привязку к `preo-sb-bc-01.bc.ptsecurity.com` / `10.0.57.33`; `dc3-bc-1capp-01` не объединяется с ним. `host_ts1c_bc` подтверждён как сервер тестирования 1С:ДиректБанк и остаётся inventory-only без выдуманного ребра. AD preview/apply даёт 4 account и 14 computer instances, также inventory-only. Assets заполняет карточку `sys_erp` только по exact match IR-30932; остальные найденные карточки не привязываются к вершинам без item-level identity/edge evidence.
+## Приёмка на сервере
 
-## Обновление и rollback
+```bash
+docker ps --filter name=use-framework
+curl --fail http://192.168.1.88:8765/health
+curl --fail http://192.168.1.88:8765/api/provenance/snapshots
+docker exec use-framework nsgraph --root /data/canonical validate
+```
 
-Обновление выполняется заменой `use_framework_repo_version` на полный принятый SHA приложения. Перед изменением модели создать backup. Revision `5e3c8530a6681928ab5220acf2f89d5c7ebd9c14` сохраняет ранее принятые compatibility selectors и изолированный operational registry. В GUI WIKI, Jira Assets и GitLab вложены в одну колонку «Исходные артефакты», а NetBox, AD и EDR показаны соседними верхнеуровневыми колонками; тяжёлые поля источников раскрываются по запросу без fixed overlay ошибки. Immutable private snapshots, authenticated preview/commit API и backup/restore private каталога сохраняются. Реальные host/Identity observations и персональные данные в Git не переносятся. EDR health вычисляется как `authorized && connected=true && age(last_seen)<14d`; ровно 14 суток уже не OK. Successor preflight миграции запускается перед общим hygiene guard только для точного известного пятифайлового cohort и ожидаемого target SHA; partial, unknown и future drift остаются fail-closed. `model/**` этим revision не меняется.
+Ответы с реальными карточками не сохранять в Git. Открыть приложение через
+LAN и при наличии соответствующего подключения — через Tailscale. Проверить:
 
-Fail-closed миграции принимают только известные SHA-256 persistent-модели, сначала валидируют временную канонику и сохраняют первоначальные originals в `/data/canonical-migrations/<migration-id>/`; последующие принятые upgrade сохраняют существующий backup неизменным, а неизвестное локальное расхождение останавливает запуск без перезаписи. Bootstrap вычисляет `captured_at` по серверному XLSX и сохраняет snapshot history, но current API выбирает только latest snapshot каждого source. Rollback кода — вернуть предыдущий SHA и повторить apply; rollback данных — остановить сервис, выполнить `/app/docker/restore.sh` для архива соответствующей revision и снова запустить apply. Производный SQLite при старте пересобирается из восстановленного YAML.
+- текущий граф и исторический срез, даты сбора и оценки;
+- карточку с изменившимся значением и сохранённым прежним основанием;
+- явные `true`, `false` и неизвестность без их смешения;
+- связь с источником, областью и основанием привязки обоих участников;
+- списки сопровождающих объектов и неразрешённых связей;
+- доступность процессной модели и существующих разделов приложения.
+
+Количество записей и сроки свежести брать из конкретного среза и его политики.
+Не закреплять в этой инструкции прежние количества EDR/AD, `stale=0` или
+поимённые привязки как бессрочные ожидания.
+
+## Резервное копирование и откат
+
+Backup новой версии включает весь `provenance` вместе с прежними разделами:
+снимки, указатель и первичные артефакты. Старый архив без этого каталога не
+восстанавливает историю источников. Перед restore остановить запись, сохранить
+текущее состояние и следовать инструкции приложения. После restore проверить
+указатель, хэши и карточки, затем доступность сервиса.
+
+Откат кода выполняется возвратом принятого pin через PR и повторным apply.
+Приватные срезы при этом не удаляются; версия до поддержки provenance их не
+показывает. Откат кода и восстановление данных — отдельные операции. Неизвестный
+дрейф канонической модели по-прежнему останавливает миграцию без перезаписи.
+
+## Устаревшая инструкция
+
+Редакция этого документа для `5e3c8530a6681928ab5220acf2f89d5c7ebd9c14`
+описывала импорты и наблюдения августа 2026 года. Её поимённые привязки,
+количества и оценки свежести не являются актуальной приёмкой. История прежней
+редакции сохранена в Git; новые запуски используют правила выше и датированный
+результат конкретной проверки.
