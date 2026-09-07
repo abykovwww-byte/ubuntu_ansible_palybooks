@@ -169,7 +169,7 @@ def _turn() -> RPTurn:
     )
 
 
-def _memory_turns() -> tuple[RPTurn, ...]:
+def _memory_turns(count: int = 8) -> tuple[RPTurn, ...]:
     turn = _turn()
     return tuple(
         replace(
@@ -183,7 +183,7 @@ def _memory_turns() -> tuple[RPTurn, ...]:
             narrator_text=f"Последствие действия {version}." * 4,
             created_at=version,
         )
-        for version in range(1, 9)
+        for version in range(1, count + 1)
     )
 
 
@@ -439,10 +439,11 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     assert "[TURN 8]" in memory_messages[1]["content"]
     assert "Ориентир — 600–1200 символов" in memory_messages[1]["content"]
     assert "Верни только компактный связный текст" in memory_messages[0]["content"]
+    assert "Символьный лимит из запроса обязателен" in memory_messages[0]["content"]
     assert "OUTPUT_SCHEMA=" not in memory_messages[0]["content"]
     assert "response_format" not in memory_payload
     assert atomic_client.calls[1]["payload"]["max_tokens"] == 2_048
-    assert memory_payload["max_tokens"] == 1_024
+    assert memory_payload["max_tokens"] == 384
     assert len(administrator_client.calls) == 1
     assert administrator_client.calls[0]["provider"] == "local"
     assert administrator_client.calls[0]["model"] == "gemma-4-26b-a4b-it-rp-q4"
@@ -472,6 +473,23 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     assert "OUTPUT_SCHEMA=" in administrator_client.calls[0]["payload"]["messages"][0][
         "content"
     ]
+
+
+def test_story_memory_archive_uses_bounded_output_budget(tmp_path: Path) -> None:
+    client = RecordingClient(_completion("Связная архивная история."))
+    provider = RPAtomicServiceProvider(
+        _settings(tmp_path),
+        provider="openrouter",
+        model=RP_ATOMIC_MODEL,
+        client=client,  # type: ignore[arg-type]
+    )
+
+    asyncio.run(provider.update_story_memory(party=_party(), turns=_memory_turns(64)))
+
+    payload = client.calls[0]["payload"]
+    assert payload["max_tokens"] == 1_024
+    assert "Ориентир — 2000–4000 символов" in payload["messages"][1]["content"]
+    assert "не длиннее 6000 символов" in payload["messages"][1]["content"]
 
 
 def test_atomic_service_rejects_superseded_local_gemma(tmp_path: Path) -> None:
