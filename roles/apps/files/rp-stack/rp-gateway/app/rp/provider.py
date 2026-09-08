@@ -373,6 +373,7 @@ class RPAtomicServiceProvider:
             else RP_MEMORY_CHUNK_MAX_CHARS
         )
         target_chars = "600–1200" if level == 1 else "2000–4000"
+        max_sentences = 8 if level == 1 else 24
         source = "\n\n".join(
             (
                 f"[TURN {turn.committed_version}]\n"
@@ -393,7 +394,9 @@ class RPAtomicServiceProvider:
                     "Верни только компактный связный текст из нескольких абзацев: без "
                     "JSON, таблиц, списков, заголовков, служебных полей и комментариев. "
                     "Символьный лимит из запроса обязателен и важнее полноты: объединяй "
-                    "связанные события и опускай второстепенное, но не превышай лимит."
+                    "связанные события и опускай второстепенное, но не превышай лимит. "
+                    "Не пересказывай каждый ход отдельно и закончи текст до исчерпания "
+                    "лимита генерации."
                 ),
             },
             {
@@ -401,6 +404,7 @@ class RPAtomicServiceProvider:
                 "content": (
                     f"Сожми RAW-ходы {turns[0].committed_version}-"
                     f"{turns[-1].committed_version}. Ориентир — {target_chars} символов; "
+                    f"не более {max_sentences} предложений. "
                     "сохраняй больше только ради причинно значимых событий. Итог должен "
                     "быть короче источника "
                     f"и не длиннее {max_chars} символов.\n\n{source}"
@@ -411,7 +415,7 @@ class RPAtomicServiceProvider:
             "messages": messages,
             "stream": False,
             "temperature": 0,
-            "max_tokens": 384 if level == 1 else 1_024,
+            "max_tokens": 640 if level == 1 else 1_536,
             "reasoning": {"enabled": False},
             "provider": {
                 **_exact_openrouter_provider(self.model),

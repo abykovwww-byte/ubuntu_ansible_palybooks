@@ -438,12 +438,16 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
     assert "[TURN 1]" in memory_messages[1]["content"]
     assert "[TURN 8]" in memory_messages[1]["content"]
     assert "Ориентир — 600–1200 символов" in memory_messages[1]["content"]
+    assert "не более 8 предложений" in memory_messages[1]["content"]
     assert "Верни только компактный связный текст" in memory_messages[0]["content"]
     assert "Символьный лимит из запроса обязателен" in memory_messages[0]["content"]
+    assert "закончи текст до исчерпания лимита генерации" in memory_messages[0][
+        "content"
+    ]
     assert "OUTPUT_SCHEMA=" not in memory_messages[0]["content"]
     assert "response_format" not in memory_payload
     assert atomic_client.calls[1]["payload"]["max_tokens"] == 2_048
-    assert memory_payload["max_tokens"] == 384
+    assert memory_payload["max_tokens"] == 640
     assert len(administrator_client.calls) == 1
     assert administrator_client.calls[0]["provider"] == "local"
     assert administrator_client.calls[0]["model"] == "gemma-4-26b-a4b-it-rp-q4"
@@ -487,8 +491,9 @@ def test_story_memory_archive_uses_bounded_output_budget(tmp_path: Path) -> None
     asyncio.run(provider.update_story_memory(party=_party(), turns=_memory_turns(64)))
 
     payload = client.calls[0]["payload"]
-    assert payload["max_tokens"] == 1_024
+    assert payload["max_tokens"] == 1_536
     assert "Ориентир — 2000–4000 символов" in payload["messages"][1]["content"]
+    assert "не более 24 предложений" in payload["messages"][1]["content"]
     assert "не длиннее 6000 символов" in payload["messages"][1]["content"]
 
 
