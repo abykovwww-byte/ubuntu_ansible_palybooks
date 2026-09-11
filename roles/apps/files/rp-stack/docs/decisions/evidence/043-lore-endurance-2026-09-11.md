@@ -128,7 +128,11 @@ accept → последующая сцена не проверена. Story Memo
 ## Проверки и границы готовности
 
 Exact runtime source: `87ada44`; проверенный image
-`sha256:a8f64014f415dbb356153ec7e3c440b6443935cdf55bc219943fbf48334b073b`.
+`sha256:d8a8c3b00b4710f7815537dbdecf4bc70283b56aa8ac5d19e0f50de202e1552e`
+(Docker image ID, не build config digest). SHA256 файлов внутри него:
+`provider.py=a62ee7a75d90570a37477e92d193292dc91e586b5f6b457f6f89323ff9cc7394`,
+`mechanics.py=788f640bbe71c1a1d456a8f9aaac1d4a72d7e81a9f99791f368c3484e96753c2`,
+`main.py=deda498e101b5f6e98eb0f5e0a3f910ba386d57e7c0a4a4abe5cd68116e2327c`.
 Image full Gateway suite: **107 passed in 8.07s**. Local CI на этой runtime
 revision: **107 passed in 23.01s**, отдельно прошли repository contracts,
 installed skill drift, DevKit policy/MCP и clean Light GUI tests. Последующие
