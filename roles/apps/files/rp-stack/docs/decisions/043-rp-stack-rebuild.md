@@ -441,6 +441,16 @@ correction **внутри** ещё продолжающейся Party, дожд�
 следствия. Administrator accept/reject, `PlayerCorrection` и player Lore также
 выполняются до последней сцены. Post-final probes не засчитываются в §6.3.
 
+Отдельный bounded Story Memory follow-up 6–11 сентября зафиксирован в
+[evidence замены Atomic model](evidence/043-atomic-model-replacement-2026-09-06.md).
+60-ходовая Party выявила oversized L1 output, а первый fix-forward — обрыв по
+`384` tokens. Применённый merge `7d92dc4` сохранил character validators,
+ограничил narrative shape и дал real production-image canary: 25 030 символов
+RAW 1–8 сжаты в 621 символ с `finish_reason=stop`, snapshot coverage `8` вошёл в
+следующий prompt рядом с RAW 9–58. Этот узкий механизм имеет уровень
+`наблюдается`; он не закрывает человеческие §6.2–§6.3 и не доказывает
+`держится`.
+
 Актуальный публичный snapshot цен и endpoint-провайдеров сохранён отдельно:
 [043-model-pricing-2026-09-02.md](evidence/043-model-pricing-2026-09-02.md).
 
