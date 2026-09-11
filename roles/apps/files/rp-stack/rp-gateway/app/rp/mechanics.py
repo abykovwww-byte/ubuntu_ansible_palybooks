@@ -62,35 +62,10 @@ class RPRelationshipResult(_StrictResult):
 
 
 class RPRuntimeLoreResult(_StrictResult):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "oneOf": [
-                {
-                    "properties": {
-                        "result": {"const": "draft"},
-                        "title": {"type": "string"},
-                        "content": {"type": "string"},
-                        "keywords": {"type": "array"},
-                        "evidence_span_ids": {"type": "array"},
-                    }
-                },
-                {
-                    "properties": {
-                        "result": {"const": "no_candidate"},
-                        "title": {"type": "null"},
-                        "content": {"type": "null"},
-                        "keywords": {"type": "null"},
-                        "evidence_span_ids": {"type": "null"},
-                    }
-                },
-            ]
-        }
-    )
-
     result: Literal["draft", "no_candidate"]
     kind: Literal["character", "event", "location"]
-    title: str | None
-    content: str | None
+    title: str | None = Field(max_length=200)
+    content: str | None = Field(max_length=4_000)
     keywords: tuple[str, ...] | None
     evidence_span_ids: tuple[int, ...] | None
 
@@ -110,12 +85,8 @@ class RPRuntimeLoreResult(_StrictResult):
             return self
         if not self.title or not self.title.strip():
             raise ValueError("Lore draft title must contain text")
-        if len(self.title) > 200:
-            raise ValueError("Lore draft title exceeds 200 characters")
         if not self.content or not self.content.strip():
             raise ValueError("Lore draft content must contain text")
-        if len(self.content) > 4_000:
-            raise ValueError("Lore draft content exceeds 4000 characters")
         if not self.keywords or any(not item.strip() for item in self.keywords):
             raise ValueError("Lore draft needs non-empty keywords")
         if len(self.keywords) > 12 or any(len(item) > 100 for item in self.keywords):
@@ -128,33 +99,10 @@ class RPRuntimeLoreResult(_StrictResult):
 
 
 class RPPlayerCorrectionResult(_StrictResult):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "oneOf": [
-                {
-                    "properties": {
-                        "result": {"const": "draft"},
-                        "target_slot": {"type": "string"},
-                        "action": {"enum": ["replace", "retract"]},
-                    }
-                },
-                {
-                    "properties": {
-                        "result": {"const": "no_target"},
-                        "target_slot": {"type": "null"},
-                        "action": {"type": "null"},
-                        "after": {"type": "null"},
-                        "forbidden_claims": {"maxItems": 0},
-                    }
-                },
-            ]
-        }
-    )
-
     result: Literal["draft", "no_target"]
     target_slot: str | None
     action: Literal["replace", "retract"] | None
-    after: str | None
+    after: str | None = Field(max_length=600)
     forbidden_claims: tuple[str, ...] = Field(max_length=20)
 
     @model_validator(mode="after")
@@ -176,8 +124,6 @@ class RPPlayerCorrectionResult(_StrictResult):
             raise ValueError("replacement PlayerCorrection needs after text")
         if self.action == "retract" and self.after is not None:
             raise ValueError("retraction PlayerCorrection cannot contain after text")
-        if self.after is not None and len(self.after) > 600:
-            raise ValueError("PlayerCorrection replacement exceeds 600 characters")
         if any(not item.strip() or len(item) > 160 for item in self.forbidden_claims):
             raise ValueError("PlayerCorrection forbidden claims are invalid")
         if len(set(self.forbidden_claims)) != len(self.forbidden_claims):

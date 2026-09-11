@@ -612,6 +612,8 @@ def test_player_correction_rejects_unowned_semantic_fields(
     )
     job = _claim_service_job(engine, "player_correction")
 
+    with pytest.raises(ValueError, match="no_target correction cannot"):
+        RPPlayerCorrectionResult(result="no_target", target_slot="raw:1", action=None, after=None, forbidden_claims=())
     class InvalidCorrectionModel(_AtomicModelFake):
         async def draft_player_correction(
             self, **_: object
