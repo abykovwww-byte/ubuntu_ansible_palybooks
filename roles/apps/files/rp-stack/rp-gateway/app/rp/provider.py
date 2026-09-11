@@ -338,7 +338,11 @@ class RPAtomicServiceProvider:
         messages = _structured_messages(
             system=(
                 "Ты атомарная служебная модель PlayerCorrection. Выбери только один "
-                "точный target_slot из переданного ranked_candidates. Не создавай новые "
+                "точный target_slot из переданного ranked_candidates. Скопируй target_slot "
+                "одного candidate буквально, не соединяй несколько IDs и не заменяй "
+                "claim ID широким raw_hint. Если просьба касается нескольких утверждений, "
+                "выбери одно; after заменяет только его before, а не весь ход, и содержит "
+                "не более 600 символов. Не создавай новые "
                 "targets и не исправляй факты по знаниям вне payload. raw_hint может "
                 "быть широким raw:<turn_id> или точным raw:<turn_id>:<claim_id>, но не "
                 "является доказательством сам по себе. Если ни один candidate не "

@@ -781,4 +781,5 @@ def test_player_operations_use_openrouter_structured_route_with_validated_schema
         payload = call["payload"]
         assert payload["reasoning"] == {"enabled": False}
         schema = payload["response_format"]["json_schema"]["schema"]
-        assert len(schema["oneOf"]) == 2 if call["role"] == "rp_atomic_player_correction" else "oneOf" not in schema
+        assert "oneOf" not in schema
+    assert {"type": "string", "maxLength": 600} in schema["properties"]["after"]["anyOf"]

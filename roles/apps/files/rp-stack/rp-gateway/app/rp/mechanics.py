@@ -99,33 +99,10 @@ class RPRuntimeLoreResult(_StrictResult):
 
 
 class RPPlayerCorrectionResult(_StrictResult):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "oneOf": [
-                {
-                    "properties": {
-                        "result": {"const": "draft"},
-                        "target_slot": {"type": "string"},
-                        "action": {"enum": ["replace", "retract"]},
-                    }
-                },
-                {
-                    "properties": {
-                        "result": {"const": "no_target"},
-                        "target_slot": {"type": "null"},
-                        "action": {"type": "null"},
-                        "after": {"type": "null"},
-                        "forbidden_claims": {"maxItems": 0},
-                    }
-                },
-            ]
-        }
-    )
-
     result: Literal["draft", "no_target"]
     target_slot: str | None
     action: Literal["replace", "retract"] | None
-    after: str | None
+    after: str | None = Field(max_length=600)
     forbidden_claims: tuple[str, ...] = Field(max_length=20)
 
     @model_validator(mode="after")
@@ -147,8 +124,6 @@ class RPPlayerCorrectionResult(_StrictResult):
             raise ValueError("replacement PlayerCorrection needs after text")
         if self.action == "retract" and self.after is not None:
             raise ValueError("retraction PlayerCorrection cannot contain after text")
-        if self.after is not None and len(self.after) > 600:
-            raise ValueError("PlayerCorrection replacement exceeds 600 characters")
         if any(not item.strip() or len(item) > 160 for item in self.forbidden_claims):
             raise ValueError("PlayerCorrection forbidden claims are invalid")
         if len(set(self.forbidden_claims)) != len(self.forbidden_claims):
