@@ -86,11 +86,57 @@ Canary выполнялся из acceptance Gateway container с искусст�
 
 ## Границы доказательства
 
-На source-кандидате пройдены focused provider/lifecycle tests `26 passed`, полный
-Gateway suite `100 passed` и aggregate `scripts/ci.ps1`, включая repository,
-Wiki, devkit, JavaScript и Gateway gates. Merge, acceptance image, live job rows
-и production apply фиксируются отдельно после выполнения; production inventory
-Decision 043 остаётся выключенным.
+Первичный source-кандидат прошёл focused provider/lifecycle tests `26 passed`,
+полный Gateway suite `100 passed` и aggregate `scripts/ci.ps1`. После замены
+модели отдельная 60-ходовая Party `party_969f9fa93918` дошла до version `60`
+без Narrator fallback, но выявила новый ограниченный дефект Story Memory. На
+source version `58` real Atomic call вернул HTTP `200`, `720` output tokens и
+2 975 символов при жёстком лимите L1 в 2 000 символов. Gateway корректно
+отклонил результат, snapshot не записал, а следующие memory jobs не перескочили
+через failed predecessor. Этот прогон доказал throughput выбранного route, но не
+приемлемый bounded output.
+
+Первый fix-forward, PR #139 / merge `fdeffc2b7d79a53bbd439a72c4cb860e2609d2b4`,
+снизил L1 budget до `384` tokens. Replay тех же RAW 1–8 показал другую границу:
+1 131 символов content, ровно `384` completion tokens и
+`finish_reason=length`. Неполный ответ снова был отвергнут без snapshot. Поэтому
+этот merge не считался runtime-closure.
+
+Финальный минимальный fix-forward, PR #140 / merge
+`7d92dc475756e7ab96d8dee077900df47dda7d3e`, сохранил L1 validator `≤2 000`
+символов, поднял generation budget до `640` tokens и потребовал закончить
+связный текст не более чем в восьми предложениях до исчерпания token budget.
+Archive сохраняет validator `≤6 000`, budget `1 536` tokens и предел в 24
+предложения. Обрезание готового текста, новый retry, сервис, dependency или
+storage schema не добавлялись.
+
+11 сентября merge `7d92dc4` применён штатным `ansible-local-apply.service`:
+`ok=74`, `changed=6`, `unreachable=0`, `failed=0`. Server checkout и running
+Gateway содержат один и тот же `provider.py` SHA-256
+`79978a249e7ba18082125a68d941e0cb1c7b503539a60813efc622869bf29e9d`.
+Gateway image `sha256:393e39d5ba77b8b5dc7ce13e49cffb12d69e8e31684f7e381e900a85f392c3ab`
+healthy с restart count `0`; `:8010` вернул HTTP `200`. Обе production SQLite
+дали `integrity_check=ok` и ноль foreign-key violations. Full suite того же
+image с очищенным только внутри test-container service key: `103 passed` за
+`7.88s`. Первый запуск с production env дал `102 passed, 1 failed`, потому что
+негативный startup-test намеренно ожидает отсутствие service key; это влияние
+окружения теста, а не результат, использованный как green proof.
+
+Отдельный canary того же production image использовал только синтетические RAW
+и packaged WorldPack, отдельные SQLite и не монтировал production data. Реальный
+`deepseek/deepseek-v4-pro` → `baidu/fp8` вызов сжал 25 030 символов RAW 1–8 в
+621 символ narrative за `6.279s`: HTTP `200`, `8 405 / 195` tokens,
+`finish_reason=stop`, стоимость `$0.0084127693`. Job завершился с `attempts=0`,
+snapshot revision `1` получил coverage `8`, а следующий локально собранный
+Narrator prompt содержал exact snapshot и ровно RAW 9–58. Обе canary SQLite
+остались `integrity_check=ok` без foreign-key violations.
+
+Для bounded Story Memory это уровень `наблюдается` в изолированной Party на
+фактически применённом production image: модельный результат сохранён в
+авторитетном store и попал в следующий prompt. Уровень `держится` не заявляется:
+не проверены второй live chunk, hierarchy после 130 000 символов и повторное
+влияние памяти на сцены длинной человеческой Party. 60-ходовой прогон также не
+закрывает human gates §6.2–§6.3 Decision 043.
 
 Источники provider snapshot:
 

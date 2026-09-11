@@ -164,6 +164,17 @@ exact `baidu/fp8`: Relationships, Runtime Lore и Story Memory прошли `3/3
 Administrator и Narrator этим изменением не переназначаются. Детали и границы —
 в [датированном evidence](../decisions/evidence/043-atomic-model-replacement-2026-09-06.md).
 
+**Production closure 2026-09-11.** 60-ходовой прогон подтвердил скорость V4 Pro,
+но вскрыл неограниченный Story Memory output; первый token cap `384` затем
+оказался слишком мал и дал terminal `finish_reason=length`. PR #140 сохранил
+жёсткие character validators, добавил короткую narrative shape и budgets
+`640 / 1536` для L1/archive. Merge `7d92dc4` применён Ansible с `failed=0`,
+running Gateway имеет exact source hash и прошёл `103` теста. На том же image
+изолированный provider-canary сжал 25 030 символов RAW в 621 символ с
+`finish_reason=stop`, записал coverage `8` и передал chunk в следующий prompt
+рядом с RAW 9–58. Для этого bounded-механизма достигнут уровень `наблюдается`,
+но не `держится`; §6.2 и §6.3 остаются следующими воротами.
+
 ### Шаг 2 — заморозить внешний контракт и file map
 
 Перед кодом составить consumer map `endpoint → handler → storage → prompt/UI →
@@ -365,6 +376,10 @@ Exact 17-turn proof использовал только `openrouter` →
 другим preset/free Scenario. Проверяются роль игрока, канон, agency, отсутствие
 мета-инструкций, prose quality, ошибочные Relationships/Lore и usability ручных
 correction/Lore decisions.
+
+Это следующий незакрытый функциональный gate после production closure Atomic
+Story Memory. Он не заменяется синтетическим memory-canary или прежним blind
+A/B: нужен ручной проход владельца и отдельный контрастный старт.
 
 #### 6.3 Длинная Party и причинные цепочки
 
