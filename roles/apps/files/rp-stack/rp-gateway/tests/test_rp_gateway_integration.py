@@ -399,6 +399,8 @@ def test_rebuilt_turn_http_contract_is_idempotent_retryable_and_fail_open(
     assert supervisor.json()["roles"]["atomic_service"]["enabled"] is False
     assert supervisor.json()["roles"]["atomic_service"]["kill_switch"] is True
     assert supervisor.json()["roles"]["atomic_service"]["status"] == "pending"
+    assert supervisor.json()["roles"]["atomic_service"]["provider"] == "openrouter"
+    assert supervisor.json()["roles"]["atomic_service"]["model"] == "deepseek/deepseek-v4-pro"
     assert {"claim_token", "raw", "raw_response"}.isdisjoint(
         _all_keys(supervisor.json())
     )

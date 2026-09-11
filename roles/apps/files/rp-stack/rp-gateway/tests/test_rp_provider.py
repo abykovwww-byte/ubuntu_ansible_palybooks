@@ -415,6 +415,11 @@ def test_atomic_and_administrator_use_separate_exact_routes(tmp_path: Path) -> N
         }
     ]
     lore_messages = atomic_client.calls[1]["payload"]["messages"]
+    lore_schema = atomic_client.calls[1]["payload"]["response_format"]["json_schema"]["schema"]
+    for field, limit in (("title", 200), ("content", 4_000)):
+        assert {"type": "string", "maxLength": limit} in lore_schema["properties"][field]["anyOf"]
+    assert "до 600" in lore_messages[0]["content"]
+    assert "Не пересказывай сцену" in lore_messages[0]["content"]
     lore_body = json.loads(lore_messages[1]["content"])
     assert lore_body["active_character_references"] == relationship_body[
         "active_character_references"
@@ -520,6 +525,8 @@ def test_narrator_rejects_atomic_service_model(tmp_path: Path) -> None:
     [
         ("relationships", '{"relationships":[],"events":[],"notes":[]}'),
         ("runtime_lore", '{"cards":[]}'),
+        ("runtime_lore", json.dumps({"result": "draft", "kind": "event", "title": "x" * 201, "content": "Fact", "keywords": ["fact"], "evidence_span_ids": [1]})),
+        ("runtime_lore", json.dumps({"result": "draft", "kind": "event", "title": "Fact", "content": "x" * 4_001, "keywords": ["fact"], "evidence_span_ids": [1]})),
         ("story_memory", '{"party_id":"party-one","memory_snapshot":{}}'),
         ("story_memory", "```json\n{}\n```"),
     ],

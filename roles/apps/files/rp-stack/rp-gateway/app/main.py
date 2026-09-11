@@ -1157,8 +1157,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "atomic_service": role_status(
                     "atomic_service",
                     settings.rp_atomic_service_enabled,
-                    "local",
-                    settings.local_llm_model_alias,
+                    "openrouter",
+                    RP_ATOMIC_MODEL,
                     service,
                 ),
                 "administrator": role_status(

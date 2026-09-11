@@ -89,8 +89,8 @@ class RPRuntimeLoreResult(_StrictResult):
 
     result: Literal["draft", "no_candidate"]
     kind: Literal["character", "event", "location"]
-    title: str | None
-    content: str | None
+    title: str | None = Field(max_length=200)
+    content: str | None = Field(max_length=4_000)
     keywords: tuple[str, ...] | None
     evidence_span_ids: tuple[int, ...] | None
 
@@ -110,12 +110,8 @@ class RPRuntimeLoreResult(_StrictResult):
             return self
         if not self.title or not self.title.strip():
             raise ValueError("Lore draft title must contain text")
-        if len(self.title) > 200:
-            raise ValueError("Lore draft title exceeds 200 characters")
         if not self.content or not self.content.strip():
             raise ValueError("Lore draft content must contain text")
-        if len(self.content) > 4_000:
-            raise ValueError("Lore draft content exceeds 4000 characters")
         if not self.keywords or any(not item.strip() for item in self.keywords):
             raise ValueError("Lore draft needs non-empty keywords")
         if len(self.keywords) > 12 or any(len(item) > 100 for item in self.keywords):

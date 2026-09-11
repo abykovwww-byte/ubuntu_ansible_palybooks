@@ -14,8 +14,7 @@
 
 ### Clean RP роли Decision 043
 
-При `RP_REBUILD_ENABLED=true` ordinary RP использует другой явный набор из трёх
-ролей:
+Единственный clean RP runtime использует три раздельные роли:
 
 | Роль | Scope | Маршрут |
 |---|---|---|
@@ -44,9 +43,23 @@ Atomic дополнительно требует поддержку переда
 endpoint отклоняются до provider call. Сохранённые исторические
 profile/Party/log rows не удаляются и не переназначаются.
 
-Supervisor clean Party показывает модель, enabled/kill switch, текущее
+Supervisor clean Party показывает фактически настроенную модель каждой роли:
+Atomic — OpenRouter V4 Pro, Administrator — локальную Gemma, Narrator — Luna.
+Панель также показывает enabled/kill switch, текущее
 состояние, success/error и последнюю ошибку каждой роли, но не raw provider
-payload. Этот source-контракт ещё не активирован в production inventory.
+payload.
+
+### Clean Atomic Lore
+
+Runtime и player Lore возвращают одну карточку или `no_candidate`. Модель
+получает ориентир: заголовок в 3–8 словах до 120 символов, один факт в 1–3
+предложениях до 600 символов, 1–5 коротких поисковых фраз. Заголовок не служит
+пересказом сцены; утверждения опираются на выбранные RAW evidence spans.
+Существующие строгие пределы заголовка и текста — 200 и 4 000 символов —
+передаются в JSON Schema модели и проверяются тем же типом результата в Gateway.
+Token budget остаётся `2048`, reasoning выключен, exact route не меняется.
+Оборванный либо невалидный ответ не создаёт карточку и не обрезается для записи.
+Player Lore сохраняется только после отдельного подтверждения владельца.
 
 ### Clean Atomic Story Memory
 

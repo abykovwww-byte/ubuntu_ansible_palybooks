@@ -218,7 +218,11 @@ class RPAtomicServiceProvider:
                 "Корень ответа содержит ровно result, kind, title, content, keywords "
                 "и evidence_span_ids; не возвращай cards или другую обёртку. Для "
                 "no_candidate поле kind обязательно, а title, content, keywords и "
-                "evidence_span_ids равны null. Верни только строгий JSON."
+                "evidence_span_ids равны null. Для draft: title — название в 3–8 словах "
+                "до 120 символов; content — один новый факт в 1–3 предложениях до 600 "
+                "символов; keywords — 1–5 коротких поисковых фраз. Не пересказывай сцену "
+                "в title, не перечисляй неизвестное и не повторяй тезисы. Закончи все "
+                "поля JSON до исчерпания лимита генерации. Верни только строгий JSON."
             ),
             body={
                 "task": "extract_runtime_lore",
@@ -275,7 +279,11 @@ class RPAtomicServiceProvider:
                 "обязательный requested kind и null во всех draft-полях. Для draft "
                 "каждый тезис должен прямо подтверждаться выбранными spans. Корень "
                 "содержит ровно result, kind, title, content, keywords и "
-                "evidence_span_ids. Верни только строгий JSON."
+                "evidence_span_ids. Для draft: title — название в 3–8 словах до 120 "
+                "символов; content — один факт в 1–3 предложениях до 600 символов; "
+                "keywords — 1–5 коротких поисковых фраз. Не пересказывай сцену в title "
+                "и не повторяй тезисы. Закончи все поля JSON до исчерпания лимита "
+                "генерации. Верни только строгий JSON."
             ),
             body={
                 "task": "draft_player_lore",
