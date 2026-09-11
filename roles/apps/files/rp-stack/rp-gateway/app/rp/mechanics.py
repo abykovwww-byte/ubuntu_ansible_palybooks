@@ -62,31 +62,6 @@ class RPRelationshipResult(_StrictResult):
 
 
 class RPRuntimeLoreResult(_StrictResult):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "oneOf": [
-                {
-                    "properties": {
-                        "result": {"const": "draft"},
-                        "title": {"type": "string"},
-                        "content": {"type": "string"},
-                        "keywords": {"type": "array"},
-                        "evidence_span_ids": {"type": "array"},
-                    }
-                },
-                {
-                    "properties": {
-                        "result": {"const": "no_candidate"},
-                        "title": {"type": "null"},
-                        "content": {"type": "null"},
-                        "keywords": {"type": "null"},
-                        "evidence_span_ids": {"type": "null"},
-                    }
-                },
-            ]
-        }
-    )
-
     result: Literal["draft", "no_candidate"]
     kind: Literal["character", "event", "location"]
     title: str | None = Field(max_length=200)

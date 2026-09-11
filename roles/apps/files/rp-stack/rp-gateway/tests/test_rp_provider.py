@@ -525,6 +525,8 @@ def test_narrator_rejects_atomic_service_model(tmp_path: Path) -> None:
     [
         ("relationships", '{"relationships":[],"events":[],"notes":[]}'),
         ("runtime_lore", '{"cards":[]}'),
+        ("runtime_lore", '{"result":"no_candidate","kind":"event","title":"Not null","content":null,"keywords":null,"evidence_span_ids":null}'),
+        ("runtime_lore", '{"result":"draft","kind":"event","title":null,"content":null,"keywords":null,"evidence_span_ids":null}'),
         ("runtime_lore", json.dumps({"result": "draft", "kind": "event", "title": "x" * 201, "content": "Fact", "keywords": ["fact"], "evidence_span_ids": [1]})),
         ("runtime_lore", json.dumps({"result": "draft", "kind": "event", "title": "Fact", "content": "x" * 4_001, "keywords": ["fact"], "evidence_span_ids": [1]})),
         ("story_memory", '{"party_id":"party-one","memory_snapshot":{}}'),
@@ -727,7 +729,7 @@ def test_provider_diagnostics_stay_in_shared_database(tmp_path: Path) -> None:
     )
 
 
-def test_player_operations_use_openrouter_structured_route_with_discriminated_schema(
+def test_player_operations_use_openrouter_structured_route_with_validated_schema(
     tmp_path: Path,
 ) -> None:
     client = RecordingClient(
@@ -779,4 +781,4 @@ def test_player_operations_use_openrouter_structured_route_with_discriminated_sc
         payload = call["payload"]
         assert payload["reasoning"] == {"enabled": False}
         schema = payload["response_format"]["json_schema"]["schema"]
-        assert len(schema["oneOf"]) == 2
+        assert len(schema["oneOf"]) == 2 if call["role"] == "rp_atomic_player_correction" else "oneOf" not in schema
