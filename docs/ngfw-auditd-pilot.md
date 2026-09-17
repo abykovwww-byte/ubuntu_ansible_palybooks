@@ -129,7 +129,7 @@ set `ngfw_lab_start_traffic: true` and apply again:
 
 ```bash
 cd /srv/apps/ngfw-lab
-docker compose up -d
+docker compose up -d --build
 ```
 
 Automatic VM start stays disabled for the pilot. This avoids reserving 26 GiB
@@ -175,23 +175,19 @@ route change.
 
 ## Baseline traffic and measurements
 
-Use identical 10-minute runs for every AuditD profile. Warm up for 2 minutes,
-measure for 10 minutes, and leave 3 minutes idle before the next profile.
+Use the [automatic traffic runner](ngfw-traffic-runner.md) for repeatable TCP,
+UDP, small-packet, short-connection, HTTP, and DNS workloads. Each scenario has
+a 2-minute warmup, a 10-minute measurement, and 3 minutes idle, repeated three
+times. The default nine-scenario matrix takes 6 hours 45 minutes plus checks.
+`python3 /srv/apps/ngfw-lab/runner.py plan` shows the exact commands without load.
+The runner requires a recorded negative route check with NGFW powered off and
+a healthy receiver, then a running/configured NGFW for the measured test.
 
-Example TCP throughput from the Docker client:
-
-```bash
-cd /srv/apps/ngfw-lab
-docker compose exec traffic-client iperf3 -c 10.77.20.10 -t 600 -P 4 -J
-```
-
-Example UDP load below the published VM-1010 ceiling:
-
-```bash
-docker compose exec traffic-client iperf3 -c 10.77.20.10 -u -b 20M -t 600 -J
-docker compose exec traffic-client iperf3 -c 10.77.20.10 -u -b 60M -t 600 -J
-docker compose exec traffic-client iperf3 -c 10.77.20.10 -u -b 100M -t 600 -J
-```
+Run one already configured AuditD profile at a time. Supply `--probe-argv-file`
+for read-only guest observations and `--baseline` to compare with a completed
+control run. `--traffic-only` explicitly records the absence of AuditD evidence.
+Ansible only installs the runner and, when enabled, starts idle endpoints; it
+never starts the workload matrix.
 
 Record at least:
 
@@ -300,19 +296,12 @@ the appliance blocks or loses records.
 
 ## Stop criteria
 
-Abort the current profile and return to the last clean overlay/snapshot on any
-of the following:
-
-- dataplane loss, VM reboot, kernel panic, or MNGT loss lasting over 60 seconds;
-- nonzero and increasing AuditD `lost` count;
-- backlog stays above 75 percent of its limit for more than 30 seconds;
-- root or AuditD filesystem reaches 80 percent used;
-- sustained NGFW CPU above 90 percent or host memory pressure/swap activity;
-- TCP throughput falls by more than 20 percent from the control run;
-- UDP loss exceeds 0.5 percent at a load that passed the control run;
-- log growth projects exhaustion of the AuditD filesystem within 24 hours.
-
-The thresholds are pilot acceptance limits, not vendor capacity guarantees.
+The runner's [stop and observation contract](ngfw-traffic-runner.md#остановка-и-данные)
+defines automated thresholds and their observation windows. It stops the current
+workload and preserves the partial report. Snapshot restoration remains an
+operator action. Kernel errors, swap behavior, administrative event presence,
+and product health still require separate review. Thresholds are pilot limits,
+not vendor capacity guarantees.
 
 ## Rollback and cleanup
 
@@ -332,7 +321,7 @@ first.
 ## Acceptance result
 
 The pilot is successful only when one minimal AuditD profile completes the full
-traffic matrix twice, after a cold VM start, with zero lost audit records, no
+traffic matrix with three repeats per scenario, after a cold VM start, with zero lost audit records, no
 stop criterion, bounded log growth, and successful management/dataplane checks.
 The result must name the exact rules, AuditD configuration, PT build, traffic
 rates, and measurement timestamps. “AuditD enabled” without those details is

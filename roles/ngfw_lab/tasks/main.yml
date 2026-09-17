@@ -16,6 +16,9 @@
       - ngfw_lab_ngfw_vcpu_pins | intersect(ngfw_lab_mngt_vcpu_pins) | length == 0
       - ngfw_lab_left_subnet != ngfw_lab_right_subnet
       - ngfw_lab_left_gateway != ngfw_lab_right_gateway
+      - ngfw_lab_traffic_cpus | float > 0
+      - ngfw_lab_traffic_cpus | float <= 4
+      - ngfw_lab_traffic_pids | int >= 96
     fail_msg: PT NGFW lab variables are incomplete or unsafe.
   tags: [ngfw-lab, preflight]
 
@@ -228,6 +231,39 @@
   when: item.rc != 0
   tags: [ngfw-lab, traffic, networks]
 
+- name: Install traffic runner and endpoint source
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ ngfw_lab_project_dir }}/{{ item.dest }}"
+    owner: "{{ ngfw_lab_owner }}"
+    group: "{{ ngfw_lab_group }}"
+    mode: "0644"
+    directory_mode: "0750"
+  loop:
+    - {src: "traffic/", dest: "traffic/"}
+    - {src: runner.py, dest: runner.py}
+    - {src: ngfw_probe.sh, dest: ngfw_probe.sh}
+  register: ngfw_lab_traffic_source
+  tags: [ngfw-lab, traffic]
+
+- name: Render traffic runner configuration
+  ansible.builtin.template:
+    src: runner.json.j2
+    dest: "{{ ngfw_lab_project_dir }}/runner.json"
+    owner: "{{ ngfw_lab_owner }}"
+    group: "{{ ngfw_lab_group }}"
+    mode: "0644"
+  tags: [ngfw-lab, traffic]
+
+- name: Validate traffic matrix without running traffic
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ ngfw_lab_project_dir }}/runner.py"
+      - plan
+  changed_when: false
+  tags: [ngfw-lab, traffic, validate]
+
 - name: Render traffic generator Compose file
   ansible.builtin.template:
     src: compose.yml.j2
@@ -250,7 +286,19 @@
   changed_when: false
   tags: [ngfw-lab, traffic, validate]
 
-- name: Start traffic generator containers
+- name: Build traffic endpoint image when explicitly enabled
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ ngfw_lab_project_dir }}"
+      - build
+  changed_when: true
+  when: ngfw_lab_start_traffic | bool
+  tags: [ngfw-lab, traffic]
+
+- name: Start idle traffic endpoints when explicitly enabled
   ansible.builtin.command:
     argv:
       - docker

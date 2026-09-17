@@ -1,0 +1,36 @@
+name: NGFW traffic
+on:
+  pull_request:
+    paths:
+      - 'roles/ngfw_lab/**'
+      - '.github/workflows/ngfw-traffic.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'roles/ngfw_lab/**'
+      - '.github/workflows/ngfw-traffic.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  traffic-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Runner guards and planning
+        run: python -m unittest discover -s roles/ngfw_lab/tests -p test_runner.py -v
+      - name: Install template check dependencies
+        run: python -m pip install jinja2 PyYAML
+      - name: Render role configuration and validate Compose
+        run: python -m unittest discover -s roles/ngfw_lab/tests -p test_render.py -v
+      - name: Build endpoint image
+        run: docker build -t ngfw-traffic-ci roles/ngfw_lab/files/traffic
+      - name: Protocols and watchdog in the actual endpoint image
+        run: >-
+          docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777
+          --cap-drop ALL --security-opt no-new-privileges --cpus 1 --memory 512m --pids-limit 192
+          -v "$PWD/roles/ngfw_lab/tests:/tests:ro"
+          --entrypoint python3 ngfw-traffic-ci /tests/test_runtime.py -v

@@ -1,16 +1,41 @@
+x-endpoint: &endpoint
+  image: {{ ngfw_lab_traffic_image }}
+  build:
+    context: ./traffic
+  init: true
+  restart: "no"
+  cpus: {{ ngfw_lab_traffic_cpus }}
+  mem_limit: {{ ngfw_lab_traffic_memory }}
+  pids_limit: {{ ngfw_lab_traffic_pids }}
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "2"
+
 services:
   traffic-client:
-    image: {{ ngfw_lab_traffic_image }}
+    <<: *endpoint
     entrypoint: ["sleep", "infinity"]
-    restart: unless-stopped
+    command: []
     networks:
       left:
         ipv4_address: {{ ngfw_lab_left_client_address }}
 
   traffic-server:
-    image: {{ ngfw_lab_traffic_image }}
-    entrypoint: ["iperf3", "--server"]
-    restart: unless-stopped
+    <<: *endpoint
+    entrypoint: ["python3", "/opt/traffic/endpoint.py"]
+    command: ["server"]
+    healthcheck:
+      test: ["CMD", "python3", "/opt/traffic/endpoint.py", "probe", "--target", "127.0.0.1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     networks:
       right:
         ipv4_address: {{ ngfw_lab_right_server_address }}
