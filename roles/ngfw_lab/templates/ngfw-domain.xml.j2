@@ -1,0 +1,74 @@
+<domain type="kvm">
+  <name>{{ ngfw_lab_ngfw_vm_name }}</name>
+  <memory unit="MiB">{{ ngfw_lab_ngfw_memory_mib }}</memory>
+  <currentMemory unit="MiB">{{ ngfw_lab_ngfw_memory_mib }}</currentMemory>
+  <vcpu placement="static">{{ ngfw_lab_ngfw_vcpus }}</vcpu>
+{% if ngfw_lab_ngfw_vcpu_pins | length > 0 %}
+  <cputune>
+{% for host_cpu in ngfw_lab_ngfw_vcpu_pins %}
+    <vcpupin vcpu="{{ loop.index0 }}" cpuset="{{ host_cpu }}"/>
+{% endfor %}
+  </cputune>
+{% endif %}
+  <os firmware="efi">
+    <type arch="x86_64" machine="q35">hvm</type>
+    <loader readonly="yes" type="pflash">{{ ngfw_lab_ovmf_code }}</loader>
+    <nvram template="{{ ngfw_lab_ovmf_vars }}">/var/lib/libvirt/qemu/nvram/{{ ngfw_lab_ngfw_vm_name }}_VARS.fd</nvram>
+    <boot dev="hd"/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <cpu mode="host-passthrough" check="none" migratable="off"/>
+  <clock offset="utc"/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>preserve</on_crash>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type="file" device="disk">
+      <driver name="qemu" type="qcow2" cache="none" io="native" discard="unmap"/>
+      <source file="{{ ngfw_lab_ngfw_overlay }}"/>
+      <target dev="vda" bus="virtio"/>
+    </disk>
+    <interface type="bridge">
+      <mac address="52:54:00:77:10:01"/>
+      <source bridge="{{ ngfw_lab_left_bridge }}"/>
+      <model type="virtio"/>
+    </interface>
+    <interface type="bridge">
+      <mac address="52:54:00:77:20:01"/>
+      <source bridge="{{ ngfw_lab_right_bridge }}"/>
+      <model type="virtio"/>
+    </interface>
+{% for nic_number in range(3, 7) %}
+    <interface type="bridge">
+      <mac address="52:54:00:77:30:0{{ nic_number }}"/>
+      <source bridge="{{ ngfw_lab_unused_bridge }}"/>
+      <model type="virtio"/>
+    </interface>
+{% endfor %}
+    <interface type="bridge">
+      <mac address="52:54:00:77:30:07"/>
+      <source bridge="{{ ngfw_lab_unused_bridge }}"/>
+      <model type="virtio"/>
+    </interface>
+    <interface type="bridge">
+      <mac address="52:54:00:77:00:20"/>
+      <source bridge="{{ ngfw_lab_mgmt_bridge }}"/>
+      <model type="virtio"/>
+    </interface>
+    <serial type="pty">
+      <target type="isa-serial" port="0"/>
+    </serial>
+    <console type="pty">
+      <target type="serial" port="0"/>
+    </console>
+    <graphics type="spice" autoport="yes" listen="127.0.0.1"/>
+    <video>
+      <model type="virtio" heads="1" primary="yes"/>
+    </video>
+    <memballoon model="virtio"/>
+  </devices>
+</domain>

@@ -1,0 +1,71 @@
+---
+ngfw_lab_enabled: false
+ngfw_lab_vms_enabled: false
+ngfw_lab_start_vms: false
+ngfw_lab_vm_autostart: false
+ngfw_lab_start_traffic: false
+
+ngfw_lab_owner: abykov
+ngfw_lab_group: abykov
+ngfw_lab_libvirt_user: libvirt-qemu
+ngfw_lab_libvirt_group: kvm
+
+ngfw_lab_project_dir: /srv/apps/ngfw-lab
+ngfw_lab_data_dir: /srv/app-data/ngfw-lab
+ngfw_lab_images_dir: "{{ ngfw_lab_data_dir }}/images"
+ngfw_lab_disks_dir: "{{ ngfw_lab_data_dir }}/disks"
+ngfw_lab_reports_dir: "{{ ngfw_lab_data_dir }}/reports"
+ngfw_lab_config_dir: /etc/ngfw-lab
+
+ngfw_lab_ngfw_base_image: "{{ ngfw_lab_images_dir }}/pt-ngfw-vm-1.11.1-1750-debian-12.qcow2"
+ngfw_lab_mngt_base_image: "{{ ngfw_lab_images_dir }}/pt-ngfw-mngt-vm-1.11.1-1750-debian-12.qcow2"
+ngfw_lab_ngfw_overlay: "{{ ngfw_lab_disks_dir }}/pt-ngfw-auditd.qcow2"
+ngfw_lab_mngt_overlay: "{{ ngfw_lab_disks_dir }}/pt-ngfw-mngt.qcow2"
+
+ngfw_lab_ngfw_vm_name: pt-ngfw-auditd
+ngfw_lab_mngt_vm_name: pt-ngfw-mngt
+ngfw_lab_ngfw_vcpus: 4
+ngfw_lab_ngfw_memory_mib: 16384
+ngfw_lab_mngt_vcpus: 4
+ngfw_lab_mngt_memory_mib: 10240
+ngfw_lab_ngfw_vcpu_pins: []
+ngfw_lab_mngt_vcpu_pins: []
+
+ngfw_lab_ovmf_code: /usr/share/OVMF/OVMF_CODE_4M.fd
+ngfw_lab_ovmf_vars: /usr/share/OVMF/OVMF_VARS_4M.fd
+
+ngfw_lab_mgmt_bridge: br-ngfw-mgmt
+ngfw_lab_left_bridge: br-ngfw-left
+ngfw_lab_right_bridge: br-ngfw-right
+ngfw_lab_unused_bridge: br-ngfw-unused
+ngfw_lab_networks:
+  - name: ngfw-lab-mgmt
+    bridge: "{{ ngfw_lab_mgmt_bridge }}"
+    host_address: 10.77.0.1
+    prefix: 24
+  - name: ngfw-lab-left
+    bridge: "{{ ngfw_lab_left_bridge }}"
+  - name: ngfw-lab-right
+    bridge: "{{ ngfw_lab_right_bridge }}"
+  - name: ngfw-lab-unused
+    bridge: "{{ ngfw_lab_unused_bridge }}"
+
+ngfw_lab_left_docker_network: ngfw-lab-left-endpoints
+ngfw_lab_right_docker_network: ngfw-lab-right-endpoints
+ngfw_lab_left_subnet: 10.77.10.0/24
+ngfw_lab_left_gateway: 10.77.10.1
+ngfw_lab_left_client_address: 10.77.10.10
+ngfw_lab_right_subnet: 10.77.20.0/24
+ngfw_lab_right_gateway: 10.77.20.1
+ngfw_lab_right_server_address: 10.77.20.10
+ngfw_lab_traffic_image: nicolaka/netshoot:v0.13
+
+ngfw_lab_packages:
+  - bridge-utils
+  - cpu-checker
+  - libvirt-clients
+  - libvirt-daemon-system
+  - ovmf
+  - qemu-kvm
+  - qemu-utils
+  - virtinst

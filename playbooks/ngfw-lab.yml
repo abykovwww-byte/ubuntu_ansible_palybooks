@@ -1,0 +1,8 @@
+---
+- name: Prepare the isolated PT NGFW AuditD pilot
+  hosts: server
+  become: true
+  roles:
+    - role: ngfw_lab
+      tags: [ngfw-lab]
+      when: ngfw_lab_enabled | default(false) | bool

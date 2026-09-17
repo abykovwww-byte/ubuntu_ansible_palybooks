@@ -1,0 +1,454 @@
+---
+- name: Validate PT NGFW lab variables
+  ansible.builtin.assert:
+    that:
+      - ngfw_lab_networks | length == 4
+      - ngfw_lab_networks | map(attribute='name') | unique | length == 4
+      - ngfw_lab_networks | map(attribute='bridge') | unique | length == 4
+      - ngfw_lab_ngfw_vcpus | int >= 4
+      - ngfw_lab_ngfw_memory_mib | int >= 16384
+      - ngfw_lab_mngt_vcpus | int >= 4
+      - ngfw_lab_mngt_memory_mib | int >= 10240
+      - ngfw_lab_ngfw_vcpu_pins | length in [0, ngfw_lab_ngfw_vcpus | int]
+      - ngfw_lab_mngt_vcpu_pins | length in [0, ngfw_lab_mngt_vcpus | int]
+      - ngfw_lab_ngfw_vcpu_pins | unique | length == ngfw_lab_ngfw_vcpu_pins | length
+      - ngfw_lab_mngt_vcpu_pins | unique | length == ngfw_lab_mngt_vcpu_pins | length
+      - ngfw_lab_ngfw_vcpu_pins | intersect(ngfw_lab_mngt_vcpu_pins) | length == 0
+      - ngfw_lab_left_subnet != ngfw_lab_right_subnet
+      - ngfw_lab_left_gateway != ngfw_lab_right_gateway
+    fail_msg: PT NGFW lab variables are incomplete or unsafe.
+  tags: [ngfw-lab, preflight]
+
+- name: Read host CPU flags
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/grep
+      - -m
+      - "1"
+      - -E
+      - ^flags[[:space:]]*:
+      - /proc/cpuinfo
+  register: ngfw_lab_cpu_flags
+  changed_when: false
+  tags: [ngfw-lab, preflight]
+
+- name: Check KVM device
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: ngfw_lab_kvm_device
+  tags: [ngfw-lab, preflight]
+
+- name: Require hardware virtualization and 1 GiB page support
+  ansible.builtin.assert:
+    that:
+      - ngfw_lab_kvm_device.stat.exists
+      - ngfw_lab_kvm_device.stat.ischr
+      - "' svm ' in (' ' ~ ngfw_lab_cpu_flags.stdout ~ ' ') or ' vmx ' in (' ' ~ ngfw_lab_cpu_flags.stdout ~ ' ')"
+      - "' pdpe1gb ' in (' ' ~ ngfw_lab_cpu_flags.stdout ~ ' ')"
+      - ansible_processor_vcpus | int >= (ngfw_lab_ngfw_vcpus | int + ngfw_lab_mngt_vcpus | int)
+      - ansible_memtotal_mb | int >= 49152
+    fail_msg: >-
+      The PT NGFW lab requires /dev/kvm, AMD-V or Intel VT-x, the pdpe1gb CPU flag,
+      at least 8 logical CPUs, and at least 48 GiB of host RAM.
+  tags: [ngfw-lab, preflight]
+
+- name: Install KVM and libvirt packages
+  ansible.builtin.apt:
+    name: "{{ ngfw_lab_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [ngfw-lab, packages]
+
+- name: Ensure libvirt is enabled and started
+  ansible.builtin.service:
+    name: libvirtd
+    enabled: true
+    state: started
+  tags: [ngfw-lab, service]
+
+- name: Ensure PT NGFW lab directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ ngfw_lab_project_dir }}"
+      owner: "{{ ngfw_lab_owner }}"
+      group: "{{ ngfw_lab_group }}"
+      mode: "0750"
+    - path: "{{ ngfw_lab_data_dir }}"
+      owner: "{{ ngfw_lab_owner }}"
+      group: "{{ ngfw_lab_libvirt_group }}"
+      mode: "0750"
+    - path: "{{ ngfw_lab_images_dir }}"
+      owner: "{{ ngfw_lab_owner }}"
+      group: "{{ ngfw_lab_libvirt_group }}"
+      mode: "0750"
+    - path: "{{ ngfw_lab_disks_dir }}"
+      owner: "{{ ngfw_lab_libvirt_user }}"
+      group: "{{ ngfw_lab_libvirt_group }}"
+      mode: "0750"
+    - path: "{{ ngfw_lab_reports_dir }}"
+      owner: "{{ ngfw_lab_owner }}"
+      group: "{{ ngfw_lab_group }}"
+      mode: "0750"
+    - path: "{{ ngfw_lab_config_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ ngfw_lab_config_dir }}/networks"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ ngfw_lab_config_dir }}/domains"
+      owner: root
+      group: root
+      mode: "0755"
+  tags: [ngfw-lab, directories]
+
+- name: Render isolated libvirt network definitions
+  ansible.builtin.template:
+    src: network.xml.j2
+    dest: "{{ ngfw_lab_config_dir }}/networks/{{ item.name }}.xml"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ ngfw_lab_networks }}"
+  register: ngfw_lab_network_templates
+  tags: [ngfw-lab, networks]
+
+- name: Define isolated libvirt networks
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - net-define
+      - "{{ ngfw_lab_config_dir }}/networks/{{ item.item.name }}.xml"
+  loop: "{{ ngfw_lab_network_templates.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  changed_when: item.changed
+  tags: [ngfw-lab, networks]
+
+- name: Inspect isolated libvirt network state
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - net-info
+      - "{{ item.name }}"
+  environment:
+    LC_ALL: C
+  loop: "{{ ngfw_lab_networks }}"
+  register: ngfw_lab_network_info
+  changed_when: false
+  tags: [ngfw-lab, networks]
+
+- name: Start isolated libvirt networks
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - net-start
+      - "{{ item.item.name }}"
+  loop: "{{ ngfw_lab_network_info.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.stdout is not search('(?m)^Active:\\s+yes$')
+  tags: [ngfw-lab, networks]
+
+- name: Enable isolated libvirt networks at boot
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - net-autostart
+      - "{{ item.name }}"
+  loop: "{{ ngfw_lab_networks }}"
+  changed_when: false
+  tags: [ngfw-lab, networks]
+
+- name: Inspect Docker endpoint networks
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - "{{ item.name }}"
+  loop:
+    - name: "{{ ngfw_lab_left_docker_network }}"
+      parent: "{{ ngfw_lab_left_bridge }}"
+      subnet: "{{ ngfw_lab_left_subnet }}"
+      gateway: "{{ ngfw_lab_left_gateway }}"
+    - name: "{{ ngfw_lab_right_docker_network }}"
+      parent: "{{ ngfw_lab_right_bridge }}"
+      subnet: "{{ ngfw_lab_right_subnet }}"
+      gateway: "{{ ngfw_lab_right_gateway }}"
+  register: ngfw_lab_docker_network_info
+  changed_when: false
+  failed_when: false
+  tags: [ngfw-lab, traffic, networks]
+
+- name: Reject conflicting Docker endpoint networks
+  ansible.builtin.assert:
+    that:
+      - (item.stdout | from_json | first).Driver == 'ipvlan'
+      - (item.stdout | from_json | first).Options.parent == item.item.parent
+      - (item.stdout | from_json | first).Options.ipvlan_mode == 'l2'
+      - (item.stdout | from_json | first).IPAM.Config[0].Subnet == item.item.subnet
+      - (item.stdout | from_json | first).IPAM.Config[0].Gateway == item.item.gateway
+    fail_msg: >-
+      Docker network {{ item.item.name }} exists with a different definition.
+      Stop the lab and remove that exact network before changing its topology.
+  loop: "{{ ngfw_lab_docker_network_info.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc == 0
+  tags: [ngfw-lab, traffic, networks]
+
+- name: Create Docker ipvlan endpoint networks
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - create
+      - --driver
+      - ipvlan
+      - --subnet
+      - "{{ item.item.subnet }}"
+      - --gateway
+      - "{{ item.item.gateway }}"
+      - --opt
+      - "parent={{ item.item.parent }}"
+      - --opt
+      - ipvlan_mode=l2
+      - "{{ item.item.name }}"
+  loop: "{{ ngfw_lab_docker_network_info.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0
+  tags: [ngfw-lab, traffic, networks]
+
+- name: Render traffic generator Compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ ngfw_lab_project_dir }}/compose.yml"
+    owner: "{{ ngfw_lab_owner }}"
+    group: "{{ ngfw_lab_group }}"
+    mode: "0644"
+  register: ngfw_lab_compose_template
+  tags: [ngfw-lab, traffic]
+
+- name: Validate traffic generator Compose file
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ ngfw_lab_project_dir }}"
+      - config
+      - --quiet
+  changed_when: false
+  tags: [ngfw-lab, traffic, validate]
+
+- name: Start traffic generator containers
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ ngfw_lab_project_dir }}"
+      - up
+      - --detach
+  register: ngfw_lab_compose_up
+  changed_when: >-
+    'Started' in ngfw_lab_compose_up.stderr or
+    'Created' in ngfw_lab_compose_up.stderr or
+    'Recreated' in ngfw_lab_compose_up.stderr
+  when: ngfw_lab_start_traffic | bool
+  tags: [ngfw-lab, traffic]
+
+- name: Check PT NGFW base images
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ ngfw_lab_ngfw_base_image }}"
+    - "{{ ngfw_lab_mngt_base_image }}"
+  register: ngfw_lab_base_images
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms, preflight]
+
+- name: Require both server-local PT NGFW base images
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - item.stat.size | int > 1048576
+    fail_msg: >-
+      Missing local PT image {{ item.item }}. Upload the licensed QCOW2 file to
+      {{ ngfw_lab_images_dir }} and rerun Ansible; images are never stored in Git.
+  loop: "{{ ngfw_lab_base_images.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms, preflight]
+
+- name: Grant qemu read access to PT NGFW base images
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: "{{ ngfw_lab_owner }}"
+    group: "{{ ngfw_lab_libvirt_group }}"
+    mode: "0640"
+  loop:
+    - "{{ ngfw_lab_ngfw_base_image }}"
+    - "{{ ngfw_lab_mngt_base_image }}"
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms, permissions]
+
+- name: Check OVMF firmware files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ ngfw_lab_ovmf_code }}"
+    - "{{ ngfw_lab_ovmf_vars }}"
+  register: ngfw_lab_ovmf_files
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms, preflight]
+
+- name: Require UEFI firmware files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: "Required OVMF firmware file is missing: {{ item.item }}"
+  loop: "{{ ngfw_lab_ovmf_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms, preflight]
+
+- name: Create copy-on-write VM disks
+  ansible.builtin.command:
+    argv:
+      - qemu-img
+      - create
+      - -f
+      - qcow2
+      - -F
+      - qcow2
+      - -b
+      - "{{ item.base }}"
+      - "{{ item.overlay }}"
+  args:
+    creates: "{{ item.overlay }}"
+  loop:
+    - base: "{{ ngfw_lab_ngfw_base_image }}"
+      overlay: "{{ ngfw_lab_ngfw_overlay }}"
+    - base: "{{ ngfw_lab_mngt_base_image }}"
+      overlay: "{{ ngfw_lab_mngt_overlay }}"
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms, disks]
+
+- name: Set VM disk ownership
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: "{{ ngfw_lab_libvirt_user }}"
+    group: "{{ ngfw_lab_libvirt_group }}"
+    mode: "0640"
+  loop:
+    - "{{ ngfw_lab_ngfw_overlay }}"
+    - "{{ ngfw_lab_mngt_overlay }}"
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms, disks]
+
+- name: Render PT NGFW domain definitions
+  ansible.builtin.template:
+    src: "{{ item.template }}"
+    dest: "{{ ngfw_lab_config_dir }}/domains/{{ item.name }}.xml"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - name: "{{ ngfw_lab_ngfw_vm_name }}"
+      template: ngfw-domain.xml.j2
+    - name: "{{ ngfw_lab_mngt_vm_name }}"
+      template: mngt-domain.xml.j2
+  register: ngfw_lab_domain_templates
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms]
+
+- name: Define PT NGFW virtual machines
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - define
+      - "{{ ngfw_lab_config_dir }}/domains/{{ item.item.name }}.xml"
+  loop: "{{ ngfw_lab_domain_templates.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  changed_when: item.changed
+  when: ngfw_lab_vms_enabled | bool
+  tags: [ngfw-lab, vms]
+
+- name: Enable PT NGFW virtual machine autostart
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - autostart
+      - "{{ item }}"
+  loop:
+    - "{{ ngfw_lab_ngfw_vm_name }}"
+    - "{{ ngfw_lab_mngt_vm_name }}"
+  changed_when: false
+  when:
+    - ngfw_lab_vms_enabled | bool
+    - ngfw_lab_vm_autostart | bool
+  tags: [ngfw-lab, vms]
+
+- name: Disable PT NGFW virtual machine autostart
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - autostart
+      - "{{ item }}"
+      - --disable
+  loop:
+    - "{{ ngfw_lab_ngfw_vm_name }}"
+    - "{{ ngfw_lab_mngt_vm_name }}"
+  changed_when: false
+  when:
+    - ngfw_lab_vms_enabled | bool
+    - not ngfw_lab_vm_autostart | bool
+  tags: [ngfw-lab, vms]
+
+- name: Inspect PT NGFW virtual machine state
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - domstate
+      - "{{ item }}"
+  environment:
+    LC_ALL: C
+  loop:
+    - "{{ ngfw_lab_mngt_vm_name }}"
+    - "{{ ngfw_lab_ngfw_vm_name }}"
+  register: ngfw_lab_domain_state
+  changed_when: false
+  when:
+    - ngfw_lab_vms_enabled | bool
+    - ngfw_lab_start_vms | bool
+  tags: [ngfw-lab, vms]
+
+- name: Start PT NGFW virtual machines
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - start
+      - "{{ item.item }}"
+  loop: "{{ ngfw_lab_domain_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - ngfw_lab_vms_enabled | bool
+    - ngfw_lab_start_vms | bool
+    - item.stdout | trim != 'running'
+  tags: [ngfw-lab, vms]
