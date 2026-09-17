@@ -63,6 +63,15 @@
     cache_valid_time: 3600
   tags: [ngfw-lab, packages]
 
+- name: Grant PT NGFW lab operators access to system libvirt
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups:
+      - libvirt
+    append: true
+  loop: "{{ ngfw_lab_operator_users }}"
+  tags: [ngfw-lab, permissions]
+
 - name: Ensure libvirt is enabled and started
   ansible.builtin.service:
     name: libvirtd

@@ -118,11 +118,17 @@ overlays, and defines both VMs. Start them manually for the first boot so that
 console errors stay visible:
 
 ```bash
-sudo virsh start pt-ngfw-mngt
-sudo virsh start pt-ngfw-auditd
-sudo virsh console pt-ngfw-mngt
-sudo virsh console pt-ngfw-auditd
+virsh -c qemu:///system start pt-ngfw-mngt
+virsh -c qemu:///system start pt-ngfw-auditd
+virsh -c qemu:///system console pt-ngfw-mngt
+virsh -c qemu:///system console pt-ngfw-auditd
 ```
+
+The role adds every `ngfw_lab_operator_users` entry (the lab owner by default)
+to the `libvirt` group. This grants passwordless control of all domains on the
+system libvirt instance, not only the two lab VMs. A newly added operator must
+start a new login session before the group membership is visible; do not add a
+passwordless `sudo` rule for `virsh`.
 
 After initial PT configuration, either start the traffic endpoints manually or
 set `ngfw_lab_start_traffic: true` and apply again:
