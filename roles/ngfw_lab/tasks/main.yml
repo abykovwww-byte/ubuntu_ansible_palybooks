@@ -26,7 +26,7 @@
       - -m
       - "1"
       - -E
-      - ^flags[[:space:]]*:
+      - "^flags[[:space:]]*:"
       - /proc/cpuinfo
   register: ngfw_lab_cpu_flags
   changed_when: false
