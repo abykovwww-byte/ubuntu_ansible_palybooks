@@ -133,6 +133,7 @@
   loop_control:
     label: "{{ item.item.name }}"
   changed_when: item.changed
+  when: item.changed
   tags: [ngfw-lab, networks]
 
 - name: Inspect isolated libvirt network state
@@ -434,7 +435,9 @@
   loop_control:
     label: "{{ item.item.name }}"
   changed_when: item.changed
-  when: ngfw_lab_vms_enabled | bool
+  when:
+    - ngfw_lab_vms_enabled | bool
+    - item.changed
   tags: [ngfw-lab, vms]
 
 - name: Enable PT NGFW virtual machine autostart

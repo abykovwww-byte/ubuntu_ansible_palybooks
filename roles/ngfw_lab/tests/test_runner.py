@@ -99,6 +99,15 @@ class Guards(unittest.TestCase):
 
 
 class Planning(unittest.TestCase):
+    def test_libvirt_definitions_only_run_for_changed_xml(self):
+        tasks = (ROOT / "tasks/main.yml").read_text()
+        network_start = tasks.index("- name: Define isolated libvirt networks")
+        network_end = tasks.index("\n- name:", network_start + 1)
+        domain_start = tasks.index("- name: Define PT NGFW virtual machines")
+        domain_end = tasks.index("\n- name:", domain_start + 1)
+        self.assertIn("\n  when: item.changed\n", tasks[network_start:network_end])
+        self.assertIn("\n    - item.changed\n", tasks[domain_start:domain_end])
+
     def test_aggregate_tcp_bitrate_not_multiplied_by_streams(self):
         cfg = r.validate(config())
         cmd = r.command(cfg, cfg["scenarios"][0], 600)
