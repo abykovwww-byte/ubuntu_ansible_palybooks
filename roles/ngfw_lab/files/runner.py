@@ -44,8 +44,9 @@ def validate(config):
     for name in ("target", "management_address", "mngt_address"):
         if not ipaddress.ip_address(config[name]).is_private:
             raise ValueError(f"{name} must be a private lab address")
-    if not 1 <= config["management_port"] <= 65535:
-        raise ValueError("invalid management port")
+    for name in ("management_port", "mngt_port"):
+        if not 1 <= config[name] <= 65535:
+            raise ValueError("invalid management port")
     if not config["scenarios"] or len(config["scenarios"]) > 32:
         raise ValueError("expected 1..32 scenarios")
     names = set()
@@ -292,7 +293,7 @@ class Backend:
         checks = {
             "dataplane_ok": lambda: self.probe_endpoint("traffic-client", config["target"]),
             "management_ok": lambda: self.tcp_ok(config["management_address"], config["management_port"]),
-            "mngt_ok": lambda: self.tcp_ok(config["mngt_address"], config["management_port"]),
+            "mngt_ok": lambda: self.tcp_ok(config["mngt_address"], config["mngt_port"]),
             "audit": self.audit, "host": self.host,
             "domstats": lambda: self.call(["virsh", "-c", "qemu:///system", "domstats", config["ngfw_vm"], config["mngt_vm"]]),
             "vms_ok": lambda: self.state(config["ngfw_vm"]) == "running" and self.state(config["mngt_vm"]) == "running",
@@ -333,7 +334,7 @@ def validate_isolation(evidence, topology, now):
 
 
 def signature(config, topology):
-    return fingerprint({k: config[k] for k in ("duration", "warmup", "idle", "repetitions", "scenarios", "limits")} | {"topology": topology})
+    return fingerprint({k: config[k] for k in ("duration", "warmup", "idle", "repetitions", "sample_interval", "scenarios", "limits")} | {"topology": topology})
 
 
 def baseline_values(baseline, sig):
@@ -513,7 +514,8 @@ def main():
             topology = backend.topology()
             validate_isolation(json.loads((root / "isolation.json").read_text()), topology, time.time())
             sig = signature(config, topology)
-            baseline = baseline_values(json.loads(args.baseline.read_text()), sig) if args.baseline else {}
+            baseline_report = json.loads(args.baseline.read_text()) if args.baseline else None
+            baseline = baseline_values(baseline_report, sig) if baseline_report else {}
             directory = root / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8])
             directory.mkdir()
             report = {"schema_version": 1, "started_at": utc(), "audit_profile": args.audit_profile,
@@ -525,6 +527,8 @@ def main():
                 report["gaps"].append("AuditD and guest filesystem/CPU thresholds are not monitored in traffic-only mode.")
             if not baseline:
                 report["gaps"].append("No control run supplied; TCP degradation versus control was not checked.")
+            elif baseline_report.get("mode") != report["mode"]:
+                report["gaps"].append("Control and current run use different observation modes; SSH/probe overhead is a comparison confounder.")
             save(directory / "isolation.json", json.loads((root / "isolation.json").read_text()))
             runner = Runner(config, backend, directory, report, Guard(config["limits"], not args.traffic_only), baseline)
             for sig_num in (signal.SIGTERM, signal.SIGINT):

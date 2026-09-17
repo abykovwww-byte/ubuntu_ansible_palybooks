@@ -31,7 +31,7 @@ LIMITS = dict(backlog_pct=75, backlog_seconds=30, disk_used_pct=80, cpu_pct=90,
 def config():
     return dict(duration=1, warmup=1, idle=0, repetitions=3, sample_interval=2,
                 project_dir="/test", reports_dir="/test", target="10.77.20.10",
-                management_address="10.77.0.20", mngt_address="10.77.0.10", management_port=443,
+                management_address="10.77.0.20", mngt_address="10.77.0.10", management_port=22, mngt_port=443,
                 ngfw_vm="ngfw", mngt_vm="mngt", limits=copy.deepcopy(LIMITS),
                 scenarios=[dict(name="tcp", kind="tcp", parallel=4, mbps=100)])
 
