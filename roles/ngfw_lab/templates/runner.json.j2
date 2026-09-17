@@ -1,0 +1,18 @@
+{{ {
+  'project_dir': ngfw_lab_project_dir,
+  'reports_dir': ngfw_lab_reports_dir,
+  'target': ngfw_lab_right_server_address,
+  'management_address': ngfw_lab_management_address,
+  'mngt_address': ngfw_lab_mngt_address,
+  'management_port': ngfw_lab_management_port,
+  'mngt_port': ngfw_lab_mngt_port,
+  'ngfw_vm': ngfw_lab_ngfw_vm_name,
+  'mngt_vm': ngfw_lab_mngt_vm_name,
+  'duration': ngfw_lab_traffic_duration,
+  'warmup': ngfw_lab_traffic_warmup,
+  'idle': ngfw_lab_traffic_idle,
+  'repetitions': ngfw_lab_traffic_repetitions,
+  'sample_interval': ngfw_lab_traffic_sample_interval,
+  'limits': ngfw_lab_traffic_limits,
+  'scenarios': ngfw_lab_traffic_scenarios
+} | to_nice_json }}
