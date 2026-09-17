@@ -46,6 +46,7 @@ deterministic-training platform:
 │   ├── coolify/
 │   ├── docker/
 │   ├── hardening/
+│   ├── ngfw_lab/
 │   └── nginx/
 ├── scripts/
 │   └── apply-local.sh
@@ -57,6 +58,8 @@ deterministic-training platform:
 - `common`: base packages, timezone, deploy group/user, SSH public keys, service directories.
 - `hardening`: cautious SSH configuration and optional UFW firewall.
 - `docker`: Docker Engine, Compose plugin, Docker group membership, optional daemon config.
+- `ngfw_lab`: disabled-by-default KVM/libvirt and Docker traffic-generator
+  topology for the isolated PT NGFW AuditD pilot.
 - `apps`: Docker Compose app deployments under `/srv/apps`.
 - `nginx`: Nginx reverse proxy sites from `nginx_apps`.
 - `coolify`: optional Coolify preparation when `coolify_enabled: true`.
@@ -121,6 +124,7 @@ Run a focused playbook:
 ansible-playbook playbooks/bootstrap.yml
 ansible-playbook playbooks/docker.yml
 ansible-playbook playbooks/apps.yml
+ansible-playbook playbooks/ngfw-lab.yml
 ansible-playbook playbooks/nginx.yml
 ansible-playbook playbooks/hardening.yml
 ansible-playbook playbooks/coolify.yml
@@ -155,6 +159,7 @@ Configure the deploy key in the server account's SSH configuration before clonin
 - `hardening`, `firewall`.
 - `docker`, `repository`, `config`, `service`.
 - `apps`, `source`, `compose`, `env`.
+- `ngfw-lab`, `vms`, `networks`, `traffic`.
 - `nginx`, `sites`, `validate`.
 - `coolify`.
 
@@ -165,6 +170,13 @@ ansible-playbook playbooks/site.yml --tags docker
 ansible-playbook playbooks/site.yml --tags preflight
 ansible-playbook playbooks/site.yml --skip-tags hardening
 ```
+
+## PT NGFW AuditD pilot
+
+The lab is disabled by default and stores licensed QCOW2 images only on the
+server. The architecture, staged Ansible overrides, traffic commands, AuditD
+experiment profiles, stop criteria, and rollback procedure are documented in
+[docs/ngfw-auditd-pilot.md](docs/ngfw-auditd-pilot.md).
 
 ## Nginx Apps
 

@@ -12,6 +12,9 @@
       when: tailscale_enabled | default(false) | bool
     - role: docker
       tags: [docker]
+    - role: ngfw_lab
+      tags: [ngfw-lab]
+      when: ngfw_lab_enabled | default(false) | bool
     - role: apps
       tags: [apps]
     - role: nginx

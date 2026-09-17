@@ -1,0 +1,24 @@
+services:
+  traffic-client:
+    image: {{ ngfw_lab_traffic_image }}
+    entrypoint: ["sleep", "infinity"]
+    restart: unless-stopped
+    networks:
+      left:
+        ipv4_address: {{ ngfw_lab_left_client_address }}
+
+  traffic-server:
+    image: {{ ngfw_lab_traffic_image }}
+    entrypoint: ["iperf3", "--server"]
+    restart: unless-stopped
+    networks:
+      right:
+        ipv4_address: {{ ngfw_lab_right_server_address }}
+
+networks:
+  left:
+    external: true
+    name: {{ ngfw_lab_left_docker_network }}
+  right:
+    external: true
+    name: {{ ngfw_lab_right_docker_network }}

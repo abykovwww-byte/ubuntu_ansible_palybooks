@@ -30,6 +30,15 @@ docker_users:
 docker_data_root: ""
 docker_daemon_config: {}
 
+# Isolated PT NGFW AuditD pilot. Enable in /etc/ansible/local-overrides.yml
+# only after reviewing docs/ngfw-auditd-pilot.md. Licensed QCOW2 images stay
+# server-local and are never committed to this repository.
+ngfw_lab_enabled: false
+ngfw_lab_vms_enabled: false
+ngfw_lab_start_vms: false
+ngfw_lab_vm_autostart: false
+ngfw_lab_start_traffic: false
+
 tailscale_enabled: true
 tailscale_hostname: abykovserv
 tailscale_node_ip: "100.117.52.16"

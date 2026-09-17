@@ -1,0 +1,7 @@
+<network>
+  <name>{{ item.name }}</name>
+  <bridge name="{{ item.bridge }}" stp="off" delay="0"/>
+{% if item.host_address is defined %}
+  <ip address="{{ item.host_address }}" prefix="{{ item.prefix }}"/>
+{% endif %}
+</network>
