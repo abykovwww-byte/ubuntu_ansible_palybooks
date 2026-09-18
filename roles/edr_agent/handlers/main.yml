@@ -1,0 +1,6 @@
+---
+- name: Restart vxagent
+  ansible.builtin.systemd:
+    name: vxagent.service
+    state: restarted
+    daemon_reload: true

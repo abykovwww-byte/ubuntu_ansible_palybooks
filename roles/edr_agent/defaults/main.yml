@@ -1,0 +1,16 @@
+---
+edr_agent_enabled: false
+edr_agent_server_host: ""
+edr_agent_server_port: 8443
+edr_agent_server_url: "wss://{{ edr_agent_server_host }}:{{ edr_agent_server_port }}"
+
+edr_agent_version: ""
+edr_agent_archive_url: ""
+edr_agent_archive_sha256: ""
+edr_agent_cache_dir: /var/cache/edr-agent
+edr_agent_archive_path: "{{ edr_agent_cache_dir }}/edr-agents-{{ edr_agent_version }}.zip"
+edr_agent_extract_dir: "{{ edr_agent_cache_dir }}/edr-agents-{{ edr_agent_version }}"
+edr_agent_deb_path: "{{ edr_agent_extract_dir }}/vxagent-{{ edr_agent_version }}_amd64.deb"
+edr_agent_download_ca_path: "{{ edr_agent_cache_dir }}/russian-trusted-root-ca.crt"
+edr_agent_service_env_path: /opt/vxagent/service.env
+edr_agent_log_path: /opt/vxagent/logs/agent.log

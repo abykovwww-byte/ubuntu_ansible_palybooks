@@ -10,6 +10,9 @@
     - role: tailscale
       tags: [tailscale]
       when: tailscale_enabled | default(false) | bool
+    - role: edr_agent
+      tags: [edr-agent]
+      when: edr_agent_enabled | default(false) | bool
     - role: docker
       tags: [docker]
     - role: ngfw_lab
