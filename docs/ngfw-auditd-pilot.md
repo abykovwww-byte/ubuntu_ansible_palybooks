@@ -65,16 +65,12 @@ or change the host kernel command line automatically: that is a reboot-level
 host change and the public requirement is CPU support for 1 GiB pages, not a
 specific persistent reservation for this small lab.
 
-The `1.11.1-1750` firewall image reserves 12 guest 1 GiB HugePages and its
-shipped DPDK profile allocates pools on guest NUMA nodes `0` through `3`.
-Accordingly, the 4-vCPU VM exposes four virtual NUMA cells, one vCPU per cell.
-Guest nodes 0 through 3 receive `6/3/3/4` GiB respectively. This boot-tested
-layout produces a `3/2/2/2` distribution of 1 GiB HugePages, enough for every
-shipped per-node DPDK pool. The cells are all backed by the home server's
-single physical NUMA node, so the appliance is not split across host NUMA
-nodes. Collapsing the guest to one NUMA cell leaves `pt-ngfw-core` in
-`activating` with `numa_node: wrong value 1`; equal 4 GiB cells fail at
-`pkt_pool0`, while `7/3/3/3` GiB fails at `pkt_pool3`.
+The firewall CPU topology is explicit: one socket, four cores, one thread per
+core. PT's bundled `cfggen` maps DPDK pools to the guest CPU socket IDs. Leaving
+the libvirt topology implicit makes QEMU expose four single-core sockets and
+causes `cfggen` to create pools for nodes `0` through `3`; the minimal VM is a
+single-NUMA-node appliance and cannot start that configuration. With one guest
+socket, the image reserves all 12 guest 1 GiB HugePages on node 0.
 
 Do not run the memory-heavy local LLM during comparable measurements. The two
 VMs reserve 26 GiB before filesystem cache and container overhead; competing
@@ -174,6 +170,29 @@ The example is illustrative, not a recommended value for abykovserv until
 
 Use the PT quick-start procedure for first boot, licensing, MNGT enrollment,
 zones, routes, and policy. Keep the lab addresses separate from home LAN:
+
+On the first boot, verify that all four CPUs belong to socket 0, then regenerate
+the appliance configuration with PT's bundled generator. The base QCOW2 may
+contain a configuration generated under the hypervisor's previous CPU
+topology. Preserve the original and validate the generated JSON before the
+atomic install:
+
+```bash
+lscpu -e=CPU,SOCKET,NODE,CORE
+sudo systemctl stop pt-ngfw-core
+sudo cp -a /opt/pt-ngfw/ngfw-core/etc/config/pt-ngfw.conf \
+  /opt/pt-ngfw/ngfw-core/etc/config/pt-ngfw.conf.pre-single-socket-pilot
+cd /opt/pt-ngfw/ngfw-core/etc/cfggen
+python3 gen.py -b default.conf -o /tmp/pt-ngfw.conf
+python3 -m json.tool /tmp/pt-ngfw.conf >/dev/null
+sudo install -o root -g root -m 0644 /tmp/pt-ngfw.conf \
+  /opt/pt-ngfw/ngfw-core/etc/config/pt-ngfw.conf
+sudo systemctl start pt-ngfw-core
+```
+
+Do not continue until `systemctl is-active pt-ngfw-core` returns `active`, all
+12 HugePages are allocated on node 0, and `ip -br link` shows only `mgmt1` and
+`sync1` because the six dataplane interfaces have been captured by DPDK.
 
 | Component | Address |
 | --- | --- |

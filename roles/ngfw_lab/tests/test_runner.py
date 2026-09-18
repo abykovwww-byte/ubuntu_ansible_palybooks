@@ -100,22 +100,13 @@ class Guards(unittest.TestCase):
 
 
 class Planning(unittest.TestCase):
-    def test_ngfw_guest_numa_matches_appliance_dpdk_profile(self):
-        defaults = (ROOT / "defaults/main.yml").read_text()
+    def test_ngfw_cpu_topology_is_one_socket_for_cfggen(self):
         domain = (ROOT / "templates/ngfw-domain.xml.j2").read_text()
-        expected_memory = [6144, 3072, 3072, 4096]
-        for cell_id, memory_mib in enumerate(expected_memory):
-            self.assertIn(
-                f'{{id: {cell_id}, cpus: "{cell_id}", memory_mib: {memory_mib}}}',
-                defaults,
-            )
-        self.assertIn("<numa>", domain)
-        self.assertIn("{% for cell in ngfw_lab_ngfw_numa_cells %}", domain)
         self.assertIn(
-            '<cell id="{{ cell.id }}" cpus="{{ cell.cpus }}" '
-            'memory="{{ cell.memory_mib }}" unit="MiB"/>',
+            '<topology sockets="1" cores="{{ ngfw_lab_ngfw_vcpus }}" threads="1"/>',
             domain,
         )
+        self.assertNotIn("<numa>", domain)
 
     def test_domains_have_stable_uuids_for_redefinition(self):
         defaults = (ROOT / "defaults/main.yml").read_text()
