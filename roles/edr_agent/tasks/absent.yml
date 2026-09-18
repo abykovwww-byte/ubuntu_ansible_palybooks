@@ -1,0 +1,33 @@
+---
+- name: Collect service state before EDR removal
+  ansible.builtin.service_facts:
+  tags: [edr-agent, service]
+
+- name: Stop and disable the EDR agent before package removal
+  ansible.builtin.systemd:
+    name: vxagent.service
+    enabled: false
+    state: stopped
+  when: "'vxagent.service' in ansible_facts.services"
+  tags: [edr-agent, service]
+
+- name: Remove the EDR agent package
+  ansible.builtin.apt:
+    name: vxagent
+    state: absent
+    purge: true
+  tags: [edr-agent, packages]
+
+- name: Remove EDR agent files from the host
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /opt/vxagent
+    - "{{ edr_agent_cache_dir }}"
+  tags: [edr-agent, packages]
+
+- name: Refresh systemd after EDR agent removal
+  ansible.builtin.systemd:
+    daemon_reload: true
+  tags: [edr-agent, service]

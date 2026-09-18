@@ -1,0 +1,12 @@
+[Unit]
+Description=PT NGFW lab TLS passthrough relay to MaxPatrol XDR
+Requires=ngfw-lab-xdr-relay.socket
+After=network-online.target libvirtd.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd {{ ngfw_lab_xdr_relay_target_host }}:{{ ngfw_lab_xdr_relay_target_port }}
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true

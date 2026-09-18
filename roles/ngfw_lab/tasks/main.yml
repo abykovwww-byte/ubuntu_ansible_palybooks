@@ -23,6 +23,13 @@
       - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_port | int > 0
       - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_port | int < 65536
       - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_allowed_cidr | length > 0
+      - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_listen_address == '10.77.0.1'
+      - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_allowed_ip == ngfw_lab_management_address
+      - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_listen_port | int > 0
+      - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_listen_port | int < 65536
+      - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_target_host | length > 0
+      - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_target_port | int > 0
+      - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_target_port | int < 65536
     fail_msg: PT NGFW lab variables are incomplete or unsafe.
   tags: [ngfw-lab, preflight]
 
@@ -275,6 +282,98 @@
     delete: true
   when: not (ngfw_lab_mngt_proxy_enabled | bool)
   tags: [ngfw-lab, mngt-proxy, firewall]
+
+- name: Render the restricted PT NGFW XDR relay systemd units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: ngfw-lab-xdr-relay.socket.j2
+      dest: ngfw-lab-xdr-relay.socket
+    - src: ngfw-lab-xdr-relay.service.j2
+      dest: ngfw-lab-xdr-relay.service
+  register: ngfw_lab_xdr_relay_units
+  when: ngfw_lab_xdr_relay_enabled | bool
+  tags: [ngfw-lab, xdr-relay]
+
+- name: Allow only the NGFW guest to use the XDR relay
+  community.general.ufw:
+    rule: allow
+    direction: in
+    proto: tcp
+    from_ip: "{{ ngfw_lab_xdr_relay_allowed_ip }}"
+    to_ip: "{{ ngfw_lab_xdr_relay_listen_address }}"
+    port: "{{ ngfw_lab_xdr_relay_listen_port }}"
+    comment: PT NGFW XDR relay
+  when: ngfw_lab_xdr_relay_enabled | bool
+  tags: [ngfw-lab, xdr-relay, firewall]
+
+- name: Enable and start the restricted PT NGFW XDR relay socket
+  ansible.builtin.systemd:
+    name: ngfw-lab-xdr-relay.socket
+    enabled: true
+    state: "{{ 'restarted' if ngfw_lab_xdr_relay_units.changed else 'started' }}"
+    daemon_reload: true
+  when: ngfw_lab_xdr_relay_enabled | bool
+  tags: [ngfw-lab, xdr-relay]
+
+- name: Inspect disabled PT NGFW XDR relay units
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item }}"
+  loop:
+    - ngfw-lab-xdr-relay.socket
+    - ngfw-lab-xdr-relay.service
+  register: ngfw_lab_xdr_relay_disabled_units
+  when: not (ngfw_lab_xdr_relay_enabled | bool)
+  tags: [ngfw-lab, xdr-relay]
+
+- name: Stop disabled PT NGFW XDR relay units
+  ansible.builtin.systemd:
+    name: "{{ item.item }}"
+    enabled: "{{ false if item.item.endswith('.socket') else omit }}"
+    state: stopped
+  loop: "{{ ngfw_lab_xdr_relay_disabled_units.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - not (ngfw_lab_xdr_relay_enabled | bool)
+    - item.stat.exists
+  tags: [ngfw-lab, xdr-relay]
+
+- name: Remove disabled PT NGFW XDR relay units
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
+  loop:
+    - ngfw-lab-xdr-relay.socket
+    - ngfw-lab-xdr-relay.service
+  register: ngfw_lab_xdr_relay_removed_units
+  when: not (ngfw_lab_xdr_relay_enabled | bool)
+  tags: [ngfw-lab, xdr-relay]
+
+- name: Reload systemd after removing PT NGFW XDR relay units
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - not (ngfw_lab_xdr_relay_enabled | bool)
+    - ngfw_lab_xdr_relay_removed_units.changed
+  tags: [ngfw-lab, xdr-relay]
+
+- name: Remove the disabled PT NGFW XDR relay firewall rule
+  community.general.ufw:
+    rule: allow
+    direction: in
+    proto: tcp
+    from_ip: "{{ ngfw_lab_xdr_relay_allowed_ip }}"
+    to_ip: "{{ ngfw_lab_xdr_relay_listen_address }}"
+    port: "{{ ngfw_lab_xdr_relay_listen_port }}"
+    comment: PT NGFW XDR relay
+    delete: true
+  when: not (ngfw_lab_xdr_relay_enabled | bool)
+  tags: [ngfw-lab, xdr-relay, firewall]
 
 - name: Inspect Docker endpoint networks
   ansible.builtin.command:

@@ -1,5 +1,6 @@
 ---
 edr_agent_enabled: false
+edr_agent_state: present
 edr_agent_server_host: ""
 edr_agent_server_port: 8443
 edr_agent_server_url: "wss://{{ edr_agent_server_host }}:{{ edr_agent_server_port }}"

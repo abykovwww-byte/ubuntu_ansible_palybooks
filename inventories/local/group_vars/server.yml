@@ -48,14 +48,19 @@ tailscale_ssh_enabled: false
 tailscale_advertise_routes:
   - "192.168.1.88/32"
 
-# MaxPatrol EDR host agent. The version, archive checksum, and external agent
-# server are pinned from the SOCIT "Установка EDR" page (version 5).
+# Remove the mistakenly installed MaxPatrol EDR host agent. The EDR target is
+# the disposable PT NGFW guest, not the abykovserv hypervisor.
 edr_agent_enabled: true
+edr_agent_state: absent
 edr_agent_server_host: xdr-ext.ptsecurity.ru
 edr_agent_server_port: 8443
 edr_agent_version: "4.3.0.177"
 edr_agent_archive_url: "https://storage.ptsecurity.com/seafhttp/f/b2409c77c3c741ad884c/?op=view"
 edr_agent_archive_sha256: "d2e4274d9dc5b8597ae5aba204959f3ad5b16341305ee196e015bdb43b29a3a6"
+
+# The NGFW VM has no default route by design. Expose only a TLS passthrough
+# listener from that guest to the external XDR endpoint.
+ngfw_lab_xdr_relay_enabled: true
 
 beszel_enabled: true
 beszel_version: "0.18.7"

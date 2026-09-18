@@ -142,6 +142,17 @@ class Planning(unittest.TestCase):
         self.assertNotIn("sudo virsh", guide)
         self.assertIn("virsh -c qemu:///system start pt-ngfw-mngt", guide)
 
+    def test_xdr_relay_is_opt_in_and_guest_restricted(self):
+        defaults = (ROOT / "defaults/main.yml").read_text()
+        tasks = (ROOT / "tasks/main.yml").read_text()
+        socket_unit = (ROOT / "templates/ngfw-lab-xdr-relay.socket.j2").read_text()
+        service_unit = (ROOT / "templates/ngfw-lab-xdr-relay.service.j2").read_text()
+        self.assertIn("ngfw_lab_xdr_relay_enabled: false", defaults)
+        self.assertIn('ngfw_lab_xdr_relay_allowed_ip: "{{ ngfw_lab_management_address }}"', defaults)
+        self.assertIn('from_ip: "{{ ngfw_lab_xdr_relay_allowed_ip }}"', tasks)
+        self.assertIn("ListenStream={{ ngfw_lab_xdr_relay_listen_address }}", socket_unit)
+        self.assertIn("systemd-socket-proxyd {{ ngfw_lab_xdr_relay_target_host }}", service_unit)
+
     def test_libvirt_definitions_only_run_for_changed_xml(self):
         tasks = (ROOT / "tasks/main.yml").read_text()
         network_start = tasks.index("- name: Define isolated libvirt networks")

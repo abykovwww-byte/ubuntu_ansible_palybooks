@@ -10,12 +10,12 @@ dataplane to the home LAN or Internet and does not make PT NGFW the gateway for
 any existing service.
 
 Ansible owns only the Ubuntu host, KVM/libvirt topology, server-local image
-paths, and Docker traffic endpoints. It does not install software in the PT
-appliances and does not apply AuditD rules there. PT documentation warns
-against installing third-party software or updating base operating-system
-components without vendor guidance. AuditD changes therefore remain an
-explicit console/SSH experiment with a powered-off snapshot and a rollback
-point.
+paths, Docker traffic endpoints, and explicitly enabled host-side relays. It
+does not install software in the PT appliances or apply AuditD rules there. PT
+documentation warns against installing third-party software or updating base
+operating-system components without vendor guidance. Guest changes therefore
+remain an explicit console/SSH experiment with a powered-off snapshot and a
+rollback point.
 
 The role is deliberately disabled by default. A normal site apply changes
 nothing until `ngfw_lab_enabled: true` is set in the server-local
@@ -34,8 +34,9 @@ flowchart LR
         C[traffic-client\n10.77.10.10]
         S[traffic-server\n10.77.20.10]
       end
-      MG[br-ngfw-mgmt\n10.77.0.1/24]
-      P[systemd socket proxy\n192.168.1.88:8443]
+    MG[br-ngfw-mgmt\n10.77.0.1/24]
+    P[systemd socket proxy\n192.168.1.88:8443]
+    X[restricted XDR relay\n10.77.0.1:8443]
       L[br-ngfw-left\nno host IP]
       R[br-ngfw-right\nno host IP]
       U[br-ngfw-unused\nno host IP]
@@ -50,7 +51,15 @@ flowchart LR
     C --- L
     S --- R
     LAN[Home LAN\n192.168.1.0/24] -->|UFW TCP/8443| P
+    F -->|only 10.77.0.20 TCP/8443| X
+    X -->|TLS passthrough| XDR[xdr-ext.ptsecurity.ru:8443]
 ```
+
+The optional XDR relay does not give the appliance a default route or general
+DNS/Internet access. UFW permits only `10.77.0.20` to reach the listener, and
+`systemd-socket-proxyd` forwards only to `xdr-ext.ptsecurity.ru:8443`. Inside
+the disposable guest, map `xdr-ext.ptsecurity.ru` to `10.77.0.1`; TLS still
+uses the original hostname and passes through unchanged.
 
 The endpoint networks use Docker `ipvlan` on the two addressless libvirt
 bridges. The host has no address on the left or right subnet. Consequently, it
