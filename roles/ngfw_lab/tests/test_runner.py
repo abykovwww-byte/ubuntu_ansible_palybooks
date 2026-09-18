@@ -103,7 +103,7 @@ class Planning(unittest.TestCase):
     def test_ngfw_guest_numa_matches_appliance_dpdk_profile(self):
         defaults = (ROOT / "defaults/main.yml").read_text()
         domain = (ROOT / "templates/ngfw-domain.xml.j2").read_text()
-        expected_memory = [7168, 3072, 3072, 3072]
+        expected_memory = [6144, 3072, 3072, 4096]
         for cell_id, memory_mib in enumerate(expected_memory):
             self.assertIn(
                 f'{{id: {cell_id}, cpus: "{cell_id}", memory_mib: {memory_mib}}}',

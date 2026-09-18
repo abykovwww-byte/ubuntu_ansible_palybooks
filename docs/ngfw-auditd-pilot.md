@@ -68,13 +68,13 @@ specific persistent reservation for this small lab.
 The `1.11.1-1750` firewall image reserves 12 guest 1 GiB HugePages and its
 shipped DPDK profile allocates pools on guest NUMA nodes `0` through `3`.
 Accordingly, the 4-vCPU VM exposes four virtual NUMA cells, one vCPU per cell.
-Guest node 0 receives 7 GiB and nodes 1 through 3 receive 3 GiB each: node 0
-also hosts the OS and needs enough ordinary memory for the early HugePage
-reservation to leave at least two 1 GiB pages on every node. The cells are all
-backed by the home server's single physical NUMA node, so the appliance is not
-split across host NUMA nodes. Collapsing the guest to one NUMA cell leaves
-`pt-ngfw-core` in `activating` with `numa_node: wrong value 1`; equal 4 GiB
-cells leave node 0 with one HugePage and fail at `pkt_pool0` initialization.
+Guest nodes 0 through 3 receive `6/3/3/4` GiB respectively. This boot-tested
+layout produces a `3/2/2/2` distribution of 1 GiB HugePages, enough for every
+shipped per-node DPDK pool. The cells are all backed by the home server's
+single physical NUMA node, so the appliance is not split across host NUMA
+nodes. Collapsing the guest to one NUMA cell leaves `pt-ngfw-core` in
+`activating` with `numa_node: wrong value 1`; equal 4 GiB cells fail at
+`pkt_pool0`, while `7/3/3/3` GiB fails at `pkt_pool3`.
 
 Do not run the memory-heavy local LLM during comparable measurements. The two
 VMs reserve 26 GiB before filesystem cache and container overhead; competing
