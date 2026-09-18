@@ -22,11 +22,7 @@
     <apic/>
   </features>
   <cpu mode="host-passthrough" check="none" migratable="off">
-    <numa>
-{% for cell in ngfw_lab_ngfw_numa_cells %}
-      <cell id="{{ cell.id }}" cpus="{{ cell.cpus }}" memory="{{ cell.memory_mib }}" unit="MiB"/>
-{% endfor %}
-    </numa>
+    <topology sockets="1" cores="{{ ngfw_lab_ngfw_vcpus }}" threads="1"/>
   </cpu>
   <clock offset="utc"/>
   <on_poweroff>destroy</on_poweroff>

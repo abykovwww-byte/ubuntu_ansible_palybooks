@@ -30,15 +30,6 @@ ngfw_lab_ngfw_uuid: "c365a5c0-2dd4-4a1f-8ae7-4fd9b9b506d5"
 ngfw_lab_mngt_uuid: "eee9f2dc-4fdf-4d1b-a91c-f3c6b571e2fa"
 ngfw_lab_ngfw_vcpus: 4
 ngfw_lab_ngfw_memory_mib: 16384
-# PT NGFW 1.11.1-1750 ships a DPDK profile with pools on guest NUMA nodes 0-3.
-# Keep one vCPU in each virtual cell while the whole VM remains on the server's
-# single physical NUMA node. This asymmetric layout was boot-tested with the
-# image's early 1 GiB HugePage reservation and yields 3/2/2/2 pages by node.
-ngfw_lab_ngfw_numa_cells:
-  - {id: 0, cpus: "0", memory_mib: 6144}
-  - {id: 1, cpus: "1", memory_mib: 3072}
-  - {id: 2, cpus: "2", memory_mib: 3072}
-  - {id: 3, cpus: "3", memory_mib: 4096}
 ngfw_lab_mngt_vcpus: 4
 ngfw_lab_mngt_memory_mib: 10240
 ngfw_lab_ngfw_vcpu_pins: []
