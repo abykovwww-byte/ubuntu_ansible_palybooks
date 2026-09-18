@@ -39,10 +39,10 @@ flowchart LR
     end
 
     M --- MG
-    F -- mgmt1 / NIC 8 --- MG
-    F -- eth1-1 / NIC 1 --- L
-    F -- eth1-2 / NIC 2 --- R
-    F -- eth1-3..6 and sync1 --- U
+    F -- mgmt1 / VirtIO 1 --- MG
+    F -- dataplane 1 / VirtIO 3 --- L
+    F -- dataplane 2 / VirtIO 4 --- R
+    F -- sync1 / VirtIO 2 and dataplane 3..6 --- U
     C --- L
     S --- R
 ```
@@ -52,6 +52,10 @@ bridges. The host has no address on the left or right subnet. Consequently, it
 must not be able to route `10.77.10.0/24` to `10.77.20.0/24`; forwarded traffic
 has to traverse the NGFW dataplane. The unused dataplane and sync interfaces
 are retained because the ready-made KVM image expects all eight interfaces.
+The image assigns `mgmt1` to the first VirtIO NIC and `sync1` to the second;
+the remaining six NICs are the dataplane adapters selected by PT `ports.conf`.
+The libvirt XML order is therefore part of the appliance contract, not a
+cosmetic detail.
 
 Published minimums for the preview-sized management VM are 4 vCPU and 10 GiB.
 The firewall VM uses 4 vCPU and 16 GiB. `host-passthrough` exposes the host CPU
