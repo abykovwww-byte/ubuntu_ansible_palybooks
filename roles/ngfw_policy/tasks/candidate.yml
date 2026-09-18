@@ -21,6 +21,7 @@
 - name: Retain the freshly verified non-secret identities
   ansible.builtin.set_fact:
     ngfw_prepared_config: "{{ ngfw_policy_result.prepared_config }}"
+    ngfw_preparation_summary: "{{ ngfw_policy_result.summary }}"
 
 - name: Reconcile and independently read back the complete candidate
   when: not ansible_check_mode
@@ -60,6 +61,6 @@
 - name: Report candidate-only evidence
   ansible.builtin.debug:
     msg:
-      summary: "{{ ngfw_policy_result.summary }}"
+      summary: "{{ ngfw_preparation_summary if ansible_check_mode else ngfw_policy_result.summary }}"
       published: false
       next_step: Review candidate changes and prepare traffic listeners before a separate explicitly confirmed publish.
