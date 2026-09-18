@@ -1,0 +1,9 @@
+[Unit]
+Description=PT NGFW MNGT lab LAN listener
+
+[Socket]
+ListenStream={{ ngfw_lab_mngt_proxy_listen_address }}:{{ ngfw_lab_mngt_proxy_listen_port }}
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target

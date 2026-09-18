@@ -1,0 +1,12 @@
+[Unit]
+Description=PT NGFW MNGT lab TLS passthrough proxy
+Requires=ngfw-lab-mngt-proxy.socket
+After=network-online.target libvirtd.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd {{ ngfw_lab_mngt_address }}:{{ ngfw_lab_mngt_port }}
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true

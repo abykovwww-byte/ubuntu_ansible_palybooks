@@ -19,6 +19,10 @@
       - ngfw_lab_traffic_cpus | float > 0
       - ngfw_lab_traffic_cpus | float <= 4
       - ngfw_lab_traffic_pids | int >= 96
+      - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_address != '0.0.0.0'
+      - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_port | int > 0
+      - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_port | int < 65536
+      - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_allowed_cidr | length > 0
     fail_msg: PT NGFW lab variables are incomplete or unsafe.
   tags: [ngfw-lab, preflight]
 
@@ -179,6 +183,98 @@
   loop: "{{ ngfw_lab_networks }}"
   changed_when: false
   tags: [ngfw-lab, networks]
+
+- name: Render PT NGFW MNGT LAN proxy systemd units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: ngfw-lab-mngt-proxy.socket.j2
+      dest: ngfw-lab-mngt-proxy.socket
+    - src: ngfw-lab-mngt-proxy.service.j2
+      dest: ngfw-lab-mngt-proxy.service
+  register: ngfw_lab_mngt_proxy_units
+  when: ngfw_lab_mngt_proxy_enabled | bool
+  tags: [ngfw-lab, mngt-proxy]
+
+- name: Allow PT NGFW MNGT proxy from the configured LAN
+  community.general.ufw:
+    rule: allow
+    direction: in
+    proto: tcp
+    from_ip: "{{ ngfw_lab_mngt_proxy_allowed_cidr }}"
+    to_ip: "{{ ngfw_lab_mngt_proxy_listen_address }}"
+    port: "{{ ngfw_lab_mngt_proxy_listen_port }}"
+    comment: PT NGFW MNGT lab
+  when: ngfw_lab_mngt_proxy_enabled | bool
+  tags: [ngfw-lab, mngt-proxy, firewall]
+
+- name: Enable and start PT NGFW MNGT LAN proxy socket
+  ansible.builtin.systemd:
+    name: ngfw-lab-mngt-proxy.socket
+    enabled: true
+    state: "{{ 'restarted' if ngfw_lab_mngt_proxy_units.changed else 'started' }}"
+    daemon_reload: true
+  when: ngfw_lab_mngt_proxy_enabled | bool
+  tags: [ngfw-lab, mngt-proxy]
+
+- name: Inspect disabled PT NGFW MNGT LAN proxy units
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item }}"
+  loop:
+    - ngfw-lab-mngt-proxy.socket
+    - ngfw-lab-mngt-proxy.service
+  register: ngfw_lab_mngt_proxy_disabled_units
+  when: not (ngfw_lab_mngt_proxy_enabled | bool)
+  tags: [ngfw-lab, mngt-proxy]
+
+- name: Stop disabled PT NGFW MNGT LAN proxy units
+  ansible.builtin.systemd:
+    name: "{{ item.item }}"
+    enabled: "{{ false if item.item.endswith('.socket') else omit }}"
+    state: stopped
+  loop: "{{ ngfw_lab_mngt_proxy_disabled_units.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - not (ngfw_lab_mngt_proxy_enabled | bool)
+    - item.stat.exists
+  tags: [ngfw-lab, mngt-proxy]
+
+- name: Remove disabled PT NGFW MNGT LAN proxy units
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
+  loop:
+    - ngfw-lab-mngt-proxy.socket
+    - ngfw-lab-mngt-proxy.service
+  register: ngfw_lab_mngt_proxy_removed_units
+  when: not (ngfw_lab_mngt_proxy_enabled | bool)
+  tags: [ngfw-lab, mngt-proxy]
+
+- name: Reload systemd after removing PT NGFW MNGT LAN proxy units
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - not (ngfw_lab_mngt_proxy_enabled | bool)
+    - ngfw_lab_mngt_proxy_removed_units.changed
+  tags: [ngfw-lab, mngt-proxy]
+
+- name: Remove the disabled PT NGFW MNGT LAN firewall rule
+  community.general.ufw:
+    rule: allow
+    direction: in
+    proto: tcp
+    from_ip: "{{ ngfw_lab_mngt_proxy_allowed_cidr }}"
+    to_ip: "{{ ngfw_lab_mngt_proxy_listen_address }}"
+    port: "{{ ngfw_lab_mngt_proxy_listen_port }}"
+    comment: PT NGFW MNGT lab
+    delete: true
+  when: not (ngfw_lab_mngt_proxy_enabled | bool)
+  tags: [ngfw-lab, mngt-proxy, firewall]
 
 - name: Inspect Docker endpoint networks
   ansible.builtin.command:
