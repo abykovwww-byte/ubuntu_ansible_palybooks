@@ -42,6 +42,12 @@ class Rendering(unittest.TestCase):
             self.assertTrue(data["services"][name]["read_only"])
             self.assertEqual(data["services"][name]["restart"], "no")
             self.assertEqual(int(data["services"][name]["mem_limit"]), 536870912)
+        self.assertEqual(json.loads(data["services"]["traffic-server"]["environment"]["NGFW_POLICY_LISTEN_RANGES"]), [])
+        values["ngfw_lab_policy_listener_ranges"] = [[10000, 10991], [20000, 20099]]
+        enabled = yaml.safe_load(env.from_string((ROOT / "templates/compose.yml.j2").read_text()).render(values))
+        self.assertEqual(json.loads(enabled["services"]["traffic-server"]["environment"]["NGFW_POLICY_LISTEN_RANGES"]),
+                         values["ngfw_lab_policy_listener_ranges"])
+        self.assertEqual(enabled["services"]["traffic-server"]["ulimits"]["nofile"]["soft"], 16384)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,12 @@ services:
     <<: *endpoint
     entrypoint: ["python3", "/opt/traffic/endpoint.py"]
     command: ["server"]
+    environment:
+      NGFW_POLICY_LISTEN_RANGES: '{{ ngfw_lab_policy_listener_ranges | to_nice_json | replace("\n", " ") }}'
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 16384
     healthcheck:
       test: ["CMD", "python3", "/opt/traffic/endpoint.py", "probe", "--target", "127.0.0.1"]
       interval: 10s

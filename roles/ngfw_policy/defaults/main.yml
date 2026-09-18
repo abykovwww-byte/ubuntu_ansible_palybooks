@@ -1,0 +1,29 @@
+---
+ngfw_policy_mode: plan
+ngfw_policy_output_dir: /srv/app-data/ngfw-lab/policy
+ngfw_policy_owner: abykov
+ngfw_policy_group: abykov
+# Credentials are deliberately not part of config or any generated file.
+ngfw_policy_login: ""
+ngfw_policy_password: ""
+ngfw_policy_config:
+  prefix: auditd-lab
+  acl_count: 1000
+  nat_count: 200
+  log_mode: NO_LOG
+  management_url: https://10.77.0.10
+  ca_file: null
+  client: 10.77.10.10
+  server: 10.77.20.10
+  dnat_vip: 10.77.20.100
+  left_cidr: 10.77.10.1/24
+  right_cidr: 10.77.20.1/24
+  device_group_name: ngfw-auditd-lab
+  device_group_id: ""
+  logical_device_id: ""
+  physical_device_id: ""
+  left_interface_id: ""
+  right_interface_id: ""
+  dedicated_mngt_confirmed: false
+  request_interval: 0.2
+  job_timeout: 300

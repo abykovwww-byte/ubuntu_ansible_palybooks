@@ -1,0 +1,34 @@
+name: NGFW policy
+on:
+  pull_request:
+    paths:
+      - 'roles/ngfw_policy/**'
+      - 'playbooks/ngfw-policy.yml'
+      - '.github/workflows/ngfw-policy.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'roles/ngfw_policy/**'
+      - 'playbooks/ngfw-policy.yml'
+      - '.github/workflows/ngfw-policy.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ansible and test dependencies
+        run: python -m pip install ansible-core PyYAML
+      - name: Policy generation, API safety and idempotency
+        run: python -m unittest discover -s roles/ngfw_policy/tests -v
+      - name: Check policy playbook syntax
+        run: ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-policy.yml --syntax-check
+      - name: Exercise the actual Ansible module offline
+        run: >-
+          ansible localhost -i localhost, -c local -M roles/ngfw_policy/library
+          -m pt_ngfw_policy -a '{"mode":"plan","config":{"acl_count":16,"nat_count":2}}'

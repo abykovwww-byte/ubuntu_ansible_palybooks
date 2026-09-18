@@ -22,6 +22,7 @@ def load(name, path):
 
 
 r = load("runner", ROOT / "files/runner.py")
+sys.path.insert(0, str(ROOT / "files/traffic"))
 e = load("endpoint", ROOT / "files/traffic/endpoint.py")
 LIMITS = dict(backlog_pct=75, backlog_seconds=30, disk_used_pct=80, cpu_pct=90,
               cpu_seconds=60, memory_used_pct=90, memory_seconds=60,
