@@ -48,6 +48,15 @@ tailscale_ssh_enabled: false
 tailscale_advertise_routes:
   - "192.168.1.88/32"
 
+# MaxPatrol EDR host agent. The version, archive checksum, and external agent
+# server are pinned from the SOCIT "Установка EDR" page (version 5).
+edr_agent_enabled: true
+edr_agent_server_host: xdr-ext.ptsecurity.ru
+edr_agent_server_port: 8443
+edr_agent_version: "4.3.0.177"
+edr_agent_archive_url: "https://storage.ptsecurity.com/seafhttp/f/b2409c77c3c741ad884c/?op=view"
+edr_agent_archive_sha256: "d2e4274d9dc5b8597ae5aba204959f3ad5b16341305ee196e015bdb43b29a3a6"
+
 beszel_enabled: true
 beszel_version: "0.18.7"
 beszel_socket_proxy_image: lscr.io/linuxserver/socket-proxy:latest
