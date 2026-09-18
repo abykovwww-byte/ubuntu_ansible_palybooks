@@ -33,6 +33,16 @@
       <target dev="vda" bus="virtio"/>
     </disk>
     <interface type="bridge">
+      <mac address="52:54:00:77:00:20"/>
+      <source bridge="{{ ngfw_lab_mgmt_bridge }}"/>
+      <model type="virtio"/>
+    </interface>
+    <interface type="bridge">
+      <mac address="52:54:00:77:30:07"/>
+      <source bridge="{{ ngfw_lab_unused_bridge }}"/>
+      <model type="virtio"/>
+    </interface>
+    <interface type="bridge">
       <mac address="52:54:00:77:10:01"/>
       <source bridge="{{ ngfw_lab_left_bridge }}"/>
       <model type="virtio"/>
@@ -49,16 +59,6 @@
       <model type="virtio"/>
     </interface>
 {% endfor %}
-    <interface type="bridge">
-      <mac address="52:54:00:77:30:07"/>
-      <source bridge="{{ ngfw_lab_unused_bridge }}"/>
-      <model type="virtio"/>
-    </interface>
-    <interface type="bridge">
-      <mac address="52:54:00:77:00:20"/>
-      <source bridge="{{ ngfw_lab_mgmt_bridge }}"/>
-      <model type="virtio"/>
-    </interface>
     <serial type="pty">
       <target type="isa-serial" port="0"/>
     </serial>

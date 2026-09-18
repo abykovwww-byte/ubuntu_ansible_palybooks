@@ -100,6 +100,18 @@ class Guards(unittest.TestCase):
 
 
 class Planning(unittest.TestCase):
+    def test_ngfw_interface_order_matches_appliance_roles(self):
+        domain = (ROOT / "templates/ngfw-domain.xml.j2").read_text()
+        management = domain.index('mac address="52:54:00:77:00:20"')
+        sync = domain.index('mac address="52:54:00:77:30:07"')
+        left = domain.index('mac address="52:54:00:77:10:01"')
+        right = domain.index('mac address="52:54:00:77:20:01"')
+        unused = domain.index("{% for nic_number in range(3, 7) %}")
+        self.assertLess(management, sync)
+        self.assertLess(sync, left)
+        self.assertLess(left, right)
+        self.assertLess(right, unused)
+
     def test_lab_operator_access_is_managed_without_sudo(self):
         tasks = (ROOT / "tasks/main.yml").read_text()
         defaults = (ROOT / "defaults/main.yml").read_text()
