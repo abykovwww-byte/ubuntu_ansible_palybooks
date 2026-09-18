@@ -4,8 +4,10 @@
 
 This is a disposable, non-production experiment to determine which AuditD
 configuration PT NGFW can sustain without losing the dataplane, management
-access, or disk capacity. It does not expose the firewall to the home LAN or
-the Internet and does not make PT NGFW the gateway for any existing service.
+access, or disk capacity. It exposes only the MNGT web interface to the home
+LAN through a source-restricted TCP proxy; it does not expose the firewall
+dataplane to the home LAN or Internet and does not make PT NGFW the gateway for
+any existing service.
 
 Ansible owns only the Ubuntu host, KVM/libvirt topology, server-local image
 paths, and Docker traffic endpoints. It does not install software in the PT
@@ -33,18 +35,21 @@ flowchart LR
         S[traffic-server\n10.77.20.10]
       end
       MG[br-ngfw-mgmt\n10.77.0.1/24]
+      P[systemd socket proxy\n192.168.1.88:8443]
       L[br-ngfw-left\nno host IP]
       R[br-ngfw-right\nno host IP]
       U[br-ngfw-unused\nno host IP]
     end
 
     M --- MG
+    P -->|TLS passthrough| M
     F -- mgmt1 / VirtIO 1 --- MG
     F -- dataplane 1 / VirtIO 3 --- L
     F -- dataplane 2 / VirtIO 4 --- R
     F -- sync1 / VirtIO 2 and dataplane 3..6 --- U
     C --- L
     S --- R
+    LAN[Home LAN\n192.168.1.0/24] -->|UFW TCP/8443| P
 ```
 
 The endpoint networks use Docker `ipvlan` on the two addressless libvirt
@@ -85,6 +90,7 @@ LLM work would make the result impossible to interpret.
 | Disposable overlays | `/srv/app-data/ngfw-lab/disks` | Never committed |
 | Measurement exports | `/srv/app-data/ngfw-lab/reports` | Never committed by default |
 | Rendered libvirt XML | `/etc/ngfw-lab` | Rendered by Ansible |
+| MNGT LAN proxy units | `/etc/systemd/system/ngfw-lab-mngt-proxy.*` | Rendered by Ansible |
 
 Expected image names:
 
@@ -107,6 +113,10 @@ ngfw_lab_vms_enabled: false
 ngfw_lab_start_vms: false
 ngfw_lab_vm_autostart: false
 ngfw_lab_start_traffic: false
+ngfw_lab_mngt_proxy_enabled: true
+ngfw_lab_mngt_proxy_listen_address: 192.168.1.88
+ngfw_lab_mngt_proxy_listen_port: 8443
+ngfw_lab_mngt_proxy_allowed_cidr: 192.168.1.0/24
 ```
 
 Run the normal local apply. It installs KVM/libvirt tooling, creates four
@@ -122,6 +132,10 @@ ngfw_lab_vms_enabled: true
 ngfw_lab_start_vms: false
 ngfw_lab_vm_autostart: false
 ngfw_lab_start_traffic: false
+ngfw_lab_mngt_proxy_enabled: true
+ngfw_lab_mngt_proxy_listen_address: 192.168.1.88
+ngfw_lab_mngt_proxy_listen_port: 8443
+ngfw_lab_mngt_proxy_allowed_cidr: 192.168.1.0/24
 ```
 
 Run Ansible again. The role checks the image presence, creates copy-on-write
@@ -209,9 +223,11 @@ add host routes between the two data networks. With the NGFW VM powered off,
 the client-to-server test must fail; if it succeeds, the topology has a bypass
 and the AuditD experiment must not begin.
 
-Reach the MNGT UI through an SSH tunnel to the host instead of advertising the
-lab subnet through Tailscale. This keeps the lab private and avoids a persistent
-route change.
+Reach the MNGT UI from the home LAN at `https://192.168.1.88:8443/`. The host
+uses `systemd-socket-proxyd` as a TLS passthrough to `10.77.0.10:443`; UFW
+allows the listener only from `192.168.1.0/24`. The lab subnet is not advertised
+through Tailscale and no host route to the dataplane networks is added. The
+browser therefore receives the original MNGT certificate unchanged.
 
 ## Baseline traffic and measurements
 
