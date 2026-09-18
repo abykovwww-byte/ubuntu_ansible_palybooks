@@ -9,6 +9,8 @@ ngfw_lab_owner: abykov
 ngfw_lab_group: abykov
 ngfw_lab_libvirt_user: libvirt-qemu
 ngfw_lab_libvirt_group: kvm
+ngfw_lab_operator_users:
+  - "{{ ngfw_lab_owner }}"
 
 ngfw_lab_project_dir: /srv/apps/ngfw-lab
 ngfw_lab_data_dir: /srv/app-data/ngfw-lab

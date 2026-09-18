@@ -100,6 +100,19 @@ class Guards(unittest.TestCase):
 
 
 class Planning(unittest.TestCase):
+    def test_lab_operator_access_is_managed_without_sudo(self):
+        tasks = (ROOT / "tasks/main.yml").read_text()
+        defaults = (ROOT / "defaults/main.yml").read_text()
+        guide = (ROOT.parents[1] / "docs/ngfw-auditd-pilot.md").read_text()
+        task_start = tasks.index("- name: Grant PT NGFW lab operators access to system libvirt")
+        task_end = tasks.index("\n- name:", task_start + 1)
+        operator_task = tasks[task_start:task_end]
+        self.assertIn("groups:\n      - libvirt", operator_task)
+        self.assertIn("append: true", operator_task)
+        self.assertIn("ngfw_lab_operator_users:", defaults)
+        self.assertNotIn("sudo virsh", guide)
+        self.assertIn("virsh -c qemu:///system start pt-ngfw-mngt", guide)
+
     def test_libvirt_definitions_only_run_for_changed_xml(self):
         tasks = (ROOT / "tasks/main.yml").read_text()
         network_start = tasks.index("- name: Define isolated libvirt networks")
