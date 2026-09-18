@@ -4,6 +4,7 @@ import concurrent.futures
 import http.client
 import http.server
 import json
+import os
 import signal
 import socket
 import socketserver
@@ -11,6 +12,8 @@ import struct
 import subprocess
 import threading
 import time
+
+import policy_probe
 
 
 QUESTION = b"\x03lab\x07invalid\x00\x00\x01\x00\x01"
@@ -41,6 +44,21 @@ class TCPHandler(socketserver.BaseRequestHandler):
 
 class HTTPHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith("/policy-probe/"):
+            try:
+                payload = policy_probe.reply(self.path, self.client_address, self.connection.getsockname())
+            except ValueError:
+                self.send_error(400)
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                self.wfile.write(payload)
+            except OSError:
+                pass
+            return
         self.send_response(200 if self.path == "/health" else 404)
         self.send_header("Content-Length", str(len(PAYLOAD)))
         self.send_header("Connection", "close")
@@ -72,6 +90,7 @@ def serve():
     stopped = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_args: stopped.set())
+    policy_receiver = policy_probe.Receiver(json.loads(os.environ.get("NGFW_POLICY_LISTEN_RANGES", "[]")))
     servers = [TCPServer(("0.0.0.0", 9000), TCPHandler),
                TCPServer(("0.0.0.0", 8080), HTTPHandler),
                socketserver.UDPServer(("0.0.0.0", 5353), DNSHandler)]
@@ -80,9 +99,12 @@ def serve():
         for server in servers:
             threading.Thread(target=server.serve_forever, daemon=True).start()
         while not stopped.wait(0.25):
+            if policy_receiver.error:
+                raise RuntimeError("policy receiver exited: " + policy_receiver.error)
             if iperf.poll() is not None:
                 raise RuntimeError("iperf3 server exited")
     finally:
+        policy_receiver.close()
         for server in servers:
             server.shutdown()
             server.server_close()

@@ -1,0 +1,7 @@
+---
+- name: Configure isolated PT NGFW policy through MNGT API
+  hosts: server
+  become: true
+  roles:
+    - role: ngfw_policy
+      tags: [ngfw-policy]
