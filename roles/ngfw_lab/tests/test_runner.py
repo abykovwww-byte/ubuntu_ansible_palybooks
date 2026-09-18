@@ -100,6 +100,22 @@ class Guards(unittest.TestCase):
 
 
 class Planning(unittest.TestCase):
+    def test_ngfw_guest_numa_matches_appliance_dpdk_profile(self):
+        defaults = (ROOT / "defaults/main.yml").read_text()
+        domain = (ROOT / "templates/ngfw-domain.xml.j2").read_text()
+        for cell_id in range(4):
+            self.assertIn(
+                f'{{id: {cell_id}, cpus: "{cell_id}", memory_mib: 4096}}',
+                defaults,
+            )
+        self.assertIn("<numa>", domain)
+        self.assertIn("{% for cell in ngfw_lab_ngfw_numa_cells %}", domain)
+        self.assertIn(
+            '<cell id="{{ cell.id }}" cpus="{{ cell.cpus }}" '
+            'memory="{{ cell.memory_mib }}" unit="MiB"/>',
+            domain,
+        )
+
     def test_domains_have_stable_uuids_for_redefinition(self):
         defaults = (ROOT / "defaults/main.yml").read_text()
         ngfw_domain = (ROOT / "templates/ngfw-domain.xml.j2").read_text()

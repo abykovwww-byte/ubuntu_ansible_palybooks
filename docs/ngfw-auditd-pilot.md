@@ -65,6 +65,13 @@ or change the host kernel command line automatically: that is a reboot-level
 host change and the public requirement is CPU support for 1 GiB pages, not a
 specific persistent reservation for this small lab.
 
+The `1.11.1-1750` firewall image reserves 12 guest 1 GiB HugePages and its
+shipped DPDK profile allocates pools on guest NUMA nodes `0` through `3`.
+Accordingly, the 4-vCPU VM exposes four 4 GiB virtual NUMA cells, one vCPU per
+cell. They are all backed by the home server's single physical NUMA node, so
+the appliance is not split across host NUMA nodes. Collapsing the guest to one
+NUMA cell leaves `pt-ngfw-core` in `activating` with `numa_node: wrong value 1`.
+
 Do not run the memory-heavy local LLM during comparable measurements. The two
 VMs reserve 26 GiB before filesystem cache and container overhead; competing
 LLM work would make the result impossible to interpret.
