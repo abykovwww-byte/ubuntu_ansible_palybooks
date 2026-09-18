@@ -32,9 +32,9 @@ options:
     type: dict
     required: true
   mode:
-    description: Plan offline, check remotely, reconcile candidate, or publish explicitly.
+    description: Plan offline, discover inventory, check remotely, reconcile candidate, or publish explicitly.
     type: str
-    choices: [plan, check, apply, publish]
+    choices: [plan, discover, check, apply, publish]
     default: plan
   login:
     description: MNGT account supplied privately by Ansible.
@@ -59,13 +59,17 @@ plan:
   description: Non-secret desired objects and representative packet tuples.
   returned: always
   type: dict
+discovery:
+  description: Allowlisted inventory for manual UUID selection; not an apply-readiness verdict.
+  returned: when mode is discover
+  type: dict
 '''
 
 DEFAULTS = {
     "prefix": "auditd-lab", "acl_count": 1000, "nat_count": 200,
     "client": "10.77.10.10", "server": "10.77.20.10", "dnat_vip": "10.77.20.100",
     "left_cidr": "10.77.10.1/24", "right_cidr": "10.77.20.1/24",
-    "management_url": "https://10.77.0.10", "ca_file": None,
+    "management_url": "https://192.168.1.88:8443", "ca_file": None,
     "device_group_id": "", "device_group_name": "ngfw-auditd-lab",
     "logical_device_id": "", "physical_device_id": "",
     "left_interface_id": "", "right_interface_id": "",
@@ -113,12 +117,17 @@ def configure(raw, live=False):
         require(addr in net and addr not in {net.network_address, net.broadcast_address, left.ip, right.ip},
                 f"{key} is not a usable lab address")
     require(c["server"] != c["dnat_vip"], "DNAT VIP must differ from receiver")
-    url = urllib.parse.urlsplit(c["management_url"])
-    require(url.scheme == "https" and not url.username and not url.password and
-            not url.query and not url.fragment and url.path in {"", "/"} and url.port in {None, 443},
-            "MNGT must use a plain HTTPS origin on port 443")
-    host = ipaddress.ip_address(url.hostname)
-    require(host in ipaddress.ip_network("10.77.0.0/24"), "MNGT must be on isolated 10.77.0.0/24")
+    try:
+        url = urllib.parse.urlsplit(c["management_url"])
+        host, port = ipaddress.ip_address(url.hostname), 443 if url.port is None else url.port
+    except (ValueError, TypeError):
+        raise PolicyError("MNGT must use an approved HTTPS IP origin") from None
+    require(url.scheme == "https" and url.username is None and url.password is None and
+            not url.query and not url.fragment and url.path in {"", "/"},
+            "MNGT must use a plain HTTPS origin without credentials, query or fragment")
+    require((host in ipaddress.ip_network("10.77.0.0/24") and port == 443) or
+            (str(host) == "192.168.1.88" and port == 8443),
+            "MNGT must use isolated 10.77.0.0/24:443 or the approved 192.168.1.88:8443 TLS proxy")
     require(not left.network.overlaps(ipaddress.ip_network("10.77.0.0/24")) and
             not right.network.overlaps(ipaddress.ip_network("10.77.0.0/24")), "Data networks overlap management")
     if live:
@@ -317,6 +326,50 @@ def flatten(groups):
         yield from flatten(group.get("subgroups", []))
 
 
+def discover(api, c):
+    """Read inventory without selecting targets or exposing full API responses."""
+    groups = list(flatten(api.call("GetDeviceGroupsTree", {}).get("groups", [])))
+    devices = pages(api, "ListPhysicalDevices", "physicalDevices")
+    contexts = pages(api, "ListVirtualContexts", "virtualContexts")
+    interfaces = pages(api, "ListVirtualInterfaces", "virtualInterfaces")
+
+    def pick(row, *keys):
+        return {k: copy.deepcopy(row[k]) for k in keys if k in row}
+
+    def ref(row, key):
+        return pick(row.get(key) or {}, "id", "name")
+
+    inventory = {
+        "format": 1,
+        "device_groups": [pick(g, "id", "name", "parentId") for g in groups],
+        "physical_devices": [
+            {**pick(d, "id", "name", "address", "productVersion", "softwareVersion", "connectionState"),
+             "logicalDevice": ref(d, "logicalDevice")} for d in devices],
+        "virtual_contexts": [
+            {**pick(v, "id", "name", "isDefault", "defaultIpsProfileId"),
+             "deviceGroup": ref(v, "deviceGroup"), "logicalDevice": ref(v, "logicalDevice")}
+            for v in contexts],
+        "virtual_interfaces": [
+            {**pick(v, "id", "name", "enabled", "mode", "inet", "inet6"),
+             "virtualContext": ref(v, "virtualContext"),
+             "deviceGroup": ref(v.get("virtualContext") or {}, "deviceGroup"),
+             "zone": ref(v, "zone"), "virtualRouter": ref(v, "virtualRouter")}
+            for v in interfaces],
+    }
+    notices = ["Inventory only: select UUIDs explicitly, then run check; no policy readiness or packet proof."]
+    if not any(g.get("name") == c["device_group_name"] and g.get("parentId") for g in groups):
+        notices.append("Named non-root lab group is absent; discovery never creates a group or moves a context.")
+    roots = {g["id"] for g in groups if not g.get("parentId")}
+    if any((v.get("deviceGroup") or {}).get("id") in roots for v in contexts):
+        notices.append("A context belongs to a root group; apply requires a dedicated non-root lab group. Preserve existing baseline.")
+    if any(v.get("defaultIpsProfileId") for v in contexts):
+        notices.append("A context has a default IPS profile; inspect it before selecting the baseline.")
+    if len(devices) != 1:
+        notices.append("Inventory does not contain exactly one physical device; global publish is not permitted.")
+    inventory["notices"] = notices
+    return inventory
+
+
 def preflight(api, c, plan):
     groups = list(flatten(api.call("GetDeviceGroupsTree", {}).get("groups", [])))
     group = [g for g in groups if g.get("id") == c["device_group_id"]]
@@ -466,7 +519,8 @@ def publish(api, c, plan):
 
 
 def execute(config, mode="plan", login=None, password=None, check_mode=False, api=None):
-    c = configure(config, live=mode != "plan")
+    require(mode in {"plan", "discover", "check", "apply", "publish"}, "Unknown policy mode")
+    c = configure(config, live=mode not in {"plan", "discover"})
     plan = build_plan(c)
     digest = hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     summary = {"counts": plan["counts"], "state": "offline-plan", "packet_hits_verified": False, "plan_sha256": digest}
@@ -476,6 +530,12 @@ def execute(config, mode="plan", login=None, password=None, check_mode=False, ap
     api = api or API(c)
     api.call("Login", {"login": login, "password": password})
     try:
+        if mode == "discover":
+            inventory = discover(api, c)
+            summary.update(state="inventory-read-only", notices=inventory["notices"],
+                           inventory_counts={k: len(inventory[k]) for k in (
+                               "device_groups", "physical_devices", "virtual_contexts", "virtual_interfaces")})
+            return {"changed": False, "plan": plan, "summary": summary, "discovery": inventory}
         if mode == "publish" and not check_mode:
             summary.update(publish(api, c, plan), state="push-job-confirmed")
             return {"changed": True, "plan": plan, "summary": summary}
@@ -495,7 +555,7 @@ def main():
     from ansible.module_utils.basic import AnsibleModule
     module = AnsibleModule(argument_spec={
         "config": {"type": "dict", "required": True},
-        "mode": {"type": "str", "choices": ["plan", "check", "apply", "publish"], "default": "plan"},
+        "mode": {"type": "str", "choices": ["plan", "discover", "check", "apply", "publish"], "default": "plan"},
         "login": {"type": "str", "no_log": True}, "password": {"type": "str", "no_log": True},
     }, supports_check_mode=True)
     lock = None

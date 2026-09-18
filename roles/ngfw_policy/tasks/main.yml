@@ -2,8 +2,8 @@
 - name: Validate explicit policy operation
   ansible.builtin.assert:
     that:
-      - ngfw_policy_mode in ['plan', 'check', 'apply', 'publish']
-    fail_msg: Choose plan, check, apply or an explicitly confirmed global publish.
+      - ngfw_policy_mode in ['plan', 'discover', 'check', 'apply', 'publish']
+    fail_msg: Choose plan, discover, check, apply or an explicitly confirmed global publish.
 
 - name: Plan or reconcile the isolated PT NGFW policy
   pt_ngfw_policy:
@@ -36,6 +36,15 @@
     owner: "{{ ngfw_policy_owner }}"
     group: "{{ ngfw_policy_group }}"
     mode: "0640"
+
+- name: Save allowlisted discovery inventory for manual UUID selection
+  ansible.builtin.copy:
+    content: "{{ ngfw_policy_result.discovery | to_nice_json }}\n"
+    dest: "{{ ngfw_policy_output_dir }}/discovery.json"
+    owner: "{{ ngfw_policy_owner }}"
+    group: "{{ ngfw_policy_group }}"
+    mode: "0640"
+  when: ngfw_policy_result.discovery is defined
 
 - name: Explain the achieved evidence boundary
   ansible.builtin.debug:
