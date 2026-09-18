@@ -11,7 +11,7 @@ ngfw_policy_config:
   acl_count: 1000
   nat_count: 200
   log_mode: NO_LOG
-  management_url: https://10.77.0.10
+  management_url: https://192.168.1.88:8443
   ca_file: null
   client: 10.77.10.10
   server: 10.77.20.10

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,9 +45,14 @@ class FakeAPI:
         self.calls = []
         self.counter = 100
         self.devices = [{"id": ident(3), "name": "pt-ngfw-auditd", "logicalDevice": {"id": ident(2)}, "productVersion": "1.11.1"}]
+        self.groups = [{"id": ident(9), "name": "Root", "subgroups": [
+            {"id": ident(1), "name": "ngfw-auditd-lab", "parentId": ident(9)}]}]
+        self.contexts = [{"id": ident(6), "name": "Default", "isDefault": True,
+                          "deviceGroup": {"id": ident(1)}, "logicalDevice": {"id": ident(2)}}]
         self.interfaces = [
             {"id": ident(4 + i), "enabled": True, "mode": "VIRTUAL_INTERFACE_MODE_ROUTING",
-             "inet": [cidr], "inet6": [], "virtualContext": {"deviceGroup": {"id": ident(1)}},
+             "name": "left" if i == 0 else "right", "inet": [cidr], "inet6": [],
+             "virtualContext": copy.deepcopy(self.contexts[0]),
              "virtualRouter": {"id": ident(20)}, "zone": {"id": "old-zone"}}
             for i, cidr in enumerate(["10.77.10.1/24", "10.77.20.1/24"])]
         self.corrupt_readback = False
@@ -60,12 +66,14 @@ class FakeAPI:
         if op in {"Login", "Logout"}:
             return {}
         if op == "GetDeviceGroupsTree":
-            return {"groups": [{"id": ident(9), "name": "Root", "subgroups": [
-                {"id": ident(1), "name": "ngfw-auditd-lab", "parentId": ident(9)}]}]}
-        if op == "ListPhysicalDevices":
-            return {"physicalDevices": copy.deepcopy(self.devices)}
-        if op == "ListVirtualInterfaces":
-            return {"virtualInterfaces": copy.deepcopy(self.interfaces)}
+            return {"groups": copy.deepcopy(self.groups)}
+        for operation, key, rows in [
+                ("ListPhysicalDevices", "physicalDevices", self.devices),
+                ("ListVirtualContexts", "virtualContexts", self.contexts),
+                ("ListVirtualInterfaces", "virtualInterfaces", self.interfaces)]:
+            if op == operation:
+                offset = body.get("offset", 0)
+                return {key: copy.deepcopy(rows[offset:offset + body["limit"]])}
         if op == "UpdateVirtualInterface":
             next(v for v in self.interfaces if v["id"] == body["id"])["zone"] = {"id": body["zoneId"]}
             return {}
@@ -142,11 +150,117 @@ class GenerationTests(unittest.TestCase):
         self.assertFalse(result["changed"])
         self.assertEqual(api.calls, [])
 
+    def test_only_approved_https_origins(self):
+        for url in ["https://10.77.0.10", "https://10.77.0.10:443/", "https://192.168.1.88:8443/"]:
+            with self.subTest(url=url):
+                self.assertEqual(p.configure({"management_url": url})["management_url"], url)
+        for url in ["http://192.168.1.88:8443", "https://192.168.1.88", "https://192.168.1.89:8443",
+                    "https://10.77.0.10:8443", "https://10.77.0.10:0", "https://192.168.1.88:9443",
+                    "https://192.168.1.88:8443/api", "https://192.168.1.88:8443/?token=secret",
+                    "https://192.168.1.88:8443/#fragment", "https://user:pass@192.168.1.88:8443",
+                    "https://@192.168.1.88:8443", "https://localhost:8443", "https://[::1]:8443",
+                    "https://192.168.1.88:invalid"]:
+            with self.subTest(url=url), self.assertRaises(p.PolicyError):
+                p.configure({"management_url": url})
+
+    def test_tls_uses_verifying_context_and_explicit_ca(self):
+        ca = "operator-selected-public-ca.pem"
+        context = p.ssl.create_default_context()
+        with patch.object(p.ssl, "create_default_context", return_value=context) as create:
+            api = p.API(p.configure({"ca_file": ca}))
+        create.assert_called_once_with(cafile=ca)
+        self.assertEqual(context.verify_mode, p.ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(api.url, "https://192.168.1.88:8443/api/v2/")
+
     def test_representative_samples(self):
         plan = p.build_plan(p.configure({}))
         self.assertEqual({r["kind"] for r in plan["probes"]}, {"acl", "snat", "dnat"})
         self.assertIn("drop", {r["expect"] for r in plan["probes"]})
         self.assertEqual({r["port"] for r in plan["probes"] if r["kind"] == "snat"}, {20000, 20050, 20099})
+
+
+class DiscoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.api = FakeAPI()
+
+    def discover(self, **kwargs):
+        return p.execute({}, "discover", "private-login", "private-password", api=self.api, **kwargs)
+
+    def test_no_uuid_required_no_mutations_even_in_check_mode(self):
+        for check in (False, True):
+            result = self.discover(check_mode=check)
+            self.assertFalse(result["changed"])
+            self.assertEqual(result["summary"]["state"], "inventory-read-only")
+            self.assertEqual(result["discovery"]["physical_devices"][0]["logicalDevice"]["id"], ident(2))
+            self.assertEqual(result["discovery"]["virtual_interfaces"][0]["virtualContext"]["id"], ident(6))
+            self.assertEqual(result["discovery"]["virtual_interfaces"][0]["deviceGroup"]["id"], ident(1))
+            self.assertEqual(result["discovery"]["virtual_interfaces"][0]["inet"], ["10.77.10.1/24"])
+            self.assertEqual(self.api.mutations, [])
+            self.assertEqual({op for op, _ in self.api.calls}, {
+                "Login", "Logout", "GetDeviceGroupsTree", "ListPhysicalDevices", "ListVirtualContexts", "ListVirtualInterfaces"})
+            self.assertFalse(result["summary"]["packet_hits_verified"])
+
+    def test_private_credentials_still_required(self):
+        with self.assertRaisesRegex(p.PolicyError, "private MNGT credentials"):
+            p.execute({}, "discover", api=self.api)
+        self.assertEqual(self.api.calls, [])
+
+    def test_discovery_does_not_relax_apply_identity_requirements(self):
+        self.discover()
+        self.api.calls.clear()
+        for mode in ("check", "apply", "publish"):
+            with self.subTest(mode=mode), self.assertRaisesRegex(p.PolicyError, "explicit device_group_id"):
+                p.execute({}, mode, "test", "test", api=self.api)
+        self.assertEqual(self.api.calls, [])
+
+    def test_unknown_and_freeform_fields_not_returned(self):
+        for row in [*self.api.groups, *self.api.devices, *self.api.contexts, *self.api.interfaces]:
+            row.update(description="private-note", password="response-secret", serialNumber="not-a-device-id")
+        self.api.devices[0]["logicalDevice"]["description"] = "nested-private-note"
+        self.api.interfaces[0]["virtualContext"]["deviceGroup"]["description"] = "nested-private-note"
+        output = json.dumps(self.discover())
+        for secret in ("private-login", "private-password", "private-note", "response-secret", "not-a-device-id"):
+            self.assertNotIn(secret, output)
+
+    def test_root_baseline_is_reported_not_moved(self):
+        self.api.groups[0]["subgroups"] = []
+        self.api.contexts[0]["deviceGroup"]["id"] = ident(9)
+        self.api.contexts[0]["defaultIpsProfileId"] = ident(900)
+        result = self.discover()
+        notices = " ".join(result["discovery"]["notices"])
+        self.assertIn("root group", notices)
+        self.assertIn("group is absent", notices)
+        self.assertIn("default IPS", notices)
+        self.assertEqual(self.api.mutations, [])
+        self.assertEqual(self.api.contexts[0]["deviceGroup"]["id"], ident(9))
+
+    def test_empty_inventory_is_not_ready(self):
+        self.api.devices, self.api.contexts, self.api.interfaces, self.api.groups = [], [], [], []
+        result = self.discover()
+        self.assertTrue(all(v == 0 for v in result["summary"]["inventory_counts"].values()))
+        self.assertIn("global publish is not permitted", " ".join(result["summary"]["notices"]))
+        self.assertFalse(result["changed"])
+
+    def test_inventory_pagination_and_no_first_device_selection(self):
+        self.api.devices = [{"id": ident(1000 + i)} for i in range(201)]
+        result = self.discover()
+        self.assertEqual(len(result["discovery"]["physical_devices"]), 201)
+        self.assertTrue(any(op == "ListPhysicalDevices" and body["offset"] == 200 for op, body in self.api.calls))
+        self.assertIn("global publish is not permitted", " ".join(result["summary"]["notices"]))
+        self.assertEqual(self.api.mutations, [])
+
+    def test_failure_logs_out_and_returns_no_partial_inventory(self):
+        original = self.api.call
+        def fail(op, body):
+            if op == "ListVirtualContexts":
+                raise p.PolicyError("ListVirtualContexts: HTTP 403")
+            return original(op, body)
+        self.api.call = fail
+        with self.assertRaisesRegex(p.PolicyError, "HTTP 403"):
+            self.discover()
+        self.assertEqual(self.api.calls[-1], ("Logout", {}))
+        self.assertEqual(self.api.mutations, [])
 
 
 class ReconcileTests(unittest.TestCase):
@@ -223,6 +337,12 @@ class ReconcileTests(unittest.TestCase):
     def test_wrong_group_not_modified(self):
         self.api.interfaces[1]["virtualContext"]["deviceGroup"]["id"] = ident(900)
         with self.assertRaisesRegex(p.PolicyError, "selected lab device group"):
+            self.run_policy()
+        self.assertEqual(self.api.mutations, [])
+
+    def test_root_group_refused_before_any_write(self):
+        self.c.update(device_group_id=ident(9), device_group_name="Root")
+        with self.assertRaisesRegex(p.PolicyError, "non-root laboratory"):
             self.run_policy()
         self.assertEqual(self.api.mutations, [])
 
@@ -364,6 +484,7 @@ class VendorSchemaTests(unittest.TestCase):
                 self.assertIs(type(value), {"integer": int, "string": str, "boolean": bool}[typ])
         api = FakeAPI()
         c = config(dedicated_mngt_confirmed=True)
+        p.execute({}, "discover", "test", "test", api=api)
         p.execute(c, "apply", "test", "test", api=api)
         api.rows["SecurityRule"][0]["enabled"] = False
         api.rows["Service"][0]["protocol"] = 17

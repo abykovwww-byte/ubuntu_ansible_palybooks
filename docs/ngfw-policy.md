@@ -28,7 +28,8 @@ UDP 5353. Ответы проверяются в рамках сессий, от
 
 Настройки: `acl_count` от 16 до 10000, чётный `nat_count` от 2 до 2000
 (половина SNAT, половина DNAT). Это границы **нашего генератора**, не утверждение
-о производительности/лицензионных лимитах VM. Начинать приёмку можно с 16/2,
+о производительности/лицензионных лимитах VM. Начинать приёмку можно с 18/2
+(в этом минимальном профиле уже есть портовое DROP-правило),
 затем увеличивать до 1000/200. Уменьшение и смена namespace намеренно не удаляют
 старые объекты: модуль останавливается для отдельного согласования очистки.
 
@@ -60,8 +61,10 @@ API доступен в установленном MNGT через `/apidoc/v2`;
    уже быть именно такими: модуль их проверяет, но не перенумеровывает интерфейсы,
    не создаёт маршруты и не трогает management `10.77.0.20`.
    По умолчанию connected-маршруты достаточны для двух этих подсетей.
-3. В конфигурации указать точные UUID группы, logical/physical device и обоих
-   virtual interfaces из MNGT. Автовыбора «первого устройства/порта» нет.
+3. Получить инвентарь через `mode=discover` и в конфигурации указать точные UUID
+   группы, logical/physical device и обоих virtual interfaces из MNGT.
+   Автовыбора «первого устройства/порта» нет. Серийный номер устройства не следует
+   подставлять вместо API `physical_devices[].id`.
 4. Доверить сертификат MNGT или указать `ca_file` на сервере. HTTPS-проверка
    обязательна; перенаправления и системные HTTP-прокси не используются.
 5. Не редактировать эту политику из UI/другим API-клиентом во время reconcile.
@@ -74,6 +77,35 @@ API доступен в установленном MNGT через `/apidoc/v2`;
 унаследованные PRE-правила блокируют запуск, чтобы не скрыть перекрытие правил.
 IPS/AV/ICAP и расписания не добавляются; неожиданные профили на управляемых ACL
 или default IPS на контексте блокируют baseline, а не игнорируются.
+
+### Если baseline уже существует в Global
+
+Не нужно повторно регистрировать устройство или ослаблять проверку non-root group.
+Сначала `discover`: он показывает существующие группы, physical/logical device,
+контексты, IPv4/IPv6 интерфейсов, зоны и виртуальные маршрутизаторы. Для этого
+режима UUID не требуются. Он выполняет только Login, четыре операции чтения и
+Logout; не создаёт группу, не переносит контекст, не меняет ACL/NAT, зоны или IP.
+`--check` не превращает discovery в другой режим.
+
+Для существующего контекста в `Global` подготовку дочерней группы и перенос
+следует согласовать отдельно, предварительно проверив наследование baseline
+и влияние на текущий трафик. Discovery выдаёт предупреждение, а `check/apply`
+продолжают требовать явно выбранную non-root группу. Инвентарь не означает
+готовность к применению и не является автоматическим файлом overrides.
+
+### HTTPS после настройки LAN-доступа
+
+По умолчанию используется TLS-passthrough из PR #157:
+`https://192.168.1.88:8443` → `10.77.0.10:443`. Разрешён именно этот LAN origin,
+не произвольный адрес/порт. Для прежнего прямого доступа разрешена изолированная
+сеть `10.77.0.0/24` на HTTPS 443, но сертификат обязан соответствовать выбранному IP.
+Сертификат только с SAN `192.168.1.88` не подходит для URL `https://10.77.0.10`.
+
+`ca_file` — существующий публичный PEM CA **на Ansible-сервере**, не закрытый ключ
+и не путь на Windows. Для лабораторного CA, подготовленного 18.09.2026, это
+`/srv/app-data/ngfw-lab/pki/192.168.1.88-20260918/pt-ngfw-lab-root-ca.pem`.
+При замене CA оператор обновляет путь. При `ca_file: null` используется системное
+хранилище доверия Python. Ни отключения TLS-проверки, ни fallback на HTTP нет.
 
 ## Переменные и запуск на сервере
 
@@ -91,8 +123,8 @@ overrides — публикация должна оставаться отдел�
 ngfw_policy_config:
   acl_count: 1000
   nat_count: 200
-  management_url: https://10.77.0.10
-  ca_file: /etc/ngfw-lab/mngt-ca.pem
+  management_url: https://192.168.1.88:8443
+  ca_file: /srv/app-data/ngfw-lab/pki/192.168.1.88-20260918/pt-ngfw-lab-root-ca.pem
   device_group_name: ngfw-auditd-lab
   device_group_id: REPLACE_FROM_MNGT
   logical_device_id: REPLACE_FROM_MNGT
@@ -116,6 +148,10 @@ cd /opt/ubuntu_ansible_palybooks
 sudo .venv/bin/ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-policy.yml \
   -e @/etc/ansible/local-overrides.yml -e ngfw_policy_mode=plan
 
+# Login + инвентарь для выбора UUID; можно запускать до заполнения UUID.
+sudo .venv/bin/ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-policy.yml \
+  -e @/etc/ansible/local-overrides.yml -e ngfw_policy_mode=discover
+
 # Login + чтение, никаких изменений конфигурации MNGT.
 sudo .venv/bin/ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-policy.yml \
   -e @/etc/ansible/local-overrides.yml -e ngfw_policy_mode=check
@@ -130,8 +166,13 @@ Ansible `--check` для apply/publish принудительно выполня
 Он требует доступного MNGT и заполненных UUID, но не создаёт/обновляет объекты.
 На пустом стенде используйте `mode=plan`, если нужен полностью офлайн-просмотр.
 
-Результаты без секретов: `/srv/app-data/ngfw-lab/policy/plan.json` и
-`plan-result.json`, `check-result.json`, `apply-result.json`, `publish-result.json`.
+Результаты без учётных данных: `/srv/app-data/ngfw-lab/policy/plan.json` и
+`plan-result.json`, `discover-result.json`, `check-result.json`, `apply-result.json`,
+`publish-result.json`. Discovery дополнительно сохраняет `discovery.json`: только
+разрешённые поля, без полных API-ответов, описаний и cookies. Это всё равно
+инвентарь инфраструктуры: держать локально, не публиковать в GitHub. Каталог имеет
+права 0750, файлы 0640. `changed: false` модуля в discovery означает отсутствие
+изменений MNGT; роль может создать/обновить локальные файлы результатов.
 `plan_sha256` связывает результат с конкретным планом. Списки читаются полностью:
 offset для объектов, cursor/nextCursor для ACL/NAT. Повторная страница, дубликаты,
 ошибка или неподтверждённое read-back завершают операцию ошибкой.
