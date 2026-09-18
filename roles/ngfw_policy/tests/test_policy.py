@@ -493,7 +493,10 @@ class VendorSchemaTests(unittest.TestCase):
         c["acl_count"] = 20
         p.execute(c, "apply", "test", "test", api=api)
         p.execute(c, "publish", "test", "test", api=api)
-        for operation, body in api.calls:
+        from test_prepare import PrepareAPI, inventory_for
+        prep = PrepareAPI()
+        p.execute({}, "prepare", "test", "test", api=prep, inventory=inventory_for(prep))
+        for operation, body in api.calls + prep.calls:
             with self.subTest(operation=operation):
                 route = doc["paths"]["/api/v2/" + operation]["post"]
                 if "requestBody" in route:

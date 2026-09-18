@@ -6,6 +6,14 @@ ngfw_policy_group: abykov
 # Credentials are deliberately not part of config or any generated file.
 ngfw_policy_login: ""
 ngfw_policy_password: ""
+# Fixed candidate workflow uses the already discovered single-device lab.
+# This is a public CA path, never a key or password file.
+ngfw_policy_candidate_config:
+  management_url: https://192.168.1.88:8443
+  ca_file: /srv/app-data/ngfw-lab/pki/192.168.1.88-20260918/pt-ngfw-lab-root-ca.pem
+  acl_count: 1000
+  nat_count: 200
+  log_mode: NO_LOG
 ngfw_policy_config:
   prefix: auditd-lab
   acl_count: 1000
@@ -24,6 +32,8 @@ ngfw_policy_config:
   physical_device_id: ""
   left_interface_id: ""
   right_interface_id: ""
+  parent_device_group_id: ""
+  virtual_context_id: ""
   dedicated_mngt_confirmed: false
   request_interval: 0.2
   job_timeout: 300

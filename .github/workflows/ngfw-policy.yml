@@ -4,12 +4,16 @@ on:
     paths:
       - 'roles/ngfw_policy/**'
       - 'playbooks/ngfw-policy.yml'
+      - 'playbooks/ngfw-policy-candidate.yml'
+      - 'scripts/ngfw-policy-candidate.sh'
       - '.github/workflows/ngfw-policy.yml'
   push:
     branches: [main]
     paths:
       - 'roles/ngfw_policy/**'
       - 'playbooks/ngfw-policy.yml'
+      - 'playbooks/ngfw-policy-candidate.yml'
+      - 'scripts/ngfw-policy-candidate.sh'
       - '.github/workflows/ngfw-policy.yml'
   workflow_dispatch:
 permissions:
@@ -28,6 +32,10 @@ jobs:
         run: python -m unittest discover -s roles/ngfw_policy/tests -v
       - name: Check policy playbook syntax
         run: ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-policy.yml --syntax-check
+      - name: Check fixed candidate workflow syntax
+        run: |
+          bash -n scripts/ngfw-policy-candidate.sh
+          ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-policy-candidate.yml --syntax-check
       - name: Exercise the actual Ansible module offline
         run: >-
           ansible localhost -i localhost, -c local -M roles/ngfw_policy/library

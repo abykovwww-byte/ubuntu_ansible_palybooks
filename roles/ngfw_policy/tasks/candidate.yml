@@ -1,0 +1,65 @@
+---
+- name: Read the saved non-secret discovery inventory
+  ansible.builtin.slurp:
+    src: "{{ ngfw_policy_output_dir }}/discovery.json"
+  register: ngfw_saved_discovery
+
+- name: Prepare the owned child group and existing context without publishing
+  pt_ngfw_policy:
+    mode: prepare
+    config: "{{ ngfw_policy_candidate_config }}"
+    inventory: "{{ ngfw_saved_discovery.content | b64decode | from_json }}"
+    login: "{{ ngfw_policy_login | default(omit, true) }}"
+    password: "{{ ngfw_policy_password | default(omit, true) }}"
+  register: ngfw_policy_result
+
+- name: Save preparation evidence and resolved variables
+  ansible.builtin.include_tasks: evidence.yml
+  vars:
+    ngfw_policy_evidence_mode: prepare
+
+- name: Retain the freshly verified non-secret identities
+  ansible.builtin.set_fact:
+    ngfw_prepared_config: "{{ ngfw_policy_result.prepared_config }}"
+
+- name: Reconcile and independently read back the complete candidate
+  when: not ansible_check_mode
+  block:
+    - name: Apply ACL NAT and lab zone bindings to candidate only
+      pt_ngfw_policy:
+        mode: apply
+        config: "{{ ngfw_prepared_config }}"
+        login: "{{ ngfw_policy_login | default(omit, true) }}"
+        password: "{{ ngfw_policy_password | default(omit, true) }}"
+      register: ngfw_policy_result
+
+    - name: Save candidate apply evidence
+      ansible.builtin.include_tasks: evidence.yml
+      vars:
+        ngfw_policy_evidence_mode: apply
+
+    - name: Check the candidate again in a new authenticated session
+      pt_ngfw_policy:
+        mode: check
+        config: "{{ ngfw_prepared_config }}"
+        login: "{{ ngfw_policy_login | default(omit, true) }}"
+        password: "{{ ngfw_policy_password | default(omit, true) }}"
+      register: ngfw_policy_result
+
+    - name: Require no remaining candidate differences
+      ansible.builtin.assert:
+        that:
+          - ngfw_policy_result.summary.change_count == 0
+        fail_msg: Candidate changed after read-back; nothing has been published.
+
+    - name: Save independent zero-drift check evidence
+      ansible.builtin.include_tasks: evidence.yml
+      vars:
+        ngfw_policy_evidence_mode: check
+
+- name: Report candidate-only evidence
+  ansible.builtin.debug:
+    msg:
+      summary: "{{ ngfw_policy_result.summary }}"
+      published: false
+      next_step: Review candidate changes and prepare traffic listeners before a separate explicitly confirmed publish.
