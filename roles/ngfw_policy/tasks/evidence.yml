@@ -1,0 +1,44 @@
+---
+- name: Create private policy evidence directory
+  ansible.builtin.file:
+    path: "{{ ngfw_policy_output_dir }}"
+    state: directory
+    owner: "{{ ngfw_policy_owner }}"
+    group: "{{ ngfw_policy_group }}"
+    mode: "0750"
+
+- name: Save desired policy without credentials
+  ansible.builtin.copy:
+    content: "{{ ngfw_policy_result.plan | to_nice_json }}\n"
+    dest: "{{ ngfw_policy_output_dir }}/plan.json"
+    owner: "{{ ngfw_policy_owner }}"
+    group: "{{ ngfw_policy_group }}"
+    mode: "0640"
+
+- name: Save operation evidence separately from the desired plan
+  ansible.builtin.copy:
+    content: "{{ ngfw_policy_result.summary | to_nice_json }}\n"
+    dest: "{{ ngfw_policy_output_dir }}/{{ ngfw_policy_evidence_mode }}-result.json"
+    owner: "{{ ngfw_policy_owner }}"
+    group: "{{ ngfw_policy_group }}"
+    mode: "0640"
+
+- name: Save allowlisted discovery inventory for manual UUID selection
+  ansible.builtin.copy:
+    content: "{{ ngfw_policy_result.discovery | to_nice_json }}\n"
+    dest: "{{ ngfw_policy_output_dir }}/discovery.json"
+    owner: "{{ ngfw_policy_owner }}"
+    group: "{{ ngfw_policy_group }}"
+    mode: "0640"
+  when: ngfw_policy_result.discovery is defined
+
+- name: Save prepared non-secret variables for subsequent check apply or publish
+  ansible.builtin.copy:
+    content: "{{ {'ngfw_policy_config': ngfw_policy_result.prepared_config} | to_nice_json }}\n"
+    dest: "{{ ngfw_policy_output_dir }}/prepared-vars.json"
+    owner: "{{ ngfw_policy_owner }}"
+    group: "{{ ngfw_policy_group }}"
+    mode: "0640"
+  when:
+    - ngfw_policy_result.prepared_config is defined
+    - not ansible_check_mode

@@ -2,49 +2,22 @@
 - name: Validate explicit policy operation
   ansible.builtin.assert:
     that:
-      - ngfw_policy_mode in ['plan', 'discover', 'check', 'apply', 'publish']
-    fail_msg: Choose plan, discover, check, apply or an explicitly confirmed global publish.
+      - ngfw_policy_mode in ['plan', 'discover', 'prepare', 'check', 'apply', 'publish']
+    fail_msg: Choose plan, discover, prepare, check, apply or an explicitly confirmed global publish.
 
 - name: Plan or reconcile the isolated PT NGFW policy
   pt_ngfw_policy:
     mode: "{{ ngfw_policy_mode }}"
     config: "{{ ngfw_policy_config }}"
+    inventory: "{{ ngfw_policy_inventory | default(omit) }}"
     login: "{{ ngfw_policy_login | default(omit, true) }}"
     password: "{{ ngfw_policy_password | default(omit, true) }}"
   register: ngfw_policy_result
 
-- name: Create private policy evidence directory
-  ansible.builtin.file:
-    path: "{{ ngfw_policy_output_dir }}"
-    state: directory
-    owner: "{{ ngfw_policy_owner }}"
-    group: "{{ ngfw_policy_group }}"
-    mode: "0750"
-
-- name: Save desired policy without credentials
-  ansible.builtin.copy:
-    content: "{{ ngfw_policy_result.plan | to_nice_json }}\n"
-    dest: "{{ ngfw_policy_output_dir }}/plan.json"
-    owner: "{{ ngfw_policy_owner }}"
-    group: "{{ ngfw_policy_group }}"
-    mode: "0640"
-
-- name: Save operation evidence separately from the desired plan
-  ansible.builtin.copy:
-    content: "{{ ngfw_policy_result.summary | to_nice_json }}\n"
-    dest: "{{ ngfw_policy_output_dir }}/{{ ngfw_policy_mode }}-result.json"
-    owner: "{{ ngfw_policy_owner }}"
-    group: "{{ ngfw_policy_group }}"
-    mode: "0640"
-
-- name: Save allowlisted discovery inventory for manual UUID selection
-  ansible.builtin.copy:
-    content: "{{ ngfw_policy_result.discovery | to_nice_json }}\n"
-    dest: "{{ ngfw_policy_output_dir }}/discovery.json"
-    owner: "{{ ngfw_policy_owner }}"
-    group: "{{ ngfw_policy_group }}"
-    mode: "0640"
-  when: ngfw_policy_result.discovery is defined
+- name: Save policy operation evidence
+  ansible.builtin.include_tasks: evidence.yml
+  vars:
+    ngfw_policy_evidence_mode: "{{ ngfw_policy_mode }}"
 
 - name: Explain the achieved evidence boundary
   ansible.builtin.debug:

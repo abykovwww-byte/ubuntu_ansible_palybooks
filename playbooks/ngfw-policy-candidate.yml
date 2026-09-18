@@ -1,0 +1,10 @@
+---
+- name: Prepare and reconcile the discovered single-device NGFW lab without publishing
+  hosts: server
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run the fixed preparation and candidate workflow
+      ansible.builtin.import_role:
+        name: ngfw_policy
+        tasks_from: candidate

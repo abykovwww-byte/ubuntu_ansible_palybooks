@@ -34,7 +34,7 @@ options:
   mode:
     description: Plan offline, discover inventory, check remotely, reconcile candidate, or publish explicitly.
     type: str
-    choices: [plan, discover, check, apply, publish]
+    choices: [plan, discover, prepare, check, apply, publish]
     default: plan
   login:
     description: MNGT account supplied privately by Ansible.
@@ -42,6 +42,9 @@ options:
   password:
     description: MNGT password supplied privately by Ansible.
     type: str
+  inventory:
+    description: Saved discover inventory for the explicitly selected single-device lab preparation.
+    type: dict
 author: ["Repository maintainers"]
 '''
 EXAMPLES = r'''
@@ -73,6 +76,7 @@ DEFAULTS = {
     "device_group_id": "", "device_group_name": "ngfw-auditd-lab",
     "logical_device_id": "", "physical_device_id": "",
     "left_interface_id": "", "right_interface_id": "",
+    "parent_device_group_id": "", "virtual_context_id": "",
     "log_mode": "NO_LOG", "dedicated_mngt_confirmed": False,
     "request_interval": 0.2, "job_timeout": 300,
 }
@@ -95,7 +99,7 @@ def require(condition, message):
         raise PolicyError(message)
 
 
-def configure(raw, live=False):
+def configure(raw, live=False, preparing=False):
     require(not (set(raw) - set(DEFAULTS)), "Unknown policy configuration key")
     c = {**DEFAULTS, **raw}
     require(re.fullmatch(r"[a-z][a-z0-9-]{2,23}", c["prefix"]), "Invalid lab prefix")
@@ -130,8 +134,13 @@ def configure(raw, live=False):
             "MNGT must use isolated 10.77.0.0/24:443 or the approved 192.168.1.88:8443 TLS proxy")
     require(not left.network.overlaps(ipaddress.ip_network("10.77.0.0/24")) and
             not right.network.overlaps(ipaddress.ip_network("10.77.0.0/24")), "Data networks overlap management")
-    if live:
-        for key in ("device_group_id", "logical_device_id", "physical_device_id", "left_interface_id", "right_interface_id"):
+    if live or preparing:
+        keys = ["logical_device_id", "physical_device_id", "left_interface_id", "right_interface_id"]
+        if not preparing or c["device_group_id"]:
+            keys.insert(0, "device_group_id")
+        if preparing:
+            keys.extend(["parent_device_group_id", "virtual_context_id"])
+        for key in keys:
             try:
                 uuid.UUID(c[key])
             except (ValueError, TypeError, AttributeError):
@@ -370,11 +379,42 @@ def discover(api, c):
     return inventory
 
 
-def preflight(api, c, plan):
-    groups = list(flatten(api.call("GetDeviceGroupsTree", {}).get("groups", [])))
-    group = [g for g in groups if g.get("id") == c["device_group_id"]]
-    require(len(group) == 1 and group[0].get("name") == c["device_group_name"] and group[0].get("parentId"),
-            "Select the named, non-root laboratory device group explicitly")
+def one(rows, message):
+    require(len(rows) == 1, message)
+    return rows[0]
+
+
+def select_lab_config(c, inventory):
+    """Resolve only the agreed AuditD lab; never select an arbitrary first device."""
+    require(isinstance(inventory, dict) and inventory.get("format") == 1, "Provide saved discovery inventory")
+    device = one(inventory.get("physical_devices", []), "Preparation requires exactly one discovered NGFW")
+    require(device.get("name") == "pt-ngfw-auditd" and device.get("address") == "10.77.0.20",
+            "Preparation is restricted to pt-ngfw-auditd at 10.77.0.20")
+    context = one(inventory.get("virtual_contexts", []), "Preparation requires exactly one discovered context")
+    require(context.get("name") == "Default" and context.get("isDefault") is True and
+            context.get("logicalDevice", {}).get("id") == device.get("logicalDevice", {}).get("id"),
+            "Discovered Default context/device mismatch")
+    groups = inventory.get("device_groups", [])
+    parent = one([g for g in groups if g.get("name") == "Global" and not g.get("parentId")],
+                 "Select the discovered Global root explicitly")
+    target = [g for g in groups if g.get("name") == c["device_group_name"]]
+    require(len(target) <= 1, "Ambiguous discovered lab group")
+    selected = {"parent_device_group_id": parent["id"], "virtual_context_id": context["id"],
+                "physical_device_id": device["id"], "logical_device_id": device["logicalDevice"]["id"],
+                "device_group_id": target[0]["id"] if target else ""}
+    for side in ("left", "right"):
+        iface = one([v for v in inventory.get("virtual_interfaces", [])
+                     if v.get("inet") == [c[f"{side}_cidr"]] and
+                     v.get("virtualContext", {}).get("id") == context["id"]],
+                    f"Select the unique discovered {side} interface by exact lab CIDR/context")
+        selected[f"{side}_interface_id"] = iface["id"]
+    for key, value in selected.items():
+        require(not c[key] or c[key] == value, f"Configured {key} conflicts with discovery")
+    # Preparation never carries a standing authorization for a GLOBAL push.
+    return configure({**c, **selected, "dedicated_mngt_confirmed": False}, preparing=True)
+
+
+def topology(api, c, allowed_groups):
     devices = pages(api, "ListPhysicalDevices", "physicalDevices")
     ours = [d for d in devices if d["id"] == c["physical_device_id"]]
     require(len(ours) == 1 and ours[0].get("logicalDevice", {}).get("id") == c["logical_device_id"],
@@ -391,13 +431,113 @@ def preflight(api, c, plan):
         require(addresses == {str(ipaddress.ip_interface(c[f"{side}_cidr"]))} and not v.get("inet6") and
                 v.get("enabled") is True and v.get("mode") == "VIRTUAL_INTERFACE_MODE_ROUTING",
                 f"{side} interface must already have only its intended lab IPv4 address, enabled in routing mode")
-        require(v.get("virtualContext", {}).get("deviceGroup", {}).get("id") == c["device_group_id"],
+        require(v.get("virtualContext", {}).get("deviceGroup", {}).get("id") in allowed_groups,
                 f"{side} interface does not belong to the selected lab device group")
+        require(not c["virtual_context_id"] or v.get("virtualContext", {}).get("id") == c["virtual_context_id"],
+                f"{side} interface context identity mismatch")
         require(not v.get("virtualContext", {}).get("defaultIpsProfileId"),
                 f"{side} lab context has a default IPS profile; baseline must be explicitly agreed first")
         bindings[side] = v
     router = bindings["left"].get("virtualRouter", {}).get("id")
     require(router and router == bindings["right"].get("virtualRouter", {}).get("id"), "Lab interfaces must share an existing virtual router")
+    return bindings, devices, interfaces
+
+
+def parent_rules(api, group_id):
+    result = {}
+    for kind in sorted(RULES):
+        operation, key = KINDS[kind]
+        rows = pages(api, operation, key, {"deviceGroupId": group_id}, cursor=True)
+        result[kind] = {r["id"]: {k: v for k, v in r.items() if k not in {
+            "metrics", "createdAt", "updatedAt", "globalPosition"}} for r in rows}
+    return result
+
+
+def interface_fingerprint(interfaces):
+    fields = ("id", "name", "enabled", "mode", "inet", "inet6", "ports", "macAddress", "vlanId",
+              "isTcpAdjustMssEnabled", "isInheritMtu", "mtu")
+    return {v["id"]: {**{k: v.get(k) for k in fields},
+                       **{k: (v.get(k) or {}).get("id") for k in ("zone", "virtualRouter", "virtualContext")}}
+            for v in interfaces}
+
+
+def prepare(api, c, plan, write=False):
+    """Create an owned child and move only the agreed context. Never publishes."""
+    groups = list(flatten(api.call("GetDeviceGroupsTree", {}).get("groups", [])))
+    parent = one([g for g in groups if g["id"] == c["parent_device_group_id"]], "Missing parent group")
+    require(parent.get("name") == "Global" and not parent.get("parentId"), "Expected Global root changed")
+    targets = [g for g in groups if g.get("name") == c["device_group_name"]]
+    require(len(targets) <= 1, "Duplicate laboratory group name")
+    target = targets[0] if targets else None
+    require(not c["device_group_id"] or (target and target["id"] == c["device_group_id"]), "Lab group identity changed")
+    if target:
+        require(target.get("parentId") == parent["id"] and target.get("description") == plan["owner"] and
+                not target.get("subgroups"), "Existing lab group is not an owned, isolated direct child")
+    allowed = {parent["id"]} | ({target["id"]} if target else set())
+    bindings, devices, interfaces = topology(api, c, allowed)
+    require(len(devices) == 1 and devices[0].get("name") == "pt-ngfw-auditd" and
+            devices[0].get("address") == "10.77.0.20", "Live single-device lab identity changed")
+    contexts = pages(api, "ListVirtualContexts", "virtualContexts")
+    context = one(contexts, "Live MNGT must contain exactly the agreed context")
+    require(context.get("id") == c["virtual_context_id"] and context.get("name") == "Default" and
+            context.get("isDefault") is True and context.get("logicalDevice", {}).get("id") == c["logical_device_id"] and
+            context.get("deviceGroup", {}).get("id") in allowed and not context.get("defaultIpsProfileId"),
+            "Live Default context identity/group/IPS changed")
+    require(all(v.get("virtualContext", {}).get("id") == context["id"] for v in interfaces),
+            "Unexpected interface context; preparation stopped")
+    # Before creating or moving anything, refuse policy that can shadow the lab.
+    before = parent_rules(api, parent["id"])
+    for kind in RULES:
+        rg = api.call("List" + kind + "Groups", {"deviceGroupId": parent["id"]}).get("ruleGroups", [])
+        pre = {g["id"] for g in rg if g.get("precedence") == "RULE_PRECEDENCE_PRE"}
+        require(not any(r.get("enabled") and r.get("ruleGroupId") in pre for r in before[kind].values()),
+                f"{kind}: active parent PRE policy must be reviewed before preparation")
+    if target:
+        preflight(api, {**c, "device_group_id": target["id"]}, plan,
+                  allowed_groups=allowed)
+    changes = []
+    if not target:
+        changes.append({"kind": "DeviceGroup", "action": "create", "name": c["device_group_name"]})
+        if write:
+            created = api.call("CreateDeviceGroup", {"name": c["device_group_name"],
+                               "parentId": parent["id"], "description": plan["owner"]})
+            target_id = created.get("id")
+            require(target_id, "CreateDeviceGroup: missing ID; inspect before retry")
+            groups = list(flatten(api.call("GetDeviceGroupsTree", {}).get("groups", [])))
+            target = one([g for g in groups if g["id"] == target_id], "Created group missing in read-back")
+            require(target.get("name") == c["device_group_name"] and target.get("parentId") == parent["id"] and
+                    target.get("description") == plan["owner"], "Created group differs in read-back")
+            preflight(api, {**c, "device_group_id": target_id}, plan, allowed_groups=allowed)
+    target_id = target["id"] if target else ""
+    if context["deviceGroup"]["id"] != target_id:
+        changes.append({"kind": "VirtualContext", "action": "move-to-lab-group", "id": context["id"]})
+        if write:
+            api.call("UpdateVirtualContext", {"id": context["id"], "deviceGroupId": target_id})
+    if write:
+        updated = one(pages(api, "ListVirtualContexts", "virtualContexts"), "Context read-back changed")
+        require(updated.get("deviceGroup", {}).get("id") == target_id, "Context move not confirmed in read-back")
+        for key in ("id", "name", "description", "isDefault", "defaultIpsProfileId"):
+            require(updated.get(key) == context.get(key), "Context fields changed unexpectedly; inspect MNGT")
+        _, _, after_interfaces = topology(api, {**c, "device_group_id": target_id}, {target_id})
+        require(interface_fingerprint(after_interfaces) == interface_fingerprint(interfaces),
+                "Interface configuration changed during preparation; policy NOT published")
+        require(parent_rules(api, parent["id"]) == before, "Parent baseline changed; policy NOT published")
+        inherited = parent_rules(api, target_id)
+        require(all(all(inherited[k].get(i) == row for i, row in rows.items()) for k, rows in before.items()),
+                "Parent baseline is not inherited unchanged; policy NOT published")
+        preflight(api, {**c, "device_group_id": target_id}, plan)
+    return changes, {**c, "device_group_id": target_id}, {
+        "parent_rule_counts": {k: len(v) for k, v in before.items()},
+        "baseline_sha256": hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest(),
+        "interfaces_unchanged_verified": write, "baseline_inheritance_verified": write}
+
+
+def preflight(api, c, plan, allowed_groups=None):
+    groups = list(flatten(api.call("GetDeviceGroupsTree", {}).get("groups", [])))
+    group = [g for g in groups if g.get("id") == c["device_group_id"]]
+    require(len(group) == 1 and group[0].get("name") == c["device_group_name"] and group[0].get("parentId"),
+            "Select the named, non-root laboratory device group explicitly")
+    bindings, devices, _ = topology(api, c, allowed_groups if allowed_groups is not None else {c["device_group_id"]})
     collections, rule_groups = {}, {}
     for kind, (operation, key) in KINDS.items():
         body = {} if kind == "Zone" else {"deviceGroupId": c["device_group_id"]}
@@ -518,9 +658,11 @@ def publish(api, c, plan):
     return {"snapshot_id": snapshot, "commit_job_id": committed["jobId"], "push_job_id": pushed["jobId"]}
 
 
-def execute(config, mode="plan", login=None, password=None, check_mode=False, api=None):
-    require(mode in {"plan", "discover", "check", "apply", "publish"}, "Unknown policy mode")
-    c = configure(config, live=mode not in {"plan", "discover"})
+def execute(config, mode="plan", login=None, password=None, check_mode=False, api=None, inventory=None):
+    require(mode in {"plan", "discover", "prepare", "check", "apply", "publish"}, "Unknown policy mode")
+    c = configure(config, live=mode not in {"plan", "discover", "prepare"})
+    if mode == "prepare":
+        c = select_lab_config(c, inventory)
     plan = build_plan(c)
     digest = hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     summary = {"counts": plan["counts"], "state": "offline-plan", "packet_hits_verified": False, "plan_sha256": digest}
@@ -530,6 +672,12 @@ def execute(config, mode="plan", login=None, password=None, check_mode=False, ap
     api = api or API(c)
     api.call("Login", {"login": login, "password": password})
     try:
+        if mode == "prepare":
+            changes, prepared, evidence = prepare(api, c, plan, write=not check_mode)
+            summary.update(state="preparation-check" if check_mode else "prepared-candidate",
+                           change_count=len(changes), **evidence)
+            return {"changed": bool(changes), "plan": plan, "summary": summary,
+                    "changes": changes, "prepared_config": prepared}
         if mode == "discover":
             inventory = discover(api, c)
             summary.update(state="inventory-read-only", notices=inventory["notices"],
@@ -555,12 +703,13 @@ def main():
     from ansible.module_utils.basic import AnsibleModule
     module = AnsibleModule(argument_spec={
         "config": {"type": "dict", "required": True},
-        "mode": {"type": "str", "choices": ["plan", "discover", "check", "apply", "publish"], "default": "plan"},
+        "mode": {"type": "str", "choices": ["plan", "discover", "prepare", "check", "apply", "publish"], "default": "plan"},
+        "inventory": {"type": "dict"},
         "login": {"type": "str", "no_log": True}, "password": {"type": "str", "no_log": True},
     }, supports_check_mode=True)
     lock = None
     try:
-        if module.params["mode"] in {"apply", "publish"} and not module.check_mode:
+        if module.params["mode"] in {"prepare", "apply", "publish"} and not module.check_mode:
             # The managed host is Linux. This also excludes simultaneous local
             # Ansible runs; the operator must separately avoid UI/API writers.
             import fcntl
@@ -573,11 +722,11 @@ def main():
                 raise PolicyError("Another Ansible policy mutation is running") from None
         module.exit_json(**execute(**module.params, check_mode=module.check_mode))
     except PolicyError as exc:
-        module.fail_json(msg=str(exc), partial_changes_possible=module.params["mode"] in {"apply", "publish"} and not module.check_mode)
+        module.fail_json(msg=str(exc), partial_changes_possible=module.params["mode"] in {"prepare", "apply", "publish"} and not module.check_mode)
     except Exception:
         # Do not serialize raw exceptions/response bodies that may include secrets.
         module.fail_json(msg="Policy adapter failed; inspect configuration/API contract. No automatic retry.",
-                         partial_changes_possible=module.params["mode"] in {"apply", "publish"} and not module.check_mode)
+                         partial_changes_possible=module.params["mode"] in {"prepare", "apply", "publish"} and not module.check_mode)
     finally:
         if lock is not None:
             lock.close()
