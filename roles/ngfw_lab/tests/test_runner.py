@@ -100,6 +100,15 @@ class Guards(unittest.TestCase):
 
 
 class Planning(unittest.TestCase):
+    def test_domains_have_stable_uuids_for_redefinition(self):
+        defaults = (ROOT / "defaults/main.yml").read_text()
+        ngfw_domain = (ROOT / "templates/ngfw-domain.xml.j2").read_text()
+        mngt_domain = (ROOT / "templates/mngt-domain.xml.j2").read_text()
+        self.assertIn('ngfw_lab_ngfw_uuid: "c365a5c0-2dd4-4a1f-8ae7-4fd9b9b506d5"', defaults)
+        self.assertIn('ngfw_lab_mngt_uuid: "eee9f2dc-4fdf-4d1b-a91c-f3c6b571e2fa"', defaults)
+        self.assertIn("<uuid>{{ ngfw_lab_ngfw_uuid }}</uuid>", ngfw_domain)
+        self.assertIn("<uuid>{{ ngfw_lab_mngt_uuid }}</uuid>", mngt_domain)
+
     def test_ngfw_interface_order_matches_appliance_roles(self):
         domain = (ROOT / "templates/ngfw-domain.xml.j2").read_text()
         management = domain.index('mac address="52:54:00:77:00:20"')
