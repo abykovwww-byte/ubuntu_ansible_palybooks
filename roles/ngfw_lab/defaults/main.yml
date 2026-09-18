@@ -77,6 +77,12 @@ ngfw_lab_mngt_proxy_enabled: true
 ngfw_lab_mngt_proxy_listen_address: 192.168.1.88
 ngfw_lab_mngt_proxy_listen_port: 8443
 ngfw_lab_mngt_proxy_allowed_cidr: 192.168.1.0/24
+ngfw_lab_xdr_relay_enabled: false
+ngfw_lab_xdr_relay_listen_address: 10.77.0.1
+ngfw_lab_xdr_relay_listen_port: 8443
+ngfw_lab_xdr_relay_allowed_ip: "{{ ngfw_lab_management_address }}"
+ngfw_lab_xdr_relay_target_host: xdr-ext.ptsecurity.ru
+ngfw_lab_xdr_relay_target_port: 8443
 ngfw_lab_traffic_duration: 600
 ngfw_lab_traffic_warmup: 120
 ngfw_lab_traffic_idle: 180

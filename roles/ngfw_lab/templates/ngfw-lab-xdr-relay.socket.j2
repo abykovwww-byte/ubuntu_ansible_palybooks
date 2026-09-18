@@ -1,0 +1,9 @@
+[Unit]
+Description=PT NGFW lab restricted XDR relay listener
+
+[Socket]
+ListenStream={{ ngfw_lab_xdr_relay_listen_address }}:{{ ngfw_lab_xdr_relay_listen_port }}
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target
