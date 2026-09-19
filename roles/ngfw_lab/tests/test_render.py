@@ -11,6 +11,27 @@ from test_runner import r, ROOT
 
 
 class Rendering(unittest.TestCase):
+    def test_local_policy_listeners_persist_without_enabling_the_lab(self):
+        values = yaml.safe_load((ROOT / "defaults/main.yml").read_text())
+        self.assertEqual(values["ngfw_lab_policy_listener_ranges"], [])
+        inventory = yaml.safe_load(
+            (ROOT.parents[1] / "inventories/local/group_vars/server.yml").read_text(encoding="utf-8"))
+        values.update({k: v for k, v in inventory.items() if k.startswith("ngfw_lab_")})
+        for flag in ("ngfw_lab_enabled", "ngfw_lab_vms_enabled", "ngfw_lab_start_vms",
+                     "ngfw_lab_vm_autostart", "ngfw_lab_start_traffic"):
+            self.assertIs(values[flag], False, flag)
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        env.filters["to_nice_json"] = lambda v: json.dumps(v, indent=2)
+        rendered = yaml.safe_load(env.from_string(
+            (ROOT / "templates/compose.yml.j2").read_text()).render(values))
+        self.assertEqual(json.loads(rendered["services"]["traffic-server"]["environment"]
+                                   ["NGFW_POLICY_LISTEN_RANGES"]),
+                         [[10000, 10991], [20000, 20099]])
+        for service in rendered["services"].values():
+            self.assertEqual(service["restart"], "no")
+            self.assertTrue(service["read_only"])
+            self.assertNotIn("ports", service)
+
     def test_default_config_and_compose(self):
         values = yaml.safe_load((ROOT / "defaults/main.yml").read_text())
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
