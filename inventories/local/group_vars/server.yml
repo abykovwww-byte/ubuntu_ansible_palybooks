@@ -38,6 +38,9 @@ ngfw_lab_vms_enabled: false
 ngfw_lab_start_vms: false
 ngfw_lab_vm_autostart: false
 ngfw_lab_start_traffic: false
+# Persistent receiver profile for this host's 1000 ACL / 200 NAT lab.
+# This does not enable the lab, start endpoints, publish policy, or run traffic.
+ngfw_lab_policy_listener_ranges: [[10000, 10991], [20000, 20099]]
 
 tailscale_enabled: true
 tailscale_hostname: abykovserv

@@ -3,11 +3,13 @@ on:
   pull_request:
     paths:
       - 'roles/ngfw_lab/**'
+      - 'inventories/local/group_vars/server.yml'
       - '.github/workflows/ngfw-traffic.yml'
   push:
     branches: [main]
     paths:
       - 'roles/ngfw_lab/**'
+      - 'inventories/local/group_vars/server.yml'
       - '.github/workflows/ngfw-traffic.yml'
   workflow_dispatch:
 permissions:

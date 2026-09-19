@@ -101,7 +101,8 @@ Logout; не создаёт группу, не переносит контекс
 переноса `Default` из `Global` оператор выполняет:
 
 ```bash
-cd /opt/ubuntu_ansible_palybooks && git pull --ff-only && sudo bash scripts/ngfw-policy-candidate.sh
+sudo git -c safe.directory=/opt/ubuntu_ansible_palybooks -C /opt/ubuntu_ansible_palybooks pull --ff-only &&
+sudo bash /opt/ubuntu_ansible_palybooks/scripts/ngfw-policy-candidate.sh
 ```
 
 Это **не общий site apply** и **не публикация**. Скрипт запускает отдельный
@@ -281,8 +282,16 @@ sudo .venv/bin/ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-po
 ## Проверка трафиком и связь с AuditD
 
 Дополнительный приёмник в traffic-server включается переменной
-`ngfw_lab_policy_listener_ranges`. По умолчанию список пуст, дополнительные порты
-не слушаются. Значение для выбранного размера находится в `plan.json.receiver_ranges`.
+`ngfw_lab_policy_listener_ranges`. В переносимых defaults роли список пуст.
+Для локального inventory abykovserv профиль `[[10000, 10991], [20000, 20099]]`
+закреплён в `inventories/local/group_vars/server.yml`: очередной общий apply
+не сбросит уже выбранные диапазоны в пустой список. Это не включает сам стенд,
+не запускает endpoints, не публикует политику и не запускает нагрузку; флаги
+включения остаются false до явного решения оператора. Значение для выбранного
+размера находится в `plan.json.receiver_ranges`. При другом размере политики
+переопределить диапазоны в серверных overrides; `[]` явно отключает их.
+Одноразовое `-e ngfw_lab_policy_listener_ranges=...` меняет только текущий запуск,
+а не постоянные переменные Ansible.
 После изменения диапазонов нужен обычный Ansible apply роли `ngfw_lab` с
 `ngfw_lab_start_traffic: true`, чтобы пересоздался контейнер.
 Один selector-поток обслуживает все порты, максимум 128 одновременных соединений,
