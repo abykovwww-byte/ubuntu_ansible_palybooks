@@ -1,0 +1,38 @@
+name: ngfw-logs
+services:
+  collector:
+    image: {{ ngfw_logs_image }}
+    build:
+      context: ./collector
+    init: true
+    user: "10001:10001"
+    # Exact management-IP listeners, no Docker DNAT or published LAN ports.
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: {{ ngfw_logs_cpus }}
+    mem_limit: {{ ngfw_logs_memory }}
+    pids_limit: 64
+    stop_grace_period: 30s
+    ulimits:
+      nofile: {soft: 4096, hard: 4096}
+    tmpfs:
+      - /run:rw,noexec,nosuid,size=16m,uid=10001,gid=10001,mode=0700
+      - /tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001,mode=0700
+    volumes:
+      - ./collector.json:/etc/collector.json:ro
+      - {{ ngfw_logs_data_dir }}/logs:/data
+      - {{ ngfw_logs_data_dir }}/state:/var/lib/syslog-ng
+    healthcheck:
+      test: ["CMD", "python3", "/opt/collector/collector.py", "health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "2"

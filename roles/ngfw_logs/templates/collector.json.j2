@@ -1,0 +1,9 @@
+{{ {
+  'listen_address': ngfw_logs_listen_address,
+  'audit_port': ngfw_logs_audit_port,
+  'ngfw_port': ngfw_logs_ngfw_port,
+  'audit_sources': ngfw_logs_audit_sources,
+  'ngfw_sources': ngfw_logs_ngfw_sources,
+  'rotate_mib': ngfw_logs_rotate_mib,
+  'rotate_count': ngfw_logs_rotate_count
+} | to_nice_json }}
