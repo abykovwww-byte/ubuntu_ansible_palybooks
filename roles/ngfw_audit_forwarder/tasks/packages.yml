@@ -1,0 +1,53 @@
+---
+# Included only by explicit apply after identity, AuditD, dataplane and receiver checks.
+- name: Refuse to take over an active system rsyslog service
+  ansible.builtin.command:
+    argv: [systemctl, is-active, rsyslog.service]
+  register: ngfw_forwarder_system_rsyslog
+  changed_when: false
+  failed_when: ngfw_forwarder_system_rsyslog.rc not in [3, 4]
+
+- name: Validate exact offline package plan without changing apt state
+  ansible.builtin.script:
+    cmd: package_preflight.py
+    executable: /usr/bin/python3
+  changed_when: false
+  register: ngfw_forwarder_package_preflight
+
+- name: Read the validated package plan
+  ansible.builtin.set_fact:
+    ngfw_forwarder_package_plan: '{{ ngfw_forwarder_package_preflight.stdout | from_json }}'
+
+- name: Mask the unused system logger before package maintainer scripts run
+  ansible.builtin.systemd_service:
+    name: rsyslog.service
+    masked: true
+    daemon_reload: true
+
+- name: Install only the validated bundled packages with service autostart inhibited
+  ansible.builtin.apt:
+    name: '{{ ngfw_forwarder_package_plan.packages }}'
+    state: present
+    update_cache: false
+    install_recommends: false
+    auto_install_module_deps: false
+    force_apt_get: true
+    fail_on_autoremove: true
+    allow_downgrade: false
+    allow_unauthenticated: false
+    policy_rc_d: 101
+  when: ngfw_forwarder_package_plan.needed | bool
+
+- name: Verify system logger remains masked
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, rsyslog.service]
+  register: ngfw_forwarder_system_mask
+  changed_when: false
+  failed_when: ngfw_forwarder_system_mask.stdout | trim != 'masked'
+
+- name: Verify system logger did not start
+  ansible.builtin.command:
+    argv: [systemctl, is-active, rsyslog.service]
+  register: ngfw_forwarder_system_inactive
+  changed_when: false
+  failed_when: ngfw_forwarder_system_inactive.rc not in [3, 4]

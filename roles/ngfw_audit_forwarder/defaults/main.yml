@@ -1,3 +1,5 @@
 ---
 # check is a read-only prerequisite check, apply is explicit, stop preserves state.
 ngfw_audit_forwarder_mode: check
+# Separate approval is required for the four bundled appliance packages.
+ngfw_audit_forwarder_install_packages: false

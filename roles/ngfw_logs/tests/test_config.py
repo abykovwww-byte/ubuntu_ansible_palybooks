@@ -41,6 +41,7 @@ class Configuration(unittest.TestCase):
         self.assertTrue(selected['ngfw_logs_start'])
         defaults = yaml.safe_load((repo / 'roles/ngfw_audit_forwarder/defaults/main.yml').read_text())
         self.assertEqual(defaults['ngfw_audit_forwarder_mode'], 'check')
+        self.assertFalse(defaults['ngfw_audit_forwarder_install_packages'])
         site = (repo / 'playbooks/site.yml').read_text()
         self.assertNotIn('ngfw_audit_forwarder', site)
 
@@ -63,6 +64,14 @@ class Configuration(unittest.TestCase):
             self.assertNotIn(forbidden, tasks)
         self.assertIn('validate:', tasks)
         self.assertIn('rescue:', tasks)
+        bootstrap = yaml.safe_load((root / 'tasks/packages.yml').read_text())
+        install = next(task['ansible.builtin.apt'] for task in bootstrap if 'ansible.builtin.apt' in task)
+        for key in ['update_cache', 'install_recommends', 'auto_install_module_deps',
+                    'allow_downgrade', 'allow_unauthenticated']:
+            self.assertFalse(install[key])
+        self.assertTrue(install['fail_on_autoremove'])
+        self.assertEqual(install['policy_rc_d'], 101)
+        self.assertIn('when: ngfw_audit_forwarder_install_packages | bool', tasks)
 
     def test_audit_receipt_requires_source_record_and_exact_marker(self):
         marker = 'NGFW_AUDIT_FORWARDER_1789977600'
