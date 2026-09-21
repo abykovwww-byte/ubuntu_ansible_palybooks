@@ -182,6 +182,11 @@ The hypothesis-driven test sequence, stable test IDs, acceptance criteria, and
 results template are in
 [docs/ngfw-audit-performance-plan.md](docs/ngfw-audit-performance-plan.md).
 This is an experiment protocol, not a completed load-test report.
+Version 2 adds mechanism-specific hypotheses, source-versus-collector filtering,
+queue/storage/forwarding checks, fail-closed configuration review, and
+[primary-source evidence boundaries](docs/ngfw-audit-performance-sources.md).
+The added tests are documented procedures, not new runner automation or approval
+to inject failures into the appliance.
 
 An independent, opt-in syslog receiver for Linux AuditD and native PT NGFW logs
 is described in [docs/ngfw-log-collector.md](docs/ngfw-log-collector.md).
