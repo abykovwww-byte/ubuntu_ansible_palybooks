@@ -3,3 +3,5 @@
 ngfw_audit_forwarder_mode: check
 # Separate approval is required for the four bundled appliance packages.
 ngfw_audit_forwarder_install_packages: false
+# Measurement campaign opt-in. Apply identically before A/B/C and include in T20.
+ngfw_audit_forwarder_metrics: false

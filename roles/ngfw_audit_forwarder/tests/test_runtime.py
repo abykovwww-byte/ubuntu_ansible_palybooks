@@ -1,5 +1,7 @@
 """Synthetic file -> actual rsyslog -> TCP. No appliance or real audit logs."""
 from pathlib import Path
+import json
+import jinja2
 import socket
 import subprocess
 import tempfile
@@ -22,7 +24,12 @@ class Forwarder(unittest.TestCase):
         self.received = bytearray()
         self.thread = threading.Thread(target=self.receive, daemon=True)
         self.thread.start()
-        config = Path('/test-source.conf').read_text()
+        config = jinja2.Template(Path('/test-source.conf').read_text()).render(ngfw_audit_forwarder_metrics=True)
+        config = config.replace('/run/ngfw-audit-forwarder', str(self.root))
+        rotate = self.root / 'rotate.sh'
+        rotate.write_text('#!/bin/sh\nset -eu\nmv -f ' + str(self.root / 'metrics.jsonl') + ' ' + str(self.root / 'metrics.jsonl.1') + '\n')
+        rotate.chmod(0o700)
+        config = config.replace('/usr/local/libexec/ngfw-forwarder-stats-rotate', '/bin/sh ' + str(rotate))
         config = config.replace('/var/lib/ngfw-audit-forwarder', str(self.root))
         config = config.replace('/var/log/audit/audit.log', str(self.audit))
         config = config.replace('10.77.0.1', '127.0.0.1')
@@ -111,6 +118,21 @@ class Forwarder(unittest.TestCase):
         self.assertIsNone(self.process.poll())
         self.assertIn('SYNTHETIC-offline-4999', self.audit.read_text())
         self.halt()
+
+    def test_bounded_local_statistics_not_forwarded(self):
+        self.config.write_text(self.config.read_text().replace('interval="5"', 'interval="1"').replace('1048576', '4096'))
+        self.start()
+        self.expect('SYNTHETIC-initial')
+        deadline = time.monotonic() + 15
+        rotated = self.root / 'metrics.jsonl.1'
+        while time.monotonic() < deadline and not rotated.exists():
+            time.sleep(.1)
+        self.assertTrue(rotated.exists(), 'statistics should rotate without altering audit.log')
+        values = [json.loads(line) for line in rotated.read_text().splitlines() if line.strip()]
+        self.assertTrue(any(v.get('origin') == 'core.queue' and 'size' in v for v in values))
+        self.assertNotIn(b'"origin":', self.received)
+        self.assertIn('SYNTHETIC-initial', self.audit.read_text())
+        self.assertLess(rotated.stat().st_size, 65536)
 
 
 if __name__ == '__main__':

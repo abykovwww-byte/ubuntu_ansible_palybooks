@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "process_names": ["auditd", "rsyslogd"],
+  "host_temperature_keys": [],
+  "guest_disk_devices": [],
+  "host_disk_devices": [],
+  "temperature_start_c": null,
+  "temperature_stop_c": null,
+  "single_core_pct": null,
+  "single_core_seconds": null,
+  "disk_await_ms": null,
+  "disk_await_seconds": null,
+  "service_probe_ms": null,
+  "service_probe_seconds": null,
+  "max_sample_seconds": null
+}

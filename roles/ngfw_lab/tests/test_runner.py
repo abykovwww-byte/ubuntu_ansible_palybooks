@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'files'))
 
 
 def load(name, path):
@@ -288,7 +289,8 @@ class Endpoints(unittest.TestCase):
 
     def test_bounded_workload_records_errors(self):
         with patch.object(e, "request", side_effect=OSError("unavailable")):
-            result = e.workload("http", "127.0.0.1", .05, 100, 1)
+            # Leave time for Windows worker startup; 50 ms could expire before any call.
+            result = e.workload("http", "127.0.0.1", .5, 100, 1)
         self.assertGreater(result["errors"], 0)
         with self.assertRaises(r.Abort):
             r.result_metrics(dict(kind="http"), result)

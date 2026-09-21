@@ -1,5 +1,7 @@
 """Supervise packaged syslog-ng and bounded log rotation; never change a source."""
 import argparse
+import csv
+import io
 import ipaddress
 import json
 import os
@@ -88,6 +90,41 @@ def rotation_config(config):
 def ctl(*args):
     return subprocess.run(['/usr/sbin/syslog-ng-ctl', *args, '--control=' + CONTROL],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3).returncode
+
+
+def parse_stats(value):
+    """Classic syslog-ng 3.38 CSV; do not expose SourceInstance (paths/peers)."""
+    if len(value) > 1048576:
+        raise ValueError('statistics size bound exceeded')
+    rows = []
+    for row in csv.DictReader(io.StringIO(value), delimiter=';'):
+        ident = row.get('SourceId', '')
+        kind = row.get('Type', '')
+        count = row.get('Number', '')
+        if (re.fullmatch(r'[sd]_(?:auditd|ngfw)(?:#[0-9]+)?', ident) and
+                kind in {'processed', 'dropped', 'queued', 'stored', 'written', 'memory_usage'} and count.isdigit()):
+            rows.append({'id': ident, 'counter': kind, 'value': int(count)})
+    return rows
+
+
+def metrics():
+    result = subprocess.run(['/usr/sbin/syslog-ng-ctl', 'stats', '--control=' + CONTROL],
+                            capture_output=True, text=True, timeout=3)
+    if result.returncode:
+        raise ValueError('collector counters unavailable')
+    counters = parse_stats(result.stdout)
+    files = {}
+    for stream in ('auditd', 'ngfw'):
+        try:
+            st = (DATA / stream / 'events.jsonl').stat()
+            files[stream] = {'bytes': st.st_size, 'inode': st.st_ino}
+        except FileNotFoundError:
+            files[stream] = None
+    fs = os.statvfs(DATA)
+    return {'schema_version': 1, 'time': time.time(), 'counters': counters, 'files': files,
+            'free_bytes': fs.f_bavail * fs.f_frsize, 'oldest_queue_age_seconds': None,
+            'gaps': ([] if counters else ['allowlisted counters not exposed']) + ['exact oldest queue age unavailable'],
+            'boundary': 'Daemon counters/file metadata, not end-to-end receipt or no-loss proof'}
 
 
 def health():
@@ -182,9 +219,12 @@ def serve(config):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['serve', 'health', 'validate', 'audit-receipt'])
+    parser.add_argument('action', choices=['serve', 'health', 'validate', 'audit-receipt', 'metrics'])
     parser.add_argument('--marker')
     args = parser.parse_args()
+    if args.action == 'metrics':
+        print(json.dumps(metrics(), allow_nan=False))
+        return 0
     if args.action == 'audit-receipt':
         if args.marker is None:
             parser.error('--marker is required for audit-receipt')

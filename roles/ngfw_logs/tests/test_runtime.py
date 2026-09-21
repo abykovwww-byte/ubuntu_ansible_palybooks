@@ -79,6 +79,11 @@ class Runtime(unittest.TestCase):
         status = Path('/proc/self/status').read_text()
         self.assertIn('CapEff:\t0000000000000000', status)
         self.assertEqual(c.health(), 0)
+        metrics = c.metrics()
+        self.assertTrue(metrics['counters'])
+        self.assertTrue(any(v['counter'] == 'processed' for v in metrics['counters']))
+        self.assertNotIn('source_ip', json.dumps(metrics))
+        self.assertIsNone(metrics['oldest_queue_age_seconds'])
         for stream in ('auditd', 'ngfw'):
             self.assertEqual((c.DATA / stream / 'events.jsonl').stat().st_mode & 0o777, 0o600)
         with self.assertRaises(OSError):

@@ -1,0 +1,7 @@
+{
+  "campaign_id": "REPLACE-campaign",
+  "test_id": "T01",
+  "comparison_id": "REPLACE-comparison",
+  "workload_id": "REPLACE-workload",
+  "profile_id": "A"
+}

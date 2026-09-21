@@ -7,6 +7,8 @@
 # Python / Ansible local state
 __pycache__/
 .pytest_cache/
+.tmp/
+.ngfw-evidence/
 .venv/
 venv/
 artifacts/evals/

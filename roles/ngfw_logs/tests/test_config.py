@@ -26,6 +26,16 @@ def render_values(**overrides):
 
 
 class Configuration(unittest.TestCase):
+    def test_metrics_projection_omits_peer_and_file_details(self):
+        value = ('SourceName;SourceId;SourceInstance;State;Type;Number\n'
+                 'dst.file;d_auditd#0;SECRET_PATH;a;processed;42\n'
+                 'src.network;s_ngfw;SECRET_IP;a;dropped;2\n'
+                 'internal;other;PRIVATE;a;processed;999\n')
+        parsed = c.parse_stats(value)
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0]['value'], 42)
+        self.assertNotIn('SECRET', json.dumps(parsed))
+
     def setUp(self):
         self.values, self.config, self.compose = render_values()
 

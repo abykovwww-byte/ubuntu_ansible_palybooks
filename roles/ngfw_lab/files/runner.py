@@ -18,6 +18,9 @@ import subprocess
 import time
 import uuid
 
+import measurement
+import measure_probe
+
 
 class Abort(RuntimeError):
     pass
@@ -28,7 +31,9 @@ def utc():
 
 
 def save(path, value):
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def fingerprint(value):
@@ -213,8 +218,9 @@ def result_metrics(scenario, raw):
 
 
 class Backend:
-    def __init__(self, config, probe_argv=None):
+    def __init__(self, config, probe_argv=None, measurement_argv=None, measurement_config=None):
         self.config, self.probe_argv = config, probe_argv
+        self.measurement_argv, self.measurement_config = measurement_argv, measurement_config
         self.compose = ["docker", "compose", "--project-directory", config["project_dir"]]
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
         self.container_ids = []
@@ -288,10 +294,35 @@ class Backend:
         script = Path(__file__).with_name("ngfw_probe.sh").read_text(encoding="utf-8")
         return parse_probe(self.call(self.probe_argv, input_text=script))
 
+    def extended_guest(self, inventory=False):
+        config = self.measurement_config or {}
+        return json.loads(self.call(self.measurement_argv, timeout=12,
+                                   input_text=measurement.source(config.get('process_names'), inventory)))
+
+    def extended_host(self):
+        return measure_probe.snapshot({'host_only': True,
+                                       'process_names': (self.measurement_config or {}).get('process_names', [])})
+
+    def endpoint_counters(self):
+        # Receiver interface bytes include management/probe traffic, not useful throughput.
+        raw = self.endpoint('traffic-server', ['python3', '-c',
+            "import json,time;from pathlib import Path;print(json.dumps({'monotonic':time.monotonic(),"
+            "'rx_bytes':int(Path('/sys/class/net/eth0/statistics/rx_bytes').read_text())}))"])
+        return json.loads(raw)
+
     def sample(self):
         config = self.config
+        started = time.monotonic()
+        probe_timing = {}
+
+        def dataplane():
+            before = time.monotonic()
+            result = self.probe_endpoint("traffic-client", config["target"])
+            probe_timing['service_probe_ms'] = 1000 * (time.monotonic() - before)
+            return result
+
         checks = {
-            "dataplane_ok": lambda: self.probe_endpoint("traffic-client", config["target"]),
+            "dataplane_ok": dataplane,
             "management_ok": lambda: self.tcp_ok(config["management_address"], config["management_port"]),
             "mngt_ok": lambda: self.tcp_ok(config["mngt_address"], config["mngt_port"]),
             "audit": self.audit, "host": self.host,
@@ -299,6 +330,13 @@ class Backend:
             "vms_ok": lambda: self.state(config["ngfw_vm"]) == "running" and self.state(config["mngt_vm"]) == "running",
             "containers": lambda: self.call(["docker", "stats", "--no-stream", "--format", "{{json .}}"] + self.container_ids, timeout=4),
         }
+        if self.measurement_argv:
+            checks.pop('audit')
+            checks.update(extended_guest=self.extended_guest, extended_host=self.extended_host,
+                          endpoint_counters=self.endpoint_counters,
+                          collector=lambda: json.loads(self.call(['docker', 'compose', '--project-directory',
+                              '/srv/apps/ngfw-logs', 'exec', '-T', 'collector', 'python3',
+                              '/opt/collector/collector.py', 'metrics'], timeout=5)))
         futures = {key: self.pool.submit(fn) for key, fn in checks.items()}
         sample = {"time": utc(), "monotonic": time.monotonic(), "unavailable": []}
         for key, future in futures.items():
@@ -306,6 +344,12 @@ class Backend:
                 sample[key] = future.result()
             except (OSError, ValueError, subprocess.SubprocessError, Abort):
                 sample["unavailable"].append(key)
+        if self.measurement_argv:
+            guest = sample.pop('extended_guest', None)
+            sample['measurement'] = {'guest': guest, 'host': sample.pop('extended_host', None)}
+            sample['audit'] = measurement.legacy_guest(guest) if guest else {}
+        sample.update(probe_timing)
+        sample['collection_seconds'] = time.monotonic() - started
         return sample
 
     def isolation(self):
@@ -377,20 +421,34 @@ def write_report(directory, report):
 
 
 class Runner:
-    def __init__(self, config, backend, directory, report, guard, baseline):
+    def __init__(self, config, backend, directory, report, guard, baseline, extra_guard=None):
         self.config, self.backend, self.directory, self.report = config, backend, directory, report
         self.guard, self.baseline = guard, baseline
         self.cancelled = False
         self.context = {}
+        self.extra_guard = extra_guard
+        self.initial_sample = True
+        self.previous_endpoint = None
 
     def monitor(self):
         if self.cancelled:
             raise Abort("operator interrupted run")
         sample = self.backend.sample()
         reasons = self.guard.check(sample)
+        if self.extra_guard:
+            reasons += self.extra_guard.check(sample, initial=self.initial_sample)
+        self.initial_sample = False
+        endpoint = sample.get('endpoint_counters')
+        if endpoint and self.previous_endpoint:
+            dt = endpoint['monotonic'] - self.previous_endpoint['monotonic']
+            delta = endpoint['rx_bytes'] - self.previous_endpoint['rx_bytes']
+            sample['endpoint_rx_bps'] = 8 * delta / dt if dt > 0 and delta >= 0 else None
+        self.previous_endpoint = endpoint
         sample.update(self.context)
         with (self.directory / "metrics.ndjson").open("a", encoding="utf-8") as output:
             output.write(json.dumps(sample) + "\n")
+        self.report['current'] = self.context | {'sample_time': sample['time'], 'stop_reasons': reasons}
+        save(self.directory / 'summary.json', self.report)
         for key in sample["unavailable"]:
             gap = key + " metrics unavailable in one or more samples"
             if gap not in self.report["gaps"]:
@@ -408,6 +466,8 @@ class Runner:
         if not seconds:
             return
         self.context = {"scenario": scenario["name"], "repetition": repetition, "phase": phase}
+        self.context.update(phase_started_at=utc(), phase_duration_seconds=seconds,
+                            offered=scenario)
         self.monitor()
         prefix = self.directory / f"{scenario['name']}-{repetition}-{phase}"
         job = uuid.uuid4().hex
@@ -416,6 +476,7 @@ class Runner:
         deadline = time.monotonic() + seconds + 15
         process = None
         completed = False
+        window_start = time.monotonic()
         with prefix.with_suffix(".json").open("w", encoding="utf-8") as out, prefix.with_suffix(".stderr").open("w", encoding="utf-8") as err:
             try:
                 process = subprocess.Popen(argv, stdout=out, stderr=err)
@@ -448,7 +509,8 @@ class Runner:
                             process.wait()
         raw = json.loads(prefix.with_suffix(".json").read_text(encoding="utf-8"))
         metrics = result_metrics(scenario, raw)
-        self.report["results"].append(self.context | {"kind": scenario["kind"], "metrics": metrics})
+        self.report["results"].append(self.context | {"kind": scenario["kind"], "metrics": metrics,
+            "window_started_monotonic": window_start, "window_finished_monotonic": time.monotonic()})
         write_report(self.directory, self.report)
         if scenario["kind"] == "udp" and metrics["loss_pct"] > self.config["limits"]["udp_loss_pct"]:
             raise Abort("UDP loss threshold exceeded")
@@ -464,20 +526,32 @@ class Runner:
                 self.workload(scenario, repetition, "warmup", self.config["warmup"])
                 self.workload(scenario, repetition, "measure", self.config["duration"])
                 self.context["phase"] = "idle"
+                self.context.update(phase_started_at=utc(), phase_duration_seconds=self.config['idle'], offered={})
                 self.pause(self.config["idle"])
         self.monitor()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["plan", "check-isolation", "run"])
+    parser.add_argument("action", choices=["plan", "check-isolation", "measure-check", "run"])
     parser.add_argument("--config", type=Path, default=Path(__file__).with_name("runner.json"))
     parser.add_argument("--audit-profile", default="P0")
     parser.add_argument("--traffic-only", action="store_true")
     parser.add_argument("--probe-argv-file", type=Path, help="local JSON argv for SSH sh -s; never copied to report")
     parser.add_argument("--baseline", type=Path, help="completed compatible summary.json")
+    parser.add_argument('--measurement-argv-file', type=Path, help='private SSH argv ending in python3 -')
+    parser.add_argument('--measurement-config', type=Path, help='operator-approved sensors and early stop thresholds')
+    parser.add_argument('--run-context', type=Path, help='five campaign/test/comparison/workload/profile IDs')
     args = parser.parse_args()
     config = validate(json.loads(args.config.read_text(encoding="utf-8")))
+    measure_config = measurement.validate(json.loads(args.measurement_config.read_text(encoding='utf-8'))) if args.measurement_config else None
+    context = measurement.load_context(args.run_context) if args.run_context else None
+    if context and (not measure_config or not args.measurement_argv_file or args.traffic_only):
+        parser.error('methodology context requires extended measurements and cannot use traffic-only')
+    if context and context['profile_id'] != args.audit_profile:
+        parser.error('context profile_id differs from --audit-profile')
+    if args.measurement_argv_file and args.probe_argv_file:
+        parser.error('choose JSON measurement probe OR legacy shell probe, not both')
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", args.audit_profile):
         parser.error("invalid audit profile label")
     if args.action == "plan":
@@ -492,11 +566,22 @@ def main():
     if probe_argv is not None and (not isinstance(probe_argv, list) or not probe_argv or
                                    not all(isinstance(x, str) and x for x in probe_argv)):
         parser.error("probe file must be a nonempty JSON argv array")
-    if args.action == "run" and not args.traffic_only and not probe_argv:
+    measurement_argv = json.loads(args.measurement_argv_file.read_text()) if args.measurement_argv_file else None
+    if measurement_argv is not None and (not isinstance(measurement_argv, list) or not measurement_argv or
+            not all(isinstance(x, str) and x for x in measurement_argv)):
+        parser.error('measurement argv must be a nonempty string array')
+    if measurement_argv and measurement_argv[-2:] != ['python3', '-']:
+        parser.error('measurement argv must end in two arguments: python3 -')
+    if args.action == 'measure-check' and not measurement_argv:
+        parser.error('measure-check requires --measurement-argv-file')
+    if args.action == 'run' and measurement_argv and not measure_config:
+        parser.error('extended run requires approved --measurement-config thresholds')
+    if args.action == "run" and not args.traffic_only and not (probe_argv or measurement_argv):
         parser.error("AuditD run needs --probe-argv-file; use --traffic-only for a traffic-only control")
-    if args.traffic_only and probe_argv:
+    if args.traffic_only and (probe_argv or measurement_argv):
         parser.error("choose either --traffic-only or --probe-argv-file")
     import fcntl
+    os.umask(0o077)
     root = Path(config["reports_dir"])
     root.mkdir(parents=True, exist_ok=True)
     with (root / ".runner.lock").open("a") as lock:
@@ -504,8 +589,18 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise Abort("another traffic runner holds the lock") from exc
-        backend = Backend(config, probe_argv)
+        backend = Backend(config, probe_argv, measurement_argv, measure_config)
         try:
+            if args.action == 'measure-check':
+                directory = root / ('preflight-' + uuid.uuid4().hex[:12])
+                directory.mkdir(mode=0o700)
+                snapshot = {'host': backend.extended_host(), 'guest': backend.extended_guest(inventory=True)}
+                risks = measurement.inventory_risks(snapshot['guest'])
+                save(directory / 'readiness.json', {'snapshots': snapshot, 'risks': risks,
+                     'status': 'BLOCKED' if risks else 'READ_ONLY_CHECKED',
+                     'boundary': 'No traffic, no isolation/readiness acceptance, no config changes'})
+                print(f"Read-only measurement discovery: {directory / 'readiness.json'}")
+                return 2 if risks else 0
             if args.action == "check-isolation":
                 evidence = backend.isolation()
                 save(root / "isolation.json", evidence)
@@ -523,6 +618,11 @@ def main():
                       "config": config, "signature": sig, "topology": topology,
                       "baseline": str(args.baseline) if args.baseline else None, "results": [],
                       "gaps": ["Audit rules/configuration identity and administrative audit events require separate acceptance."]}
+            report['run_id'] = directory.name
+            report['context'] = context
+            report['measurement_config'] = measure_config
+            report['tool_sha256'] = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                                    for name in ('runner.py', 'measurement.py', 'measure_probe.py')}
             if args.traffic_only:
                 report["gaps"].append("AuditD and guest filesystem/CPU thresholds are not monitored in traffic-only mode.")
             if not baseline:
@@ -530,12 +630,19 @@ def main():
             elif baseline_report.get("mode") != report["mode"]:
                 report["gaps"].append("Control and current run use different observation modes; SSH/probe overhead is a comparison confounder.")
             save(directory / "isolation.json", json.loads((root / "isolation.json").read_text()))
-            runner = Runner(config, backend, directory, report, Guard(config["limits"], not args.traffic_only), baseline)
+            runner = Runner(config, backend, directory, report, Guard(config["limits"], not args.traffic_only), baseline,
+                            measurement.Guard(measure_config) if measure_config else None)
             for sig_num in (signal.SIGTERM, signal.SIGINT):
                 signal.signal(sig_num, lambda *_a: setattr(runner, "cancelled", True))
             print(f"Reports: {directory}", flush=True)
             write_report(directory, report)
             try:
+                if measurement_argv:
+                    before = backend.extended_guest(inventory=True)
+                    save(directory / 'inventory-before.json', before)
+                    risks = measurement.inventory_risks(before)
+                    if risks:
+                        raise Abort('; '.join(risks))
                 report["iperf_version"] = backend.endpoint("traffic-client", ["iperf3", "--version"])
                 runner.run()
                 report["status"] = "completed"
@@ -543,8 +650,21 @@ def main():
                 report["status"] = "aborted"
                 report["reason"] = str(exc)
             finally:
+                if measurement_argv:
+                    try:
+                        after = backend.extended_guest(inventory=True)
+                        save(directory / 'inventory-after.json', after)
+                        previous = json.loads((directory / 'inventory-before.json').read_text())
+                        for key in ('rules_sha256', 'auditd_conf_sha256', 'forwarder_conf_sha256'):
+                            if (previous.get('inventory') or {}).get(key) != (after.get('inventory') or {}).get(key):
+                                report['status'] = 'aborted'
+                                report['gaps'].append('effective configuration changed: ' + key)
+                    except (OSError, ValueError, subprocess.SubprocessError, Abort):
+                        report['status'] = 'aborted'
+                        report['gaps'].append('final inventory unavailable; comparison incomplete')
                 report["finished_at"] = utc()
                 write_report(directory, report)
+                save(directory / 'manifest.json', measurement.manifest(directory))
             print(f"{report['status']}: {directory / 'report.md'}")
             return 0 if report["status"] == "completed" else 2
         finally:

@@ -185,6 +185,12 @@ This is an experiment protocol, not a completed load-test report.
 Version 2 adds mechanism-specific hypotheses, source-versus-collector filtering,
 queue/storage/forwarding checks, fail-closed configuration review, and
 [primary-source evidence boundaries](docs/ngfw-audit-performance-sources.md).
+
+The [measurement toolkit and real-time test monitor](docs/ngfw-measurement-toolkit.md)
+add read-only per-core/disk/audit telemetry, optional bounded forwarding statistics,
+source/receipt attribution, H2 comparison checks and a loopback-only dashboard.
+LAN/Tailscale access uses SSH; completed evidence can also be analyzed on Windows.
+Code delivery does not establish live lab readiness or authorize fault injection.
 The added tests are documented procedures, not new runner automation or approval
 to inject failures into the appliance.
 
