@@ -20,6 +20,9 @@
       when: ngfw_lab_enabled | default(false) | bool
     - role: apps
       tags: [apps]
+    - role: ngfw_logs
+      tags: [ngfw-logs]
+      when: ngfw_logs_enabled | default(false) | bool
     - role: nginx
       tags: [nginx]
     - role: coolify

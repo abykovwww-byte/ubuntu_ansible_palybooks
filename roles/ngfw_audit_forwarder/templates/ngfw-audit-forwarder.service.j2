@@ -1,0 +1,46 @@
+# Managed by Ansible ngfw_audit_forwarder.
+[Unit]
+Description=Isolated file-only AuditD syslog forwarder
+After=network-online.target auditd.service
+Wants=network-online.target
+ConditionPathExists=/var/log/audit/audit.log
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStartPre=/usr/sbin/rsyslogd -N1 -f /etc/ngfw-audit-forwarder/rsyslog.conf
+ExecStart=/usr/sbin/rsyslogd -n -i /run/ngfw-audit-forwarder/rsyslog.pid -f /etc/ngfw-audit-forwarder/rsyslog.conf
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+RuntimeDirectory=ngfw-audit-forwarder
+RuntimeDirectoryMode=0700
+StateDirectory=ngfw-audit-forwarder
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=10.77.0.1/32
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=32
+StandardOutput=null
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=10
+
+[Install]
+WantedBy=multi-user.target

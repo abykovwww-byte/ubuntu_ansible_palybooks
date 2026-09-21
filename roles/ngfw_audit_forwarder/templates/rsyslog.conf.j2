@@ -1,0 +1,14 @@
+# Managed by Ansible ngfw_audit_forwarder. Separate process, no vendor includes.
+global(workDirectory="/var/lib/ngfw-audit-forwarder" maxMessageSize="64k")
+module(load="imfile")
+main_queue(queue.size="4096" queue.timeoutEnqueue="0")
+ruleset(name="ngfw_lab_audit_export") {
+  action(type="omfwd" target="10.77.0.1" port="5514" protocol="tcp"
+         TCP_Framing="traditional" template="RSYSLOG_SyslogProtocol23Format"
+         queue.type="LinkedList" queue.size="4096"
+         queue.timeoutEnqueue="0" queue.timeoutShutdown="1000"
+         action.resumeRetryCount="-1" action.resumeInterval="5")
+}
+input(type="imfile" File="/var/log/audit/audit.log" Tag="auditd:"
+      Facility="local6" Severity="info" PersistStateInterval="1"
+      freshStartTail="off" Ruleset="ngfw_lab_audit_export")

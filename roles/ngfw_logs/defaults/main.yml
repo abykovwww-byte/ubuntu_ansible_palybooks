@@ -1,0 +1,18 @@
+---
+# Receiver only: never configures the appliance or enables source logging.
+ngfw_logs_enabled: false
+ngfw_logs_start: false
+ngfw_logs_project_dir: /srv/apps/ngfw-logs
+ngfw_logs_data_dir: /srv/app-data/ngfw-logs
+ngfw_logs_image: ngfw-lab-logs:1
+ngfw_logs_listen_address: 10.77.0.1
+ngfw_logs_interface: br-ngfw-mgmt
+ngfw_logs_audit_port: 5514
+ngfw_logs_ngfw_port: 5515
+ngfw_logs_audit_sources: [10.77.0.20]
+# Native PT export can originate from MNGT/log collector, not only the firewall.
+ngfw_logs_ngfw_sources: [10.77.0.10, 10.77.0.20]
+ngfw_logs_rotate_mib: 64
+ngfw_logs_rotate_count: 7
+ngfw_logs_cpus: 1.0
+ngfw_logs_memory: 512m

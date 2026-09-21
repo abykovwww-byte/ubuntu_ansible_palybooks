@@ -1,0 +1,8 @@
+---
+- name: Prepare the isolated AuditD and PT NGFW log receiver
+  hosts: server
+  become: true
+  roles:
+    - role: ngfw_logs
+      tags: [ngfw-logs]
+      when: ngfw_logs_enabled | default(false) | bool

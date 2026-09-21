@@ -1,0 +1,106 @@
+---
+- name: Validate isolated log receiver settings
+  ansible.builtin.assert:
+    that:
+      - ngfw_logs_listen_address == '10.77.0.1'
+      - ngfw_logs_interface == 'br-ngfw-mgmt'
+      - ngfw_logs_listen_address in ansible_all_ipv4_addresses
+      - ngfw_logs_audit_port | int >= 1024
+      - ngfw_logs_ngfw_port | int >= 1024
+      - ngfw_logs_audit_port | int <= 65535
+      - ngfw_logs_ngfw_port | int <= 65535
+      - ngfw_logs_audit_port != ngfw_logs_ngfw_port
+      - ngfw_logs_audit_sources | length > 0
+      - ngfw_logs_ngfw_sources | length > 0
+      - ngfw_logs_audit_sources | difference(['10.77.0.20']) | length == 0
+      - ngfw_logs_ngfw_sources | difference(['10.77.0.10', '10.77.0.20']) | length == 0
+      - ngfw_logs_rotate_mib | int >= 1
+      - ngfw_logs_rotate_mib | int <= 1024
+      - ngfw_logs_rotate_count | int >= 1
+      - ngfw_logs_rotate_count | int <= 30
+      - ngfw_logs_project_dir == '/srv/apps/ngfw-logs'
+      - ngfw_logs_data_dir == '/srv/app-data/ngfw-logs'
+    fail_msg: This role is restricted to the existing isolated NGFW management network.
+
+- name: Create root-managed receiver build directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ ngfw_logs_project_dir }}"
+    - "{{ ngfw_logs_project_dir }}/collector"
+
+- name: Create private persistent receiver storage
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: '10001'
+    group: '10001'
+    mode: '0700'
+  loop:
+    - "{{ ngfw_logs_data_dir }}"
+    - "{{ ngfw_logs_data_dir }}/logs"
+    - "{{ ngfw_logs_data_dir }}/state"
+
+- name: Install receiver build sources
+  ansible.builtin.copy:
+    src: "collector/{{ item }}"
+    dest: "{{ ngfw_logs_project_dir }}/collector/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [Dockerfile, collector.py]
+
+- name: Render receiver settings and Compose project
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ ngfw_logs_project_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [collector.json, compose.yml]
+
+- name: Allow management sources to the AuditD input only
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: "{{ ngfw_logs_interface }}"
+    proto: "{{ item.1 }}"
+    from_ip: "{{ item.0 }}"
+    to_ip: "{{ ngfw_logs_listen_address }}"
+    port: "{{ ngfw_logs_audit_port }}"
+    comment: NGFW lab AuditD receiver
+    delete: "{{ not (ngfw_logs_start | bool) }}"
+  loop: "{{ ngfw_logs_audit_sources | product(['tcp', 'udp']) | list }}"
+
+- name: Allow management sources to the native NGFW input only
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: "{{ ngfw_logs_interface }}"
+    proto: "{{ item.1 }}"
+    from_ip: "{{ item.0 }}"
+    to_ip: "{{ ngfw_logs_listen_address }}"
+    port: "{{ ngfw_logs_ngfw_port }}"
+    comment: NGFW lab native log receiver
+    delete: "{{ not (ngfw_logs_start | bool) }}"
+  loop: "{{ ngfw_logs_ngfw_sources | product(['tcp', 'udp']) | list }}"
+
+- name: Build and start the explicitly enabled log receiver
+  ansible.builtin.command:
+    argv: [docker, compose, --project-directory, "{{ ngfw_logs_project_dir }}", up, -d, --build, --wait, --wait-timeout, '60']
+  when:
+    - ngfw_logs_start | bool
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Stop the prepared receiver without deleting persistent logs
+  ansible.builtin.command:
+    argv: [docker, compose, --project-directory, "{{ ngfw_logs_project_dir }}", stop]
+  when:
+    - not (ngfw_logs_start | bool)
+    - not ansible_check_mode
+  changed_when: true

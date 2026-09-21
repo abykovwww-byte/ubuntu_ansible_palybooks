@@ -1,0 +1,74 @@
+name: NGFW log receiver
+on:
+  pull_request:
+    paths:
+      - 'roles/ngfw_logs/**'
+      - 'roles/ngfw_audit_forwarder/**'
+      - 'inventories/local/group_vars/server.yml'
+      - 'inventories/ngfw-audit-source/**'
+      - 'playbooks/ngfw-audit-forwarder.yml'
+      - 'playbooks/ngfw-logs.yml'
+      - 'playbooks/site.yml'
+      - 'scripts/ngfw-access.ps1'
+      - '.github/workflows/ngfw-logs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'roles/ngfw_logs/**'
+      - 'roles/ngfw_audit_forwarder/**'
+      - 'inventories/local/group_vars/server.yml'
+      - 'inventories/ngfw-audit-source/**'
+      - 'playbooks/ngfw-audit-forwarder.yml'
+      - 'playbooks/ngfw-logs.yml'
+      - 'playbooks/site.yml'
+      - 'scripts/ngfw-access.ps1'
+      - '.github/workflows/ngfw-logs.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  receiver-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install template dependencies
+        run: python -m pip install jinja2 PyYAML ansible-core
+      - name: Check guest forwarder playbook syntax
+        run: ansible-playbook -i inventories/ngfw-audit-source/hosts.yml playbooks/ngfw-audit-forwarder.yml --syntax-check
+      - name: Parse dual-path Windows access helper
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/ngfw-access.ps1", [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+      - name: Settings, isolation and retention contracts
+        run: python -m unittest discover -s roles/ngfw_logs/tests -p test_config.py -v
+      - name: Render and validate Compose
+        run: |
+          python roles/ngfw_logs/tests/render_ci.py /tmp/ngfw-logs-ci
+          docker compose -f /tmp/ngfw-logs-ci/compose.yml config -q
+      - name: Build actual receiver image
+        run: docker build -t ngfw-logs-ci roles/ngfw_logs/files/collector
+      - name: TCP, UDP, source filtering, JSON, rotation and supervision
+        run: >-
+          docker run --rm --network none --read-only --user 10001:10001
+          --cap-drop ALL --security-opt no-new-privileges --cpus 1 --memory 512m --pids-limit 64
+          --tmpfs /run:rw,noexec,nosuid,size=16m,uid=10001,gid=10001,mode=0700
+          --tmpfs /tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001,mode=0700
+          --tmpfs /data:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700
+          --tmpfs /var/lib/syslog-ng:rw,noexec,nosuid,size=16m,uid=10001,gid=10001,mode=0700
+          -v /tmp/ngfw-logs-ci/collector.json:/etc/collector.json:ro
+          -v "$PWD/roles/ngfw_logs/tests:/tests:ro"
+          --entrypoint python3 ngfw-logs-ci /tests/test_runtime.py -v
+      - name: Build isolated AuditD sender test image
+        run: docker build -f roles/ngfw_audit_forwarder/tests/Dockerfile -t ngfw-audit-sender-ci roles/ngfw_audit_forwarder
+      - name: Audit file delivery, rotation, offsets and unavailable receiver
+        run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges --cpus 0.5 --memory 256m --pids-limit 32
+          --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 ngfw-audit-sender-ci
