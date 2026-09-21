@@ -44,8 +44,8 @@ def validate(config):
 def syslog_config(config):
     config = validate(config)
     lines = ['@version: 3.38', '@include "scl.conf"', '''options {
-    use-dns(no); keep-hostname(no); chain-hostnames(no);
-    log-msg-size(65536); log-fifo-size(1024); flush-lines(1);
+    use-dns(no); dns-cache(no); keep-hostname(no); chain-hostnames(no);
+    log-msg-size(65536); log-fifo-size(2048); flush-lines(1);
     time-reopen(5); stats-freq(0); stats-level(1); threaded(yes);
 };''']
     for stream, key in [('auditd', 'audit'), ('ngfw', 'ngfw')]:
@@ -53,7 +53,7 @@ def syslog_config(config):
         allowed = ' or '.join('netmask("' + value + '/32")' for value in config[key + '_sources'])
         lines.append(f'''source s_{stream} {{
     network(ip("{ip}") port({port}) transport("tcp") flags(no-parse)
-            max-connections(16) log-iw-size(1024));
+            max-connections(8) log-iw-size(1024));
     network(ip("{ip}") port({port}) transport("udp") flags(no-parse));
 }};
 filter f_{stream} {{ {allowed}; }};
@@ -97,7 +97,9 @@ def health():
     for stream in ('auditd', 'ngfw'):
         probe = DATA / stream / '.health'
         with probe.open('w', encoding='utf-8') as out:
-            out.write('')
+            out.write('ok\n')
+            out.flush()
+            os.fsync(out.fileno())
         probe.unlink()
     return 0
 

@@ -5,6 +5,7 @@ on:
       - 'roles/ngfw_logs/**'
       - 'playbooks/ngfw-logs.yml'
       - 'playbooks/site.yml'
+      - 'scripts/ngfw-access.ps1'
       - '.github/workflows/ngfw-logs.yml'
   push:
     branches: [main]
@@ -12,6 +13,7 @@ on:
       - 'roles/ngfw_logs/**'
       - 'playbooks/ngfw-logs.yml'
       - 'playbooks/site.yml'
+      - 'scripts/ngfw-access.ps1'
       - '.github/workflows/ngfw-logs.yml'
   workflow_dispatch:
 permissions:
@@ -26,6 +28,14 @@ jobs:
           python-version: '3.12'
       - name: Install template dependencies
         run: python -m pip install jinja2 PyYAML
+      - name: Parse dual-path Windows access helper
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/ngfw-access.ps1", [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
       - name: Settings, isolation and retention contracts
         run: python -m unittest discover -s roles/ngfw_logs/tests -p test_config.py -v
       - name: Render and validate Compose

@@ -63,6 +63,60 @@ Native managed-протокол `audisp-remote`, RELP и TLS в этой вер�
 
 ## Развёртывание через Ansible
 
+### Локальная сеть и Tailscale
+
+Оба пути сохраняются одновременно, не требуют пересборки/перенастройки
+приёмника при переезде рабочего компьютера:
+
+| Назначение | Из локальной сети | Удалённо через Tailscale |
+| --- | --- | --- |
+| SSH, запуск Ansible, Compose, чтение логов | `abykov@192.168.1.88` | `abykov@100.117.52.16` |
+| MNGT HTTPS | `https://192.168.1.88:8443/` напрямую | тот же URL через SSH SOCKS5 на Tailscale-подключении |
+| AuditD/NGFW → приёмник | внутренняя сеть `10.77.0.0/24` | та же внутренняя сеть, независимо от доступа оператора |
+
+Для Windows есть helper, который проверяет SSH host key и имя `abykovserv`.
+Режим Auto сначала пробует LAN, затем Tailscale; можно явно выбрать любой.
+Он не читает содержимое приватного ключа, не копирует его на сервер и не
+меняет SSH config, маршруты или сертификаты. Нужен уже разрешённый ключ:
+
+```powershell
+.\scripts\ngfw-access.ps1 -Action Check -Transport Auto
+.\scripts\ngfw-access.ps1 -Action Ssh -Transport Tailscale
+.\scripts\ngfw-access.ps1 -Action Proxy -Transport Tailscale
+```
+
+Если ключ лежит в другом месте, передать `-IdentityFile 'C:\path\to\existing_key'`.
+Новый SSH host key сверяется с доверенным fingerprint отдельно; скрипт не делает
+`accept-new`, `StrictHostKeyChecking=no` или agent forwarding.
+
+`Proxy` держит SOCKS5 на **локальном** `127.0.0.1:1080`, пока открыт терминал.
+В отдельном браузерном профиле можно настроить этот SOCKS5 и открыть исходный
+URL MNGT. Это настройка браузера оператора, не глобальное изменение прокси Windows.
+Проверка через curl с публичным CA лаборатории:
+
+```powershell
+curl.exe --proxy socks5h://127.0.0.1:1080 `
+  --cacert 'C:\path\to\pt-ngfw-lab-root-ca.pem' `
+  --fail --output NUL --write-out '%{http_code}' https://192.168.1.88:8443/
+```
+
+Windows curl/Schannel может сообщить `revocation status is unknown`, если у
+частной CA не настроены CRL/OCSP. Это не повод добавлять `--insecure` или
+отключать проверку сертификата. Сам туннель можно проверить клиентом TLS с
+явно доверенным лабораторным CA и обязательной проверкой имени, либо браузером
+с корректно установленным CA. Такой HTTPS-check через Tailscale выполнен
+21.09.2026: HTTP 200, TLS 1.3, проверка цепочки и IP имени успешна; это не
+подтверждение проверки отзыва сертификатов и не проверка всего UI.
+
+SSH переносит соединение до того же сервера через VPN, URL и проверка SAN
+сертификата остаются прежними. **Прямой** `https://100.117.52.16:8443/` не
+считается готовым: для него отдельно нужны listener/firewall и сертификат с
+этим IP или общим DNS-именем в SAN. Не обходить проверку TLS.
+Порты приёма логов 5514/5515 намеренно не выставляются в LAN/Tailscale:
+данные из VM идут по management, оператор читает их через авторизованный SSH.
+
+### Применение
+
 Предпосылки: Docker/Compose v2 и существующая management-сеть `10.77.0.1`
 на `br-ngfw-mgmt`. Роль не создаёт VM/сети и не запускает NGFW. Адреса источников
 приведены для этого лабораторного стенда; роль намеренно ограничивает их.
@@ -197,3 +251,6 @@ CI использует loopback и синтетические события; �
   — UDP syslog-export от MNGT; не подтверждение UI/API версии 1.11.1.
 - [syslog-ng 3.38 control](https://manpages.debian.org/bookworm/syslog-ng-core/syslog-ng-ctl.1.en.html)
   и [logrotate](https://manpages.debian.org/bookworm/logrotate/logrotate.8.en.html).
+- [OpenSSH dynamic forwarding](https://man.openbsd.org/ssh) и
+  [curl SOCKS5](https://curl.se/docs/manpage.html#--socks5-hostname) — удалённый
+  доступ к исходному HTTPS URL без отключения проверки сертификата.
