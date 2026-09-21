@@ -1,12 +1,14 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Check', 'Ssh', 'Proxy')]
+    [ValidateSet('Check', 'Ssh', 'Proxy', 'TestMonitor')]
     [string]$Action = 'Check',
     [ValidateSet('Auto', 'Local', 'Tailscale')]
     [string]$Transport = 'Auto',
     [string]$IdentityFile = (Join-Path $env:USERPROFILE '.ssh/id_ed25519'),
     [ValidateRange(1024, 65535)]
-    [int]$ProxyPort = 1080
+    [int]$ProxyPort = 1080,
+    [ValidateRange(1024, 65535)]
+    [int]$MonitorPort = 8787
 )
 
 # No SSH config, credentials, certificates, routes or server settings are changed.
@@ -58,6 +60,14 @@ switch ($Action) {
         & $sshExe @common -o BatchMode=yes -o ExitOnForwardFailure=yes `
             -o ServerAliveInterval=15 -o ServerAliveCountMax=3 `
             -N -D ('127.0.0.1:' + $ProxyPort) $target
+        exit $LASTEXITCODE
+    }
+    'TestMonitor' {
+        Write-Host ('Read-only test monitor: http://127.0.0.1:{0}/. Keep this tunnel open.' -f $MonitorPort)
+        Write-Host 'Requires monitor.py already running on server loopback port 8787; does not start traffic or services.'
+        & $sshExe @common -o BatchMode=yes -o ExitOnForwardFailure=yes `
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=3 `
+            -N -L ('127.0.0.1:' + $MonitorPort + ':127.0.0.1:8787') $target
         exit $LASTEXITCODE
     }
 }

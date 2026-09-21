@@ -2,6 +2,18 @@
 global(workDirectory="/var/lib/ngfw-audit-forwarder" maxMessageSize="64k")
 module(load="imfile")
 main_queue(queue.size="4096" queue.timeoutEnqueue="0")
+{% if ngfw_audit_forwarder_metrics | default(false) %}
+# Dedicated local statistics output; never forward these records to the collector.
+template(name="ngfw_metrics_json" type="string" string="%msg%\n")
+ruleset(name="ngfw_forwarder_metrics") {
+    action(type="omfile" file="/run/ngfw-audit-forwarder/metrics.jsonl"
+           template="ngfw_metrics_json" fileCreateMode="0600"
+           rotation.sizeLimit="1048576"
+           rotation.sizeLimitCommand="/usr/local/libexec/ngfw-forwarder-stats-rotate")
+}
+module(load="impstats" interval="5" resetCounters="off" format="json"
+       log.syslog="on" ruleset="ngfw_forwarder_metrics")
+{% endif %}
 ruleset(name="ngfw_lab_audit_export") {
   action(type="omfwd" target="10.77.0.1" port="5514" protocol="tcp"
          TCP_Framing="traditional" template="RSYSLOG_SyslogProtocol23Format"

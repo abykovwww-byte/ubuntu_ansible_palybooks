@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NGFW · Испытания</title><link rel="stylesheet" href="/monitor.css"><script src="/monitor.js" defer></script></head>
+<body><header><div><span class="eyebrow">ЛАБОРАТОРИЯ / AUDITD</span><h1>Наблюдение за тестом</h1></div>
+<div class="controls"><label for="runs">Прогон</label><select id="runs"><option>Нет прогонов</option></select><span id="connection" class="badge">Подключение…</span></div></header>
+<main><section id="empty" class="empty"><h2>Ожидаем первый прогон</h2><p>Здесь появятся измерения запускателя. Отсутствующие данные не заменяются нулями.</p></section>
+<div id="content" hidden><section class="runhead"><div><span id="test" class="eyebrow"></span><h2 id="scenario">—</h2><p id="phase">—</p></div>
+<div class="runstate"><span id="status" class="badge">—</span><p id="freshness">—</p></div></section>
+<section id="alarm" class="alarm" hidden></section>
+<section class="cards" aria-label="Основные показатели">
+<article><span>Приём конечной точки</span><strong id="throughput">—</strong><small>Интерфейс RX, включая служебный трафик</small></article>
+<article><span>CPU NGFW</span><strong id="cpu">—</strong><small id="hottest">Самое занятое ядро: —</small></article>
+<article><span>Температура хоста</span><strong id="temperature">—</strong><small>Максимум из доступных датчиков</small></article>
+<article><span>Очередь AuditD</span><strong id="backlog">—</strong><small id="lost">Потерянные записи: —</small></article>
+</section>
+<section class="charts">
+<article><h3>Приём трафика <span>Мбит/с</span></h3><svg id="traffic-chart" viewBox="0 0 560 160" role="img" aria-label="График RX конечной точки"></svg><p id="offered">Заданная нагрузка: —</p></article>
+<article><h3>CPU NGFW / хоста <span>%</span></h3><svg id="cpu-chart" viewBox="0 0 560 160" role="img" aria-label="CPU гостя и хоста"></svg><p><i class="dot blue"></i> NGFW <i class="dot gray"></i> Хост · iowait показан отдельно в подробностях</p></article>
+<article><h3>Очередь аудита <span>% лимита</span></h3><svg id="audit-chart" viewBox="0 0 560 160" role="img" aria-label="Заполнение очереди аудита"></svg><p id="lograte">Скорость audit.log: —</p></article>
+<article><h3>Контроль доступности <span>мс</span></h3><svg id="probe-chart" viewBox="0 0 560 160" role="img" aria-label="Время контрольной проверки"></svg><p>Полная проверка через Docker; не p95 пользовательских запросов</p></article>
+</section>
+<section class="details"><article><h3>Загрузка ядер NGFW</h3><div id="cores" class="cores"></div></article>
+<article><h3>Диск и аудит</h3><div id="disk"></div></article></section>
+<section class="details"><article><h3>Завершённые измерительные окна</h3><div class="scroll"><table><thead><tr><th>Сценарий</th><th>Повтор</th><th>Получено</th><th>Потери / ошибки</th><th>p95 ≤ мс</th></tr></thead><tbody id="results"></tbody></table></div><small>p95 — верхняя граница корзины задержек успешных запросов, после завершения окна.</small></article>
+<article><h3>Пробелы и ограничения</h3><ul id="gaps"></ul></article></section>
+<footer>Только наблюдение · обновление каждые 2 секунды · графики: последние 360 отсчётов.<br>Завершение прогона не подтверждает тезис. Для вывода нужны сопоставимые повторы и проверка сохранности аудита.</footer></div></main>
+</body></html>

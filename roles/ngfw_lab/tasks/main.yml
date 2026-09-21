@@ -447,6 +447,12 @@
   loop:
     - {src: "traffic/", dest: "traffic/"}
     - {src: runner.py, dest: runner.py}
+    - {src: measure_probe.py, dest: measure_probe.py}
+    - {src: measurement.py, dest: measurement.py}
+    - {src: monitor.py, dest: monitor.py}
+    - {src: monitor/, dest: monitor/}
+    - {src: audit_evidence.py, dest: audit_evidence.py}
+    - {src: campaign.py, dest: campaign.py}
     - {src: ngfw_probe.sh, dest: ngfw_probe.sh}
   register: ngfw_lab_traffic_source
   tags: [ngfw-lab, traffic]

@@ -95,6 +95,24 @@
         mode: '0700'
       loop: [/etc/ngfw-audit-forwarder, /var/lib/ngfw-audit-forwarder]
 
+    - name: Create dedicated helper directory
+      ansible.builtin.file:
+        path: /usr/local/libexec
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: ngfw_audit_forwarder_metrics | bool
+
+    - name: Install fixed-target bounded statistics rotation helper
+      ansible.builtin.copy:
+        src: stats-rotate.sh
+        dest: /usr/local/libexec/ngfw-forwarder-stats-rotate
+        owner: root
+        group: root
+        mode: '0755'
+      when: ngfw_audit_forwarder_metrics | bool
+
     - name: Validate and install our standalone rsyslog config
       ansible.builtin.template:
         src: rsyslog.conf.j2
