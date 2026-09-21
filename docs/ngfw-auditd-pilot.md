@@ -1,5 +1,9 @@
 # PT NGFW 1.11.1 AuditD pilot on abykovserv
 
+For the ordered hypothesis-driven campaign, stable test IDs and conclusion
+criteria, use the [AuditD performance test plan](ngfw-audit-performance-plan.md)
+and its [results template](templates/ngfw-audit-performance-results.md).
+
 ## Goal and safety boundary
 
 This is a disposable, non-production experiment to determine which AuditD
