@@ -7,9 +7,53 @@ import re
 
 import measure_probe
 
+AUDIT_FIXED_CONTROLS = ('enabled', 'failure', 'pid', 'rate_limit', 'backlog_limit', 'backlog_wait_time')
+
 
 def number(value):
     return type(value) in (int, float) and math.isfinite(value)
+
+
+def validate_busy_poll_baseline(value):
+    if (not isinstance(value, dict)
+            or set(value) != {'boot_id', 'observed_seconds', 'evidence_sha256', 'cores'}):
+        raise ValueError('busy-poll baseline requires exact evidence and core identity fields')
+    if not isinstance(value['boot_id'], str) or not re.fullmatch(
+            r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value['boot_id']):
+        raise ValueError('busy-poll baseline requires the actual guest boot UUID')
+    if not number(value['observed_seconds']) or not 60 <= value['observed_seconds'] <= 86400:
+        raise ValueError('busy-poll baseline requires 60..86400 seconds of observation')
+    if not isinstance(value['evidence_sha256'], str) or not re.fullmatch(r'[0-9a-f]{64}', value['evidence_sha256']):
+        raise ValueError('busy-poll baseline requires observation evidence SHA256')
+    cores = value['cores']
+    if not isinstance(cores, list) or not 1 <= len(cores) <= 16:
+        raise ValueError('busy-poll baseline requires 1..16 explicit core identities')
+    seen_cores, seen_threads = set(), set()
+    for row in cores:
+        fields = {'cpu', 'pid', 'process_start_ticks', 'process_comm', 'tid',
+                  'thread_start_ticks', 'thread_comm', 'affinity'}
+        if not isinstance(row, dict) or set(row) != fields:
+            raise ValueError('busy-poll core identity requires exact fields')
+        if (not isinstance(row['cpu'], str) or not re.fullmatch(r'cpu(?:0|[1-9][0-9]{0,2})', row['cpu'])
+                or int(row['cpu'][3:]) > 511):
+            raise ValueError('invalid busy-poll CPU identity')
+        for key in ('pid', 'tid', 'process_start_ticks', 'thread_start_ticks'):
+            if type(row[key]) is not int or not 0 < row[key] <= 2**63 - 1:
+                raise ValueError('invalid busy-poll task identity: ' + key)
+        if row['pid'] > 2147483647 or row['tid'] > 2147483647:
+            raise ValueError('busy-poll PID/TID outside Linux task identifier range')
+        for key in ('process_comm', 'thread_comm'):
+            if not isinstance(row[key], str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,15}', row[key]):
+                raise ValueError('busy-poll comm must be an exact bounded Linux task name')
+        if (not isinstance(row['affinity'], list) or len(row['affinity']) != 1
+                or type(row['affinity'][0]) is not int or row['affinity'][0] != int(row['cpu'][3:])):
+            raise ValueError('busy-poll affinity must be exactly its one selected CPU')
+        thread = (row['pid'], row['tid'])
+        if row['cpu'] in seen_cores or thread in seen_threads:
+            raise ValueError('duplicate busy-poll CPU or PID/TID identity')
+        seen_cores.add(row['cpu'])
+        seen_threads.add(thread)
+    return value
 
 
 def validate(config):
@@ -41,24 +85,44 @@ def validate(config):
     allowed = {'schema_version', 'process_names', 'host_temperature_keys', 'guest_disk_devices',
                'host_disk_devices', 'temperature_start_c', 'temperature_stop_c', 'single_core_pct',
                'single_core_seconds', 'disk_await_ms', 'disk_await_seconds', 'service_probe_ms',
-               'service_probe_seconds', 'max_sample_seconds'}
+               'service_probe_seconds', 'max_sample_seconds', 'guest_busy_poll_baseline'}
     if set(config) - allowed:
         raise ValueError('unknown measurement setting')
+    if 'guest_busy_poll_baseline' in config:
+        validate_busy_poll_baseline(config['guest_busy_poll_baseline'])
     return config
 
 
-def source(process_names=None, inventory=False):
+def source(process_names=None, inventory=False, guest_busy_poll_baseline=None):
     options = {'process_names': process_names or ['auditd', 'rsyslogd'], 'inventory': inventory}
+    if guest_busy_poll_baseline is not None:
+        baseline = validate_busy_poll_baseline(guest_busy_poll_baseline)
+        options['thread_targets'] = [{'pid': row['pid'], 'tid': row['tid']} for row in baseline['cores']]
     return Path(measure_probe.__file__).read_text(encoding='utf-8').replace(
         'OPTIONS = {}', 'OPTIONS = ' + repr(options), 1)
 
 
+def control_changes(before, after):
+    """Compare fixed kernel AuditD controls in two full probe snapshots."""
+    first, last = (before or {}).get('audit') or {}, (after or {}).get('audit') or {}
+    reasons = []
+    for field in AUDIT_FIXED_CONTROLS:
+        old, current = first.get(field), last.get(field)
+        if type(old) is not int or old < 0 or type(current) is not int or current < 0:
+            reasons.append('fixed AuditD control unavailable: ' + field)
+        elif old != current:
+            reasons.append('fixed AuditD control changed: ' + field)
+    return reasons
+
+
 def inventory_risks(snapshot):
-    problems = []
+    problems = control_changes(snapshot, snapshot)
     audit = snapshot.get('audit') or {}
     inv = snapshot.get('inventory') or {}
-    if audit.get('enabled') != 1 or audit.get('failure') != 1 or audit.get('lost') != 0:
-        problems.append('audit controls missing/unsafe: require enabled=1, failure=1, lost=0')
+    # The operator selected the existing EDR runtime profile as baseline.
+    # Both silent (0) and printk (1) are availability-preserving; panic (2) is not.
+    if audit.get('enabled') != 1 or audit.get('failure') not in (0, 1) or audit.get('lost') != 0:
+        problems.append('audit controls missing/unsafe: require enabled=1, failure=0 or 1, lost=0')
     if not inv.get('rules_sha256') or not inv.get('auditd_conf_sha256'):
         problems.append('effective rules/config identity unavailable')
     if not inv.get('auditd_active') or not inv.get('dataplane_active'):
@@ -66,9 +130,15 @@ def inventory_risks(snapshot):
     cfg = inv.get('auditd_conf') or {}
     if cfg.get('standard_log_path') is False or cfg.get('write_logs') == 'no':
         problems.append('probe requires local standard audit.log recording')
+    known_defaults = measure_probe.effective_defaults(cfg, inv.get('auditd_package') or {})
     for key in ('space_left_action', 'admin_space_left_action', 'max_log_file_action',
                 'disk_full_action', 'disk_error_action', 'overflow_action'):
-        if cfg.get(key) not in {'ignore', 'syslog', 'rotate', 'suspend', 'email', 'keep_logs'}:
+        value = cfg.get(key)
+        expected_default = known_defaults.get(key)
+        reported_default = (inv.get('effective_defaults') or {}).get(key)
+        if key not in cfg and expected_default and reported_default == expected_default:
+            value = expected_default['value']
+        if value not in {'ignore', 'syslog', 'rotate', 'suspend', 'email', 'keep_logs'}:
             problems.append(key + ' missing or potentially fail-closed; review installed-version defaults')
     return problems
 
@@ -158,9 +228,9 @@ def derive(previous, current):
 
 
 class Guard:
-    def __init__(self, config):
+    def __init__(self, config, initial_guest=None):
         self.config = validate(config)
-        self.previous = {}
+        self.previous = {'guest': initial_guest} if initial_guest is not None else {}
         self.since = {}
 
     def held(self, name, condition, now, seconds):
@@ -169,6 +239,37 @@ class Guard:
             return False
         self.since.setdefault(name, now)
         return now - self.since[name] >= seconds
+
+    def busy_poll_cores(self, current):
+        baseline = self.config.get('guest_busy_poll_baseline')
+        if baseline is None:
+            return set(), []
+        reasons = []
+        selected = {row['cpu'] for row in baseline['cores']}
+        actual = {name for name in (current.get('cpu') or {}) if re.fullmatch(r'cpu[0-9]+', name)}
+        if current.get('boot_id') != baseline['boot_id']:
+            reasons.append('guest busy-poll baseline boot changed')
+        if not selected <= actual:
+            reasons.append('guest busy-poll baseline references an unavailable CPU')
+        if not actual - selected:
+            reasons.append('guest busy-poll baseline must leave at least one guest core monitored')
+        threads = current.get('busy_poll_threads') or {}
+        if threads.get('unavailable') or not threads.get('values'):
+            reasons.append('guest busy-poll thread observations unavailable')
+        for expected in baseline['cores']:
+            key = f"{expected['pid']}:{expected['tid']}"
+            row = (threads.get('values') or {}).get(key) or {}
+            if any(row.get(field) != expected[field] for field in expected if field != 'cpu'):
+                reasons.append('guest busy-poll task identity/affinity changed: ' + expected['cpu'])
+            elif any(row.get(field) not in {'R', 'S', 'D', 'I'}
+                     for field in ('process_state', 'thread_state')):
+                reasons.append('guest busy-poll task stopped/state unavailable: ' + expected['cpu'])
+        verified = selected if not reasons else set()
+        current['busy_poll_baseline'] = {'expected_cores': sorted(selected), 'verified_cores': sorted(verified),
+                                        'observed_seconds': baseline['observed_seconds'],
+                                        'evidence_sha256': baseline['evidence_sha256'],
+                                        'scope': 'absolute-busy-pct-only; counters remain measured'}
+        return verified, reasons
 
     def check(self, sample, initial=False):
         reasons = []
@@ -182,8 +283,9 @@ class Guard:
             old = self.previous.get(side)
             if side == 'guest':
                 audit = current.get('audit') or {}
-                if audit.get('enabled') != 1 or audit.get('failure') != 1 or not audit.get('pid'):
+                if audit.get('enabled') != 1 or audit.get('failure') not in (0, 1) or not audit.get('pid'):
                     reasons.append('AuditD enabled/failure/pid controls unavailable or unsafe')
+                reasons.extend(control_changes(old if old is not None else current, current))
                 device = (current.get('audit_fs') or {}).get('device')
                 if not device or not any((current.get('disks') or {}).get(name, {}).get('major_minor') == device
                                          for name in cfg['guest_disk_devices']):
@@ -192,6 +294,10 @@ class Guard:
                 reasons.append(side + ' boot changed')
             derived = derive(old, current)
             current['derived'] = derived
+            busy_poll_cores = set()
+            if side == 'guest':
+                busy_poll_cores, busy_poll_reasons = self.busy_poll_cores(current)
+                reasons.extend(busy_poll_reasons)
             for device in cfg[side + '_disk_devices']:
                 if device not in (current.get('disks') or {}):
                     reasons.append(side + ' selected disk unavailable: ' + device)
@@ -201,6 +307,8 @@ class Guard:
                              now, cfg['disk_await_seconds']):
                     reasons.append(side + ' sustained disk latency')
             for core, row in derived['cpu'].items():
+                if core in busy_poll_cores:
+                    continue  # Only verified guest polling cores; host and other guards remain unchanged.
                 if core != 'cpu' and self.held(side + core, row['busy_pct'] >= cfg['single_core_pct'],
                                                now, cfg['single_core_seconds']):
                     reasons.append(side + ' sustained single-core CPU: ' + core)

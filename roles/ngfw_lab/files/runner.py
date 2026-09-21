@@ -297,7 +297,8 @@ class Backend:
     def extended_guest(self, inventory=False):
         config = self.measurement_config or {}
         return json.loads(self.call(self.measurement_argv, timeout=12,
-                                   input_text=measurement.source(config.get('process_names'), inventory)))
+                                   input_text=measurement.source(config.get('process_names'), inventory,
+                                                                 config.get('guest_busy_poll_baseline'))))
 
     def extended_host(self):
         return measure_probe.snapshot({'host_only': True,
@@ -643,6 +644,9 @@ def main():
                     risks = measurement.inventory_risks(before)
                     if risks:
                         raise Abort('; '.join(risks))
+                    # Pin the inventory read-back before the first measured sample;
+                    # an EDR control change between preflight and load invalidates it.
+                    runner.extra_guard = measurement.Guard(measure_config, initial_guest=before)
                 report["iperf_version"] = backend.endpoint("traffic-client", ["iperf3", "--version"])
                 runner.run()
                 report["status"] = "completed"
@@ -655,6 +659,12 @@ def main():
                         after = backend.extended_guest(inventory=True)
                         save(directory / 'inventory-after.json', after)
                         previous = json.loads((directory / 'inventory-before.json').read_text())
+                        changes = measurement.control_changes(previous, after)
+                        if previous.get('boot_id') != after.get('boot_id'):
+                            changes.append('guest boot changed between inventories')
+                        if changes:
+                            report['status'] = 'aborted'
+                            report['gaps'].extend(changes)
                         for key in ('rules_sha256', 'auditd_conf_sha256', 'forwarder_conf_sha256'):
                             if (previous.get('inventory') or {}).get(key) != (after.get('inventory') or {}).get(key):
                                 report['status'] = 'aborted'

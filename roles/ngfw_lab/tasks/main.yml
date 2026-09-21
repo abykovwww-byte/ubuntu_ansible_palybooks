@@ -449,6 +449,7 @@
     - {src: runner.py, dest: runner.py}
     - {src: measure_probe.py, dest: measure_probe.py}
     - {src: measurement.py, dest: measurement.py}
+    - {src: interactive_probe.py, dest: interactive_probe.py}
     - {src: monitor.py, dest: monitor.py}
     - {src: monitor/, dest: monitor/}
     - {src: audit_evidence.py, dest: audit_evidence.py}
