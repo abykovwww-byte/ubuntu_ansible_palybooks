@@ -100,19 +100,51 @@ def validate(config):
     allowed = {'schema_version', 'process_names', 'host_temperature_keys', 'guest_disk_devices',
                'host_disk_devices', 'temperature_start_c', 'temperature_stop_c', 'single_core_pct',
                'single_core_seconds', 'disk_await_ms', 'disk_await_seconds', 'service_probe_ms',
-               'service_probe_seconds', 'max_sample_seconds', 'guest_busy_poll_baseline', 'cpu_action'}
+               'service_probe_seconds', 'max_sample_seconds', 'guest_busy_poll_baseline', 'cpu_action',
+               'guest_process_targets', 'guest_process_boot_id'}
     if set(config) - allowed:
         raise ValueError('unknown measurement setting')
     if 'guest_busy_poll_baseline' in config:
         validate_busy_poll_baseline(config['guest_busy_poll_baseline'])
+    if ('guest_process_targets' in config) != ('guest_process_boot_id' in config):
+        raise ValueError('guest_process_targets and guest_process_boot_id must be set together')
+    if 'guest_process_targets' in config:
+        measure_probe.validate_process_targets(config['guest_process_targets'], config['process_names'])
+        measure_probe.validate_process_boot_id(config['guest_process_boot_id'])
     return config
 
 
-def source(process_names=None, inventory=False, guest_busy_poll_baseline=None):
+def select_guest_process_targets(snapshot, process_names):
+    """Explicit operator preparation from saved discovery, outside measured windows.
+
+    This never refreshes a selected target or falls back to runtime discovery.
+    Process creation/restarts require a new inventory and baseline selection.
+    """
+    rows = snapshot.get('processes') or {}
+    measure_probe.validate_process_boot_id(snapshot.get('boot_id'))
+    if (rows.get('scan_truncated') is not False or rows.get('requested_not_found')
+            or rows.get('mode', 'discovery') != 'discovery' or not rows.get('values')):
+        raise ValueError('complete discovery inventory required to select guest processes')
+    targets = []
+    for pid, row in rows['values'].items():
+        if not isinstance(pid, str) or not re.fullmatch(r'[1-9][0-9]{0,9}', pid):
+            raise ValueError('invalid discovery process identifier')
+        targets.append({'comm': row.get('comm'), 'pid': int(pid), 'start_ticks': row.get('start_ticks')})
+    return measure_probe.validate_process_targets(sorted(targets, key=lambda row: row['pid']), process_names)
+
+
+def source(process_names=None, inventory=False, guest_busy_poll_baseline=None, guest_process_targets=None,
+           guest_process_boot_id=None):
     options = {'process_names': process_names or ['auditd', 'rsyslogd'], 'inventory': inventory}
     if guest_busy_poll_baseline is not None:
         baseline = validate_busy_poll_baseline(guest_busy_poll_baseline)
         options['thread_targets'] = [{'pid': row['pid'], 'tid': row['tid']} for row in baseline['cores']]
+    if (guest_process_targets is None) != (guest_process_boot_id is None):
+        raise ValueError('guest_process_targets and guest_process_boot_id must be set together')
+    if guest_process_targets is not None:
+        options['process_targets'] = measure_probe.validate_process_targets(
+            guest_process_targets, options['process_names'])
+        options['process_boot_id'] = measure_probe.validate_process_boot_id(guest_process_boot_id)
     return Path(measure_probe.__file__).read_text(encoding='utf-8').replace(
         'OPTIONS = {}', 'OPTIONS = ' + repr(options), 1)
 
@@ -130,10 +162,46 @@ def control_changes(before, after):
     return reasons
 
 
-def inventory_risks(snapshot):
+def selected_process_risks(current, targets, boot_id=None):
+    if targets is None:
+        return []
+    observed = current.get('processes') or {}
+    if not isinstance(observed, dict):
+        return ['guest selected process observations unavailable or scope changed']
+    values = observed.get('values') or {}
+    expected_pids = {str(target['pid']) for target in targets}
+    reasons = []
+    if current.get('boot_id') != boot_id:
+        reasons.append('guest selected process baseline boot changed; new baseline required')
+    if (observed.get('mode') != 'selected' or observed.get('scan_truncated') is not False
+            or observed.get('unavailable') != [] or observed.get('requested_not_found') != []
+            or not isinstance(values, dict) or set(values) != expected_pids):
+        reasons.append('guest selected process observations unavailable or scope changed')
+    for target in targets:
+        row = values.get(str(target['pid'])) if isinstance(values, dict) else None
+        if (not isinstance(row, dict) or type(row.get('start_ticks')) is not int
+                or not isinstance(row.get('comm'), str)
+                or any(row.get(field) != target[field] for field in ('comm', 'start_ticks'))
+                or not isinstance(row.get('state'), str) or row['state'] not in {'R', 'S', 'D', 'I'}):
+            reasons.append('guest selected process identity/state changed: ' + str(target['pid']))
+    return reasons
+
+
+def inventory_risks(snapshot, config=None):
     problems = control_changes(snapshot, snapshot)
     audit = snapshot.get('audit') or {}
     inv = snapshot.get('inventory') or {}
+    processes = snapshot.get('processes') or {}
+    if not isinstance(processes, dict):
+        processes = {}
+    if processes.get('mode') == 'selected' and (
+            processes.get('unavailable') != [] or processes.get('scan_truncated') is not False
+            or processes.get('requested_not_found') != [] or not processes.get('values')):
+        problems.append('guest selected process inventory unavailable; new baseline required')
+    if config is not None:
+        validate(config)
+        problems.extend(selected_process_risks(snapshot, config.get('guest_process_targets'),
+                                               config.get('guest_process_boot_id')))
     # The operator selected the existing EDR runtime profile as baseline.
     # Both silent (0) and printk (1) are availability-preserving; panic (2) is not.
     if audit.get('enabled') != 1 or audit.get('failure') not in (0, 1) or audit.get('lost') != 0:
@@ -297,6 +365,8 @@ class Guard:
                 continue
             old = self.previous.get(side)
             if side == 'guest':
+                reasons.extend(selected_process_risks(current, cfg.get('guest_process_targets'),
+                                                      cfg.get('guest_process_boot_id')))
                 audit = current.get('audit') or {}
                 if audit.get('enabled') != 1 or audit.get('failure') not in (0, 1) or not audit.get('pid'):
                     reasons.append('AuditD enabled/failure/pid controls unavailable or unsafe')

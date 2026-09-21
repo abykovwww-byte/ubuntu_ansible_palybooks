@@ -31,6 +31,7 @@ GUEST = 'ngfw@10.77.0.20'
 REQUEST_SECONDS = 9
 MAX_SOURCE = 262144
 MAX_REPLY = 2097152
+MAX_GUEST_REQUEST = 16384
 NONCE = re.compile(r'[0-9a-f]{32}')
 DIGEST = re.compile(r'[0-9a-f]{64}')
 DEFAULT_NAMES = ['auditd', 'rsyslogd']
@@ -48,18 +49,28 @@ def validate_names(names):
     return list(names)
 
 
-def source_allowlist(source, names=None, baseline=None):
+def source_allowlist(source, names=None, baseline=None, process_targets=None, process_boot_id=None):
     """Match measurement.source exactly; never parse/evaluate caller Python."""
     if len(source.encode('utf-8')) > MAX_SOURCE or source.count('OPTIONS = {}') != 1:
         raise ProbeError('unexpected deployed probe source')
     if baseline is not None:
         baseline = measurement.validate_busy_poll_baseline(baseline)
+    names = validate_names(names)
+    if (process_targets is None) != (process_boot_id is None):
+        raise ValueError('guest_process_targets and guest_process_boot_id must be set together')
+    if process_targets is not None:
+        measurement.measure_probe.validate_process_targets(process_targets, names)
+        measurement.measure_probe.validate_process_boot_id(process_boot_id)
     allowed = {}
-    for process_names in (DEFAULT_NAMES, validate_names(names)):
+    # A pinned-process broker never accepts a discovery/default-name downgrade.
+    for process_names in ((names,) if process_targets is not None else (DEFAULT_NAMES, names)):
         for inventory in (False, True):
             options = {'process_names': process_names, 'inventory': inventory}
             if baseline is not None:
                 options['thread_targets'] = [{'pid': row['pid'], 'tid': row['tid']} for row in baseline['cores']]
+            if process_targets is not None:
+                options['process_targets'] = process_targets
+                options['process_boot_id'] = process_boot_id
             rendered = source.replace('OPTIONS = {}', 'OPTIONS = ' + repr(options), 1)
             allowed[hashlib.sha256(rendered.encode('utf-8')).hexdigest()] = options
     return allowed
@@ -143,7 +154,8 @@ def guest_program(source, allowed, marker, lifetime):
     options = list(allowed.values())
     constants = ('SOURCE = ' + repr(payload) + '\nOPTIONS = ' + repr(options) +
                  '\nLIFETIME = ' + repr(lifetime) + '\nMARKER = ' + repr(marker) +
-                 '\nREQUEST_SECONDS = ' + str(REQUEST_SECONDS) + '\nMAX_REPLY = ' + str(MAX_REPLY) + '\n')
+                 '\nREQUEST_SECONDS = ' + str(REQUEST_SECONDS) + '\nMAX_REPLY = ' + str(MAX_REPLY) +
+                 '\nMAX_GUEST_REQUEST = ' + str(MAX_GUEST_REQUEST) + '\n')
     return constants + '''import base64,json,os,re,select,signal,sys,termios,time
 if os.geteuid() != 0:
     raise SystemExit(41)
@@ -163,10 +175,10 @@ seen = set()
 try:
     print(MARKER, flush=True)
     while time.monotonic() < expiry:
-        line = sys.stdin.buffer.readline(2049)
+        line = sys.stdin.buffer.readline(MAX_GUEST_REQUEST+1)
         if not line:
             break
-        if len(line) > 2048 or not line.endswith(b'\\n'):
+        if len(line) > MAX_GUEST_REQUEST or not line.endswith(b'\\n'):
             raise SystemExit(42)
         request = json.loads(line)
         if (not isinstance(request,dict) or set(request) != {'nonce','options'} or
@@ -441,7 +453,8 @@ def main(argv=None):
             old_handlers[signum] = signal.signal(signum, interrupt)
         source = Path(__file__).with_name('measure_probe.py').read_text(encoding='utf-8')
         allowed = source_allowlist(source, config.get('process_names', args.process_name),
-                                   config.get('guest_busy_poll_baseline'))
+                                   config.get('guest_busy_poll_baseline'), config.get('guest_process_targets'),
+                                   config.get('guest_process_boot_id'))
         session = GuestSession(source, allowed, args.lifetime)
         session.start()
         session.authenticate()
