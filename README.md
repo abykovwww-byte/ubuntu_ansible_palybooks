@@ -178,6 +178,11 @@ server. The architecture, staged Ansible overrides, traffic commands, AuditD
 experiment profiles, stop criteria, and rollback procedure are documented in
 [docs/ngfw-auditd-pilot.md](docs/ngfw-auditd-pilot.md).
 
+The hypothesis-driven test sequence, stable test IDs, acceptance criteria, and
+results template are in
+[docs/ngfw-audit-performance-plan.md](docs/ngfw-audit-performance-plan.md).
+This is an experiment protocol, not a completed load-test report.
+
 An independent, opt-in syslog receiver for Linux AuditD and native PT NGFW logs
 is described in [docs/ngfw-log-collector.md](docs/ngfw-log-collector.md).
 It does not configure log forwarding on the appliance or start traffic tests.
