@@ -3,6 +3,8 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+import tempfile
 
 import jinja2
 import yaml
@@ -31,6 +33,56 @@ class Configuration(unittest.TestCase):
         self.assertFalse(self.values['ngfw_logs_enabled'])
         self.assertFalse(self.values['ngfw_logs_start'])
         self.assertEqual(c.validate(self.config), self.config)
+
+    def test_selected_host_enables_receiver_but_not_guest_apply(self):
+        repo = ROOT.parents[1]
+        selected = yaml.safe_load((repo / 'inventories/local/group_vars/server.yml').read_text(encoding='utf-8'))
+        self.assertTrue(selected['ngfw_logs_enabled'])
+        self.assertTrue(selected['ngfw_logs_start'])
+        defaults = yaml.safe_load((repo / 'roles/ngfw_audit_forwarder/defaults/main.yml').read_text())
+        self.assertEqual(defaults['ngfw_audit_forwarder_mode'], 'check')
+        site = (repo / 'playbooks/site.yml').read_text()
+        self.assertNotIn('ngfw_audit_forwarder', site)
+
+    def test_sender_is_file_only_bounded_and_separate(self):
+        root = ROOT.parent / 'ngfw_audit_forwarder'
+        config = (root / 'templates/rsyslog.conf.j2').read_text()
+        unit = (root / 'templates/ngfw-audit-forwarder.service.j2').read_text()
+        tasks = (root / 'tasks/main.yml').read_text()
+        self.assertIn('File="/var/log/audit/audit.log"', config)
+        self.assertIn('target="10.77.0.1" port="5514"', config)
+        self.assertIn('PersistStateInterval="1"', config)
+        self.assertIn('freshStartTail="off"', config)
+        self.assertIn('queue.timeoutEnqueue="0"', config)
+        for forbidden in ['imuxsock', 'imjournal', 'include(', 'queue.filename']:
+            self.assertNotIn(forbidden, config)
+        for setting in ['MemoryMax=256M', 'CPUQuota=50%', 'NoNewPrivileges=yes',
+                        'ProtectSystem=strict', 'IPAddressDeny=any', 'StateDirectory=ngfw-audit-forwarder']:
+            self.assertIn(setting, unit)
+        for forbidden in ['ansible.builtin.apt:', 'ansible.builtin.shell:', 'authorized_keys', 'local-overrides.yml', 'auditctl, -R']:
+            self.assertNotIn(forbidden, tasks)
+        self.assertIn('validate:', tasks)
+        self.assertIn('rescue:', tasks)
+
+    def test_audit_receipt_requires_source_record_and_exact_marker(self):
+        marker = 'NGFW_AUDIT_FORWARDER_1789977600'
+        with tempfile.TemporaryDirectory() as temp, patch.object(c, 'DATA', Path(temp)):
+            path = Path(temp) / 'auditd'
+            path.mkdir()
+            row = dict(stream='auditd', source_ip='10.77.0.20',
+                       raw='type=USER msg=audit(1789977600.123:42): msg=' + marker)
+            for wrong in [row | {'source_ip': '10.77.0.10'}, row | {'stream': 'ngfw'},
+                          row | {'raw': marker}, row | {'raw': row['raw'] + '0'}]:
+                (path / 'events.jsonl').write_text(json.dumps(wrong) + '\n')
+                self.assertIsNone(c.find_audit_receipt(marker))
+            (path / 'events.jsonl').write_text(json.dumps(row) + '\n')
+            result = c.find_audit_receipt(marker)
+            self.assertEqual(result['audit_id'], '1789977600.123:42')
+            self.assertNotIn('raw', result)
+            (path / 'events.jsonl').rename(path / 'events.jsonl.1')
+            self.assertEqual(c.find_audit_receipt(marker), result)
+            with self.assertRaises(ValueError):
+                c.find_audit_receipt('')
 
     def test_management_only_no_docker_nat_or_privileges(self):
         service = self.compose['services']['collector']

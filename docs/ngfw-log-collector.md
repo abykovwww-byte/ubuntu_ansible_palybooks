@@ -3,7 +3,8 @@
 Отдельный Compose-проект `ngfw-logs` на `abykovserv`: Debian 12 + пакетный
 syslog-ng 3.38, без SIEM, веб-интерфейса и зависимости от traffic-runner.
 Ansible-роль: `roles/ngfw_logs`; отдельный playbook: `playbooks/ngfw-logs.yml`.
-Роль также подключена к `site.yml`, но выключена по умолчанию.
+Роль также подключена к `site.yml`: переносимые defaults выключены, а в
+инвентаре этого стенда `inventories/local` приёмник явно включён.
 
 Это **внешний syslog-приёмник**, а не штатный PT log collector, и не замена
 локальному `/var/log/audit/audit.log`. Он не включает AuditD, не меняет его
@@ -121,7 +122,9 @@ SSH переносит соединение до того же сервера ч
 на `br-ngfw-mgmt`. Роль не создаёт VM/сети и не запускает NGFW. Адреса источников
 приведены для этого лабораторного стенда; роль намеренно ограничивает их.
 
-После merge оператор добавляет **на сервере**, в приватные overrides:
+После merge штатное применение включает приёмник из инвентаря этого стенда.
+Эквивалентные настройки ниже можно переопределить **на сервере** в приватных
+overrides (они имеют приоритет над inventory):
 
 ```yaml
 ngfw_logs_enabled: true
@@ -155,50 +158,92 @@ sudo .venv/bin/ansible-playbook -i inventories/local/hosts.yml \
 
 ### AuditD
 
-Предпочтительно использовать уже разрешённый локальный syslog-forwarder.
-Возможные цепочки:
+Цепочка: `audit.log → отдельный rsyslog imfile → TCP → 10.77.0.1:5514`.
+Роль `ngfw_audit_forwarder` запускает **отдельный процесс**, а не меняет
+`/etc/rsyslog.conf` или конфигурацию штатного логирования PT. Не добавляет
+dispatcher plugin, не меняет `/etc/audit`, правила, backlog или AuditD service.
 
-1. `audit.log → rsyslog imfile → TCP syslog → 10.77.0.1:5514`.
-   Наблюдение за файлом не добавляет remote plugin в очередь AuditD. Нужны
-   разрешённое чтение, persistent offset, учёт ротации и ограниченная очередь.
-2. `AuditD → audisp-syslog → локальный syslog-forwarder → 10.77.0.1:5514`.
-   Это отдельное изменение dispatcher-профиля; не включать автоматически.
+Предпосылки: существующий `/usr/sbin/rsyslogd` с imfile, Python 3, активные
+`auditd` и `pt-ngfw-core`, root-owned `/var/log/audit/audit.log`. Если компонента
+нет, playbook завершается **без установки пакетов на appliance**. Решение об
+установке/поддерживаемом альтернативном отправителе принимается отдельно.
 
-Первая схема сохраняет выбранный P1 и локальный аудит. Пример ниже — **шаблон
-для согласования**, не команда установки на appliance. Использовать только
-если rsyslog/imfile уже установлен и разрешён; роль не ставит сторонние
-пакеты на NGFW. Не загружать imfile второй раз, если он уже подключён.
+Запускать на `abykovserv` от обычного оператора, у которого уже есть доступ
+Docker для проверки коллектора. Не через sudo всего Ansible: SSH known_hosts
+должен принадлежать оператору. Вводятся пароли **пользователя ОС NGFW `ngfw`**
+и его sudo, не пароль MNGT admin. Пароли не писать в inventory/extra-vars или Git.
+Ansible core 2.19+ поддерживает SSH_ASKPASS без установки sshpass. Host key уже
+должен быть проверен; `StrictHostKeyChecking=yes` не отключать.
 
-```text
-module(load="imfile")
-ruleset(name="ngfw_lab_audit_export") {
-  action(type="omfwd" target="10.77.0.1" port="5514" protocol="tcp"
-         TCP_Framing="traditional" template="RSYSLOG_SyslogProtocol23Format"
-         queue.type="LinkedList" queue.size="4096"
-         queue.timeoutEnqueue="0" action.resumeRetryCount="-1")
-}
-input(type="imfile" File="/var/log/audit/audit.log" Tag="auditd:"
-      Facility="local6" Severity="info" PersistStateInterval="100"
-      freshStartTail="on" Ruleset="ngfw_lab_audit_export")
+```bash
+cd /opt/ubuntu_ansible_palybooks
+# Только проверка предпосылок и счётчиков, без изменений:
+.venv/bin/ansible-playbook -i inventories/ngfw-audit-source/hosts.yml \
+  playbooks/ngfw-audit-forwarder.yml --ask-pass --ask-become-pass
+# После healthy collector — отдельное явное применение:
+.venv/bin/ansible-playbook -i inventories/ngfw-audit-source/hosts.yml \
+  playbooks/ngfw-audit-forwarder.yml --ask-pass --ask-become-pass \
+  -e ngfw_audit_forwarder_mode=apply
 ```
 
-Для imfile нужен существующий writable `workDirectory` rsyslog для state-файлов.
-`freshStartTail=on` сознательно не экспортирует старую историю при первом
-подключении. Очередь в примере в памяти и ограничена, при переполнении события
-могут теряться; это выбор доступности NGFW, не обещание полной доставки.
-Перед включением проверить конфигурацию установленной версией (`rsyslogd -N1`),
-права, локальную ротацию и поведение при недоступном получателе.
+Перед изменениями apply проверяет здоровье коллектора с контроллера и TCP
+доступность из гостя. Конфиг валидируется **установленным** rsyslogd; сохраняются
+резервные копии изменяемых собственных файлов. Ошибка применения останавливает
+только `ngfw-audit-forwarder`, сохраняет offset/state и требует разбора ошибки.
+Автоматически возвращать предыдущий экспорт после ошибки роль не пытается.
+После старта playbook создаёт одну безопасную USER-запись через `auditctl -m`
+и до 20 секунд ожидает её на коллекторе. Проверяются источник `10.77.0.20`,
+поток `auditd`, тип USER, audit timestamp/serial и точный уникальный маркер.
+В вывод попадают только эти метаданные, не сырые журналы. Это проверяет реальный
+путь AuditD с синтетическим содержимым, но не полноту/отсутствие потерь при нагрузке.
+Поиск ограничен последними 256 KiB текущего и предыдущего несжатого файла;
+при сильном потоке/долгом backfill возможен безопасный отказ проверки.
+
+Служба `/etc/systemd/system/ngfw-audit-forwarder.service`: 256 MiB, 50% CPU,
+32 tasks, без capabilities, read-only filesystem кроме собственных state/runtime,
+без чтения домашней директории. Root нужен для чтения локального audit.log;
+основные службы не перезапускаются. Systemd IP-фильтр дополнительно ограничивает
+сеть адресом коллектора (поддержка зависит от cgroup/BPF ОС; это не замена
+изоляции стенда). Очереди в памяти по 4096 записей, без ожидания свободного
+места при enqueue. Переполнение/остановка могут терять сообщения; это профиль
+доступности, не гарантия полноты удалённого аудита.
+
+Offset хранится в `/var/lib/ngfw-audit-forwarder`, обновляется после каждой
+записи. При первом запуске читается **текущий audit.log с начала**, не архивы.
+Это намеренный ограниченный backfill; возможны дубликаты при потере state.
+`freshStartTail=off` выбран, чтобы не пропускать первые записи нового файла при
+ротации. Размер исходного активного файла ограничивает существующая политика
+AuditD; она не меняется. Приёмник хранит такие записи по своей политике ротации.
+
+Откат экспорта, не удаляющий локальные логи/offset и не выключающий AuditD:
+
+```bash
+.venv/bin/ansible-playbook -i inventories/ngfw-audit-source/hosts.yml \
+  playbooks/ngfw-audit-forwarder.yml --ask-pass --ask-become-pass \
+  -e ngfw_audit_forwarder_mode=stop
+```
 
 `audisp-remote` в режиме `managed` нельзя направлять на этот порт: ему нужен
 совместимый audit receiver с собственным протоколом, не обычный syslog-ng.
 
 ### Собственные журналы NGFW
 
-В штатной настройке экспорта журналов PT MNGT/log collector задать получатель
-`10.77.0.1`, порт `5515`. Выбирать поддерживаемый **данной версией PT** транспорт
-и формат. Контейнер принимает TCP/LF и UDP; для PT syslog-export публичная
-таблица потоков подтверждает UDP от MNGT. Точный путь UI/API PT 1.11.1 требует
-отдельной live-проверки: переносить инструкции другой версии вслепую нельзя.
+Путь проверен в UI текущего стенда 21.09.2026, без сохранения настроек:
+
+1. **Параметры → Syslog-серверы → Добавить**: имя `ngfw-lab-collector`, IP
+   `10.77.0.1`, порт `5515`. В списке протоколов этой версии доступен **UDP**.
+2. **Параметры → Отправка событий → Добавить**: имя `ngfw-lab-audit-export`,
+   «Выбранные» типы журналов **Аудит** и **Аутентификация**, сервер из шага 1.
+3. Сохранить только после проверки healthy collector. Если MNGT требует
+   «Отправить на устройства», сначала проверить состав pending-изменений;
+   не публиковать посторонние изменения вместе с экспортом.
+4. Выполнить штатное административное действие/вход в MNGT и сопоставить
+   native event из его журнала с записью в `ngfw/events.jsonl`.
+
+Это инструкция, **не утверждение, что export уже включён**. На момент осмотра
+обе таблицы были пусты. Не создавать повторный сервер/правило при следующем
+применении: использовать существующие объекты с указанными именами. Для отката
+выключить только это правило пересылки; не выключать сам сбор журналов PT.
 
 Сначала экспортировать минимальные системные/административные события.
 Существующие тестовые ACL/NAT остаются без session logging: наличие приёмника
@@ -234,6 +279,9 @@ CI проверяет реальные TCP/UDP-пакеты, обе незави
 отказ постороннему IP, UID/capabilities/read-only rootfs, права файлов,
 ротацию/сжатие/переоткрытие, число архивов и контроль процесса.
 CI использует loopback и синтетические события; это **не live-доставка с NGFW**.
+Отдельный контейнерный тест rsyslog проверяет чтение файла, ротацию, offset после
+перезапуска и недоступного получателя. Он не проверяет systemd/cgroup ограничения
+в реальном appliance — это часть проверки после гостевого apply.
 
 Приёмник логов не устраняет отдельный блокер нагрузочного теста: для `lost`,
 `backlog`, CPU и диска по-прежнему нужен разрешённый read-only probe внутри
@@ -246,7 +294,11 @@ CI использует loopback и синтетические события; �
 - [audit remote protocol и форматы](https://manpages.debian.org/trixie/audispd-plugins/audisp-remote.conf.5.en.html)
   — ссылка описывает протокол, не инструкцию обновления appliance.
 - [rsyslog imfile](https://docs.rsyslog.com/doc/configuration/modules/imfile.html)
-  — чтение файлов, offsets, ротация и freshStartTail.
+  — чтение файлов и offsets;
+  [freshStartTail](https://docs.rsyslog.com/doc/reference/parameters/imfile-freshstarttail.html)
+  — риск пропуска первых записей, поэтому отправитель оставляет его выключенным.
+- [Ansible SSH connection](https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/ssh_connection.html)
+  — интерактивный механизм SSH_ASKPASS, без паролей в файлах.
 - [PT NGFW: таблица потоков, версия 1.8](https://help.ptsecurity.com/ru-RU/projects/ngfw/1.8/help/9490983819)
   — UDP syslog-export от MNGT; не подтверждение UI/API версии 1.11.1.
 - [syslog-ng 3.38 control](https://manpages.debian.org/bookworm/syslog-ng-core/syslog-ng-ctl.1.en.html)

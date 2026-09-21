@@ -1,0 +1,167 @@
+---
+- name: Restrict operation and target to the existing Debian lab guest
+  ansible.builtin.assert:
+    that:
+      - ngfw_audit_forwarder_mode in ['check', 'apply', 'stop']
+      - ansible_host == '10.77.0.20'
+      - ansible_facts.hostname == 'ngfw'
+      - ansible_facts.distribution == 'Debian'
+      - ansible_facts.distribution_major_version == '12'
+      - "'10.77.0.20' in ansible_facts.all_ipv4_addresses"
+    fail_msg: This workflow only supports the existing isolated PT NGFW Debian 12 guest.
+
+- name: Stop only our forwarder without changing AuditD or deleting offsets
+  ansible.builtin.systemd_service:
+    name: ngfw-audit-forwarder.service
+    state: stopped
+    enabled: false
+  when: ngfw_audit_forwarder_mode == 'stop'
+
+- name: Check prerequisites without installing appliance packages
+  when: ngfw_audit_forwarder_mode != 'stop'
+  block:
+    - name: Check existing rsyslog binary
+      ansible.builtin.stat:
+        path: /usr/sbin/rsyslogd
+      register: ngfw_forwarder_binary
+
+    - name: Check existing local audit log metadata only
+      ansible.builtin.stat:
+        path: /var/log/audit/audit.log
+        get_checksum: false
+      register: ngfw_forwarder_audit_log
+
+    - name: Require installed forwarder and root-readable local audit file
+      ansible.builtin.assert:
+        that:
+          - ngfw_forwarder_binary.stat.exists
+          - ngfw_forwarder_binary.stat.executable | default(false)
+          - ngfw_forwarder_audit_log.stat.isreg | default(false)
+          - ngfw_forwarder_audit_log.stat.uid | default(-1) == 0
+          - ngfw_forwarder_audit_log.stat.rusr | default(false)
+        fail_msg: Missing prerequisite; no packages or audit settings were changed. Review the guest before proceeding.
+
+    - name: Require active AuditD and PT dataplane
+      ansible.builtin.command:
+        argv: [systemctl, is-active, '{{ item }}']
+      loop: [auditd.service, pt-ngfw-core.service]
+      changed_when: false
+      check_mode: false
+
+    - name: Read AuditD health counters without reading events
+      ansible.builtin.command:
+        argv: [/usr/sbin/auditctl, -s]
+      register: ngfw_forwarder_audit_status
+      changed_when: false
+      check_mode: false
+
+    - name: Report read-only prerequisite result and counters
+      ansible.builtin.debug:
+        msg:
+          - 'Prerequisites present. This is not proof of forwarding or module compatibility.'
+          - "{{ ngfw_forwarder_audit_status.stdout_lines }}"
+
+- name: Apply only after the isolated collector is healthy
+  when:
+    - ngfw_audit_forwarder_mode == 'apply'
+    - not ansible_check_mode
+  block:
+    - name: Verify actual receiver health on the Ansible controller
+      ansible.builtin.command:
+        argv: [docker, compose, --project-directory, /srv/apps/ngfw-logs, exec, -T, collector, python3, /opt/collector/collector.py, health]
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Require management TCP reachability from the guest
+      ansible.builtin.wait_for:
+        host: 10.77.0.1
+        port: 5514
+        connect_timeout: 3
+        timeout: 10
+
+    - name: Create private configuration and offset directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [/etc/ngfw-audit-forwarder, /var/lib/ngfw-audit-forwarder]
+
+    - name: Validate and install our standalone rsyslog config
+      ansible.builtin.template:
+        src: rsyslog.conf.j2
+        dest: /etc/ngfw-audit-forwarder/rsyslog.conf
+        owner: root
+        group: root
+        mode: '0600'
+        backup: true
+        validate: '/usr/sbin/rsyslogd -N1 -f %s'
+      register: ngfw_forwarder_config
+
+    - name: Install only our resource-bounded service
+      ansible.builtin.template:
+        src: ngfw-audit-forwarder.service.j2
+        dest: /etc/systemd/system/ngfw-audit-forwarder.service
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+      register: ngfw_forwarder_unit
+
+    - name: Start or restart only our dedicated forwarder
+      ansible.builtin.systemd_service:
+        name: ngfw-audit-forwarder.service
+        daemon_reload: true
+        enabled: true
+        state: "{{ 'restarted' if (ngfw_forwarder_config.changed or ngfw_forwarder_unit.changed) else 'started' }}"
+
+    - name: Allow startup failures to become visible
+      ansible.builtin.pause:
+        seconds: 2
+
+    - name: Check forwarder and original services after apply
+      ansible.builtin.command:
+        argv: [systemctl, is-active, '{{ item }}']
+      loop: [ngfw-audit-forwarder.service, auditd.service, pt-ngfw-core.service]
+      changed_when: false
+
+    - name: Set a unique non-sensitive AuditD pipeline probe
+      ansible.builtin.set_fact:
+        ngfw_forwarder_marker: 'NGFW_AUDIT_FORWARDER_{{ ansible_facts.date_time.epoch }}'
+
+    - name: Emit one user message through the real AuditD pipeline
+      ansible.builtin.command:
+        argv: [/usr/sbin/auditctl, -m, '{{ ngfw_forwarder_marker }}']
+      changed_when: true
+
+    - name: Require the corresponding AuditD serial on the collector without printing raw logs
+      ansible.builtin.command:
+        argv: [docker, compose, --project-directory, /srv/apps/ngfw-logs, exec, -T, collector, python3, /opt/collector/collector.py, audit-receipt, --marker, '{{ ngfw_forwarder_marker }}']
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      register: ngfw_forwarder_receipt
+
+    - name: Report only safe receipt metadata
+      ansible.builtin.debug:
+        var: ngfw_forwarder_receipt.stdout
+
+  rescue:
+    - name: Check whether our unit was installed
+      ansible.builtin.stat:
+        path: /etc/systemd/system/ngfw-audit-forwarder.service
+      register: ngfw_forwarder_failed_unit
+
+    - name: Fail closed by stopping only the new export path
+      ansible.builtin.systemd_service:
+        name: ngfw-audit-forwarder.service
+        state: stopped
+        enabled: false
+        daemon_reload: true
+      when: ngfw_forwarder_failed_unit.stat.exists
+
+    - name: Keep local audit running and require review
+      ansible.builtin.fail:
+        msg: Forwarder apply failed and its export was stopped. AuditD and vendor syslog configuration were not modified; review before retrying.

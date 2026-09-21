@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import time
@@ -104,6 +105,34 @@ def health():
     return 0
 
 
+def find_audit_receipt(marker):
+    """Return only receipt metadata for our exact probe, never raw audit data."""
+    if not re.fullmatch(r'NGFW_AUDIT_FORWARDER_[0-9]{10,20}', marker):
+        raise ValueError('invalid audit probe marker')
+    for name in ('events.jsonl', 'events.jsonl.1'):
+        try:
+            with (DATA / 'auditd' / name).open('rb') as log:
+                log.seek(max(0, log.seek(0, 2) - 262144))
+                tail = log.read(262144)
+        except FileNotFoundError:
+            continue
+        for line in tail.splitlines():
+            try:
+                row = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if not isinstance(row, dict):
+                continue
+            raw = row.get('raw', '')
+            if row.get('stream') != 'auditd' or row.get('source_ip') != '10.77.0.20' or not isinstance(raw, str):
+                continue
+            match = re.search(r'\btype=USER\s+msg=audit\(([0-9.]+:[0-9]+)\)', raw)
+            if match and re.search(r'(?<![A-Za-z0-9_])' + re.escape(marker) + r'(?![A-Za-z0-9_])', raw):
+                return {'stream': 'auditd', 'source_ip': '10.77.0.20',
+                        'audit_id': match.group(1), 'marker': marker}
+    return None
+
+
 def serve(config):
     os.umask(0o077)
     for stream in ('auditd', 'ngfw'):
@@ -153,8 +182,22 @@ def serve(config):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['serve', 'health', 'validate'])
+    parser.add_argument('action', choices=['serve', 'health', 'validate', 'audit-receipt'])
+    parser.add_argument('--marker')
     args = parser.parse_args()
+    if args.action == 'audit-receipt':
+        if args.marker is None:
+            parser.error('--marker is required for audit-receipt')
+        deadline = time.monotonic() + 20
+        while True:
+            receipt = find_audit_receipt(args.marker)
+            if receipt:
+                print(json.dumps(receipt))
+                return 0
+            if time.monotonic() >= deadline:
+                print('AuditD probe was not found in the bounded recent log window')
+                return 1
+            time.sleep(.5)
     if args.action == 'health':
         try:
             return health()

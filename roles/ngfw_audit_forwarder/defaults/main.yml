@@ -1,0 +1,3 @@
+---
+# check is a read-only prerequisite check, apply is explicit, stop preserves state.
+ngfw_audit_forwarder_mode: check
