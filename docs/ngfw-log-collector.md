@@ -165,8 +165,8 @@ dispatcher plugin, не меняет `/etc/audit`, правила, backlog ил�
 
 Предпосылки: существующий `/usr/sbin/rsyslogd` с imfile, Python 3, активные
 `auditd` и `pt-ngfw-core`, root-owned `/var/log/audit/audit.log`. Если компонента
-нет, playbook завершается **без установки пакетов на appliance**. Решение об
-установке/поддерживаемом альтернативном отправителе принимается отдельно.
+нет, обычный playbook завершается **без установки пакетов на appliance**.
+После отдельного разрешения на установку можно явно включить bootstrap ниже.
 
 Запускать на `abykovserv` от обычного оператора, у которого уже есть доступ
 Docker для проверки коллектора. Не через sudo всего Ansible: SSH known_hosts
@@ -185,6 +185,42 @@ cd /opt/ubuntu_ansible_palybooks
   playbooks/ngfw-audit-forwarder.yml --ask-pass --ask-become-pass \
   -e ngfw_audit_forwarder_mode=apply
 ```
+
+Если rsyslog отсутствует, для этого PT NGFW 1.11.1 предусмотрена **отдельная
+opt-in установка из уже встроенного** `file:/opt/pt-ngfw/ngfw-repo`:
+
+```bash
+.venv/bin/ansible-playbook -i inventories/ngfw-audit-source/hosts.yml \
+  playbooks/ngfw-audit-forwarder.yml --ask-pass --ask-become-pass \
+  -e ngfw_audit_forwarder_mode=apply \
+  -e ngfw_audit_forwarder_install_packages=true
+```
+
+Разрешённый набор — `rsyslog`, `libestr0`, `libfastjson4`, `liblognorm5`;
+точные версии и проверка плана находятся в
+`roles/ngfw_audit_forwarder/files/package_preflight.py`. Сначала выполняются
+read-only проверки версий, локального источника и симуляция транзакции. Любое
+обновление/понижение уже установленного пакета, удаление или дополнительная
+зависимость требуют отдельного решения. Нет `apt update`, внешнего репозитория,
+рекомендованных пакетов или автоматической установки зависимостей Ansible.
+`python3-apt` должен уже присутствовать. Режим `check`, `--check` и `stop`
+пакеты не устанавливают; по умолчанию opt-in выключен.
+
+Активный общий `rsyslog.service` — причина остановки, а не разрешение забрать
+его управление. Неактивная общая служба маскируется **до установки**, запуск
+из package scripts дополнительно запрещает временный `policy-rc.d=101`.
+Ansible восстанавливает исходный `policy-rc.d` после транзакции. Работает только
+отдельная `ngfw-audit-forwarder.service`. Маска общего rsyslog и установленные
+пакеты сохраняются при `stop`/ошибке: откат отключает экспорт, не удаляет
+пакеты и не запускает системный logger. Это изменение лабораторного appliance,
+не утверждение о поддержке такого изменения производителем.
+
+Если `/opt/ubuntu_ansible_palybooks` ещё не обновлён и оператору запрещено sudo
+на хосте, допустим отдельный обычный checkout **точного merged commit** в
+пользовательском каталоге. Запускать из его корня существующим интерпретатором
+`/opt/ubuntu_ansible_palybooks/.venv/bin/ansible-playbook`, с теми же inventory
+и playbook. Это меняет только гостя; не обновляет root-owned checkout и не
+запускает host apply. Проверки Docker на контроллере всегда `become: false`.
 
 Перед изменениями apply проверяет здоровье коллектора с контроллера и TCP
 доступность из гостя. Конфиг валидируется **установленным** rsyslogd; сохраняются
@@ -228,7 +264,7 @@ AuditD; она не меняется. Приёмник хранит такие �
 
 ### Собственные журналы NGFW
 
-Путь проверен в UI текущего стенда 21.09.2026, без сохранения настроек:
+Путь настройки в UI текущего стенда:
 
 1. **Параметры → Syslog-серверы → Добавить**: имя `ngfw-lab-collector`, IP
    `10.77.0.1`, порт `5515`. В списке протоколов этой версии доступен **UDP**.
@@ -240,8 +276,11 @@ AuditD; она не меняется. Приёмник хранит такие �
 4. Выполнить штатное административное действие/вход в MNGT и сопоставить
    native event из его журнала с записью в `ngfw/events.jsonl`.
 
-Это инструкция, **не утверждение, что export уже включён**. На момент осмотра
-обе таблицы были пусты. Не создавать повторный сервер/правило при следующем
+21.09.2026 экспорт включён, конфигурация доставлена на устройства и сборщики.
+В 08:23:54 UTC получено native audit-событие `CommitSnapshot` от `10.77.0.10`
+в потоке `ngfw`. Это подтверждает одну реальную доставку журнала аудита;
+категория аутентификации настроена, но отдельная доставка её события пока
+не подтверждена. Не создавать повторный сервер/правило при следующем
 применении: использовать существующие объекты с указанными именами. Для отката
 выключить только это правило пересылки; не выключать сам сбор журналов PT.
 
@@ -299,6 +338,8 @@ CI использует loopback и синтетические события; �
   — риск пропуска первых записей, поэтому отправитель оставляет его выключенным.
 - [Ansible SSH connection](https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/ssh_connection.html)
   — интерактивный механизм SSH_ASKPASS, без паролей в файлах.
+- [Ansible apt](https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/apt_module.html)
+  — `policy_rc_d`, запрет автоустановки module dependencies и удаления пакетов.
 - [PT NGFW: таблица потоков, версия 1.8](https://help.ptsecurity.com/ru-RU/projects/ngfw/1.8/help/9490983819)
   — UDP syslog-export от MNGT; не подтверждение UI/API версии 1.11.1.
 - [syslog-ng 3.38 control](https://manpages.debian.org/bookworm/syslog-ng-core/syslog-ng-ctl.1.en.html)

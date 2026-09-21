@@ -17,7 +17,7 @@
     enabled: false
   when: ngfw_audit_forwarder_mode == 'stop'
 
-- name: Check prerequisites without installing appliance packages
+- name: Check appliance prerequisites before any changes
   when: ngfw_audit_forwarder_mode != 'stop'
   block:
     - name: Check existing rsyslog binary
@@ -31,15 +31,17 @@
         get_checksum: false
       register: ngfw_forwarder_audit_log
 
-    - name: Require installed forwarder and root-readable local audit file
+    - name: Require root-readable local audit file and explicit missing-package approval
       ansible.builtin.assert:
         that:
-          - ngfw_forwarder_binary.stat.exists
-          - ngfw_forwarder_binary.stat.executable | default(false)
+          - >-
+            (ngfw_forwarder_binary.stat.executable | default(false)) or
+            (ngfw_audit_forwarder_mode == 'apply' and
+             ngfw_audit_forwarder_install_packages | bool and not ansible_check_mode)
           - ngfw_forwarder_audit_log.stat.isreg | default(false)
           - ngfw_forwarder_audit_log.stat.uid | default(-1) == 0
           - ngfw_forwarder_audit_log.stat.rusr | default(false)
-        fail_msg: Missing prerequisite; no packages or audit settings were changed. Review the guest before proceeding.
+        fail_msg: Missing prerequisite; no packages or audit settings were changed. Bundled package installation requires separate explicit approval.
 
     - name: Require active AuditD and PT dataplane
       ansible.builtin.command:
@@ -58,7 +60,7 @@
     - name: Report read-only prerequisite result and counters
       ansible.builtin.debug:
         msg:
-          - 'Prerequisites present. This is not proof of forwarding or module compatibility.'
+          - 'Guest health checked. This is not proof of forwarding or module compatibility.'
           - "{{ ngfw_forwarder_audit_status.stdout_lines }}"
 
 - name: Apply only after the isolated collector is healthy
@@ -79,6 +81,10 @@
         port: 5514
         connect_timeout: 3
         timeout: 10
+
+    - name: Bootstrap only explicitly approved bundled packages
+      ansible.builtin.include_tasks: packages.yml
+      when: ngfw_audit_forwarder_install_packages | bool
 
     - name: Create private configuration and offset directories
       ansible.builtin.file:

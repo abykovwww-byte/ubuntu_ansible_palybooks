@@ -48,6 +48,8 @@ jobs:
           if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
       - name: Settings, isolation and retention contracts
         run: python -m unittest discover -s roles/ngfw_logs/tests -p test_config.py -v
+      - name: Offline package approval boundaries
+        run: python -m unittest discover -s roles/ngfw_audit_forwarder/tests -p test_packages.py -v
       - name: Render and validate Compose
         run: |
           python roles/ngfw_logs/tests/render_ci.py /tmp/ngfw-logs-ci
