@@ -34,6 +34,33 @@ class Monitor(unittest.TestCase):
         self.assertIsNone(row['guest_cpu_pct'])
         self.assertIsNone(row['backlog'])
 
+    def test_cpu_warning_policy_and_history_project_without_changing_status(self):
+        self.assertEqual(self.store.run('SYNTHETIC')['cpu_action'], 'stop')
+        self.assertEqual(monitor.project_sample({})['warnings'], [])
+        warnings = ['host sustained single-core CPU: cpu15', 'sustained appliance CPU']
+        self.summary.update(measurement_config={'cpu_action': 'warn'}, warnings=warnings)
+        (self.run / 'summary.json').write_text(json.dumps(self.summary), encoding='utf-8')
+        (self.run / 'metrics.ndjson').write_text(
+            json.dumps({'time': datetime.now(timezone.utc).isoformat(), 'warnings': warnings}) + '\n' +
+            json.dumps({'time': datetime.now(timezone.utc).isoformat(), 'warnings': []}) + '\n', encoding='utf-8')
+        result = self.store.run('SYNTHETIC')
+        self.assertEqual(result['cpu_action'], 'warn')
+        self.assertEqual(result['status'], 'running')
+        self.assertEqual(result['reason'], '')
+        self.assertEqual(result['warnings'], warnings)
+        self.assertEqual(result['samples'][0]['warnings'], warnings)
+        self.assertEqual(result['samples'][1]['warnings'], [])
+        self.assertNotIn('SECRET', json.dumps(result))
+
+    def test_cpu_warning_projection_is_bounded(self):
+        warnings = ['x' * 200] * 70
+        self.summary.update(warnings=warnings)
+        (self.run / 'summary.json').write_text(json.dumps(self.summary), encoding='utf-8')
+        for projected in (self.store.run('SYNTHETIC')['warnings'],
+                          monitor.project_sample({'warnings': warnings})['warnings']):
+            self.assertEqual(len(projected), 64)
+            self.assertTrue(all(len(value) == 160 for value in projected))
+
     def test_live_stale_and_partial_line(self):
         (self.run / 'metrics.ndjson').write_text(json.dumps({'time': datetime.now(timezone.utc).isoformat()}) + '\n{', encoding='utf-8')
         result = self.store.run('SYNTHETIC')

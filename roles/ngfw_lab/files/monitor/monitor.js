@@ -30,6 +30,9 @@ function render(data){
  const alarms=[];if(data.reason)alarms.push(data.reason);if(data.stale&&data.status==='running')alarms.push('Свежих измерений нет. Это не подтверждение безопасного состояния.');
  if(last.lost>0)alarms.push(`Потери аудита: ${last.lost}`);
  $('alarm').hidden=!alarms.length;$('alarm').textContent=alarms.join(' · ');
+ const cpuWarnings=last.warnings||[];
+ $('cpu-warning').hidden=data.cpu_action!=='warn';
+ $('cpu-warning').textContent='CPU: предупреждение без автоостановки. '+(cpuWarnings.length?cpuWarnings.join(' · '):'В последнем отсчёте устойчивое превышение не зарегистрировано.')+(data.warnings?.length?' За прогон отмечено: '+data.warnings.join(' · '):'');
  $('throughput').textContent=fmt(last.endpoint_rx_bps===null?null:last.endpoint_rx_bps/1e6,' Мбит/с');
  $('cpu').textContent=fmt(last.guest_cpu_pct,' %');
  const cores=Object.entries(last.cores||{}).filter(([,v])=>v!==null).sort((a,b)=>Number(a[0].slice(3))-Number(b[0].slice(3)));
