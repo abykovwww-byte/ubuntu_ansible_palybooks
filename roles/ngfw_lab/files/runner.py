@@ -125,8 +125,9 @@ def cpu_percent(before, after):
 
 
 class Guard:
-    def __init__(self, limits, audit_required):
+    def __init__(self, limits, audit_required, cpu_action='stop'):
         self.limits, self.audit_required = limits, audit_required
+        self.cpu_action = measurement.validate_cpu_action(cpu_action)
         self.previous = None
         self.since = {}
 
@@ -175,7 +176,7 @@ class Guard:
                 else:
                     audit["cpu_pct"] = cpu_percent(previous, audit)
                     if self.held("cpu", audit["cpu_pct"] >= limits["cpu_pct"], now, limits["cpu_seconds"]):
-                        reasons.append("sustained appliance CPU")
+                        measurement.cpu_observation(sample, reasons, self.cpu_action, "sustained appliance CPU")
                     seconds = now - self.previous["monotonic"]
                     delta = audit["log_bytes"] - previous["log_bytes"]
                     if seconds > 0 and audit["log_inode"] == previous["log_inode"] and delta >= 0:
@@ -414,6 +415,9 @@ def write_report(directory, report):
             detail += f"; loss {value['loss_pct']:.3f}%"
         lines.append(f"| {row['scenario']} | {row['repetition']} | {row['phase']} | {detail} |")
     lines += ["", "## Gaps", ""] + ["- " + gap for gap in report["gaps"]]
+    lines += ["", "## CPU observations (not stop reasons)", "",
+              "CPU action: " + (report.get('measurement_config') or {}).get('cpu_action', 'stop')]
+    lines += ["- " + warning for warning in report.get('warnings', [])]
     if report.get("reason"):
         lines += ["", "Stop reason: " + report["reason"]]
     lines += ["", "Raw measurements: metrics.ndjson; each workload: *.json / *.stderr.",
@@ -435,6 +439,7 @@ class Runner:
         if self.cancelled:
             raise Abort("operator interrupted run")
         sample = self.backend.sample()
+        sample['warnings'] = []
         reasons = self.guard.check(sample)
         if self.extra_guard:
             reasons += self.extra_guard.check(sample, initial=self.initial_sample)
@@ -448,7 +453,11 @@ class Runner:
         sample.update(self.context)
         with (self.directory / "metrics.ndjson").open("a", encoding="utf-8") as output:
             output.write(json.dumps(sample) + "\n")
-        self.report['current'] = self.context | {'sample_time': sample['time'], 'stop_reasons': reasons}
+        for warning in sample['warnings']:
+            if warning not in self.report.setdefault('warnings', []):
+                self.report['warnings'].append(warning)
+        self.report['current'] = self.context | {'sample_time': sample['time'], 'stop_reasons': reasons,
+                                               'warnings': sample['warnings']}
         save(self.directory / 'summary.json', self.report)
         for key in sample["unavailable"]:
             gap = key + " metrics unavailable in one or more samples"
@@ -551,6 +560,9 @@ def main():
         parser.error('methodology context requires extended measurements and cannot use traffic-only')
     if context and context['profile_id'] != args.audit_profile:
         parser.error('context profile_id differs from --audit-profile')
+    if (args.action == 'run' and (measure_config or {}).get('cpu_action') == 'warn'
+            and (not args.measurement_argv_file or args.traffic_only)):
+        parser.error('cpu_action=warn requires extended measurements and cannot use traffic-only')
     if args.measurement_argv_file and args.probe_argv_file:
         parser.error('choose JSON measurement probe OR legacy shell probe, not both')
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", args.audit_profile):
@@ -559,6 +571,7 @@ def main():
         print(json.dumps({"duration_seconds": len(config["scenarios"]) * config["repetitions"] *
                           (config["warmup"] + config["duration"] + config["idle"]),
                           "repetitions": config["repetitions"], "audit_profile": args.audit_profile,
+                          "cpu_action": (measure_config or {}).get('cpu_action', 'stop'),
                           "measure_commands": [command(config, s, config["duration"]) for s in config["scenarios"]]}, indent=2))
         return 0
     if os.name != "posix":
@@ -631,7 +644,9 @@ def main():
             elif baseline_report.get("mode") != report["mode"]:
                 report["gaps"].append("Control and current run use different observation modes; SSH/probe overhead is a comparison confounder.")
             save(directory / "isolation.json", json.loads((root / "isolation.json").read_text()))
-            runner = Runner(config, backend, directory, report, Guard(config["limits"], not args.traffic_only), baseline,
+            runner = Runner(config, backend, directory, report,
+                            Guard(config["limits"], not args.traffic_only,
+                                  (measure_config or {}).get('cpu_action', 'stop')), baseline,
                             measurement.Guard(measure_config) if measure_config else None)
             for sig_num in (signal.SIGTERM, signal.SIGINT):
                 signal.signal(sig_num, lambda *_a: setattr(runner, "cancelled", True))

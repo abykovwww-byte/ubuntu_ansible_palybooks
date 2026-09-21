@@ -1,5 +1,6 @@
 import copy
 import importlib.util
+import io
 import json
 from pathlib import Path
 import socket
@@ -7,8 +8,9 @@ import socketserver
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +50,56 @@ def sample(now=0):
 
 
 class Guards(unittest.TestCase):
+    def test_cpu_action_defaults_to_stop_and_rejects_unknown_values(self):
+        self.assertEqual(r.Guard(LIMITS, True).cpu_action, 'stop')
+        for action in ('stop', 'warn'):
+            self.assertEqual(r.Guard(LIMITS, True, action).cpu_action, action)
+        for action in (None, True, '', 'ignore', 'WARN', [], {}):
+            with self.subTest(action=action), self.assertRaisesRegex(ValueError, 'cpu_action'):
+                r.Guard(LIMITS, True, action)
+
+    def test_warn_total_cpu_records_observation_and_resets_hold_on_recovery(self):
+        guard = r.Guard(LIMITS, True, cpu_action='warn')
+        for now in (0, 5, 65, 70, 75, 134, 135):
+            row = sample(now)
+            row['audit']['cpu_idle'] = 90 if now < 70 else 590
+            self.assertEqual(guard.check(row), [])
+            self.assertEqual(row.get('warnings', []),
+                             ['sustained appliance CPU'] if now in (65, 135) else [], now)
+            if now:
+                self.assertEqual(row['audit']['cpu_pct'], 0 if now == 70 else 100)
+
+    def test_warn_preserves_access_lost_disk_and_missing_audit_stops(self):
+        mutations = [(key + ' failed', lambda row, key=key: row.update({key: False}))
+                     for key in ('dataplane_ok', 'management_ok', 'mngt_ok', 'vms_ok')]
+        mutations += [
+            ('AuditD lost is nonzero', lambda row: row['audit'].update(audit_lost=1)),
+            ('appliance filesystem full threshold', lambda row: row['audit'].update(audit_disk_used_pct=80)),
+            ('host report filesystem full threshold', lambda row: row['host'].update(disk_used_pct=80)),
+            ('host metrics unavailable', lambda row: row.pop('host')),
+            ('AuditD probe incomplete or unavailable', lambda row: row.pop('audit')),
+        ]
+        for expected, mutate in mutations:
+            with self.subTest(expected=expected):
+                row = sample()
+                mutate(row)
+                self.assertIn(expected, r.Guard(LIMITS, True, cpu_action='warn').check(row))
+                self.assertFalse(row.get('warnings'))
+
+    def test_warn_preserves_sustained_backlog_memory_and_boot_stops(self):
+        guard = r.Guard(LIMITS, True, cpu_action='warn')
+        for now in (0, 5, 65):
+            row = sample(now)
+            row['audit'].update(cpu_idle=90, audit_backlog=7000, memory_used_pct=90)
+            row['host']['memory_used_pct'] = 90
+            reasons = guard.check(row)
+        self.assertEqual(set(reasons), {'sustained AuditD backlog', 'sustained host memory pressure',
+                                        'sustained appliance memory pressure'})
+        self.assertEqual(row['warnings'], ['sustained appliance CPU'])
+        row = sample(70)
+        row['audit']['boot_id'] = 'new-boot'
+        self.assertIn('appliance rebooted', guard.check(row))
+
     def test_extended_guest_preserves_selected_baseline_in_source(self):
         selected = {'explicit': 'baseline is validated by measurement.source'}
         backend = r.Backend(config(), measurement_argv=['fixed-probe'],
@@ -115,6 +167,91 @@ class Guards(unittest.TestCase):
 
 
 class Planning(unittest.TestCase):
+    def test_warn_cli_requires_extended_transport_and_disallows_traffic_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg_path, measurement_path = root / 'runner.json', root / 'measurement.json'
+            cfg_path.write_text(json.dumps(config()), encoding='utf-8')
+            measurement_path.write_text('{}', encoding='utf-8')
+            for extra in ([], ['--traffic-only'],
+                          ['--traffic-only', '--measurement-argv-file', str(root / 'private-argv.json')]):
+                argv = ['runner.py', 'run', '--config', str(cfg_path),
+                        '--measurement-config', str(measurement_path)] + extra
+                with self.subTest(extra=extra), patch.object(sys, 'argv', argv), \
+                        patch.object(r.measurement, 'validate', return_value={'cpu_action': 'warn'}), \
+                        patch.object(r, 'Backend') as backend, patch.object(sys, 'stderr', new_callable=io.StringIO) as error:
+                    with self.assertRaises(SystemExit) as raised:
+                        r.main()
+                    self.assertEqual(raised.exception.code, 2)
+                    self.assertIn('cpu_action=warn requires extended measurements and cannot use traffic-only', error.getvalue())
+                    backend.assert_not_called()
+
+    def test_main_wires_same_cpu_policy_to_both_guards_and_pinned_inventory(self):
+        # Exercise the real CLI orchestration without Linux operations, subprocesses or traffic.
+        for cpu_action in (None, 'stop', 'warn'):
+            with self.subTest(cpu_action=cpu_action), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                cfg = config() | {'reports_dir': str(root)}
+                cfg_path, measurement_path, argv_path = root / 'runner.json', root / 'measurement.json', root / 'argv.json'
+                extended = dict(schema_version=1, process_names=['auditd'], host_temperature_keys=['cpu/package'],
+                                guest_disk_devices=['vda1'], host_disk_devices=[], temperature_start_c=60,
+                                temperature_stop_c=80, single_core_pct=90, single_core_seconds=10,
+                                disk_await_ms=50, disk_await_seconds=10, service_probe_ms=1000,
+                                service_probe_seconds=10, max_sample_seconds=15)
+                if cpu_action is not None:
+                    extended['cpu_action'] = cpu_action
+                cfg_path.write_text(json.dumps(cfg), encoding='utf-8')
+                measurement_path.write_text(json.dumps(extended), encoding='utf-8')
+                argv_path.write_text(json.dumps(['fixed-private-probe', 'python3', '-']), encoding='utf-8')
+                (root / 'isolation.json').write_text('{}', encoding='utf-8')
+                inventory = {'boot_id': 'boot', 'audit': dict(enabled=1, failure=0, pid=100,
+                             rate_limit=0, backlog_limit=8192, backlog_wait_time=1)}
+                backend = Mock()
+                backend.topology.return_value = {}
+                backend.extended_guest.return_value = inventory
+                backend.endpoint.return_value = 'iperf3 synthetic'
+                argv = ['runner.py', 'run', '--config', str(cfg_path), '--measurement-config',
+                        str(measurement_path), '--measurement-argv-file', str(argv_path)]
+                fake_fcntl = SimpleNamespace(flock=Mock(), LOCK_EX=1, LOCK_NB=2)
+                with patch.object(sys, 'argv', argv), patch.dict(sys.modules, {'fcntl': fake_fcntl}), \
+                        patch.object(r, 'os', SimpleNamespace(name='posix', umask=Mock())), \
+                        patch.object(r, 'Backend', return_value=backend), patch.object(r, 'Runner') as runner, \
+                        patch.object(r, 'validate_isolation'), patch.object(r.measurement, 'inventory_risks', return_value=[]), \
+                        patch.object(r.signal, 'signal'), patch.object(sys, 'stdout', new_callable=io.StringIO):
+                    self.assertEqual(r.main(), 0)
+                expected = cpu_action or 'stop'
+                self.assertEqual(runner.call_args.args[4].cpu_action, expected)
+                self.assertEqual(runner.call_args.args[6].config.get('cpu_action', 'stop'), expected)
+                self.assertEqual(runner.return_value.extra_guard.config.get('cpu_action', 'stop'), expected)
+                self.assertEqual(runner.return_value.extra_guard.previous['guest'], inventory)
+                runner.return_value.run.assert_called_once_with()
+                saved = json.loads(next(root.glob('*/summary.json')).read_text(encoding='utf-8'))
+                self.assertEqual(saved['measurement_config'].get('cpu_action', 'stop'), expected)
+                backend.pool.shutdown.assert_called_once_with(wait=True)
+
+    def test_monitor_clears_stale_warnings_and_persists_unique_history_after_recovery(self):
+        rows = [sample(now) for now in (0, 5, 65, 70, 75)]
+        for row in rows:
+            row['warnings'] = ['stale backend warning']
+            row['audit']['cpu_idle'] = 90 if row['monotonic'] < 75 else 590
+        backend = Mock()
+        backend.sample.side_effect = rows
+        report = {'gaps': []}
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = r.Runner(config(), backend, Path(tmp), report,
+                              r.Guard(LIMITS, True, cpu_action='warn'), {})
+            runner.context = {'phase': 'measure', 'scenario': 'synthetic'}
+            for _ in rows:
+                runner.monitor()
+            recorded = [json.loads(line) for line in (Path(tmp) / 'metrics.ndjson').read_text(encoding='utf-8').splitlines()]
+            saved = json.loads((Path(tmp) / 'summary.json').read_text(encoding='utf-8'))
+        self.assertEqual([row['warnings'] for row in recorded],
+                         [[], [], ['sustained appliance CPU'], ['sustained appliance CPU'], []])
+        self.assertEqual(saved['warnings'], ['sustained appliance CPU'])
+        self.assertEqual(saved['current']['warnings'], [])
+        self.assertEqual(saved['current']['stop_reasons'], [])
+        self.assertNotIn('stale backend warning', json.dumps(saved))
+
     def test_ngfw_cpu_topology_is_one_socket_for_cfggen(self):
         domain = (ROOT / "templates/ngfw-domain.xml.j2").read_text()
         self.assertIn(

@@ -14,6 +14,20 @@ def number(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def validate_cpu_action(action):
+    if action not in ('stop', 'warn'):
+        raise ValueError('cpu_action must be stop or warn')
+    return action
+
+
+def cpu_observation(sample, reasons, action, message):
+    """Route only a CPU threshold observation; never downgrade another guard."""
+    if action == 'warn':
+        sample.setdefault('warnings', []).append(message)
+    else:
+        reasons.append(message)
+
+
 def validate_busy_poll_baseline(value):
     if (not isinstance(value, dict)
             or set(value) != {'boot_id', 'observed_seconds', 'evidence_sha256', 'cores'}):
@@ -59,6 +73,7 @@ def validate_busy_poll_baseline(value):
 def validate(config):
     if config.get('schema_version') != 1:
         raise ValueError('measurement schema_version must be 1')
+    validate_cpu_action(config.get('cpu_action', 'stop'))
     for key in ('process_names', 'host_temperature_keys', 'guest_disk_devices', 'host_disk_devices'):
         values = config.get(key)
         if not isinstance(values, list) or len(values) > 64 or not all(
@@ -85,7 +100,7 @@ def validate(config):
     allowed = {'schema_version', 'process_names', 'host_temperature_keys', 'guest_disk_devices',
                'host_disk_devices', 'temperature_start_c', 'temperature_stop_c', 'single_core_pct',
                'single_core_seconds', 'disk_await_ms', 'disk_await_seconds', 'service_probe_ms',
-               'service_probe_seconds', 'max_sample_seconds', 'guest_busy_poll_baseline'}
+               'service_probe_seconds', 'max_sample_seconds', 'guest_busy_poll_baseline', 'cpu_action'}
     if set(config) - allowed:
         raise ValueError('unknown measurement setting')
     if 'guest_busy_poll_baseline' in config:
@@ -307,11 +322,12 @@ class Guard:
                              now, cfg['disk_await_seconds']):
                     reasons.append(side + ' sustained disk latency')
             for core, row in derived['cpu'].items():
-                if core in busy_poll_cores:
-                    continue  # Only verified guest polling cores; host and other guards remain unchanged.
+                if core in busy_poll_cores and cfg.get('cpu_action', 'stop') == 'stop':
+                    continue  # Preserve the existing verified-polling exemption in stop mode only.
                 if core != 'cpu' and self.held(side + core, row['busy_pct'] >= cfg['single_core_pct'],
                                                now, cfg['single_core_seconds']):
-                    reasons.append(side + ' sustained single-core CPU: ' + core)
+                    cpu_observation(sample, reasons, cfg.get('cpu_action', 'stop'),
+                                    side + ' sustained single-core CPU: ' + core)
             self.previous[side] = current
         temps = (measurements.get('host') or {}).get('temperature_c') or {}
         for name in cfg['host_temperature_keys']:

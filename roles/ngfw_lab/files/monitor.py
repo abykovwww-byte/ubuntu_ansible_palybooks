@@ -74,6 +74,7 @@ def project_sample(row):
              for name, v in gd.get('disks', {}).items()}
     backlog, limit = audit.get('backlog', legacy.get('audit_backlog')), audit.get('backlog_limit', legacy.get('audit_backlog_limit'))
     return {'time': row.get('time'), 'phase': row.get('phase'), 'scenario': row.get('scenario'),
+            'warnings': [str(w)[:160] for w in row.get('warnings', [])][:64],
             'guest_cpu_pct': finite(gd.get('cpu', {}).get('cpu', {}).get('busy_pct', legacy.get('cpu_pct'))),
             'host_cpu_pct': finite(hd.get('cpu', {}).get('cpu', {}).get('busy_pct')),
             'guest_cpu_breakdown': {k: finite(gd.get('cpu', {}).get('cpu', {}).get(k + '_pct'))
@@ -156,6 +157,8 @@ class Store:
                                                         for k in ('p50', 'p95', 'p99')}})
         cfg = summary.get('config') or {}
         return {'id': name, 'status': summary.get('status'), 'profile': summary.get('audit_profile'),
+                'cpu_action': (summary.get('measurement_config') or {}).get('cpu_action', 'stop'),
+                'warnings': [str(w)[:160] for w in summary.get('warnings', [])][:64],
                 'thresholds': {k: (summary.get('measurement_config') or {}).get(k)
                                for k in ('single_core_pct', 'temperature_start_c', 'temperature_stop_c')},
                 'started_at': summary.get('started_at'), 'finished_at': summary.get('finished_at'),

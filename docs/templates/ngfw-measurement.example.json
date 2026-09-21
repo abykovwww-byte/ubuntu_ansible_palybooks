@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "cpu_action": "stop",
   "process_names": ["auditd", "rsyslogd"],
   "host_temperature_keys": [],
   "guest_disk_devices": [],

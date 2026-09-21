@@ -153,6 +153,100 @@ class Probe(unittest.TestCase):
 
 
 class Measurements(unittest.TestCase):
+    def test_cpu_action_is_explicit_enum_and_omission_preserves_stop(self):
+        self.assertNotIn('cpu_action', m.validate(config()))
+        for action in ('stop', 'warn'):
+            self.assertEqual(m.validate(config() | {'cpu_action': action})['cpu_action'], action)
+        for action in (None, True, 1, '', 'WARN', 'ignore', [], {}):
+            with self.subTest(action=action), self.assertRaisesRegex(ValueError, 'cpu_action'):
+                m.validate(config() | {'cpu_action': action})
+
+    def test_warn_records_host_and_all_guest_cores_including_verified_polling(self):
+        guard = m.Guard(config() | {'cpu_action': 'warn', 'guest_busy_poll_baseline': busy_baseline()})
+        for t in (0, 5, 15):
+            row = busy_sample(t)
+            for side, core in (('host', 'cpu2'), ('guest', 'cpu0')):
+                row['measurement'][side]['cpu'][core]['idle'] = 100
+            self.assertEqual(guard.check(row, initial=(t == 0)), [])
+            self.assertEqual(bool(row.get('warnings')), t == 15)
+        self.assertEqual(set(row['warnings']), {
+            'host sustained single-core CPU: cpu2', 'guest sustained single-core CPU: cpu0',
+            'guest sustained single-core CPU: cpu2', 'guest sustained single-core CPU: cpu3'})
+        self.assertEqual(row['measurement']['guest']['busy_poll_baseline']['verified_cores'], ['cpu2', 'cpu3'])
+        for side, core in (('host', 'cpu2'), ('guest', 'cpu0'), ('guest', 'cpu2'), ('guest', 'cpu3')):
+            self.assertEqual(row['measurement'][side]['derived']['cpu'][core]['busy_pct'], 100)
+
+    def test_warn_cpu_hold_resets_after_recovery(self):
+        guard = m.Guard(config() | {'cpu_action': 'warn'})
+        for t in (0, 5, 15, 20, 25, 34, 35):
+            row = sample(t)
+            # Monotonic cumulative idle counters: recover once, then become busy again.
+            row['measurement']['guest']['cpu']['cpu0']['idle'] = 100 if t < 20 else 500
+            self.assertFalse(guard.check(row))
+            self.assertEqual(bool(row.get('warnings')), t in (15, 35), t)
+
+    def test_warn_preserves_immediate_extended_safety_stops(self):
+        mutations = [
+            ('host temperature threshold', lambda row: row['measurement']['host']['temperature_c'].update({'cpu/package': 80})),
+            ('measurement collection deadline exceeded', lambda row: row.update(collection_seconds=16)),
+            ('service probe latency unavailable', lambda row: row.pop('service_probe_ms')),
+            ('host extended measurement unavailable', lambda row: row['measurement'].pop('host')),
+            ('guest extended measurement unavailable', lambda row: row['measurement'].pop('guest')),
+            ('selected temperature sensor unavailable', lambda row: row['measurement']['host'].update(temperature_c={})),
+            ('selected guest disks do not include audit filesystem device',
+             lambda row: row['measurement']['guest']['audit_fs'].update(device='9:9')),
+            ('guest selected disk unavailable', lambda row: row['measurement']['guest'].update(disks={})),
+            ('AuditD enabled/failure/pid controls unavailable or unsafe',
+             lambda row: row['measurement']['guest']['audit'].update(pid=0)),
+        ]
+        for expected, mutate in mutations:
+            with self.subTest(expected=expected):
+                row = sample()
+                mutate(row)
+                reasons = m.Guard(config() | {'cpu_action': 'warn'}).check(row)
+                self.assertTrue(any(expected in reason for reason in reasons), reasons)
+                self.assertFalse(row.get('warnings'))
+        row = sample()
+        row['measurement']['host']['temperature_c']['cpu/package'] = 60
+        self.assertIn('host temperature threshold: cpu/package',
+                      m.Guard(config() | {'cpu_action': 'warn'}).check(row, initial=True))
+
+    def test_warn_preserves_sustained_service_and_disk_latency_stops(self):
+        guard = m.Guard(config() | {'cpu_action': 'warn', 'host_disk_devices': ['vda1']})
+        for t in (0, 5, 15):
+            row = sample(t)
+            row['service_probe_ms'] = 1000
+            for side in ('host', 'guest'):
+                row['measurement'][side]['disks']['vda1'].update(read_ms=100 + 100*t, write_ms=200 + 100*t)
+                row['measurement'][side]['cpu']['cpu0']['idle'] = 100
+            reasons = guard.check(row)
+        self.assertEqual(set(reasons), {'host sustained disk latency', 'guest sustained disk latency',
+                                        'sustained service probe latency'})
+        self.assertEqual(len(row['warnings']), 2)
+
+    def test_warn_preserves_boot_fixed_controls_and_busy_poll_identity_stops(self):
+        mutations = [('boot_id', 'other')]
+        mutations += [('audit.' + field, snapshot()['audit'][field] + 1) for field in m.AUDIT_FIXED_CONTROLS]
+        mutations += [('thread.' + field, value) for field, value in (
+            ('pid', 200), ('tid', 202), ('process_start_ticks', 11), ('thread_start_ticks', 23),
+            ('process_comm', 'other'), ('thread_comm', 'other'), ('affinity', [1]), ('thread_state', 'T'))]
+        for field, value in mutations:
+            with self.subTest(field=field):
+                guard = m.Guard(config() | {'cpu_action': 'warn', 'guest_busy_poll_baseline': busy_baseline()})
+                self.assertFalse(guard.check(busy_sample()))
+                row = busy_sample(5)
+                guest = row['measurement']['guest']
+                if field.startswith('audit.'):
+                    guest['audit'][field.split('.')[1]] = value
+                    expected = 'fixed AuditD control changed'
+                elif field.startswith('thread.'):
+                    guest['busy_poll_threads']['values']['100:102'][field.split('.')[1]] = value
+                    expected = 'guest busy-poll task'
+                else:
+                    guest[field] = value
+                    expected = 'guest boot changed'
+                self.assertTrue(any(expected in reason for reason in guard.check(row)))
+
     def test_fixed_control_changes_ignore_only_dynamic_counters(self):
         before, after = snapshot(), snapshot(5)
         after['audit'].update(backlog=42, lost=1, backlog_wait_time_actual=10)
