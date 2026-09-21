@@ -43,7 +43,9 @@ function render(data){
  chart('cpu-chart',data.samples,[{get:r=>r.guest_cpu_pct,color:'#3679e7'},{get:r=>r.host_cpu_pct,color:'#93a0b2'}],100);
  chart('audit-chart',data.samples,[{get:r=>r.backlog_pct,color:'#9774cd'}],100);
  chart('probe-chart',data.samples,[{get:r=>r.service_probe_ms,color:'#379984'}]);
- $('cores').replaceChildren(...cores.map(([name,v])=>{const e=make('div',name,'core'+(typeof data.thresholds.single_core_pct==='number'&&v>=data.thresholds.single_core_pct?' hot':''));e.append(make('strong',fmt(v,'%')));return e;}));
+ const polling=new Set(last.verified_polling_cores||[]);
+ $('cores').replaceChildren(...cores.map(([name,v])=>{const e=make('div',name,'core'+(typeof data.thresholds.single_core_pct==='number'&&v>=data.thresholds.single_core_pct?' hot':''));e.append(make('strong',fmt(v,'%')));if(polling.has(name))e.append(make('small','Polling: подтверждённый фон'));return e;}));
+ if(polling.size)$('cores').append(make('p','Polling-ядра продолжают измеряться. Их постоянная загрузка подтверждена до теста; это не свободная производительность и не доказательство нагрузки от AuditD.'));
  if(!cores.length)$('cores').append(make('p','Данные по ядрам не собраны'));
  const disk=Object.entries(last.disks||{}).map(([name,v])=>make('p',`${name}: await ${fmt(v.await_ms,' мс')} · запись ${fmt(v.write_bytes_s===null?null:v.write_bytes_s/1024,' КиБ/с')} · очередь ${fmt(v.avg_queue_depth)}`));
  disk.push(make('p',Object.entries(last.guest_cpu_breakdown||{}).map(([k,v])=>k+': '+fmt(v,'%')).join(' · ')));

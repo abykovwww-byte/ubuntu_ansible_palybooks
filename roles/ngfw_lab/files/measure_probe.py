@@ -24,6 +24,13 @@ CONF_FIELDS = {'flush', 'freq', 'num_logs', 'max_log_file', 'max_log_file_action
                'space_left', 'space_left_action', 'admin_space_left',
                'admin_space_left_action', 'disk_full_action', 'disk_error_action',
                'q_depth', 'overflow_action', 'write_logs', 'log_format'}
+DEBIAN_AUDITD_VERSION = '1:3.0.9-1'
+DEBIAN_AUDITD_DEFAULT_SOURCE = {
+    'source': 'https://deb.debian.org/debian/pool/main/a/audit/audit_3.0.9-1.dsc',
+    'source_member': 'audit-3.0.9/src/auditd-config.c:351',
+    'orig_sha256': 'fd9570444df1573a274ca8ba23590082298a083cfc0618138957f590e845bc78',
+    'debian_sha256': 'b80d2685b79a617098a3389f41356ffd77d8d62d59bee03b189e31dd9b81580e',
+}
 
 
 def text(path, limit=262144):
@@ -83,6 +90,30 @@ def config_summary(value):
         if sep and key == 'log_file':
             result['standard_log_path'] = val == str(AUDIT_LOG)
     return result
+
+
+def auditd_package():
+    # auditd 3.0.9 has no -v option. Query the installed package, never start a
+    # second daemon or mistake auditctl's version for the daemon package version.
+    rows = command(['dpkg-query', '-W', '-f=${Package}\n${Version}\n${Status}\n',
+                    'auditd']).splitlines()
+    if (len(rows) != 3 or rows[0] != 'auditd' or rows[2] != 'install ok installed'
+            or not re.fullmatch(r'[A-Za-z0-9.+:~_-]{1,160}', rows[1])):
+        raise ValueError('installed auditd package identity unavailable')
+    return {'name': rows[0], 'version': rows[1], 'status': rows[2], 'origin': 'dpkg-query'}
+
+
+def effective_defaults(config, package):
+    """Only the exact source-reviewed Debian package; never fill configured data."""
+    if (package != {'name': 'auditd', 'version': DEBIAN_AUDITD_VERSION,
+                    'status': 'install ok installed', 'origin': 'dpkg-query'}
+            or 'overflow_action' in config):
+        return {}
+    # The Debian orig/patch archive SHA256 values were checked against its DSC;
+    # none of that revision's four patches changes this built-in default.
+    return {'overflow_action': {'value': 'syslog', 'origin': 'verified-package-default',
+                               'package_name': 'auditd', 'package_version': DEBIAN_AUDITD_VERSION,
+                               **DEBIAN_AUDITD_DEFAULT_SOURCE}}
 
 
 def filesystem(path):
@@ -173,6 +204,54 @@ def process_counters(names):
             'requested_not_found': sorted(set(names) - {r['comm'] for r in result.values()})}
 
 
+def task_stat(path, expected_id):
+    raw = text(path, 8192)
+    prefix, sep, rest = raw.partition('(')
+    comm, close, fields = rest.rpartition(')')
+    if not sep or not close or int(prefix.strip()) != expected_id:
+        raise ValueError('task stat identity unavailable')
+    fields = fields.split()
+    return {'comm': comm, 'state': fields[0], 'start_ticks': int(fields[19]),
+            'user_ticks': int(fields[11]), 'system_ticks': int(fields[12])}
+
+
+def selected_thread_counters(targets):
+    """Read at most 16 explicit PID/TID pairs; never walk every process thread."""
+    if not isinstance(targets, list) or not 1 <= len(targets) <= 16:
+        raise ValueError('invalid selected thread targets')
+    result, unavailable, seen = {}, [], set()
+    for target in targets:
+        if (not isinstance(target, dict) or set(target) != {'pid', 'tid'}
+                or any(type(target[k]) is not int or not 0 < target[k] <= 2147483647
+                       for k in ('pid', 'tid'))):
+            raise ValueError('invalid selected thread identity')
+        pid, tid = target['pid'], target['tid']
+        key = f'{pid}:{tid}'
+        if key in seen:
+            raise ValueError('duplicate selected thread')
+        seen.add(key)
+        process_path, thread_path = PROC / str(pid), PROC / str(pid) / 'task' / str(tid)
+        try:
+            before_process = task_stat(process_path / 'stat', pid)
+            before_thread = task_stat(thread_path / 'stat', tid)
+            affinity = sorted(os.sched_getaffinity(tid))
+            if not affinity or len(affinity) > 512:
+                raise ValueError('selected thread affinity unavailable or outside read bound')
+            process = task_stat(process_path / 'stat', pid)
+            thread = task_stat(thread_path / 'stat', tid)
+            if any(old[k] != new[k] for old, new in ((before_process, process), (before_thread, thread))
+                   for k in ('comm', 'start_ticks')):
+                raise ValueError('task identity changed during collection')
+            result[key] = {'pid': pid, 'tid': tid, 'process_comm': process['comm'],
+                           'process_start_ticks': process['start_ticks'], 'process_state': process['state'],
+                           'thread_comm': thread['comm'], 'thread_start_ticks': thread['start_ticks'],
+                           'thread_state': thread['state'], 'affinity': affinity,
+                           'user_ticks': thread['user_ticks'], 'system_ticks': thread['system_ticks']}
+        except (OSError, ValueError, IndexError, AttributeError):
+            unavailable.append(key)  # Missing/racing task must block the specific exception.
+    return {'values': result, 'unavailable': unavailable}
+
+
 def inventory():
     result, gaps = {}, []
     for key, fn in {
@@ -180,7 +259,7 @@ def inventory():
         'auditd_conf_sha256': lambda: hashlib.sha256(AUDIT_CONF.read_bytes()).hexdigest(),
         'auditd_conf': lambda: config_summary(text(AUDIT_CONF)),
         'forwarder_conf_sha256': lambda: hashlib.sha256(text('/etc/ngfw-audit-forwarder/rsyslog.conf').encode()).hexdigest(),
-        'auditd_version': lambda: command(['auditd', '-v']).strip()[:160],
+        'auditd_package': auditd_package,
         'auditd_active': lambda: command(['systemctl', 'is-active', 'auditd.service']).strip() == 'active',
         'dataplane_active': lambda: command(['systemctl', 'is-active', 'pt-ngfw-core.service']).strip() == 'active',
     }.items():
@@ -189,6 +268,11 @@ def inventory():
         except (OSError, ValueError, subprocess.SubprocessError):
             result[key] = None
             gaps.append(key)
+    package = result['auditd_package'] or {}
+    result['auditd_version'] = package.get('version')
+    if result['auditd_version'] is None:
+        gaps.append('auditd_version')
+    result['effective_defaults'] = effective_defaults(result['auditd_conf'] or {}, package)
     result['gaps'] = gaps
     return result
 
@@ -240,6 +324,8 @@ def snapshot(options=None):
     }
     if options.get('inventory'):
         collectors['inventory'] = inventory
+    if options.get('thread_targets') is not None and not options.get('host_only'):
+        collectors['busy_poll_threads'] = lambda: selected_thread_counters(options['thread_targets'])
     if options.get('host_only'):
         for name in ('audit', 'audit_fs', 'audit_log', 'inventory', 'forwarder'):
             collectors.pop(name, None)

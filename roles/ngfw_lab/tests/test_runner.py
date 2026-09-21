@@ -48,6 +48,20 @@ def sample(now=0):
 
 
 class Guards(unittest.TestCase):
+    def test_extended_guest_preserves_selected_baseline_in_source(self):
+        selected = {'explicit': 'baseline is validated by measurement.source'}
+        backend = r.Backend(config(), measurement_argv=['fixed-probe'],
+                            measurement_config={'process_names': ['auditd', 'pt-ngfw'],
+                                                'guest_busy_poll_baseline': selected})
+        try:
+            with patch.object(r.measurement, 'source', return_value='PINNED_SOURCE') as source, \
+                    patch.object(backend, 'call', return_value='{"schema_version":1}') as call:
+                self.assertEqual(backend.extended_guest(inventory=True), {'schema_version': 1})
+            source.assert_called_once_with(['auditd', 'pt-ngfw'], True, selected)
+            call.assert_called_once_with(['fixed-probe'], timeout=12, input_text='PINNED_SOURCE')
+        finally:
+            backend.pool.shutdown(wait=True)
+
     def test_no_audit_cannot_pass_as_observed(self):
         s = sample()
         s.pop("audit")

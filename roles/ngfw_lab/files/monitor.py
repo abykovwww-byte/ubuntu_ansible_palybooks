@@ -66,6 +66,9 @@ def project_sample(row):
     audit = guest.get('audit') or {}
     legacy = row.get('audit') or {}
     cpus = {name: finite(val.get('busy_pct')) for name, val in gd.get('cpu', {}).items() if name != 'cpu'}
+    baseline = guest.get('busy_poll_baseline') or {}
+    polling = [name for name in baseline.get('verified_cores', [])
+               if isinstance(name, str) and re.fullmatch(r'cpu[0-9]{1,3}', name) and name in cpus]
     temperature = {name: finite(value) for name, value in (host.get('temperature_c') or {}).items()}
     disks = {name: {k: finite(v.get(k)) for k in ('await_ms', 'write_bytes_s', 'iops', 'avg_queue_depth')}
              for name, v in gd.get('disks', {}).items()}
@@ -77,7 +80,8 @@ def project_sample(row):
                                     for k in ('system', 'iowait', 'irq', 'softirq', 'steal')},
             'processes': [{k: value.get(k) for k in ('comm', 'cpu_one_core_pct', 'state', 'wchan')}
                           for value in gd.get('processes', {}).values()],
-            'cores': cpus, 'temperature_c': temperature, 'disks': disks,
+            'cores': cpus, 'verified_polling_cores': polling,
+            'temperature_c': temperature, 'disks': disks,
             'backlog': finite(backlog), 'backlog_pct': 100 * backlog / limit if finite(backlog) is not None and finite(limit) and limit > 0 else None,
             'lost': finite(audit.get('lost', legacy.get('audit_lost'))),
             'audit_wait_delta': finite(gd.get('audit_wait_delta')),

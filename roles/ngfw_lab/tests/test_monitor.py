@@ -41,6 +41,17 @@ class Monitor(unittest.TestCase):
         self.assertEqual(len(result['samples']), 1)
         self.assertEqual(len(self.store.runs()), 1)
 
+    def test_verified_polling_marker_does_not_hide_core_load(self):
+        row = monitor.project_sample({'measurement': {'guest': {
+            'derived': {'cpu': {'cpu2': {'busy_pct': 100}, 'cpu0': {'busy_pct': 12}}},
+            'busy_poll_baseline': {'expected_cores': ['cpu0', 'cpu2'],
+                                   'verified_cores': ['cpu2', 'cpu99', 'NOT_A_CORE'],
+                                   'evidence_sha256': 'PRIVATE_NOT_PROJECTED'}}}})
+        self.assertEqual(row['verified_polling_cores'], ['cpu2'])
+        self.assertEqual(row['cores'], {'cpu2': 100, 'cpu0': 12})
+        self.assertNotIn('PRIVATE_NOT_PROJECTED', json.dumps(row))
+        self.assertEqual(monitor.project_sample({})['verified_polling_cores'], [])
+
     def test_traversal_rejected(self):
         for path in ['..', '../secret', 'a/b', '%2e%2e', 'C:\\secret']:
             with self.assertRaises(ValueError):
