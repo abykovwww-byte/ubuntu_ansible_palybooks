@@ -63,7 +63,106 @@ def busy_sample(t=0):
     return row
 
 
+def process_targets():
+    return [{'comm': 'auditd', 'pid': 100, 'start_ticks': 10}]
+
+
+PROCESS_BOOT_ID = '12345678-1234-1234-1234-123456789abc'
+
+
+def process_config():
+    return config() | {'guest_process_targets': process_targets(), 'guest_process_boot_id': PROCESS_BOOT_ID}
+
+
+def selected_sample(t=0):
+    row = sample(t)
+    row['measurement']['guest']['boot_id'] = PROCESS_BOOT_ID
+    row['measurement']['guest']['processes'] = {
+        'mode': 'selected', 'scan_truncated': False, 'requested_not_found': [], 'unavailable': [],
+        'values': {'100': {'comm': 'auditd', 'state': 'S', 'start_ticks': 10,
+                           'user_ticks': 100+t, 'system_ticks': 10, 'rss_pages': 7}}}
+    return row
+
+
 class Probe(unittest.TestCase):
+    def test_selected_processes_never_enumerate_proc_and_read_only_explicit_paths(self):
+        fields = ['S'] + ['0'] * 21
+        fields[11], fields[12], fields[19], fields[21] = '100', '10', '10', '7'
+        stat = '100 (auditd) ' + ' '.join(fields)
+        raw = {'stat': stat, 'comm': 'auditd\n', 'wchan': 'wait_woken\n',
+               'io': 'read_bytes: 4096\nwrite_bytes: 8192\nsyscr: 5\nsyscw: 6\n'}
+        def read(path, limit):
+            self.assertEqual(path.parent, probe.PROC / '100')
+            return raw[path.name]
+        with patch.object(Path, 'iterdir', side_effect=AssertionError('no process discovery allowed')), \
+                patch.object(probe, 'text', side_effect=read) as read_call:
+            rows = probe.process_counters(['auditd'], process_targets())
+        self.assertEqual(rows['mode'], 'selected')
+        self.assertEqual(rows['unavailable'], [])
+        self.assertEqual(rows['requested_not_found'], [])
+        self.assertFalse(rows['scan_truncated'])
+        self.assertEqual(rows['values']['100']['rss_pages'], 7)
+        self.assertEqual(rows['values']['100']['io']['read_bytes'], 4096)
+        self.assertEqual(read_call.call_count, 6)
+
+    def test_selected_process_identity_loss_and_races_never_fall_back_to_discovery(self):
+        process = dict(comm='auditd', state='S', start_ticks=10, user_ticks=100,
+                       system_ticks=10, rss_pages=7)
+        for field, value in [('comm', 'other'), ('start_ticks', 11)]:
+            for snapshots in ([process | {field: value}, process], [process, process | {field: value}]):
+                with patch.object(Path, 'iterdir', side_effect=AssertionError('no fallback')), \
+                        patch.object(probe, 'task_stat', side_effect=snapshots), \
+                        patch.object(probe, 'process_details', side_effect=lambda path, row: row), \
+                        patch.object(probe, 'text', return_value='auditd\n'):
+                    rows = probe.process_counters(['auditd'], process_targets())
+                self.assertEqual(rows['unavailable'], ['100'])
+                self.assertEqual(rows['values'], {})
+        for comms in (['other', 'auditd'], ['auditd', 'other']):
+            with patch.object(Path, 'iterdir', side_effect=AssertionError('no fallback')), \
+                    patch.object(probe, 'task_stat', return_value=process), \
+                    patch.object(probe, 'process_details', side_effect=lambda path, row: row), \
+                    patch.object(probe, 'text', side_effect=comms):
+                self.assertEqual(probe.process_counters(['auditd'], process_targets())['unavailable'], ['100'])
+        with patch.object(Path, 'iterdir', side_effect=AssertionError('no fallback')), \
+                patch.object(probe, 'task_stat', side_effect=FileNotFoundError):
+            rows = probe.process_counters(['auditd'], process_targets())
+        self.assertEqual(rows['unavailable'], ['100'])
+        self.assertEqual(rows['requested_not_found'], ['auditd'])
+
+    def test_selected_process_rendering_binds_exact_targets_in_both_inventory_modes(self):
+        for inventory in (False, True):
+            rendered = m.source(['auditd'], inventory, None, process_targets(), PROCESS_BOOT_ID)
+            compile(rendered, '<selected-process-probe>', 'exec')
+            options = next(line for line in rendered.splitlines() if line.startswith('OPTIONS = '))
+            self.assertIn("'process_targets': [{'comm': 'auditd', 'pid': 100, 'start_ticks': 10}]", options)
+            self.assertIn("'process_boot_id': '" + PROCESS_BOOT_ID + "'", options)
+        default = next(line for line in m.source().splitlines() if line.startswith('OPTIONS = '))
+        self.assertNotIn('process_targets', default)
+
+    def test_selected_snapshot_does_not_read_processes_on_boot_mismatch(self):
+        with patch.object(probe, 'text', return_value='different-boot'), \
+                patch.object(probe, 'memory', return_value={}), \
+                patch.object(probe, 'filesystem', return_value={}), \
+                patch.object(probe, 'sensors', return_value={}), \
+                patch.object(probe, 'frequencies', return_value={}), \
+                patch.object(probe.os, 'sysconf', return_value=100, create=True), \
+                patch.object(probe, 'process_counters', side_effect=AssertionError('no process reads')):
+            row = probe.snapshot({'host_only': True, 'process_names': ['auditd'],
+                                  'process_targets': process_targets(), 'process_boot_id': PROCESS_BOOT_ID})
+        self.assertIsNone(row['processes'])
+        self.assertIn('processes', row['gaps'])
+        self.assertEqual(row['probe_pid'], os.getpid())
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'actual selected process identity needs Linux CI')
+    def test_real_selected_current_process_without_discovery(self):
+        pid = os.getpid()
+        row = probe.task_stat(probe.PROC / str(pid) / 'stat', pid)
+        targets = [{'comm': row['comm'], 'pid': pid, 'start_ticks': row['start_ticks']}]
+        with patch.object(Path, 'iterdir', side_effect=AssertionError('no discovery')):
+            result = probe.process_counters([row['comm']], targets)
+        self.assertEqual(result['unavailable'], [])
+        self.assertEqual(result['values'][str(pid)]['start_ticks'], row['start_ticks'])
+
     def test_auditd_version_uses_installed_package_not_daemon_cli(self):
         with patch.object(probe, 'command', return_value='auditd\n1:3.0.9-1\ninstall ok installed\n') as call:
             package = probe.auditd_package()
@@ -146,6 +245,7 @@ class Probe(unittest.TestCase):
     @unittest.skipUnless(sys.platform.startswith('linux'), 'actual proc/sys needs Linux CI')
     def test_real_read_only_host_snapshot(self):
         row = probe.snapshot({'host_only': True})
+        self.assertEqual(row['probe_pid'], os.getpid())
         self.assertTrue(row['cpu']['cpu'])
         self.assertTrue(row['boot_id'])
         self.assertNotIn('audit', row)
@@ -153,6 +253,92 @@ class Probe(unittest.TestCase):
 
 
 class Measurements(unittest.TestCase):
+    def test_process_targets_are_strict_bounded_and_cover_selected_names(self):
+        self.assertNotIn('guest_process_targets', m.validate(config()))
+        self.assertEqual(m.validate(process_config())['guest_process_targets'],
+                         process_targets())
+        multiple = process_targets() + [{'comm': 'auditd', 'pid': 101, 'start_ticks': 11}]
+        self.assertEqual(m.validate(process_config() | {'guest_process_targets': multiple})['guest_process_targets'], multiple)
+        invalid = [None, [], {}, process_targets() * 2, process_targets() * 65,
+                   [{'comm': 'auditd', 'pid': 100}],
+                   [process_targets()[0] | {'path': '/proc'}]]
+        for field, values in {'pid': [True, 0, -1, 2147483648, '100', '../100'],
+                              'start_ticks': [True, 0, -1, 2**63, '10', 10.0],
+                              'comm': [None, True, 'other', '../auditd', 'auditd\n']}.items():
+            invalid.extend([[process_targets()[0] | {field: value}] for value in values])
+        for targets in invalid:
+            with self.subTest(targets=targets), self.assertRaisesRegex(ValueError, 'guest_process_targets'):
+                m.validate(process_config() | {'guest_process_targets': targets})
+        with self.assertRaisesRegex(ValueError, 'every selected process name'):
+            m.validate(process_config() | {'process_names': ['auditd', 'vxagent']})
+
+    def test_process_target_boot_identity_is_required_and_exact(self):
+        for invalid in (None, False, '', 'boot', '../boot', PROCESS_BOOT_ID.upper()):
+            with self.assertRaisesRegex(ValueError, 'guest_process_boot_id'):
+                m.validate(process_config() | {'guest_process_boot_id': invalid})
+        for cfg in (config() | {'guest_process_targets': process_targets()},
+                    config() | {'guest_process_boot_id': PROCESS_BOOT_ID}):
+            with self.assertRaisesRegex(ValueError, 'must be set together'):
+                m.validate(cfg)
+        for args in ((['auditd'], False, None, process_targets()),
+                     (['auditd'], False, None, None, PROCESS_BOOT_ID)):
+            with self.assertRaisesRegex(ValueError, 'must be set together'):
+                m.source(*args)
+        row = selected_sample()
+        row['measurement']['guest']['boot_id'] = '00000000-0000-0000-0000-000000000000'
+        self.assertTrue(any('baseline boot changed' in reason
+                            for reason in m.Guard(process_config()).check(row, initial=True)))
+
+    def test_process_targets_are_selected_only_from_complete_saved_discovery(self):
+        saved = {'boot_id': PROCESS_BOOT_ID, 'processes': {'scan_truncated': False, 'requested_not_found': [],
+                              'values': {'100': {'comm': 'auditd', 'start_ticks': 10}}}}
+        with patch.object(probe, 'process_counters', side_effect=AssertionError('no fresh discovery')):
+            self.assertEqual(m.select_guest_process_targets(saved, ['auditd']), process_targets())
+        for key, value in [('scan_truncated', True), ('requested_not_found', ['auditd']),
+                           ('mode', 'selected'), ('values', {})]:
+            invalid = copy.deepcopy(saved)
+            invalid['processes'][key] = value
+            with self.assertRaises(ValueError):
+                m.select_guest_process_targets(invalid, ['auditd'])
+        invalid = copy.deepcopy(saved)
+        invalid['processes']['values']['../100'] = invalid['processes']['values'].pop('100')
+        with self.assertRaises(ValueError):
+            m.select_guest_process_targets(invalid, ['auditd'])
+
+    def test_selected_process_guard_stops_identity_changes_even_in_cpu_warn_mode(self):
+        cfg = process_config() | {'cpu_action': 'warn'}
+        self.assertFalse(m.Guard(cfg).check(selected_sample(), initial=True))
+        for field, value in [('comm', 'other'), ('start_ticks', 11), ('start_ticks', 10.0),
+                             ('state', 'Z'), ('state', 'T'), ('state', [])]:
+            for first in (True, False):
+                guard = m.Guard(cfg)
+                if not first:
+                    self.assertFalse(guard.check(selected_sample()))
+                row = selected_sample(5)
+                row['measurement']['guest']['processes']['values']['100'][field] = value
+                self.assertIn('guest selected process identity/state changed: 100', guard.check(row, initial=first))
+        for field, value in [('mode', 'discovery'), ('unavailable', ['100']), ('scan_truncated', True),
+                             ('requested_not_found', ['auditd']), ('values', {}), ('values', {'101': {}})]:
+            row = selected_sample()
+            row['measurement']['guest']['processes'][field] = value
+            self.assertTrue(any('guest selected process' in x for x in m.Guard(cfg).check(row)))
+        for value in (None, [], ['invalid'], {}):
+            row = selected_sample()
+            row['measurement']['guest']['processes'] = value
+            self.assertTrue(any('guest selected process' in x for x in m.Guard(cfg).check(row)))
+
+    def test_selected_inventory_risks_require_exact_current_observations(self):
+        cfg = process_config()
+        row = selected_sample()['measurement']['guest']
+        self.assertFalse(any('selected process' in x for x in m.inventory_risks(row, cfg)))
+        row['processes']['unavailable'] = ['100']
+        self.assertTrue(any('selected process' in x for x in m.inventory_risks(row, cfg)))
+        self.assertTrue(any('selected process' in x for x in m.inventory_risks(row)))
+        del row['processes']
+        self.assertTrue(any('selected process' in x for x in m.inventory_risks(row, cfg)))
+        row['processes'] = ['invalid']
+        self.assertTrue(any('selected process' in x for x in m.inventory_risks(row, cfg)))
+
     def test_cpu_action_is_explicit_enum_and_omission_preserves_stop(self):
         self.assertNotIn('cpu_action', m.validate(config()))
         for action in ('stop', 'warn'):

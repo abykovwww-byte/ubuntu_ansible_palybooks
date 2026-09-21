@@ -1,4 +1,5 @@
 import copy
+import csv
 import importlib.util
 import io
 import json
@@ -10,7 +11,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,8 +110,32 @@ class Guards(unittest.TestCase):
             with patch.object(r.measurement, 'source', return_value='PINNED_SOURCE') as source, \
                     patch.object(backend, 'call', return_value='{"schema_version":1}') as call:
                 self.assertEqual(backend.extended_guest(inventory=True), {'schema_version': 1})
-            source.assert_called_once_with(['auditd', 'pt-ngfw'], True, selected)
+            source.assert_called_once_with(['auditd', 'pt-ngfw'], True, selected, None, None)
             call.assert_called_once_with(['fixed-probe'], timeout=12, input_text='PINNED_SOURCE')
+        finally:
+            backend.pool.shutdown(wait=True)
+
+    def test_extended_guest_forwards_exact_process_targets_but_host_keeps_discovery(self):
+        targets = [{'pid': 585, 'start_ticks': 400, 'comm': 'auditd'},
+                   {'pid': 686, 'start_ticks': 500, 'comm': 'pt-ngfw'}]
+        selected = {'explicit': 'validated by measurement.source'}
+        names = ['auditd', 'pt-ngfw']
+        boot = '12345678-1234-1234-1234-123456789abc'
+        backend = r.Backend(config(), measurement_argv=['fixed-probe'], measurement_config={
+            'process_names': names, 'guest_busy_poll_baseline': selected, 'guest_process_targets': targets,
+            'guest_process_boot_id': boot})
+        try:
+            for inventory in (False, True):
+                with self.subTest(inventory=inventory), \
+                        patch.object(r.measurement, 'source', return_value='PINNED_SOURCE') as source, \
+                        patch.object(backend, 'call', return_value='{"schema_version":1}') as call:
+                    self.assertEqual(backend.extended_guest(inventory=inventory), {'schema_version': 1})
+                source.assert_called_once_with(names, inventory, selected, targets, boot)
+                self.assertIs(source.call_args.args[3], targets)
+                call.assert_called_once_with(['fixed-probe'], timeout=12, input_text='PINNED_SOURCE')
+            with patch.object(r.measure_probe, 'snapshot', return_value={'host': 'snapshot'}) as snapshot:
+                self.assertEqual(backend.extended_host(), {'host': 'snapshot'})
+            snapshot.assert_called_once_with({'host_only': True, 'process_names': names})
         finally:
             backend.pool.shutdown(wait=True)
 
@@ -227,6 +252,61 @@ class Planning(unittest.TestCase):
                 runner.return_value.run.assert_called_once_with()
                 saved = json.loads(next(root.glob('*/summary.json')).read_text(encoding='utf-8'))
                 self.assertEqual(saved['measurement_config'].get('cpu_action', 'stop'), expected)
+                backend.pool.shutdown.assert_called_once_with(wait=True)
+
+    def test_main_final_inventory_invalidates_completed_windows_on_selected_process_change(self):
+        # No mutation is present before/during runner.run(); only its final read-back changes.
+        boot = '12345678-1234-1234-1234-123456789abc'
+        for change in ('unchanged', 'pid-reused', 'pid-disappeared'):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                cfg_path, measurement_path, argv_path = root / 'runner.json', root / 'measurement.json', root / 'argv.json'
+                extended = dict(schema_version=1, process_names=['auditd'], host_temperature_keys=['cpu/package'],
+                                guest_disk_devices=['vda1'], host_disk_devices=[], temperature_start_c=60,
+                                temperature_stop_c=80, single_core_pct=90, single_core_seconds=10,
+                                disk_await_ms=50, disk_await_seconds=10, service_probe_ms=1000,
+                                service_probe_seconds=10, max_sample_seconds=15,
+                                guest_process_targets=[{'comm': 'auditd', 'pid': 100, 'start_ticks': 10}],
+                                guest_process_boot_id=boot)
+                before = dict(boot_id=boot, audit=dict(enabled=1, failure=0, pid=100, lost=0,
+                              rate_limit=0, backlog_limit=8192, backlog_wait_time=1),
+                              processes=dict(mode='selected', scan_truncated=False, unavailable=[],
+                              requested_not_found=[], values={'100': dict(comm='auditd', start_ticks=10, state='S')}),
+                              inventory=dict(rules_sha256='a' * 64, auditd_conf_sha256='b' * 64,
+                              auditd_active=True, dataplane_active=True, auditd_conf={key: 'syslog' for key in (
+                                  'space_left_action', 'admin_space_left_action', 'max_log_file_action',
+                                  'disk_full_action', 'disk_error_action', 'overflow_action')}))
+                after = copy.deepcopy(before)
+                if change == 'pid-reused':
+                    after['processes']['values']['100']['start_ticks'] = 11
+                elif change == 'pid-disappeared':
+                    after['processes'].update(values={}, unavailable=['100'], requested_not_found=['auditd'])
+                self.assertEqual(r.measurement.inventory_risks(before, extended), [])
+                cfg_path.write_text(json.dumps(config() | {'reports_dir': str(root)}), encoding='utf-8')
+                measurement_path.write_text(json.dumps(extended), encoding='utf-8')
+                argv_path.write_text(json.dumps(['fixed-private-probe', 'python3', '-']), encoding='utf-8')
+                (root / 'isolation.json').write_text('{}', encoding='utf-8')
+                backend = Mock()
+                backend.topology.return_value = {}
+                backend.extended_guest.side_effect = [before, after]
+                backend.endpoint.return_value = 'iperf3 synthetic'
+                argv = ['runner.py', 'run', '--config', str(cfg_path), '--measurement-config',
+                        str(measurement_path), '--measurement-argv-file', str(argv_path)]
+                fake_fcntl = SimpleNamespace(flock=Mock(), LOCK_EX=1, LOCK_NB=2)
+                with patch.object(sys, 'argv', argv), patch.dict(sys.modules, {'fcntl': fake_fcntl}), \
+                        patch.object(r, 'os', SimpleNamespace(name='posix', umask=Mock())), \
+                        patch.object(r, 'Backend', return_value=backend), patch.object(r, 'Runner') as runner, \
+                        patch.object(r, 'validate_isolation'), patch.object(r.signal, 'signal'), \
+                        patch.object(sys, 'stdout', new_callable=io.StringIO):
+                    self.assertEqual(r.main(), 0 if change == 'unchanged' else 2)
+                runner.return_value.run.assert_called_once_with()
+                self.assertEqual(backend.extended_guest.call_count, 2)
+                directory = next(root.glob('*/summary.json')).parent
+                saved = json.loads((directory / 'summary.json').read_text(encoding='utf-8'))
+                self.assertEqual(saved['status'], 'completed' if change == 'unchanged' else 'aborted')
+                if change != 'unchanged':
+                    self.assertIn('guest selected process identity/state changed: 100', saved['gaps'])
+                self.assertEqual(json.loads((directory / 'inventory-after.json').read_text(encoding='utf-8')), after)
                 backend.pool.shutdown.assert_called_once_with(wait=True)
 
     def test_monitor_clears_stale_warnings_and_persists_unique_history_after_recovery(self):
@@ -430,6 +510,52 @@ class Planning(unittest.TestCase):
                     runner.workload(config()["scenarios"][0], 1, "measure", 1)
             self.assertEqual(backend.stopped[2], "stop")
 
+    def test_application_failure_retains_window_and_stops_before_next_scenario(self):
+        for kind in ('http', 'short-tcp', 'dns'):
+            for successful, errors in ((5900, 2), (0, 2), (0, 0)):
+                with self.subTest(kind=kind, successful=successful, errors=errors), tempfile.TemporaryDirectory() as tmp:
+                    directory = Path(tmp)
+                    cfg = config() | {'warmup': 0, 'repetitions': 1, 'scenarios': [
+                        dict(name='first', kind=kind, rate=50, concurrency=2),
+                        dict(name='must-not-run', kind=kind, rate=100, concurrency=2)]}
+                    raw = dict(successful_requests=successful, errors=errors, requests_per_second=49,
+                               error_diagnostics={'counts': [{'stage': 'connect', 'count': errors}]})
+                    report = dict(status='running', mode='test', audit_profile='test', started_at='test',
+                                  results=[], gaps=[])
+                    backend = Mock(compose=['docker', 'compose'])
+                    runner = r.Runner(cfg, backend, directory, report, None, {})
+                    runner.monitor = lambda: None
+
+                    def finish(_argv, stdout, stderr):
+                        json.dump(raw, stdout)
+                        return Mock(returncode=0, poll=Mock(return_value=0))
+
+                    with patch.object(r.subprocess, 'Popen', side_effect=finish) as launch:
+                        with self.assertRaisesRegex(r.Abort, 'errors or no successful requests'):
+                            runner.run()
+                    self.assertEqual(launch.call_count, 1)
+                    saved = json.loads((directory / 'summary.json').read_text(encoding='utf-8'))
+                    self.assertEqual(len(saved['results']), 1)
+                    row = saved['results'][0]
+                    self.assertEqual(row['metrics'], raw)
+                    self.assertEqual(row['status'], 'failed')
+                    self.assertEqual(row['scenario'], 'first')
+                    self.assertLessEqual(row['window_started_monotonic'], row['window_finished_monotonic'])
+                    self.assertIn('errors or no successful requests', row['stop_reason'])
+                    self.assertIn('; FAILED', (directory / 'report.md').read_text(encoding='utf-8'))
+                    with (directory / 'results.csv').open(encoding='utf-8', newline='') as source:
+                        csv_rows = list(csv.DictReader(source))
+                    self.assertEqual(len(csv_rows), 1)
+                    self.assertEqual(csv_rows[0]['status'], 'failed')
+                    self.assertEqual(csv_rows[0]['errors'], str(errors))
+                    self.assertEqual(csv_rows[0]['stop_reason'], row['stop_reason'])
+                    backend.endpoint.assert_not_called()  # The bounded client already exited.
+
+    def test_successful_application_metrics_contract_is_unchanged(self):
+        raw = dict(successful_requests=100, errors=0, requests_per_second=50)
+        for kind in ('http', 'short-tcp', 'dns'):
+            self.assertIs(r.result_metrics(dict(kind=kind), raw), raw)
+
 
 class Endpoints(unittest.TestCase):
     def test_dns_is_static_and_checks_transaction(self):
@@ -439,12 +565,129 @@ class Endpoints(unittest.TestCase):
         self.assertIsNone(e.dns_answer(query.replace(b"invalid", b"example")))
 
     def test_bounded_workload_records_errors(self):
-        with patch.object(e, "request", side_effect=OSError("unavailable")):
+        with patch.object(e, "request", side_effect=ConnectionRefusedError(111, "SECRET exception argument")):
             # Leave time for Windows worker startup; 50 ms could expire before any call.
             result = e.workload("http", "127.0.0.1", .5, 100, 1)
         self.assertGreater(result["errors"], 0)
+        diagnostic = result['error_diagnostics']
+        self.assertEqual(diagnostic['counts'], [dict(stage='unknown', exception_class='ConnectionRefusedError',
+                                                   errno=111, count=result['errors'])])
+        self.assertEqual(len(diagnostic['samples']), min(e.ERROR_SAMPLE_LIMIT, result['errors']))
+        self.assertEqual(diagnostic['samples_omitted'], max(0, result['errors'] - e.ERROR_SAMPLE_LIMIT))
+        for row in diagnostic['samples']:
+            self.assertGreaterEqual(row['offset_seconds'], 0)
+            self.assertLess(row['offset_seconds'], result['seconds'])
+            self.assertGreaterEqual(row['duration_ms'], 0)
+        self.assertNotIn('SECRET', json.dumps(result))
         with self.assertRaises(r.Abort):
             r.result_metrics(dict(kind="http"), result)
+
+    def test_error_diagnostics_have_hard_group_and_sample_bounds(self):
+        diagnostic = e.ErrorDiagnostics()
+        count = e.ERROR_GROUP_LIMIT + 20
+        for index in range(count):
+            diagnostic.record(e.RequestFailure('recv', OSError(index, 'SECRET text')), index, 20)
+        result = diagnostic.result()
+        self.assertEqual(len(result['counts']), e.ERROR_GROUP_LIMIT)
+        self.assertEqual(result['other_errors'], 20)
+        self.assertEqual(sum(row['count'] for row in result['counts']) + result['other_errors'], count)
+        self.assertEqual(len(result['samples']), e.ERROR_SAMPLE_LIMIT)
+        self.assertEqual(result['samples_omitted'], count - e.ERROR_SAMPLE_LIMIT)
+        self.assertNotIn('SECRET', json.dumps(result))
+
+    def test_real_request_stage_reaches_workload_diagnostics_across_workers(self):
+        with patch.object(e.socket, 'create_connection', side_effect=ConnectionRefusedError(111, 'SECRET')):
+            result = e.workload('short-tcp', '10.77.20.10', .5, 100, 2)
+        self.assertGreater(result['errors'], 0)
+        self.assertEqual(result['successful_requests'], 0)
+        self.assertEqual(result['error_diagnostics']['counts'], [dict(
+            stage='connect', exception_class='ConnectionRefusedError', errno=111, count=result['errors'])])
+        self.assertNotIn('SECRET', json.dumps(result))
+
+    def test_successful_workload_has_empty_error_diagnostics(self):
+        with patch.object(e, 'request', return_value=None):
+            result = e.workload('http', '10.77.20.10', .5, 100, 2)
+        self.assertGreater(result['successful_requests'], 0)
+        self.assertEqual(result['errors'], 0)
+        self.assertEqual(result['error_diagnostics'], dict(counts=[], other_errors=0, samples=[], samples_omitted=0))
+        self.assertIsNotNone(result['latency_ms_bucket_upper_bounds']['p95'])
+
+    def test_unknown_exception_class_name_and_non_numeric_errno_are_not_exported(self):
+        private_type = type('SECRET_CLASS', (OSError,), {})
+        for number in ('SECRET_ERRNO', True, 99999999):
+            error = private_type('SECRET argument')
+            error.errno = number
+            diagnostic = e.ErrorDiagnostics()
+            diagnostic.record(e.RequestFailure('recv', error), 0, 1)
+            result = diagnostic.result()
+            self.assertEqual(result['counts'][0], dict(stage='recv', exception_class='OSError', errno=None, count=1))
+            self.assertNotIn('SECRET', json.dumps(result))
+
+    def test_tcp_failure_stage_is_recorded_without_retry_or_exception_text(self):
+        for stage in ('connect', 'send', 'recv'):
+            with self.subTest(stage=stage):
+                sock = MagicMock()
+                sock.__enter__.return_value = sock
+                sock.recv.return_value = e.PAYLOAD
+                error = TimeoutError(110, 'SECRET destination or payload')
+                connect = Mock(return_value=sock)
+                if stage == 'connect':
+                    connect.side_effect = error
+                else:
+                    getattr(sock, 'sendall' if stage == 'send' else 'recv').side_effect = error
+                with patch.object(e.socket, 'create_connection', connect):
+                    with self.assertRaises(TimeoutError) as raised:
+                        e.request('short-tcp', '10.77.20.10')
+                connect.assert_called_once_with(('10.77.20.10', 9000), 2)
+                detail = e.RequestFailure(raised.exception.ngfw_stage, raised.exception)
+                self.assertEqual(detail.stage, stage)
+                self.assertEqual(detail.exception_class, 'TimeoutError')
+                self.assertEqual(detail.errno, 110)
+                self.assertNotIn('SECRET', json.dumps(vars(detail)))
+                self.assertLessEqual(sock.sendall.call_count, 1)
+                self.assertLessEqual(sock.recv.call_count, 1)
+
+    def test_tcp_partial_response_read_semantics_unchanged(self):
+        sock = MagicMock()
+        sock.__enter__.return_value = sock
+        sock.recv.side_effect = [e.PAYLOAD[:2], e.PAYLOAD[2:]]
+        with patch.object(e.socket, 'create_connection', return_value=sock):
+            e.request('short-tcp', '10.77.20.10')
+        sock.sendall.assert_called_once_with(e.PAYLOAD)
+        self.assertEqual([call.args for call in sock.recv.call_args_list], [(len(e.PAYLOAD),), (len(e.PAYLOAD) - 2,)])
+
+    def test_http_failure_uses_opaque_http_stage_and_preserves_timeout(self):
+        conn = Mock()
+        conn.getresponse.side_effect = e.http.client.BadStatusLine('SECRET raw response')
+        with patch.object(e.http.client, 'HTTPConnection', return_value=conn) as constructor:
+            with self.assertRaises(e.http.client.BadStatusLine) as raised:
+                e.request('http', '10.77.20.10', timeout=1)
+        constructor.assert_called_once_with('10.77.20.10', 8080, timeout=1)
+        conn.request.assert_called_once_with('GET', '/health')
+        conn.close.assert_called_once_with()
+        detail = e.RequestFailure(raised.exception.ngfw_stage, raised.exception)
+        self.assertEqual(detail.stage, 'http')
+        self.assertEqual(detail.exception_class, 'BadStatusLine')
+        self.assertNotIn('SECRET', json.dumps(vars(detail)))
+
+    def test_dns_failure_stage_distinguishes_transport_from_response_validation(self):
+        for stage in ('connect', 'send', 'recv', 'dns'):
+            with self.subTest(stage=stage):
+                sock = MagicMock()
+                sock.__enter__.return_value = sock
+                sock.recv.return_value = b'SECRET bad response'
+                if stage != 'dns':
+                    getattr(sock, stage).side_effect = OSError(111, 'SECRET transport')
+                with patch.object(e.socket, 'socket', return_value=sock):
+                    with self.assertRaises(ValueError if stage == 'dns' else OSError) as raised:
+                        e.request('dns', '10.77.20.10')
+                detail = e.RequestFailure(raised.exception.ngfw_stage, raised.exception)
+                self.assertEqual(detail.stage, stage)
+                sock.settimeout.assert_called_once_with(2)
+                sock.connect.assert_called_once_with(('10.77.20.10', 5353))
+                self.assertLessEqual(sock.send.call_count, 1)
+                self.assertLessEqual(sock.recv.call_count, 1)
+                self.assertNotIn('SECRET', json.dumps(vars(detail)))
 
 
 if __name__ == "__main__":

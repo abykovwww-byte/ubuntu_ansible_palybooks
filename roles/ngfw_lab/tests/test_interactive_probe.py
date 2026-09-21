@@ -32,6 +32,45 @@ def response(nonce, clock=1):
 
 
 class Protocol(unittest.TestCase):
+    def test_selected_process_allowlist_binds_exact_targets_and_rejects_discovery(self):
+        names = ['auditd', 'vxagent']
+        targets = [{'comm': 'auditd', 'pid': 100, 'start_ticks': 10},
+                   {'comm': 'vxagent', 'pid': 101, 'start_ticks': 11}]
+        selected = baseline()
+        boot = selected['boot_id']
+        allowed = p.source_allowlist(SOURCE, names, selected, targets, boot)
+        self.assertEqual(len(allowed), 2)
+        for inventory in (False, True):
+            rendered = measurement.source(names, inventory, selected, targets, boot)
+            digest = p.hashlib.sha256(rendered.encode()).hexdigest()
+            options = p.request_options({'nonce': 'a'*32, 'source_sha256': digest}, allowed)
+            self.assertEqual(options['process_targets'], targets)
+            self.assertEqual(options['process_boot_id'], boot)
+            for alternate in (measurement.source(), measurement.source(names, inventory, selected),
+                              measurement.source(names, inventory, selected,
+                                  [targets[0] | {'start_ticks': 12}, targets[1]], boot),
+                              measurement.source(names, inventory, selected,
+                                  [targets[0] | {'pid': 102}, targets[1]], boot),
+                              measurement.source(names, inventory, selected, targets,
+                                  '00000000-0000-0000-0000-000000000000')):
+                with self.assertRaises(p.ProbeError):
+                    p.request_options({'nonce': 'a'*32, 'source_sha256': p.hashlib.sha256(alternate.encode()).hexdigest()}, allowed)
+        with self.assertRaises(ValueError):
+            p.source_allowlist(SOURCE, names, process_targets=targets[:1], process_boot_id=boot)
+        with self.assertRaises(ValueError):
+            p.source_allowlist(SOURCE, names, process_targets=targets)
+
+    def test_maximum_selected_targets_fit_bounded_guest_protocol_and_bootstrap(self):
+        names = ['process-' + str(i) for i in range(64)]
+        targets = [{'comm': name, 'pid': 2147483647-i, 'start_ticks': 2**63-1} for i, name in enumerate(names)]
+        allowed = p.source_allowlist(SOURCE, names, baseline(), targets, baseline()['boot_id'])
+        for options in allowed.values():
+            packet = json.dumps({'nonce': 'a'*32, 'options': options}, separators=(',', ':')).encode()+b'\n'
+            self.assertLessEqual(len(packet), p.MAX_GUEST_REQUEST)
+        session = p.GuestSession(SOURCE, allowed, 600)
+        compile(session.program, '<selected-guest>', 'exec')
+        self.assertIn('readline(MAX_GUEST_REQUEST+1)', session.program)
+
     def test_config_is_validated_and_bounded_without_executing_fields(self):
         path = Mock()
         config = dict(schema_version=1, process_names=['auditd'], host_temperature_keys=['cpu/package'],

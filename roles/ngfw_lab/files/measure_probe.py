@@ -168,7 +168,79 @@ def frequencies():
     return result
 
 
-def process_counters(names):
+def validate_process_boot_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value):
+        raise ValueError('guest_process_boot_id requires the actual guest boot UUID')
+    return value
+
+
+def validate_process_targets(targets, names):
+    """Exact prior-inventory identities, not arbitrary /proc paths or queries."""
+    if not isinstance(targets, list) or not 1 <= len(targets) <= 64:
+        raise ValueError('guest_process_targets requires 1..64 explicit identities')
+    if (not isinstance(names, list) or not names or len(names) > 64
+            or not all(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,15}', name)
+                       for name in names)):
+        raise ValueError('guest_process_targets requires exact selected process_names')
+    seen = set()
+    for row in targets:
+        if not isinstance(row, dict) or set(row) != {'comm', 'pid', 'start_ticks'}:
+            raise ValueError('guest_process_targets requires exact comm/pid/start_ticks fields')
+        if (not isinstance(row['comm'], str) or row['comm'] not in names
+                or type(row['pid']) is not int or not 0 < row['pid'] <= 2147483647
+                or type(row['start_ticks']) is not int or not 0 < row['start_ticks'] <= 2**63 - 1):
+            raise ValueError('invalid guest_process_targets identity')
+        if row['pid'] in seen:
+            raise ValueError('duplicate guest_process_targets PID')
+        seen.add(row['pid'])
+    if {row['comm'] for row in targets} != set(names):
+        raise ValueError('guest_process_targets must cover every selected process name')
+    return targets
+
+
+def process_details(item, row):
+    """Optional I/O and wait counters; never read argv, environment or raw logs."""
+    row.update(wchan=None, io=None)
+    try:
+        row['wchan'] = text(item / 'wchan', 256).strip()
+    except (OSError, ValueError):
+        pass
+    try:
+        row['io'] = {k: int(v) for line in text(item / 'io', 8192).splitlines()
+                     for k, v in [line.split(':', 1)] if k in {'read_bytes', 'write_bytes', 'syscr', 'syscw'}}
+    except (OSError, ValueError):
+        pass
+    return row
+
+
+def selected_process_counters(names, targets):
+    """Never enumerate /proc in selected mode, including on missing/reused PIDs."""
+    validate_process_targets(targets, names)
+    result, unavailable = {}, []
+    for expected in targets:
+        pid = expected['pid']
+        item = PROC / str(pid)
+        try:
+            before = task_stat(item / 'stat', pid)
+            before_comm = text(item / 'comm', 128).strip()
+            row = process_details(item, dict(before))
+            after = task_stat(item / 'stat', pid)
+            after_comm = text(item / 'comm', 128).strip()
+            if (before_comm != expected['comm'] or after_comm != expected['comm']
+                    or any(value[field] != expected[field] for value in (before, after)
+                           for field in ('comm', 'start_ticks'))):
+                raise ValueError('selected process identity changed')
+            result[str(pid)] = row
+        except (OSError, ValueError, IndexError):
+            unavailable.append(str(pid))
+    return {'values': result, 'scan_truncated': False, 'mode': 'selected',
+            'unavailable': unavailable,
+            'requested_not_found': sorted(set(names) - {row['comm'] for row in result.values()})}
+
+
+def process_counters(names, targets=None):
+    if targets is not None:
+        return selected_process_counters(names, targets)
     result = {}
     scanned = 0
     truncated = False
@@ -187,17 +259,8 @@ def process_counters(names):
             fields = text(item / 'stat', 8192).rsplit(')', 1)[1].split()
             row = {'comm': name, 'state': fields[0], 'start_ticks': int(fields[19]),
                    'user_ticks': int(fields[11]), 'system_ticks': int(fields[12]),
-                   'rss_pages': int(fields[21]), 'wchan': None, 'io': None}
-            try:
-                row['wchan'] = text(item / 'wchan', 256).strip()
-            except (OSError, ValueError):
-                pass
-            try:
-                row['io'] = {k: int(v) for line in text(item / 'io', 8192).splitlines()
-                             for k, v in [line.split(':', 1)] if k in {'read_bytes', 'write_bytes', 'syscr', 'syscw'}}
-            except (OSError, ValueError):
-                pass
-            result[item.name] = row
+                   'rss_pages': int(fields[21])}
+            result[item.name] = process_details(item, row)
         except (OSError, ValueError, IndexError):
             continue  # Process exit races are expected, never invent zero counters.
     return {'values': result, 'scan_truncated': truncated,
@@ -212,7 +275,7 @@ def task_stat(path, expected_id):
         raise ValueError('task stat identity unavailable')
     fields = fields.split()
     return {'comm': comm, 'state': fields[0], 'start_ticks': int(fields[19]),
-            'user_ticks': int(fields[11]), 'system_ticks': int(fields[12])}
+            'user_ticks': int(fields[11]), 'system_ticks': int(fields[12]), 'rss_pages': int(fields[21])}
 
 
 def selected_thread_counters(targets):
@@ -306,7 +369,15 @@ def forwarder_stats():
 def snapshot(options=None):
     options = options or {}
     begin, cpu_begin = time.monotonic(), time.process_time()
-    result = {'schema_version': 1, 'wall_time': time.time(), 'monotonic': begin, 'gaps': []}
+    result = {'schema_version': 1, 'wall_time': time.time(), 'monotonic': begin,
+              'probe_pid': os.getpid(), 'gaps': []}
+    def processes():
+        targets = options.get('process_targets')
+        if targets is not None:
+            expected_boot = validate_process_boot_id(options.get('process_boot_id'))
+            if result.get('boot_id') != expected_boot:
+                raise ValueError('selected process boot changed; new baseline required')
+        return process_counters(options.get('process_names', ['auditd', 'rsyslogd']), targets)
     collectors = {
         'boot_id': lambda: text(PROC / 'sys/kernel/random/boot_id', 128).strip(),
         'kernel': lambda: text(PROC / 'sys/kernel/osrelease', 256).strip(),
@@ -316,7 +387,7 @@ def snapshot(options=None):
         'disks': lambda: disk_counters(text(PROC / 'diskstats')),
         'memory': memory, 'root_fs': lambda: filesystem('/'),
         'temperature_c': sensors, 'frequency': frequencies,
-        'processes': lambda: process_counters(options.get('process_names', ['auditd', 'rsyslogd'])),
+        'processes': processes,
         'audit': lambda: status(command(['auditctl', '-s'])),
         'audit_fs': lambda: filesystem(AUDIT_LOG.parent),
         'audit_log': lambda: {'inode': AUDIT_LOG.stat().st_ino, 'bytes': AUDIT_LOG.stat().st_size},

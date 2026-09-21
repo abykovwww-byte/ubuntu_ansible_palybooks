@@ -26,6 +26,13 @@ class Abort(RuntimeError):
     pass
 
 
+class ApplicationWorkloadError(Abort):
+    """A failed completed window still has useful measured application counters."""
+    def __init__(self, metrics):
+        super().__init__("application workload returned errors or no successful requests")
+        self.metrics = metrics
+
+
 def utc():
     return datetime.now(timezone.utc).isoformat()
 
@@ -214,7 +221,7 @@ def result_metrics(scenario, raw):
                           received_report_pps=received["packets"] / received["seconds"])
         return result
     if raw.get("successful_requests", 0) <= 0 or raw.get("errors", 0):
-        raise Abort("application workload returned errors or no successful requests")
+        raise ApplicationWorkloadError(raw)
     return raw
 
 
@@ -299,7 +306,9 @@ class Backend:
         config = self.measurement_config or {}
         return json.loads(self.call(self.measurement_argv, timeout=12,
                                    input_text=measurement.source(config.get('process_names'), inventory,
-                                                                 config.get('guest_busy_poll_baseline'))))
+                                                                 config.get('guest_busy_poll_baseline'),
+                                                                 config.get('guest_process_targets'),
+                                                                 config.get('guest_process_boot_id'))))
 
     def extended_host(self):
         return measure_probe.snapshot({'host_only': True,
@@ -396,7 +405,8 @@ def baseline_values(baseline, sig):
 def write_report(directory, report):
     save(directory / "summary.json", report)
     fields = ["scenario", "repetition", "phase", "kind", "received_bps", "sent_bps", "loss_pct",
-              "jitter_ms", "received_report_pps", "retransmits", "requests_per_second", "errors"]
+              "jitter_ms", "received_report_pps", "retransmits", "requests_per_second", "errors",
+              "status", "stop_reason"]
     with (directory / "results.csv").open("w", newline="", encoding="utf-8") as output:
         writer = csv.DictWriter(output, fields, extrasaction="ignore")
         writer.writeheader()
@@ -413,6 +423,10 @@ def write_report(directory, report):
                   else f"{value.get('requests_per_second', 0):.2f} successful requests/s")
         if "loss_pct" in value:
             detail += f"; loss {value['loss_pct']:.3f}%"
+        if "errors" in value:
+            detail += f"; errors {value['errors']}"
+        if row.get('status') == 'failed':
+            detail += "; FAILED"
         lines.append(f"| {row['scenario']} | {row['repetition']} | {row['phase']} | {detail} |")
     lines += ["", "## Gaps", ""] + ["- " + gap for gap in report["gaps"]]
     lines += ["", "## CPU observations (not stop reasons)", "",
@@ -518,10 +532,19 @@ class Runner:
                             process.kill()
                             process.wait()
         raw = json.loads(prefix.with_suffix(".json").read_text(encoding="utf-8"))
-        metrics = result_metrics(scenario, raw)
-        self.report["results"].append(self.context | {"kind": scenario["kind"], "metrics": metrics,
-            "window_started_monotonic": window_start, "window_finished_monotonic": time.monotonic()})
+        application_failure = None
+        try:
+            metrics = result_metrics(scenario, raw)
+        except ApplicationWorkloadError as error:
+            metrics, application_failure = error.metrics, error
+        row = self.context | {"kind": scenario["kind"], "metrics": metrics,
+            "window_started_monotonic": window_start, "window_finished_monotonic": time.monotonic()}
+        if application_failure:
+            row.update(status='failed', stop_reason=str(application_failure))
+        self.report["results"].append(row)
         write_report(self.directory, self.report)
+        if application_failure:
+            raise application_failure
         if scenario["kind"] == "udp" and metrics["loss_pct"] > self.config["limits"]["udp_loss_pct"]:
             raise Abort("UDP loss threshold exceeded")
         if phase == "measure" and scenario["kind"] == "tcp" and self.baseline:
@@ -609,7 +632,7 @@ def main():
                 directory = root / ('preflight-' + uuid.uuid4().hex[:12])
                 directory.mkdir(mode=0o700)
                 snapshot = {'host': backend.extended_host(), 'guest': backend.extended_guest(inventory=True)}
-                risks = measurement.inventory_risks(snapshot['guest'])
+                risks = measurement.inventory_risks(snapshot['guest'], measure_config)
                 save(directory / 'readiness.json', {'snapshots': snapshot, 'risks': risks,
                      'status': 'BLOCKED' if risks else 'READ_ONLY_CHECKED',
                      'boundary': 'No traffic, no isolation/readiness acceptance, no config changes'})
@@ -656,7 +679,7 @@ def main():
                 if measurement_argv:
                     before = backend.extended_guest(inventory=True)
                     save(directory / 'inventory-before.json', before)
-                    risks = measurement.inventory_risks(before)
+                    risks = measurement.inventory_risks(before, measure_config)
                     if risks:
                         raise Abort('; '.join(risks))
                     # Pin the inventory read-back before the first measured sample;
@@ -675,6 +698,7 @@ def main():
                         save(directory / 'inventory-after.json', after)
                         previous = json.loads((directory / 'inventory-before.json').read_text())
                         changes = measurement.control_changes(previous, after)
+                        changes.extend(measurement.inventory_risks(after, measure_config))
                         if previous.get('boot_id') != after.get('boot_id'):
                             changes.append('guest boot changed between inventories')
                         if changes:
