@@ -35,6 +35,40 @@ class Kernel:
 
 
 class Profiles(unittest.TestCase):
+    def test_numeric_filetype_can_be_removed_and_restored_in_net_suffix(self):
+        class CommandKernel(ctl.Kernel):
+            def __init__(self):
+                self.state = Kernel()
+                self.state.rules[-2] = ('-a always,exit -F arch=b64 -S open,openat '
+                    '-F dir=/proc -F filetype=32768 -F perm=r -F auid!=-1 -F key=pt_siem_proc')
+            def inventory(self):
+                return self.state.inventory()
+            def call(self, argv):
+                if 'filetype=32768' in argv:
+                    raise RuntimeError('libaudit rejects numeric input filetype')
+                rule = list(argv[1:])
+                action = rule[0]
+                rule[0] = {'-d': '-a', '-W': '-w'}.get(action, action)
+                rule = ' '.join(rule).replace('filetype=file', 'filetype=32768')
+                if action in ('-d', '-W'):
+                    self.state.delete(rule)
+                else:
+                    self.state.add(rule)
+        for profile in ('C-EDR-NET', 'C-EDR-PROC'):
+            kernel = CommandKernel()
+            before = kernel.inventory()
+            change = ctl.plan(before, profile, before['rules_sha256'])
+            ctl.apply(kernel, before, change, lambda: None)
+            self.assertEqual(kernel.inventory(), before)
+
+    def test_unknown_filetype_rejects_plan_before_any_deletion(self):
+        kernel = Kernel()
+        kernel.rules.append('-a always,exit -S openat -F filetype=12345 -k other')
+        before = kernel.inventory()
+        with self.assertRaisesRegex(ValueError, 'filetype'):
+            ctl.plan(before, 'C-EDR-NET', before['rules_sha256'])
+        self.assertEqual(kernel.deleted, [])
+
     def test_exact_allowed_keys_and_ordered_restore(self):
         for profile, keys in ctl.PROFILES.items():
             kernel = Kernel()
