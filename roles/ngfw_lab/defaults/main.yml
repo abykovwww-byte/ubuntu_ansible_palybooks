@@ -65,6 +65,10 @@ ngfw_lab_right_server_address: 10.77.20.10
 ngfw_lab_traffic_image: ngfw-lab-traffic:1
 ngfw_lab_traffic_cpus: 1.0
 ngfw_lab_traffic_memory: 512m
+ngfw_lab_traffic_client_cpus: "{{ ngfw_lab_traffic_cpus }}"
+ngfw_lab_traffic_server_cpus: "{{ ngfw_lab_traffic_cpus }}"
+ngfw_lab_traffic_client_memory: "{{ ngfw_lab_traffic_memory }}"
+ngfw_lab_traffic_server_memory: "{{ ngfw_lab_traffic_memory }}"
 ngfw_lab_traffic_pids: 192
 # Opt-in listeners for the 1000 ACL / 200 NAT policy profile:
 # [[10000, 10991], [20000, 20099]]. No automatic policy traffic.

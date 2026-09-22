@@ -101,7 +101,7 @@ def validate(config):
                'host_disk_devices', 'temperature_start_c', 'temperature_stop_c', 'single_core_pct',
                'single_core_seconds', 'disk_await_ms', 'disk_await_seconds', 'service_probe_ms',
                'service_probe_seconds', 'max_sample_seconds', 'guest_busy_poll_baseline', 'cpu_action',
-               'guest_process_targets', 'guest_process_boot_id'}
+               'guest_process_targets', 'guest_process_boot_id', 'qualification_mode'}
     if set(config) - allowed:
         raise ValueError('unknown measurement setting')
     if 'guest_busy_poll_baseline' in config:
@@ -377,6 +377,13 @@ class Guard:
                     reasons.append('selected guest disks do not include audit filesystem device')
             if old and old['boot_id'] != current['boot_id']:
                 reasons.append(side + ' boot changed')
+            if old:
+                for cpu, counters in (current.get('frequency') or {}).items():
+                    previous_counters = (old.get('frequency') or {}).get(cpu, {})
+                    for name in ('core_throttle_count', 'package_throttle_count'):
+                        if (number(counters.get(name)) and number(previous_counters.get(name))
+                                and counters[name] > previous_counters[name]):
+                            reasons.append(side + ' hardware throttling: ' + cpu)
             derived = derive(old, current)
             current['derived'] = derived
             busy_poll_cores = set()
@@ -404,7 +411,7 @@ class Guard:
             value = temps.get(name)
             if not number(value):
                 reasons.append('selected temperature sensor unavailable: ' + name)
-            elif value >= cfg['temperature_start_c' if initial else 'temperature_stop_c']:
+            elif value >= cfg['temperature_start_c' if initial and not cfg.get('qualification_mode') else 'temperature_stop_c']:
                 reasons.append('host temperature threshold: ' + name)
         latency = sample.get('service_probe_ms')
         if not number(latency):

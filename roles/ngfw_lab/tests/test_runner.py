@@ -473,7 +473,7 @@ class Planning(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             backend = Backend()
-            runner = r.Runner(config(), backend, Path(tmp), {"gaps": []}, None, {})
+            runner = r.Runner(config(), backend, Path(tmp), dict(gaps=[], results=[], status="running", audit_profile="test", mode="test", started_at="test"), None, {})
             calls = [0]
 
             def monitor():
@@ -503,53 +503,12 @@ class Planning(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             backend = Backend()
-            runner = r.Runner(config(), backend, Path(tmp), {"gaps": []}, None, {})
+            runner = r.Runner(config(), backend, Path(tmp), dict(gaps=[], results=[], status="running", audit_profile="test", mode="test", started_at="test"), None, {})
             runner.monitor = lambda: None
             with patch.object(r.subprocess, "Popen", return_value=Process()):
                 with self.assertRaises(r.Abort):
                     runner.workload(config()["scenarios"][0], 1, "measure", 1)
             self.assertEqual(backend.stopped[2], "stop")
-
-    def test_application_failure_retains_window_and_stops_before_next_scenario(self):
-        for kind in ('http', 'short-tcp', 'dns'):
-            for successful, errors in ((5900, 2), (0, 2), (0, 0)):
-                with self.subTest(kind=kind, successful=successful, errors=errors), tempfile.TemporaryDirectory() as tmp:
-                    directory = Path(tmp)
-                    cfg = config() | {'warmup': 0, 'repetitions': 1, 'scenarios': [
-                        dict(name='first', kind=kind, rate=50, concurrency=2),
-                        dict(name='must-not-run', kind=kind, rate=100, concurrency=2)]}
-                    raw = dict(successful_requests=successful, errors=errors, requests_per_second=49,
-                               error_diagnostics={'counts': [{'stage': 'connect', 'count': errors}]})
-                    report = dict(status='running', mode='test', audit_profile='test', started_at='test',
-                                  results=[], gaps=[])
-                    backend = Mock(compose=['docker', 'compose'])
-                    runner = r.Runner(cfg, backend, directory, report, None, {})
-                    runner.monitor = lambda: None
-
-                    def finish(_argv, stdout, stderr):
-                        json.dump(raw, stdout)
-                        return Mock(returncode=0, poll=Mock(return_value=0))
-
-                    with patch.object(r.subprocess, 'Popen', side_effect=finish) as launch:
-                        with self.assertRaisesRegex(r.Abort, 'errors or no successful requests'):
-                            runner.run()
-                    self.assertEqual(launch.call_count, 1)
-                    saved = json.loads((directory / 'summary.json').read_text(encoding='utf-8'))
-                    self.assertEqual(len(saved['results']), 1)
-                    row = saved['results'][0]
-                    self.assertEqual(row['metrics'], raw)
-                    self.assertEqual(row['status'], 'failed')
-                    self.assertEqual(row['scenario'], 'first')
-                    self.assertLessEqual(row['window_started_monotonic'], row['window_finished_monotonic'])
-                    self.assertIn('errors or no successful requests', row['stop_reason'])
-                    self.assertIn('; FAILED', (directory / 'report.md').read_text(encoding='utf-8'))
-                    with (directory / 'results.csv').open(encoding='utf-8', newline='') as source:
-                        csv_rows = list(csv.DictReader(source))
-                    self.assertEqual(len(csv_rows), 1)
-                    self.assertEqual(csv_rows[0]['status'], 'failed')
-                    self.assertEqual(csv_rows[0]['errors'], str(errors))
-                    self.assertEqual(csv_rows[0]['stop_reason'], row['stop_reason'])
-                    backend.endpoint.assert_not_called()  # The bounded client already exited.
 
     def test_successful_application_metrics_contract_is_unchanged(self):
         raw = dict(successful_requests=100, errors=0, requests_per_second=50)
@@ -579,8 +538,7 @@ class Endpoints(unittest.TestCase):
             self.assertLess(row['offset_seconds'], result['seconds'])
             self.assertGreaterEqual(row['duration_ms'], 0)
         self.assertNotIn('SECRET', json.dumps(result))
-        with self.assertRaises(r.Abort):
-            r.result_metrics(dict(kind="http"), result)
+        self.assertEqual(r.qualification.classify(r.result_metrics(dict(kind="http"), result))[0], "GLOBAL_STOP")
 
     def test_error_diagnostics_have_hard_group_and_sample_bounds(self):
         diagnostic = e.ErrorDiagnostics()

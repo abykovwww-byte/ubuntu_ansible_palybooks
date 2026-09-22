@@ -21,6 +21,8 @@ x-endpoint: &endpoint
 services:
   traffic-client:
     <<: *endpoint
+    cpus: {{ ngfw_lab_traffic_client_cpus }}
+    mem_limit: {{ ngfw_lab_traffic_client_memory }}
     entrypoint: ["sleep", "infinity"]
     command: []
     networks:
@@ -29,6 +31,8 @@ services:
 
   traffic-server:
     <<: *endpoint
+    cpus: {{ ngfw_lab_traffic_server_cpus }}
+    mem_limit: {{ ngfw_lab_traffic_server_memory }}
     entrypoint: ["python3", "/opt/traffic/endpoint.py"]
     command: ["server"]
     environment:

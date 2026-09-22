@@ -49,6 +49,7 @@ def parse(line, source, mapping):
     group = sorted(groups)[0] if len(groups) == 1 else 'mixed' if groups else 'unattributed'
     return {'event': stamp + ':' + serial, 'epoch': float(stamp), 'kind': kind,
             'group': group, 'received': received, 'bytes': len(payload.encode('utf-8')),
+            'keys': sorted({k for key in keys for k in key.split('\x01') if k and k != '(null)'}),
             'hash': hashlib.sha256(payload.encode('utf-8')).hexdigest()}
 
 
@@ -69,7 +70,8 @@ def summarize(inputs, destination, source, scope, start, end, mapping, max_bytes
     try:
         db.executescript('CREATE TABLE records (digest TEXT PRIMARY KEY, event TEXT, kind TEXT, grp TEXT, '
                          'bytes INTEGER, copies INTEGER, epoch REAL, received REAL); '
-                         'CREATE INDEX event_idx ON records(event);')
+                         'CREATE INDEX event_idx ON records(event); '
+                         'CREATE TABLE event_keys (event TEXT, key TEXT, PRIMARY KEY(event,key));')
         counts, files, total, gaps = Counter(), [], 0, []
         for path in map(Path, inputs):
             before = path.stat()
@@ -97,6 +99,8 @@ def summarize(inputs, destination, source, scope, start, end, mapping, max_bytes
                         counts['outside_window'] += 1
                         continue
                     counts['records_in_window'] += 1
+                    db.executemany('INSERT OR IGNORE INTO event_keys VALUES (?,?)',
+                                   [(row['event'], key) for key in row['keys']])
                     db.execute('INSERT INTO records VALUES (?,?,?,?,?,1,?,?) ON CONFLICT(digest) DO UPDATE SET '
                                'copies=copies+1, received=MIN(received,excluded.received)',
                                (row['hash'], row['event'], row['kind'], row['group'], row['bytes'], row['epoch'], row['received']))
@@ -119,6 +123,9 @@ def summarize(inputs, destination, source, scope, start, end, mapping, max_bytes
                                for name, n, distinct, events, size in db.execute(
                                    f'SELECT {column},SUM(copies),COUNT(*),COUNT(DISTINCT event),SUM(bytes*copies) FROM records GROUP BY {column}')}
         meta = {'schema_version': 1, 'scope': scope, 'source': source, 'start': start, 'end': end,
+                'events_by_key': {key: n for key, n in db.execute('SELECT key,COUNT(*) FROM event_keys GROUP BY key')},
+                'audit_eps': db.execute('SELECT COUNT(DISTINCT event) FROM records').fetchone()[0] / (end - start),
+                'audit_bytes_s': db.execute('SELECT COALESCE(SUM(bytes),0) FROM records').fetchone()[0] / (end - start),
                 'key_map_sha256': hashlib.sha256(json.dumps(mapping, sort_keys=True).encode()).hexdigest(),
                 'events': db.execute('SELECT COUNT(DISTINCT event) FROM records').fetchone()[0],
                 'counts': dict(counts), 'files': files, 'gaps': gaps, **stats,

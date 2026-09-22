@@ -1,5 +1,33 @@
 # Автоматические прогоны трафика PT NGFW
 
+Для текущей EDR-кампании использовать [операторский маршрут](ngfw-edr-production-qualification.md)
+и четыре отдельных `--qualification-plan`: `edr-calibration`, `edr-ablation`,
+`edr-confirmation`, `edr-endurance`. Они не запускаются обычным Ansible apply.
+Остальные примеры ниже сохраняют прежний формат runner/P1, не заменяют калибровку.
+
+Каждое прикладное окно содержит attempted/successful/errors, attempt/success rates,
+requested/achieved rate, error_rate_pct, skipped_slots, scheduler_lag_max_ms,
+generator_limited и безопасную диагностику stage/class/errno. Отставание не
+компенсируется пачкой запросов. Каждая повторная попытка имеет отдельные raw-файлы.
+JSON/CSV/Markdown сохраняют также WARN, SCENARIO_STOP, GLOBAL_STOP и INVALID окна.
+Редкие ошибки <0,1% дают один повтор; повторные или 0,1–1% останавливают данный
+kind; ≥1% или ноль успехов останавливают кампанию. Перед независимым kind — recovery
+и свежий health-check. Недостижение 95% заданного объёма запрещает вывод о пределе NGFW.
+
+Ресурсы задаются раздельно: `ngfw_lab_traffic_client_cpus`,
+`ngfw_lab_traffic_server_cpus`, `ngfw_lab_traffic_client_memory`,
+`ngfw_lab_traffic_server_memory`. По умолчанию наследуют прежние общие лимиты.
+Runner записывает CPU и память обоих endpoints и оценивает CPU относительно
+квоты (Docker 100% = одно ядро). Упор генератора/общего хоста — INVALID,
+а не предел dataplane. Менять ресурсы или переходить к внешнему генератору
+следует по данным такой калибровки, с новой фиксацией topology.
+
+Qualification привязывает T00 к `campaign_id` и точной topology; legacy сохраняет
+настраиваемый `isolation_max_age_seconds` (по умолчанию 86400). Значение null
+разрешено только с campaign binding. CPU в qualification переводится в warn;
+аварийная `temperature_stop_c`, реальный throttling и остальные защитные условия
+сохраняются. Подробности и ограничения — в операторском документе.
+
 Для расширенной методики H1–H9 использовать
 [измерители и живую панель](ngfw-measurement-toolkit.md): JSON probe, дополнительные
 стоп-условия, read-back, run context, анализ событий и парных сравнений.
