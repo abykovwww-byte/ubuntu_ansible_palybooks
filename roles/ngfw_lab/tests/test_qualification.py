@@ -28,6 +28,13 @@ def report():
 
 
 class Qualification(unittest.TestCase):
+    def test_partial_completed_campaign_cannot_be_a_control(self):
+        for status in ('INVALID', 'SCENARIO_STOP', 'WARN'):
+            baseline = {'status': 'completed', 'signature': 'same', 'results': [
+                {'phase': 'measure', 'scenario': 'tcp', 'status': status, 'metrics': {'received_bps': 100}}]}
+            with self.assertRaises(r.Abort):
+                r.baseline_values(baseline, 'same')
+
     def test_classifications(self):
         self.assertEqual(q.classify(counters(2))[0], 'WARN')
         self.assertEqual(q.classify(counters(2), repeated=True)[0], 'SCENARIO_STOP')

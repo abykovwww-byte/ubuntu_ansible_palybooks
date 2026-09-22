@@ -450,6 +450,8 @@ def baseline_values(baseline, sig):
     values = {}
     for row in baseline["results"]:
         if row["phase"] == "measure" and "received_bps" in row["metrics"]:
+            if row.get('status', 'PASS') != 'PASS' or row['metrics'].get('generator_limited') or row['metrics'].get('invalid_reasons'):
+                raise Abort('baseline contains an invalid or stopped measurement window')
             values.setdefault(row["scenario"], []).append(row["metrics"]["received_bps"])
     return {k: statistics.median(v) for k, v in values.items()}
 
@@ -654,6 +656,7 @@ class Runner:
                             raise
                         if outcome != 'WARN':
                             stopped_kinds.add(scenario['kind'])
+                            self.report['gaps'].append(scenario['kind'] + ' ladder stopped: ' + str(error))
                     self.context.update(phase='idle', phase_started_at=utc(),
                                         phase_duration_seconds=self.config['idle'], offered={})
                     self.pause(self.config["idle"])
@@ -663,6 +666,8 @@ class Runner:
                 if scenario['kind'] in stopped_kinds:
                     break
         self.monitor()
+        outcomes = {row.get('status', 'PASS') for row in self.report.get('results', [])}
+        self.report['outcome'] = next((v for v in ('GLOBAL_STOP', 'INVALID', 'SCENARIO_STOP', 'WARN') if v in outcomes), 'PASS')
 
 
 def main():
