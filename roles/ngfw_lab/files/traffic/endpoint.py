@@ -4,6 +4,7 @@ import concurrent.futures
 import http.client
 import http.server
 import json
+import math
 import os
 import signal
 import socket
@@ -211,18 +212,21 @@ def request(kind, target, timeout=2):
 
 
 def workload(kind, target, duration, rate, concurrency):
-    stop_at = time.monotonic() + duration
+    started = time.monotonic()
+    stop_at = started + duration
     diagnostics = ErrorDiagnostics()
 
     def worker(index):
         ok, errors, histogram = 0, 0, [0] * len(BUCKETS)
+        skipped, lag_max = 0, 0.0
         interval = concurrency / rate
-        next_at = time.monotonic() + index / rate
+        next_at = started + index / rate
         while next_at < stop_at:
             time.sleep(max(0, next_at - time.monotonic()))
             if time.monotonic() >= stop_at:
                 break
             start = time.monotonic()
+            lag_max = max(lag_max, start - next_at)
             try:
                 request(kind, target)
                 elapsed = (time.monotonic() - start) * 1000
@@ -236,10 +240,14 @@ def workload(kind, target, duration, rate, concurrency):
                 detail = RequestFailure(getattr(error, 'ngfw_stage', 'unknown'), error)
                 diagnostics.record(detail, start - started, (failed_at - start) * 1000)
             # No catch-up burst when the receiver or scheduler falls behind.
-            next_at = max(next_at + interval, time.monotonic())
-        return ok, errors, histogram
+            next_at += interval
+            now = time.monotonic()
+            if now > next_at:
+                missed = math.ceil((min(now, stop_at) - next_at) / interval)
+                skipped += max(0, missed)
+                next_at += max(0, missed) * interval
+        return ok, errors, histogram, skipped, lag_max
 
-    started = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         parts = list(pool.map(worker, range(concurrency)))
     seconds = time.monotonic() - started
@@ -255,7 +263,17 @@ def workload(kind, target, duration, rate, concurrency):
             if ok and cumulative >= ok * q:
                 quantiles[label] = bound
                 break
+    attempted = ok + errors
+    attempt_rate = attempted / seconds
+    limited = attempt_rate < .95 * rate
     return {"kind": kind, "seconds": seconds, "requested_rate": rate,
+            "attempted_requests": attempted, "attempt_rate": attempt_rate,
+            "success_rate": ok / seconds, "achieved_rate": attempt_rate,
+            "error_rate_pct": 100 * errors / attempted if attempted else 100.0,
+            "skipped_slots": sum(p[3] for p in parts),
+            "scheduler_lag_max_ms": 1000 * max(p[4] for p in parts),
+            "generator_limited": limited,
+            "generator_limit_reason": "achieved attempt rate below 95% requested" if limited else None,
             "successful_requests": ok, "errors": errors, "requests_per_second": ok / seconds,
             "latency_ms_bucket_upper_bounds": quantiles, "error_diagnostics": diagnostics.result()}
 

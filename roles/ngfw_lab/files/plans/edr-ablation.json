@@ -1,0 +1,5 @@
+{
+  "qualification_mode": true, "qualification_stage": "ablation", "requires_workload_selection": true,
+  "allowed_profiles": ["B-EDR-CURRENT", "C-EDR-NET", "C-EDR-PROC"],
+  "duration": 120, "warmup": 30, "idle": 60, "repetitions": 1, "isolation_max_age_seconds": null
+}

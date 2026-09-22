@@ -20,17 +20,17 @@ import uuid
 
 import measurement
 import measure_probe
+import qualification
 
 
 class Abort(RuntimeError):
     pass
 
 
-class ApplicationWorkloadError(Abort):
-    """A failed completed window still has useful measured application counters."""
-    def __init__(self, metrics):
-        super().__init__("application workload returned errors or no successful requests")
-        self.metrics = metrics
+class WindowStop(Abort):
+    def __init__(self, outcome, reason):
+        super().__init__(reason)
+        self.outcome = outcome
 
 
 def utc():
@@ -48,6 +48,11 @@ def fingerprint(value):
 
 
 def validate(config):
+    age = config.get('isolation_max_age_seconds', 86400)
+    if age is not None and (type(age) is not int or age <= 0):
+        raise ValueError('isolation_max_age_seconds must be positive or null with campaign binding')
+    if age is None and not config.get('campaign_id'):
+        raise ValueError('unexpired isolation requires campaign_id')
     for name, low, high in [("duration", 1, 3600), ("warmup", 0, 3600), ("idle", 0, 3600),
                             ("repetitions", 1, 10), ("sample_interval", 2, 30)]:
         value = config.get(name)
@@ -148,8 +153,11 @@ class Guard:
     def check(self, sample):
         now, reasons, limits = sample["monotonic"], [], self.limits
         for check in ("dataplane_ok", "management_ok", "mngt_ok", "vms_ok"):
-            if not sample.get(check):
+            hold = limits.get('availability_seconds', 0) if self.previous and check != 'vms_ok' else 0
+            if self.held(check, not sample.get(check), now, hold):
                 reasons.append(check + " failed")
+            elif not sample.get(check):
+                sample.setdefault('warnings', []).append(check + ' transient failure; awaiting confirmation')
         host = sample.get("host", {})
         if not host:
             reasons.append("host metrics unavailable")
@@ -203,25 +211,50 @@ class Guard:
 
 def result_metrics(scenario, raw):
     if "error" in raw:
-        raise Abort("iperf3 reported an error")
+        raise WindowStop('INVALID', "iperf3 reported an error")
     if scenario["kind"] in ("tcp", "udp"):
         end = raw.get("end", {})
         # Legacy UDP "sum" mixes sender/receiver fields. Require the explicit receiver.
         received = end.get("sum_received", {})
         sent = end.get("sum_sent", {})
         if "bits_per_second" not in received or received.get("seconds", 0) <= 0:
-            raise Abort("iperf3 receiver summary missing")
+            raise WindowStop('INVALID', "iperf3 receiver summary missing")
         result = {"received_bps": received["bits_per_second"],
                   "sent_bps": sent.get("bits_per_second"), "retransmits": sent.get("retransmits")}
+        offered = scenario.get('mbps', 0) * 1_000_000
+        result.update(requested_bps=offered, achieved_bps=received['bits_per_second'],
+                      sender_bytes=sent.get('bytes'), receiver_bytes=received.get('bytes'),
+                      invalid_reasons=[])
+        if not sent.get('bytes') or not received.get('bytes') or not sent.get('seconds'):
+            result['invalid_reasons'].append('sender/receiver volume confirmation missing')
+        result['generator_limited'] = (not qualification.finite(result['sent_bps']) or
+                                       result['sent_bps'] < .95 * offered or result['received_bps'] < .95 * offered)
+        result['generator_limit_reason'] = ('sent/received rate below 95%; source/path attribution unresolved'
+                                            if result['generator_limited'] else None)
         if scenario["kind"] == "udp":
-            for field in ("lost_percent", "packets", "jitter_ms"):
+            for field in ("lost_percent", "packets", "lost_packets", "jitter_ms"):
                 if field not in received:
-                    raise Abort("UDP receiver counters missing")
+                    raise WindowStop('INVALID', "UDP receiver counters missing")
+            # iperf_udp.c: packet_count is highest sequence, not received datagrams.
+            delivered = received['packets'] - received['lost_packets']
+            if delivered < 0:
+                raise WindowStop('INVALID', 'inconsistent UDP receiver counters')
             result.update(loss_pct=received["lost_percent"], jitter_ms=received["jitter_ms"],
-                          received_report_pps=received["packets"] / received["seconds"])
+                          receiver_sequence_packets=received['packets'], receiver_lost_packets=received['lost_packets'],
+                          received_packets=delivered, received_report_pps=delivered / received["seconds"])
         return result
-    if raw.get("successful_requests", 0) <= 0 or raw.get("errors", 0):
-        raise ApplicationWorkloadError(raw)
+    required = ('attempted_requests', 'successful_requests', 'errors', 'attempt_rate', 'success_rate',
+                'requested_rate', 'achieved_rate', 'error_rate_pct', 'skipped_slots', 'scheduler_lag_max_ms')
+    if any(not qualification.finite(raw.get(k)) or raw[k] < 0 for k in required):
+        raw.setdefault('invalid_reasons', []).append('application generator counters incomplete')
+    elif (raw['attempted_requests'] != raw['successful_requests'] + raw['errors'] or
+          raw['requested_rate'] != scenario.get('rate', raw['requested_rate'])):
+        raw.setdefault('invalid_reasons', []).append('inconsistent application generator counters')
+    else:
+        raw['error_rate_pct'] = 100 * raw['errors'] / raw['attempted_requests'] if raw['attempted_requests'] else 100.0
+        raw['generator_limited'] = raw['attempt_rate'] < .95 * raw['requested_rate']
+        if raw['generator_limited']:
+            raw['generator_limit_reason'] = 'achieved attempt rate below 95% requested'
     return raw
 
 
@@ -232,6 +265,7 @@ class Backend:
         self.compose = ["docker", "compose", "--project-directory", config["project_dir"]]
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
         self.container_ids = []
+        self.endpoints = []
 
     def call(self, argv, timeout=4, input_text=None):
         result = subprocess.run(argv, input=input_text, text=True, capture_output=True, timeout=timeout)
@@ -248,7 +282,8 @@ class Backend:
             cid = self.call(self.compose + ["ps", "-q", service]).strip()
             if not cid:
                 raise Abort(service + " is not running")
-            self.container_ids.append(cid)
+            if cid not in self.container_ids:
+                self.container_ids.append(cid)
             entry = json.loads(self.call(["docker", "inspect", cid]))[0]
             if not entry["State"]["Running"]:
                 raise Abort(service + " is not running")
@@ -259,6 +294,7 @@ class Backend:
                             "networks": {k: {f: v[f] for f in ("NetworkID", "IPAddress", "Gateway")}
                                          for k, v in networks.items()},
                             "cpus": entry["HostConfig"]["NanoCpus"], "memory": entry["HostConfig"]["Memory"]})
+        self.endpoints = [e | {'container_id': cid} for e, cid in zip(details, self.container_ids)]
         network_names = [next(iter(e["networks"])) for e in details]
         if network_names[0] == network_names[1]:
             raise Abort("endpoints share one network")
@@ -359,6 +395,10 @@ class Backend:
             guest = sample.pop('extended_guest', None)
             sample['measurement'] = {'guest': guest, 'host': sample.pop('extended_host', None)}
             sample['audit'] = measurement.legacy_guest(guest) if guest else {}
+        try:
+            sample['container_resources'] = qualification.docker_resources(sample.get('containers', ''), self.endpoints)
+        except (ValueError, KeyError, TypeError):
+            sample['unavailable'].append('container_resources')
         sample.update(probe_timing)
         sample['collection_seconds'] = time.monotonic() - started
         return sample
@@ -379,17 +419,29 @@ class Backend:
         if self.state(self.config["ngfw_vm"]) != "shut off":
             raise Abort("NGFW changed state during isolation check")
         return {"checked_at": time.time(), "time": utc(), "topology": self.topology(),
+                "campaign_id": self.config.get('campaign_id'),
                 "receiver_local_health": True, "client_to_receiver": "unreachable", "ngfw_state": "shut off"}
 
 
-def validate_isolation(evidence, topology, now):
+def validate_isolation(evidence, topology, now, max_age=86400, campaign_id=None):
     age = now - evidence["checked_at"]
-    if age < 0 or age > 86400 or evidence["topology"] != topology:
+    if (age < 0 or (max_age is not None and age > max_age) or evidence["topology"] != topology
+            or (campaign_id and evidence.get('campaign_id') != campaign_id)
+            or (max_age is None and not campaign_id)):
         raise Abort("isolation evidence expired or topology changed; repeat check-isolation")
 
 
+def bind_isolation(evidence, topology, campaign_id, attestation):
+    if (not campaign_id or not attestation or evidence.get('topology') != topology
+            or evidence.get('receiver_local_health') is not True
+            or evidence.get('client_to_receiver') != 'unreachable' or evidence.get('ngfw_state') != 'shut off'):
+        raise Abort('existing T00 topology/negative test or explicit unchanged-campaign attestation missing')
+    return {'campaign_id': campaign_id, 'evidence_sha256': fingerprint(evidence),
+            'bound_at': utc(), 'attestation': attestation}
+
+
 def signature(config, topology):
-    return fingerprint({k: config[k] for k in ("duration", "warmup", "idle", "repetitions", "sample_interval", "scenarios", "limits")} | {"topology": topology})
+    return fingerprint({k: config[k] for k in ("duration", "warmup", "idle", "repetitions", "sample_interval", "scenarios", "limits")} | {"topology": topology, 'qualification_mode': config.get('qualification_mode', False)})
 
 
 def baseline_values(baseline, sig):
@@ -406,6 +458,9 @@ def write_report(directory, report):
     save(directory / "summary.json", report)
     fields = ["scenario", "repetition", "phase", "kind", "received_bps", "sent_bps", "loss_pct",
               "jitter_ms", "received_report_pps", "retransmits", "requests_per_second", "errors",
+              "attempted_requests", "successful_requests", "attempt_rate", "success_rate", "error_rate_pct",
+              "requested_rate", "achieved_rate", "requested_bps", "achieved_bps", "skipped_slots",
+              "scheduler_lag_max_ms", "generator_limited", "generator_limit_reason", "attempt",
               "status", "stop_reason"]
     with (directory / "results.csv").open("w", newline="", encoding="utf-8") as output:
         writer = csv.DictWriter(output, fields, extrasaction="ignore")
@@ -425,8 +480,8 @@ def write_report(directory, report):
             detail += f"; loss {value['loss_pct']:.3f}%"
         if "errors" in value:
             detail += f"; errors {value['errors']}"
-        if row.get('status') == 'failed':
-            detail += "; FAILED"
+        if row.get('status'):
+            detail += '; ' + row['status'] + ': ' + (row.get('stop_reason') or '')
         lines.append(f"| {row['scenario']} | {row['repetition']} | {row['phase']} | {detail} |")
     lines += ["", "## Gaps", ""] + ["- " + gap for gap in report["gaps"]]
     lines += ["", "## CPU observations (not stop reasons)", "",
@@ -448,6 +503,8 @@ class Runner:
         self.extra_guard = extra_guard
         self.initial_sample = True
         self.previous_endpoint = None
+        self.window_samples = []
+        self.attempt = 1
 
     def monitor(self):
         if self.cancelled:
@@ -465,6 +522,7 @@ class Runner:
             sample['endpoint_rx_bps'] = 8 * delta / dt if dt > 0 and delta >= 0 else None
         self.previous_endpoint = endpoint
         sample.update(self.context)
+        self.window_samples.append(sample)
         with (self.directory / "metrics.ndjson").open("a", encoding="utf-8") as output:
             output.write(json.dumps(sample) + "\n")
         for warning in sample['warnings']:
@@ -478,7 +536,9 @@ class Runner:
             if gap not in self.report["gaps"]:
                 self.report["gaps"].append(gap)
         if reasons:
-            raise Abort("; ".join(reasons))
+            invalid = all(any(word in reason.lower() for word in
+                ('unavailable', 'incomplete', 'changed', 'deadline', 'identity', 'not found')) for reason in reasons)
+            raise WindowStop('INVALID' if invalid else 'GLOBAL_STOP', '; '.join(reasons))
 
     def pause(self, seconds):
         end = time.monotonic() + seconds
@@ -489,11 +549,32 @@ class Runner:
     def workload(self, scenario, repetition, phase, seconds):
         if not seconds:
             return
-        self.context = {"scenario": scenario["name"], "repetition": repetition, "phase": phase}
+        before = len(self.report['results'])
+        started = time.monotonic()
+        try:
+            return self._workload(scenario, repetition, phase, seconds)
+        except (Abort, OSError, ValueError, subprocess.SubprocessError) as error:
+            if len(self.report['results']) == before:
+                outcome = getattr(error, 'outcome', 'GLOBAL_STOP' if isinstance(error, Abort) else 'INVALID')
+                self.report['results'].append({'scenario': scenario['name'], 'kind': scenario['kind'],
+                    'repetition': repetition, 'phase': phase, 'attempt': self.attempt,
+                    'window_started_monotonic': started, 'window_finished_monotonic': time.monotonic(),
+                    'metrics': {}, 'status': outcome,
+                    'stop_reason': str(error) if isinstance(error, Abort) else type(error).__name__})
+                write_report(self.directory, self.report)
+            if not isinstance(error, Abort):
+                raise WindowStop('INVALID', type(error).__name__) from error
+            raise
+
+    def _workload(self, scenario, repetition, phase, seconds):
+        if not seconds:
+            return
+        self.context = {"scenario": scenario["name"], "repetition": repetition, "phase": phase, 'attempt': self.attempt}
         self.context.update(phase_started_at=utc(), phase_duration_seconds=seconds,
                             offered=scenario)
+        self.window_samples = []
         self.monitor()
-        prefix = self.directory / f"{scenario['name']}-{repetition}-{phase}"
+        prefix = self.directory / f"{scenario['name']}-{repetition}-{phase}-attempt{self.attempt}"
         job = uuid.uuid4().hex
         argv = self.backend.compose + ["exec", "-T", "traffic-client", "python3", "/opt/traffic/job.py",
                                        "run", "--timeout", str(seconds + 10), job, "--"] + command(self.config, scenario, seconds)
@@ -532,41 +613,61 @@ class Runner:
                             process.kill()
                             process.wait()
         raw = json.loads(prefix.with_suffix(".json").read_text(encoding="utf-8"))
-        application_failure = None
         try:
             metrics = result_metrics(scenario, raw)
-        except ApplicationWorkloadError as error:
-            metrics, application_failure = error.metrics, error
+        except WindowStop as error:
+            metrics = {'invalid_reasons': [str(error)]}
+        resource_summary, gaps, limited = qualification.resources(self.window_samples, self.report.get('topology', {}))
+        metrics['generator_resources'] = resource_summary
+        metrics.setdefault('invalid_reasons', []).extend(gaps)
+        if limited:
+            metrics.update(generator_limited=True, generator_limit_reason='; '.join(limited))
+        outcome, reason = qualification.classify(metrics, repeated=self.attempt > 1)
+        if outcome in ('PASS', 'WARN') and phase == 'measure' and scenario['kind'] == 'tcp' and self.baseline:
+            base = self.baseline.get(scenario['name'])
+            if not base or metrics.get('received_bps', 0) < base * (1 - self.config['limits']['tcp_drop_pct'] / 100):
+                outcome, reason = 'SCENARIO_STOP', 'TCP throughput below control threshold'
         row = self.context | {"kind": scenario["kind"], "metrics": metrics,
             "window_started_monotonic": window_start, "window_finished_monotonic": time.monotonic()}
-        if application_failure:
-            row.update(status='failed', stop_reason=str(application_failure))
+        row.update(status=outcome, stop_reason=reason)
         self.report["results"].append(row)
         write_report(self.directory, self.report)
-        if application_failure:
-            raise application_failure
-        if scenario["kind"] == "udp" and metrics["loss_pct"] > self.config["limits"]["udp_loss_pct"]:
-            raise Abort("UDP loss threshold exceeded")
-        if phase == "measure" and scenario["kind"] == "tcp" and self.baseline:
-            base = self.baseline.get(scenario["name"])
-            if not base or metrics["received_bps"] < base * (1 - self.config["limits"]["tcp_drop_pct"] / 100):
-                raise Abort("TCP throughput below control threshold")
+        if outcome != 'PASS':
+            raise WindowStop(outcome, reason)
 
     def run(self):
+        stopped_kinds = set()
         for scenario in self.config["scenarios"]:
+            if scenario['kind'] in stopped_kinds:
+                continue
             for repetition in range(1, self.config["repetitions"] + 1):
                 print(f"{utc()} {scenario['name']} repeat {repetition}", flush=True)
-                self.workload(scenario, repetition, "warmup", self.config["warmup"])
-                self.workload(scenario, repetition, "measure", self.config["duration"])
-                self.context["phase"] = "idle"
-                self.context.update(phase_started_at=utc(), phase_duration_seconds=self.config['idle'], offered={})
-                self.pause(self.config["idle"])
+                for attempt in (1, 2):
+                    self.attempt = attempt
+                    outcome = 'PASS'
+                    try:
+                        self.workload(scenario, repetition, "warmup", self.config["warmup"])
+                        self.workload(scenario, repetition, "measure", self.config["duration"])
+                    except WindowStop as error:
+                        outcome = error.outcome
+                        if outcome == 'GLOBAL_STOP':
+                            raise
+                        if outcome != 'WARN':
+                            stopped_kinds.add(scenario['kind'])
+                    self.context.update(phase='idle', phase_started_at=utc(),
+                                        phase_duration_seconds=self.config['idle'], offered={})
+                    self.pause(self.config["idle"])
+                    self.monitor()  # Independent scenarios require a fresh healthy check.
+                    if outcome != 'WARN':
+                        break
+                if scenario['kind'] in stopped_kinds:
+                    break
         self.monitor()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["plan", "check-isolation", "measure-check", "run"])
+    parser.add_argument("action", choices=["plan", "check-isolation", "bind-isolation", "measure-check", "run"])
     parser.add_argument("--config", type=Path, default=Path(__file__).with_name("runner.json"))
     parser.add_argument("--audit-profile", default="P0")
     parser.add_argument("--traffic-only", action="store_true")
@@ -575,10 +676,38 @@ def main():
     parser.add_argument('--measurement-argv-file', type=Path, help='private SSH argv ending in python3 -')
     parser.add_argument('--measurement-config', type=Path, help='operator-approved sensors and early stop thresholds')
     parser.add_argument('--run-context', type=Path, help='five campaign/test/comparison/workload/profile IDs')
+    parser.add_argument('--qualification-plan', choices=['edr-calibration', 'edr-ablation', 'edr-confirmation', 'edr-endurance'])
+    parser.add_argument('--campaign-id', help='bind unchanged T00 topology evidence to this campaign')
+    parser.add_argument('--selected-workloads', type=Path, help='private calibrated workload selection JSON')
+    parser.add_argument('--endurance-minutes', type=int, choices=[30, 60])
+    parser.add_argument('--unchanged-campaign-attestation', help='operator evidence reference: no VM/snapshot/route/topology change since existing T00')
     args = parser.parse_args()
-    config = validate(json.loads(args.config.read_text(encoding="utf-8")))
+    config = json.loads(args.config.read_text(encoding="utf-8"))
+    if args.qualification_plan:
+        config.update(json.loads((Path(__file__).parent / 'plans' / (args.qualification_plan + '.json')).read_text()))
+        config['limits'] = config['limits'] | {'availability_seconds': 10}
+        config['campaign_id'] = args.campaign_id
+        if args.audit_profile not in config['allowed_profiles']:
+            parser.error('profile not allowed for selected qualification stage')
+        if config.get('requires_workload_selection'):
+            if not args.selected_workloads:
+                parser.error('select identical workloads from calibration with --selected-workloads')
+            selected = json.loads(args.selected_workloads.read_text(encoding='utf-8'))
+            if not selected.get('calibration_run_ids') or not selected.get('selection_reason'):
+                parser.error('workload selection requires calibration_run_ids and selection_reason')
+            config['scenarios'] = selected['scenarios']
+            config['workload_selection'] = selected
+        if args.endurance_minutes:
+            if args.qualification_plan != 'edr-endurance':
+                parser.error('--endurance-minutes only for endurance')
+            config['duration'] = args.endurance_minutes * 60
+    config = validate(config)
     measure_config = measurement.validate(json.loads(args.measurement_config.read_text(encoding='utf-8'))) if args.measurement_config else None
+    if config.get('qualification_mode') and measure_config:
+        measure_config = measure_config | {'cpu_action': 'warn', 'qualification_mode': True}
     context = measurement.load_context(args.run_context) if args.run_context else None
+    if context and config.get('campaign_id') and context['campaign_id'] != config['campaign_id']:
+        parser.error('run context campaign differs from T00 campaign')
     if context and (not measure_config or not args.measurement_argv_file or args.traffic_only):
         parser.error('methodology context requires extended measurements and cannot use traffic-only')
     if context and context['profile_id'] != args.audit_profile:
@@ -644,7 +773,19 @@ def main():
                 print("Isolation evidence saved; start/configure NGFW before run.")
                 return 0
             topology = backend.topology()
-            validate_isolation(json.loads((root / "isolation.json").read_text()), topology, time.time())
+            isolation = json.loads((root / 'isolation.json').read_text())
+            if args.action == 'bind-isolation':
+                binding = bind_isolation(isolation, topology, config.get('campaign_id'), args.unchanged_campaign_attestation)
+                save(root / 'isolation-binding.json', binding)
+                print('Existing T00 bound without traffic or changing original evidence.')
+                return 0
+            binding_path = root / 'isolation-binding.json'
+            if not isolation.get('campaign_id') and binding_path.exists():
+                binding = json.loads(binding_path.read_text())
+                if binding.get('evidence_sha256') == fingerprint(isolation):
+                    isolation = isolation | {'campaign_id': binding['campaign_id']}
+            validate_isolation(isolation, topology, time.time(),
+                               config.get('isolation_max_age_seconds', 86400), config.get('campaign_id'))
             sig = signature(config, topology)
             baseline_report = json.loads(args.baseline.read_text()) if args.baseline else None
             baseline = baseline_values(baseline_report, sig) if baseline_report else {}
@@ -659,7 +800,9 @@ def main():
             report['context'] = context
             report['measurement_config'] = measure_config
             report['tool_sha256'] = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                                    for name in ('runner.py', 'measurement.py', 'measure_probe.py')}
+                                    for name in ('runner.py', 'measurement.py', 'measure_probe.py', 'qualification.py')}
+            if config.get('qualification_mode') and (not context or not measurement_argv or not measure_config):
+                raise Abort('qualification requires campaign context and extended measurements')
             if args.traffic_only:
                 report["gaps"].append("AuditD and guest filesystem/CPU thresholds are not monitored in traffic-only mode.")
             if not baseline:
@@ -667,6 +810,8 @@ def main():
             elif baseline_report.get("mode") != report["mode"]:
                 report["gaps"].append("Control and current run use different observation modes; SSH/probe overhead is a comparison confounder.")
             save(directory / "isolation.json", json.loads((root / "isolation.json").read_text()))
+            if binding_path.exists():
+                save(directory / 'isolation-binding.json', json.loads(binding_path.read_text()))
             runner = Runner(config, backend, directory, report,
                             Guard(config["limits"], not args.traffic_only,
                                   (measure_config or {}).get('cpu_action', 'stop')), baseline,
@@ -691,6 +836,7 @@ def main():
             except (Abort, OSError, ValueError, subprocess.SubprocessError) as exc:
                 report["status"] = "aborted"
                 report["reason"] = str(exc)
+                report['outcome'] = getattr(exc, 'outcome', 'GLOBAL_STOP')
             finally:
                 if measurement_argv:
                     try:

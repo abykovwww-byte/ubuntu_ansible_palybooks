@@ -16,8 +16,10 @@
       - ngfw_lab_ngfw_vcpu_pins | intersect(ngfw_lab_mngt_vcpu_pins) | length == 0
       - ngfw_lab_left_subnet != ngfw_lab_right_subnet
       - ngfw_lab_left_gateway != ngfw_lab_right_gateway
-      - ngfw_lab_traffic_cpus | float > 0
-      - ngfw_lab_traffic_cpus | float <= 4
+      - ngfw_lab_traffic_client_cpus | float > 0
+      - ngfw_lab_traffic_client_cpus | float <= 4
+      - ngfw_lab_traffic_server_cpus | float > 0
+      - ngfw_lab_traffic_server_cpus | float <= 4
       - ngfw_lab_traffic_pids | int >= 96
       - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_address != '0.0.0.0'
       - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_port | int > 0
@@ -454,6 +456,9 @@
     - {src: monitor/, dest: monitor/}
     - {src: audit_evidence.py, dest: audit_evidence.py}
     - {src: campaign.py, dest: campaign.py}
+    - {src: qualification.py, dest: qualification.py}
+    - {src: audit_profile_ctl.py, dest: audit_profile_ctl.py}
+    - {src: plans/, dest: plans/}
     - {src: ngfw_probe.sh, dest: ngfw_probe.sh}
   register: ngfw_lab_traffic_source
   tags: [ngfw-lab, traffic]

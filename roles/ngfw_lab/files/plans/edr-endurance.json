@@ -1,0 +1,5 @@
+{
+  "qualification_mode": true, "qualification_stage": "endurance", "requires_workload_selection": true,
+  "allowed_profiles": ["D-EDR-CANDIDATE"],
+  "duration": 1800, "warmup": 30, "idle": 60, "repetitions": 1, "isolation_max_age_seconds": null
+}

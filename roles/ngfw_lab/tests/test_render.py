@@ -22,6 +22,9 @@ class Rendering(unittest.TestCase):
             self.assertIs(values[flag], False, flag)
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         env.filters["to_nice_json"] = lambda v: json.dumps(v, indent=2)
+        for key in ('ngfw_lab_traffic_client_cpus', 'ngfw_lab_traffic_server_cpus',
+                    'ngfw_lab_traffic_client_memory', 'ngfw_lab_traffic_server_memory'):
+            values[key] = env.from_string(str(values[key])).render(values)
         rendered = yaml.safe_load(env.from_string(
             (ROOT / "templates/compose.yml.j2").read_text()).render(values))
         self.assertEqual(json.loads(rendered["services"]["traffic-server"]["environment"]

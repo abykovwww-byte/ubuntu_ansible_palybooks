@@ -1,0 +1,27 @@
+{
+  "qualification_mode": true, "qualification_stage": "calibration",
+  "duration": 120, "warmup": 30, "idle": 60, "repetitions": 1,
+  "isolation_max_age_seconds": null,
+  "allowed_profiles": ["B-EDR-CURRENT"],
+  "scenarios": [
+    {"name":"tcp-100m","kind":"tcp","mbps":100,"parallel":4},
+    {"name":"tcp-300m","kind":"tcp","mbps":300,"parallel":4},
+    {"name":"tcp-600m","kind":"tcp","mbps":600,"parallel":8},
+    {"name":"tcp-900m","kind":"tcp","mbps":900,"parallel":8},
+    {"name":"udp64-20m","kind":"udp","mbps":20,"length":64},
+    {"name":"udp64-60m","kind":"udp","mbps":60,"length":64},
+    {"name":"udp64-100m","kind":"udp","mbps":100,"length":64},
+    {"name":"short-tcp-500","kind":"short-tcp","rate":500,"concurrency":16},
+    {"name":"short-tcp-1000","kind":"short-tcp","rate":1000,"concurrency":32},
+    {"name":"short-tcp-2500","kind":"short-tcp","rate":2500,"concurrency":64},
+    {"name":"short-tcp-5000","kind":"short-tcp","rate":5000,"concurrency":64},
+    {"name":"http-200","kind":"http","rate":200,"concurrency":16},
+    {"name":"http-500","kind":"http","rate":500,"concurrency":32},
+    {"name":"http-1000","kind":"http","rate":1000,"concurrency":64},
+    {"name":"http-2500","kind":"http","rate":2500,"concurrency":64},
+    {"name":"dns-200","kind":"dns","rate":200,"concurrency":16},
+    {"name":"dns-500","kind":"dns","rate":500,"concurrency":32},
+    {"name":"dns-1000","kind":"dns","rate":1000,"concurrency":64},
+    {"name":"dns-2500","kind":"dns","rate":2500,"concurrency":64}
+  ]
+}
