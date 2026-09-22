@@ -32,6 +32,25 @@ def response(nonce, clock=1):
 
 
 class Protocol(unittest.TestCase):
+    def test_session_duration_covers_endurance_and_keeps_both_timers(self):
+        lifetime = p.lifetime_seconds('7200')
+        self.assertEqual(lifetime, 7200)
+        script = p.guest_program(SOURCE, p.source_allowlist(SOURCE), 'READY', lifetime)
+        compile(script, '<endurance-guest>', 'exec')
+        self.assertIn('LIFETIME = 7200', script)
+        self.assertIn('signal.setitimer(signal.ITIMER_REAL, LIFETIME)', script)
+        self.assertIn('expiry = time.monotonic() + LIFETIME', script)
+        self.assertIn('len(seen) >= 2000', script)
+
+    def test_cli_rejects_unbounded_duration_before_opening_guest_session(self):
+        for value in ('59', '7201', '0', '-1', 'forever'):
+            with self.subTest(value=value), patch.object(p, 'GuestSession') as guest, \
+                    patch('sys.stderr', new_callable=io.StringIO):
+                with self.assertRaises(SystemExit) as error:
+                    p.main(['broker', '--lifetime', value])
+                self.assertEqual(error.exception.code, 2)
+                guest.assert_not_called()
+
     def test_selected_process_allowlist_binds_exact_targets_and_rejects_discovery(self):
         names = ['auditd', 'vxagent']
         targets = [{'comm': 'auditd', 'pid': 100, 'start_ticks': 10},
