@@ -35,10 +35,21 @@ MAX_GUEST_REQUEST = 16384
 NONCE = re.compile(r'[0-9a-f]{32}')
 DIGEST = re.compile(r'[0-9a-f]{64}')
 DEFAULT_NAMES = ['auditd', 'rsyslogd']
+MAX_LIFETIME_SECONDS = 7200
 
 
 class ProbeError(Exception):
     pass
+
+
+def lifetime_seconds(value):
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError('lifetime must be an integer number of seconds') from None
+    if not 60 <= seconds <= MAX_LIFETIME_SECONDS:
+        raise argparse.ArgumentTypeError(f'lifetime must be 60..{MAX_LIFETIME_SECONDS} seconds')
+    return seconds
 
 
 def validate_names(names):
@@ -422,7 +433,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
     broker = sub.add_parser('broker')
-    broker.add_argument('--lifetime', type=int, default=1800)
+    broker.add_argument('--lifetime', type=lifetime_seconds, default=1800,
+                        help='session seconds, 60..7200; default 1800 (30 minutes)')
     selection = broker.add_mutually_exclusive_group()
     selection.add_argument('--process-name', action='append', default=None)
     selection.add_argument('--measurement-config', type=Path)
@@ -442,8 +454,6 @@ def main(argv=None):
             return 0
         if os.geteuid() == 0:
             raise ProbeError('run broker as the ordinary host operator, never host sudo')
-        if not 60 <= args.lifetime <= 1800:
-            raise ProbeError('lifetime must be 60..1800 seconds')
         if not sys.stdin.isatty():
             raise ProbeError('broker requires an interactive terminal')
         config = load_measurement_config(args.measurement_config) if args.measurement_config else {}
