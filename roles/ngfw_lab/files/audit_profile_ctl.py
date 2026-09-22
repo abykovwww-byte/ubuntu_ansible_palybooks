@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import signal
 import subprocess
@@ -19,6 +20,8 @@ NETWORK = frozenset({'pt_siem_api_socket', 'pt_siem_api_connect', 'pt_siem_api_a
                      'pt_siem_api_listen', 'pt_siem_api_bind'})
 PROFILES = {'C-EDR-NET': NETWORK, 'C-EDR-PROC': frozenset({'pt_siem_proc'})}
 CONTROLS = ('enabled', 'failure', 'pid', 'rate_limit', 'backlog_limit', 'backlog_wait_time')
+FILE_TYPES = {4096: 'fifo', 8192: 'character', 16384: 'dir', 24576: 'block',
+              32768: 'file', 40960: 'link', 49152: 'socket'}
 
 
 def digest(value):
@@ -29,6 +32,31 @@ def text_rules(rules):
     return '\n'.join(rules) + ('\n' if rules else '')
 
 
+def rule_argv(rule):
+    """Render auditctl input without changing the recorded kernel rule text.
+
+    auditctl -l may print numeric filetype, but libaudit accepts symbolic names.
+    Both deletion and replay must address the same underlying file type.
+    """
+    argv = shlex.split(rule)
+    for i in range(1, len(argv)):
+        if argv[i-1] != '-F':
+            continue
+        match = re.fullmatch(r'(filetype(?:!=|=))(.+)', argv[i])
+        if not match:
+            continue
+        value = match[2]
+        if value in FILE_TYPES.values():
+            continue
+        try:
+            number = int(value, 16 if value.lower().startswith('0x') else 10)
+            name = FILE_TYPES[number]
+        except (ValueError, KeyError):
+            raise ValueError('unsupported filetype: exact replay cannot be planned') from None
+        argv[i] = match[1] + name
+    return argv
+
+
 def parse_rules(text):
     if text.strip() == 'No rules':
         return []
@@ -36,7 +64,7 @@ def parse_rules(text):
     if len(rules) != len(set(rules)):
         raise ValueError('duplicate rules: exact reconstruction is not supported')
     for rule in rules:
-        argv = shlex.split(rule)
+        argv = rule_argv(rule)
         # Runtime auditctl output only, never directives/control files or shell input.
         if not argv or argv[0] not in ('-a', '-w'):
             raise ValueError('unsupported runtime rule: exact ordered restore cannot be planned')
@@ -133,12 +161,12 @@ class Kernel:
                 'edr_active': self.active('vxagent'), 'auditd_active': self.active('auditd')}
 
     def delete(self, rule):
-        argv = shlex.split(rule)
+        argv = rule_argv(rule)
         argv[0] = {'-a': '-d', '-w': '-W'}[argv[0]]
         self.call(['auditctl'] + argv)
 
     def add(self, rule):
-        self.call(['auditctl'] + shlex.split(rule))
+        self.call(['auditctl'] + rule_argv(rule))
 
 
 def unchanged(before, after):
