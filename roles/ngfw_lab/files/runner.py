@@ -21,10 +21,17 @@ import uuid
 import measurement
 import measure_probe
 import qualification
+from traffic.probe_diagnostics import decode_failure, RequestFailure
 
 
 class Abort(RuntimeError):
     pass
+
+
+class ProbeFailure(Abort):
+    def __init__(self, diagnostic):
+        super().__init__('dataplane probe failed')
+        self.diagnostic = diagnostic
 
 
 class WindowStop(Abort):
@@ -313,7 +320,22 @@ class Backend:
         return self.call(["virsh", "-c", "qemu:///system", "domstate", vm]).strip()
 
     def probe_endpoint(self, service, target):
-        self.endpoint(service, ["python3", "/opt/traffic/endpoint.py", "probe", "--target", target])
+        started = time.monotonic()
+        try:
+            self.endpoint(service, ["python3", "/opt/traffic/endpoint.py", "probe", "--target", target])
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            detail = {'layer': 'command', 'exception_class': 'ValueError' if isinstance(error, ValueError) else 'OSError',
+                      'errno': RequestFailure('unknown', error).errno}
+            if isinstance(error, subprocess.CalledProcessError):
+                detail = {'layer': 'command', 'exception_class': 'CalledProcessError',
+                          'returncode': error.returncode}
+                request_error = decode_failure(error.stdout)
+                if request_error is not None:
+                    detail = {'layer': 'request', 'returncode': error.returncode, **request_error}
+            elif isinstance(error, subprocess.TimeoutExpired):
+                detail = {'layer': 'command', 'exception_class': 'TimeoutExpired'}
+            detail['elapsed_ms'] = 1000 * (time.monotonic() - started)
+            raise ProbeFailure(detail) from None
         return True
 
     @staticmethod
@@ -389,8 +411,10 @@ class Backend:
         for key, future in futures.items():
             try:
                 sample[key] = future.result()
-            except (OSError, ValueError, subprocess.SubprocessError, Abort):
+            except (OSError, ValueError, subprocess.SubprocessError, Abort) as error:
                 sample["unavailable"].append(key)
+                if isinstance(error, ProbeFailure):
+                    sample.setdefault('check_errors', {})[key] = error.diagnostic
         if self.measurement_argv:
             guest = sample.pop('extended_guest', None)
             sample['measurement'] = {'guest': guest, 'host': sample.pop('extended_host', None)}
@@ -804,8 +828,9 @@ def main():
             report['run_id'] = directory.name
             report['context'] = context
             report['measurement_config'] = measure_config
-            report['tool_sha256'] = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                                    for name in ('runner.py', 'measurement.py', 'measure_probe.py', 'qualification.py')}
+            report['tool_sha256'] = {name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
+                                    for name in ('runner.py', 'measurement.py', 'measure_probe.py', 'qualification.py',
+                                                 'traffic/endpoint.py', 'traffic/probe_diagnostics.py')}
             if config.get('qualification_mode') and (not context or not measurement_argv or not measure_config):
                 raise Abort('qualification requires campaign context and extended measurements')
             if args.traffic_only:
