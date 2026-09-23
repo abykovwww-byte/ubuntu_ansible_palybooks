@@ -27,7 +27,7 @@ jobs:
       - name: Measurements, attribution, comparison and read-only monitor
         env:
           PYTHONPATH: roles/ngfw_lab/tests
-        run: python -m unittest test_measurement test_interactive_probe test_audit_evidence test_campaign test_monitor test_qualification test_audit_profile_ctl -v
+        run: python -m unittest test_measurement test_interactive_probe test_audit_evidence test_campaign test_monitor test_qualification test_audit_profile_ctl test_probe_diagnostics -v
       - name: Browser script syntax
         run: node --check roles/ngfw_lab/files/monitor/monitor.js
       - name: Install template check dependencies

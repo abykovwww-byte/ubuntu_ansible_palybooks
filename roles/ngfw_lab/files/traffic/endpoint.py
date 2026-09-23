@@ -15,6 +15,7 @@ import threading
 import time
 
 import policy_probe
+from probe_diagnostics import RequestFailure, failure_payload
 
 
 QUESTION = b"\x03lab\x07invalid\x00\x00\x01\x00\x01"
@@ -23,24 +24,6 @@ PAYLOAD = b"ngfw-lab\n"
 BUCKETS = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
 ERROR_SAMPLE_LIMIT = 10
 ERROR_GROUP_LIMIT = 32
-ERROR_CLASSES = (TimeoutError, ConnectionRefusedError, ConnectionResetError,
-                 ConnectionAbortedError, BrokenPipeError, OSError, ValueError,
-                 socket.gaierror, socket.herror, http.client.HTTPException,
-                 http.client.RemoteDisconnected, http.client.BadStatusLine,
-                 http.client.IncompleteRead, http.client.CannotSendRequest,
-                 http.client.ResponseNotReady, http.client.LineTooLong)
-
-
-class RequestFailure:
-    """Only fixed metadata crosses the workload boundary, never exception text."""
-    def __init__(self, stage, error):
-        self.stage = stage if stage in ('connect', 'send', 'recv', 'http', 'dns') else 'unknown'
-        self.exception_class = (type(error).__name__ if type(error) in ERROR_CLASSES
-                                else 'OSError' if isinstance(error, OSError)
-                                else 'HTTPException' if isinstance(error, http.client.HTTPException)
-                                else 'ValueError')
-        number = getattr(error, 'errno', None)
-        self.errno = number if type(number) is int and -65535 <= number <= 65535 else None
 
 
 class ErrorDiagnostics:
@@ -293,7 +276,11 @@ def main():
     if args.action == "server":
         serve()
     elif args.action == "probe":
-        request(args.kind, args.target, timeout=1)
+        try:
+            request(args.kind, args.target, timeout=1)
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            print(json.dumps(failure_payload(getattr(error, 'ngfw_stage', 'unknown'), error)))
+            raise SystemExit(1) from None
     else:
         print(json.dumps(workload(args.kind, args.target, args.duration, args.rate, args.concurrency)))
 
