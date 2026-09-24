@@ -28,6 +28,13 @@ class Abort(RuntimeError):
     pass
 
 
+class CommandFailure(Abort):
+    def __init__(self, command, returncode, stdout):
+        super().__init__(f"{command} check failed (exit {returncode})")
+        self.returncode = returncode
+        self.request_error = decode_failure(stdout)
+
+
 class ProbeFailure(Abort):
     def __init__(self, diagnostic):
         super().__init__('dataplane probe failed')
@@ -277,7 +284,7 @@ class Backend:
     def call(self, argv, timeout=4, input_text=None):
         result = subprocess.run(argv, input=input_text, text=True, capture_output=True, timeout=timeout)
         if result.returncode:
-            raise Abort(f"{argv[0]} check failed (exit {result.returncode})")
+            raise CommandFailure(argv[0], result.returncode, result.stdout)
         return result.stdout
 
     def endpoint(self, service, args, timeout=4):
@@ -323,13 +330,14 @@ class Backend:
         started = time.monotonic()
         try:
             self.endpoint(service, ["python3", "/opt/traffic/endpoint.py", "probe", "--target", target])
-        except (OSError, ValueError, subprocess.SubprocessError) as error:
-            detail = {'layer': 'command', 'exception_class': 'ValueError' if isinstance(error, ValueError) else 'OSError',
+        except (OSError, ValueError, subprocess.SubprocessError, CommandFailure) as error:
+            detail = {'layer': 'command', 'exception_class': ('ValueError' if isinstance(error, ValueError)
+                      else 'OSError' if isinstance(error, OSError) else 'SubprocessError'),
                       'errno': RequestFailure('unknown', error).errno}
-            if isinstance(error, subprocess.CalledProcessError):
-                detail = {'layer': 'command', 'exception_class': 'CalledProcessError',
+            if isinstance(error, CommandFailure):
+                detail = {'layer': 'command', 'exception_class': 'CommandFailure',
                           'returncode': error.returncode}
-                request_error = decode_failure(error.stdout)
+                request_error = error.request_error
                 if request_error is not None:
                     detail = {'layer': 'request', 'returncode': error.returncode, **request_error}
             elif isinstance(error, subprocess.TimeoutExpired):
