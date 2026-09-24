@@ -1,4 +1,5 @@
 """Linux image integration. Run inside the built traffic image in CI, on loopback."""
+import asyncio
 import importlib.util
 import json
 import os
@@ -13,6 +14,7 @@ import uuid
 
 TRAFFIC = Path("/opt/traffic")
 sys.path.insert(0, str(TRAFFIC))
+import held_receiver
 import policy_probe
 spec = importlib.util.spec_from_file_location("endpoint", TRAFFIC / "endpoint.py")
 endpoint = importlib.util.module_from_spec(spec)
@@ -37,6 +39,35 @@ class Runtime(unittest.TestCase):
         cls.server.terminate()
         cls.server.wait(timeout=10)
 
+
+    def test_five_thousand_held_sessions_with_payload(self):
+        async def exercise():
+            peers = []
+            ident = uuid.uuid4().int & ((1 << 64) - 1)
+            try:
+                for cid in range(5000):
+                    reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", 9000, limit=1024), 2)
+                    peers.append((reader, writer))
+                    data = held_receiver.FRAME.pack(held_receiver.MAGIC, ident, cid, 0, time.monotonic_ns())
+                    writer.write(data)
+                    await writer.drain()
+                    self.assertEqual(await asyncio.wait_for(reader.readexactly(len(data)), 2), data)
+                for _ in range(50):
+                    state = json.loads(Path("/tmp/ngfw-held-server.json").read_text())
+                    if state["runs"].get(str(ident), {}).get("active") == 5000:
+                        break
+                    await asyncio.sleep(.1)
+                self.assertEqual(state["runs"][str(ident)]["active"], 5000)
+                for cid, (reader, writer) in enumerate(peers):
+                    data = held_receiver.FRAME.pack(held_receiver.MAGIC, ident, cid, 1, time.monotonic_ns())
+                    writer.write(data)
+                    await writer.drain()
+                    self.assertEqual(await asyncio.wait_for(reader.readexactly(len(data)), 2), data)
+            finally:
+                for reader, writer in peers:
+                    writer.close()
+                await asyncio.gather(*(writer.wait_closed() for reader, writer in peers))
+        asyncio.run(asyncio.wait_for(exercise(), 25))
     def test_real_protocols(self):
         for kind in ("short-tcp", "http", "dns"):
             with self.subTest(kind=kind):
