@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 
+import held_receiver
 import policy_probe
 from probe_diagnostics import RequestFailure, failure_payload
 
@@ -61,16 +62,6 @@ def dns_answer(data):
     # Static answer, no recursion, no upstream resolver, no arbitrary names.
     return (data[:2] + b"\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00" + QUESTION
             + b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04\xc0\x00\x02\x01")
-
-
-class TCPHandler(socketserver.BaseRequestHandler):
-    def handle(self):
-        self.request.settimeout(2)
-        try:
-            if self.request.recv(64) == PAYLOAD:
-                self.request.sendall(PAYLOAD)
-        except OSError:
-            pass
 
 
 class HTTPHandler(http.server.BaseHTTPRequestHandler):
@@ -122,19 +113,22 @@ def serve():
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_args: stopped.set())
     policy_receiver = policy_probe.Receiver(json.loads(os.environ.get("NGFW_POLICY_LISTEN_RANGES", "[]")))
-    servers = [TCPServer(("0.0.0.0", 9000), TCPHandler),
-               TCPServer(("0.0.0.0", 8080), HTTPHandler),
+    tcp_receiver = held_receiver.Receiver()
+    servers = [TCPServer(("0.0.0.0", 8080), HTTPHandler),
                socketserver.UDPServer(("0.0.0.0", 5353), DNSHandler)]
     iperf = subprocess.Popen(["iperf3", "--server"], stdout=subprocess.DEVNULL)
     try:
         for server in servers:
             threading.Thread(target=server.serve_forever, daemon=True).start()
         while not stopped.wait(0.25):
+            if tcp_receiver.error:
+                raise RuntimeError("TCP receiver exited: " + tcp_receiver.error)
             if policy_receiver.error:
                 raise RuntimeError("policy receiver exited: " + policy_receiver.error)
             if iperf.poll() is not None:
                 raise RuntimeError("iperf3 server exited")
     finally:
+        tcp_receiver.close()
         policy_receiver.close()
         for server in servers:
             server.shutdown()

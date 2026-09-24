@@ -27,7 +27,7 @@ jobs:
       - name: Measurements, attribution, comparison and read-only monitor
         env:
           PYTHONPATH: roles/ngfw_lab/tests
-        run: python -m unittest test_measurement test_interactive_probe test_audit_evidence test_campaign test_monitor test_qualification test_audit_profile_ctl test_probe_diagnostics -v
+        run: python -m unittest test_measurement test_interactive_probe test_audit_evidence test_campaign test_monitor test_qualification test_audit_profile_ctl test_probe_diagnostics test_held_receiver -v
       - name: Browser script syntax
         run: node --check roles/ngfw_lab/files/monitor/monitor.js
       - name: Install template check dependencies
@@ -39,6 +39,6 @@ jobs:
       - name: Protocols and watchdog in the actual endpoint image
         run: >-
           docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777
-          --cap-drop ALL --security-opt no-new-privileges --cpus 1 --memory 512m --pids-limit 192
+          --cap-drop ALL --security-opt no-new-privileges --cpus 1 --memory 512m --pids-limit 192 --ulimit nofile=16384:16384
           -v "$PWD/roles/ngfw_lab/tests:/tests:ro"
           --entrypoint python3 ngfw-traffic-ci /tests/test_runtime.py -v
