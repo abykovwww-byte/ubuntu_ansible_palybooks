@@ -446,13 +446,18 @@ class Backend:
                                 capture_output=True, text=True, timeout=4)
         if result.returncode == 0:
             raise Abort("isolation failed: reachable receiver while NGFW is off")
-        if "TimeoutError" not in result.stderr and "OSError" not in result.stderr and "ConnectionRefusedError" not in result.stderr:
+        error = decode_failure(result.stdout)
+        if (result.returncode != 1 or not error or error['stage'] != 'http'
+                or not (error['exception_class'] in ('TimeoutError', 'ConnectionRefusedError')
+                        or (error['exception_class'] == 'OSError'
+                            and error['errno'] in (101, 110, 111, 113)))):
             raise Abort("isolation probe failed for an unrecognized reason")
         if self.state(self.config["ngfw_vm"]) != "shut off":
             raise Abort("NGFW changed state during isolation check")
         return {"checked_at": time.time(), "time": utc(), "topology": self.topology(),
                 "campaign_id": self.config.get('campaign_id'),
-                "receiver_local_health": True, "client_to_receiver": "unreachable", "ngfw_state": "shut off"}
+                "receiver_local_health": True, "client_to_receiver": "unreachable", "ngfw_state": "shut off",
+                "client_probe_error": error}
 
 
 def validate_isolation(evidence, topology, now, max_age=86400, campaign_id=None):

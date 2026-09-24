@@ -5,11 +5,66 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from test_runner import r, e, config
+from test_runner import r, e, config, ROOT
 from traffic.probe_diagnostics import decode_failure, failure_payload
 
 
 class ProbeDiagnostics(unittest.TestCase):
+    def test_isolation_accepts_actual_endpoint_cli_failure_across_subprocess(self):
+        backend = r.Backend(config() | {'campaign_id': 'test-campaign'})
+        child = '''import sys
+sys.path.insert(0, TRAFFIC)
+import endpoint
+if '--help' in sys.argv or 'traffic-server' in sys.argv:
+    sys.exit(0)
+def unreachable(*args, **kwargs):
+    error = TimeoutError(110, 'SECRET request')
+    error.ngfw_stage = 'http'
+    raise error
+endpoint.request = unreachable
+sys.argv = ['endpoint.py', 'probe']
+endpoint.main()
+'''.replace('TRAFFIC', repr(str(ROOT / 'files/traffic')))
+        backend.compose = [sys.executable, '-c', child]
+        try:
+            with patch.object(backend, 'state', return_value='shut off'), \
+                    patch.object(backend, 'topology', return_value={'test': True}):
+                evidence = backend.isolation()
+            self.assertEqual(evidence['campaign_id'], 'test-campaign')
+            self.assertEqual(evidence['client_to_receiver'], 'unreachable')
+            self.assertEqual(evidence['client_probe_error'],
+                             {'stage': 'http', 'exception_class': 'TimeoutError', 'errno': 110})
+            self.assertNotIn('SECRET', json.dumps(evidence))
+        finally:
+            backend.pool.shutdown(wait=True)
+
+    def test_isolation_rejects_success_command_failure_and_non_network_errors(self):
+        valid = json.dumps(failure_payload('http', TimeoutError(110, 'SECRET')))
+        cases = [(0, ''), (125, valid), (1, ''), (1, 'SECRET TimeoutError traceback'),
+                 (1, json.dumps(failure_payload('http', ValueError('SECRET')))),
+                 (1, json.dumps(failure_payload('http', OSError(13, 'SECRET')))),
+                 (1, json.dumps(failure_payload('http', ConnectionResetError(104, 'SECRET')))),
+                 (1, json.dumps(failure_payload('dns', TimeoutError(110, 'SECRET'))))]
+        backend = r.Backend(config())
+        try:
+            for code, output in cases:
+                with self.subTest(code=code, output=output), \
+                        patch.object(backend, 'state', return_value='shut off'), \
+                        patch.object(backend, 'probe_endpoint'), patch.object(backend, 'endpoint'), \
+                        patch.object(r.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                            ['docker'], code, output, 'SECRET TimeoutError')):
+                    with self.assertRaises(r.Abort) as stopped:
+                        backend.isolation()
+                    self.assertNotIn('SECRET', str(stopped.exception))
+            with patch.object(backend, 'state', side_effect=['shut off', 'running']), \
+                    patch.object(backend, 'probe_endpoint'), patch.object(backend, 'endpoint'), \
+                    patch.object(r.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                        ['docker'], 1, valid, '')):
+                with self.assertRaisesRegex(r.Abort, 'changed state'):
+                    backend.isolation()
+        finally:
+            backend.pool.shutdown(wait=True)
+
     def test_cli_failure_has_only_bounded_metadata_and_still_exits_nonzero(self):
         error = TimeoutError(110, 'SECRET response body')
         error.ngfw_stage = 'http'
