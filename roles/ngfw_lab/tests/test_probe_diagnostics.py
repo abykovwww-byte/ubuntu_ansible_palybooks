@@ -46,11 +46,13 @@ class ProbeDiagnostics(unittest.TestCase):
 
     def test_request_failure_survives_sample_without_becoming_a_success(self):
         backend = r.Backend(config())
-        error = subprocess.CalledProcessError(1, ['SECRET argv'],
-            output=json.dumps(failure_payload('http', TimeoutError(110, 'SECRET'))), stderr='SECRET traceback')
+        def command(argv, **kwargs):
+            if 'probe' in argv:
+                return subprocess.CompletedProcess(argv, 1,
+                    json.dumps(failure_payload('http', TimeoutError(110, 'SECRET'))), 'SECRET traceback')
+            return subprocess.CompletedProcess(argv, 0, '', '')
         try:
-            with patch.object(backend, 'endpoint', side_effect=error), \
-                    patch.object(backend, 'call', return_value=''), \
+            with patch.object(r.subprocess, 'run', side_effect=command), \
                     patch.object(backend, 'host', return_value={}), \
                     patch.object(backend, 'audit', return_value={}), \
                     patch.object(backend, 'state', return_value='running'), \
@@ -71,7 +73,7 @@ class ProbeDiagnostics(unittest.TestCase):
 
     def test_command_timeout_or_unstructured_failure_is_not_a_network_verdict(self):
         cases = [(subprocess.TimeoutExpired(['SECRET'], 4, output='SECRET', stderr='SECRET'), 'TimeoutExpired'),
-                 (subprocess.CalledProcessError(125, ['SECRET'], output='SECRET', stderr='SECRET'), 'CalledProcessError'),
+                 (subprocess.SubprocessError('SECRET'), 'SubprocessError'),
                  (PermissionError(13, 'SECRET'), 'OSError'),
                  (ValueError('SECRET'), 'ValueError')]
         backend = r.Backend(config())
@@ -84,6 +86,45 @@ class ProbeDiagnostics(unittest.TestCase):
                     self.assertEqual(detail['layer'], 'command')
                     self.assertEqual(detail['exception_class'], expected)
                     self.assertNotIn('SECRET', json.dumps(detail))
+        finally:
+            backend.pool.shutdown(wait=True)
+
+    def test_real_call_chain_rejects_unstructured_output_and_remains_an_abort(self):
+        backend = r.Backend(config())
+        try:
+            result = subprocess.CompletedProcess(['docker'], 125, 'SECRET output', 'SECRET stderr')
+            with patch.object(r.subprocess, 'run', return_value=result):
+                with self.assertRaises(r.Abort) as stopped:
+                    backend.call(['docker', 'SECRET argument'])
+                self.assertIsInstance(stopped.exception, r.CommandFailure)
+                self.assertEqual(str(stopped.exception), 'docker check failed (exit 125)')
+                self.assertIsNone(stopped.exception.request_error)
+                self.assertNotIn('SECRET', repr(vars(stopped.exception)))
+                with self.assertRaises(r.ProbeFailure) as probe:
+                    backend.probe_endpoint('traffic-client', '10.77.20.10')
+            detail = probe.exception.diagnostic
+            self.assertEqual(detail['layer'], 'command')
+            self.assertEqual(detail['exception_class'], 'CommandFailure')
+            self.assertEqual(detail['returncode'], 125)
+            self.assertNotIn('SECRET', json.dumps(detail))
+        finally:
+            backend.pool.shutdown(wait=True)
+
+    def test_failure_crosses_an_actual_subprocess_without_mocking_backend(self):
+        backend = r.Backend(config())
+        payload = json.dumps(failure_payload('http', ConnectionRefusedError(111, 'SECRET')))
+        backend.compose = [sys.executable, '-c',
+            'import sys; print(' + repr(payload) + '); sys.stderr.write("SECRET stderr"); sys.exit(1)']
+        try:
+            with self.assertRaises(r.ProbeFailure) as stopped:
+                backend.probe_endpoint('traffic-client', '127.0.0.1')
+            detail = stopped.exception.diagnostic
+            self.assertEqual(detail['layer'], 'request')
+            self.assertEqual(detail['exception_class'], 'ConnectionRefusedError')
+            self.assertEqual(detail['stage'], 'http')
+            self.assertEqual(detail['errno'], 111)
+            self.assertEqual(detail['returncode'], 1)
+            self.assertNotIn('SECRET', json.dumps(detail))
         finally:
             backend.pool.shutdown(wait=True)
 
