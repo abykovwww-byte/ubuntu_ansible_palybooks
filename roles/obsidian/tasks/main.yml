@@ -7,6 +7,10 @@
       - obsidian_operations_dir.startswith(obsidian_data_dir ~ '/')
       - obsidian_login is match('^[A-Za-z0-9_.-]+$')
       - obsidian_https_port | int > 0
+      - obsidian_lan_bind_host in ansible_all_ipv4_addresses
+      - obsidian_lan_bind_host not in ['0.0.0.0', '127.0.0.1']
+      - obsidian_lan_https_port | int > 0
+      - obsidian_lan_https_port | int <= 65535
 
 - name: Read private network status
   ansible.builtin.command: tailscale status --json
@@ -167,6 +171,10 @@
     group: root
     mode: "0644"
   register: obsidian_serve_unit
+
+- name: Report local Obsidian address
+  ansible.builtin.debug:
+    msg: "https://{{ obsidian_lan_bind_host }}:{{ obsidian_lan_https_port }}/ (container self-signed certificate; same Obsidian login/password)"
 
 - name: Start private HTTPS entry
   ansible.builtin.systemd:

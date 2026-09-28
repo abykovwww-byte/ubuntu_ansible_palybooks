@@ -24,6 +24,29 @@ def note(identifier='NOTE-1', body='Пример'):
     return f'---\nid: {identifier}\ntype: evidence\n---\n\n# {body}\n'
 
 
+class DeploymentTests(unittest.TestCase):
+    def test_dual_access_keeps_plaintext_local_and_auth_shared(self):
+        import yaml
+        from jinja2 import Environment, StrictUndefined
+        variables = yaml.safe_load((ROOT / 'roles/obsidian/defaults/main.yml').read_text(encoding='utf-8'))
+        environment = Environment(undefined=StrictUndefined)
+        template = environment.from_string((ROOT / 'roles/obsidian/templates/compose.yml.j2').read_text(encoding='utf-8'))
+        for address, port in [('192.168.1.88', 3201), ('192.168.1.90', 3202)]:
+            with self.subTest(address=address, port=port):
+                values = dict(variables, obsidian_lan_bind_host=address, obsidian_lan_https_port=port)
+                for _ in range(3):
+                    values = {k: environment.from_string(v).render(values) if isinstance(v, str) else v
+                              for k, v in values.items()}
+                services = yaml.safe_load(template.render(values))['services']
+                self.assertEqual(set(services), {'obsidian'})
+                service = services['obsidian']
+                bindings = [binding.split(':') for binding in service['ports']]
+                self.assertEqual(bindings, [['127.0.0.1', '3200', '3000'], [address, str(port), '3001']])
+                self.assertEqual(service['environment']['CUSTOM_USER'], 'abykov')
+                self.assertEqual(service['environment']['FILE__PASSWORD'], '/run/secrets/obsidian_password')
+                self.assertIn('/srv/app-data/obsidian/vaults/Work:/vault/Work', service['volumes'])
+
+
 class VaultTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
