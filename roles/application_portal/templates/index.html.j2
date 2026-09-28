@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Приложения домашнего сервера abykovserv: работа, AI, безопасность и управление.">
+  <title>Приложения · {{ application_portal_title | e }}</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/portal.css">
+  <script src="assets/portal.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#applications">Перейти к приложениям</a>
+  <aside class="sidebar">
+    <a class="brand" href="./" aria-label="abykovserv — все приложения"><span class="brand-mark" aria-hidden="true">a<span>·</span></span><span>{{ application_portal_title | e }}<small>Личное пространство</small></span></a>
+    <div class="nav-label">БИБЛИОТЕКА</div>
+    <nav class="categories" aria-label="Категории приложений">
+      <button class="nav-item active" data-category="all" aria-pressed="true"><span class="nav-icon" aria-hidden="true">▦</span>Все приложения<span class="nav-count">{{ application_portal_apps | length }}</span></button>
+{% for key, label, symbol in [('work', 'Работа', '□'), ('ai', 'AI и сценарии', '✧'), ('security', 'Безопасность', '◇'), ('system', 'Система', '≡')] %}
+      <button class="nav-item" data-category="{{ key }}" aria-pressed="false"><span class="nav-icon" aria-hidden="true">{{ symbol }}</span>{{ label }}<span class="nav-count">{{ application_portal_apps | selectattr('category', 'equalto', key) | list | length }}</span></button>
+{% endfor %}
+    </nav>
+    <div class="sidebar-bottom"><span class="server-icon" aria-hidden="true">▤</span><div>Ваш сервер<small>{{ application_portal_host | e }}</small></div><span class="local-badge">LAN</span></div>
+  </aside>
+  <main>
+    <header class="topbar"><div class="breadcrumb">Личное пространство<span>/</span><strong>Приложения</strong></div><span class="edition">HOME SERVER <span>01</span></span></header>
+    <section class="hero" aria-labelledby="page-title">
+      <div class="hero-copy"><p class="eyebrow"><span></span>ВАША ТОЧКА ВХОДА</p><h1 id="page-title">Все приложения.<br><em>Один адрес.</em></h1><p class="hero-description">Работайте, исследуйте, создавайте.<br>Нужный инструмент — на расстоянии одного клика.</p><div class="hero-meta"><span>{{ application_portal_apps | length }} приложений</span><i></i><span>4 категории</span><i></i><span>Ваше пространство</span></div></div>
+      <div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="floating-label label-one">&lt; / &gt;</div><div class="floating-label label-two">✧</div><div class="server-stack"><div class="server-top"><span>a<span class="accent">·</span></span></div><div class="server-slice"><b></b><b></b><i></i></div><div class="server-slice"><b></b><b></b><i></i></div><div class="server-slice"><b></b><b></b><i></i></div></div><div class="art-caption">ABYKOVSERV / PERSONAL CLOUD</div></div>
+    </section>
+    <section id="applications" aria-labelledby="catalog-title">
+      <div class="catalog-toolbar"><div><h2 id="catalog-title">Все приложения <span id="result-count">{{ application_portal_apps | length }}</span></h2><p>Выберите, с чего начнём</p></div><div class="search"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path></svg><label class="sr-only" for="search">Найти приложение</label><input id="search" type="search" placeholder="Найти приложение…" autocomplete="off"><kbd aria-hidden="true">/</kbd></div></div>
+      <p id="search-status" class="sr-only" role="status" aria-live="polite"></p>
+      <div class="app-grid">
+{% for app in application_portal_apps %}
+        <a class="app-card" href="{{ app.url | e }}" data-category="{{ app.category | e }}" data-search="{{ (app.name ~ ' ' ~ app.subtitle ~ ' ' ~ app.description ~ ' ' ~ app.category_label) | e }}" aria-label="Открыть {{ app.name | e }}{% if app.notice is defined %}. {{ app.notice | e }}{% endif %}">
+          <div class="card-art art-{{ app.id | e }}"><img src="assets/{{ app.id | e }}.svg" alt="" width="720" height="320" loading="lazy">{% if app.notice is defined %}<span class="notice">{{ app.notice | e }}</span>{% else %}<span class="category-tag">{{ app.category_label | e }}</span>{% endif %}<span class="launch-arrow" aria-hidden="true">↗</span></div>
+          <div class="card-body"><div class="card-heading"><h3>{{ app.name | e }}</h3><span>{{ app.subtitle | e }}</span></div><p class="description">{{ app.description | e }}</p>{% if app.note is defined %}<p class="app-note">{{ app.note | e }}</p>{% endif %}<div class="card-footer"><span>{{ app.hint | e }}</span><span class="address">{{ app.address | e }}</span></div></div>
+        </a>
+{% endfor %}
+      </div>
+      <div id="empty-state" class="empty-state" hidden><span aria-hidden="true">⌕</span><h3>Ничего не нашлось</h3><p>Попробуйте другое название или выберите все приложения.</p><button id="reset-search">Сбросить поиск</button></div>
+      <noscript><p class="noscript-note">Все ссылки работают без JavaScript. Для поиска и фильтров включите JavaScript.</p></noscript>
+    </section>
+    <footer class="page-footer"><span>{{ application_portal_title | e }}<span class="footer-divider">/</span>Место для ваших инструментов</span><span>Приложения открываются в этой вкладке</span></footer>
+  </main>
+</body>
+</html>

@@ -17,6 +17,12 @@ deterministic-training platform:
 
 Private browser-based Obsidian, ordinary login/password, persistent Markdown and a command-driven LLM skill: [deployment and operations](docs/obsidian.md). Managed by the dedicated `obsidian` role; no backups are configured by the user's current choice.
 
+## Application portal
+
+`http://192.168.1.88/` is the application catalogue, with local illustrations,
+descriptions, search and categories. See [portal deployment and operations](docs/application-portal.md)
+for the focused Ansible apply and application entry points.
+
 ## Repository Layout
 
 ```text

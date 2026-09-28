@@ -1,5 +1,8 @@
 server {
     listen 80;
+{% for listener in item.extra_listeners | default([]) %}
+    listen {{ listener }};
+{% endfor %}
     server_name {{ item.server_names | join(' ') }};
 
     client_max_body_size {{ item.client_max_body_size | default(nginx_client_max_body_size) }};
