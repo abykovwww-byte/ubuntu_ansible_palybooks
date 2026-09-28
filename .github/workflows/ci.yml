@@ -17,6 +17,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  application-portal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: python -m pip install PyYAML Jinja2
+      - run: node --check roles/application_portal/files/assets/portal.js
+      - run: python scripts/check-application-portal.py
+
   obsidian:
     runs-on: ubuntu-latest
     steps:
@@ -88,3 +102,4 @@ jobs:
         run: |
           ansible-playbook -i inventories/local/hosts.yml playbooks/site.yml --syntax-check
           ansible-playbook -i inventories/local/hosts.yml playbooks/obsidian.yml --syntax-check
+          ansible-playbook -i inventories/local/hosts.yml playbooks/application-portal.yml --syntax-check

@@ -25,6 +25,8 @@
       when: ngfw_logs_enabled | default(false) | bool
     - role: nginx
       tags: [nginx]
+    - role: application_portal
+      tags: [application-portal]
     - role: obsidian
       tags: [obsidian]
       when: obsidian_enabled | default(false) | bool

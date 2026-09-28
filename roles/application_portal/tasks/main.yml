@@ -1,0 +1,58 @@
+---
+- name: Install application portal files
+  when: application_portal_enabled | bool
+  tags: [application-portal]
+  block:
+    - name: Create portal directory
+      ansible.builtin.file:
+        path: "{{ application_portal_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy self-contained portal assets
+      ansible.builtin.copy:
+        src: assets/
+        dest: "{{ application_portal_root }}/assets/"
+        owner: root
+        group: root
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Render application catalogue
+      ansible.builtin.template:
+        src: index.html.j2
+        dest: "{{ application_portal_root }}/index.html"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Render portal virtual host
+      ansible.builtin.template:
+        src: portal.conf.j2
+        dest: /etc/nginx/sites-available/application-portal.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload portal nginx
+
+    - name: Enable portal virtual host
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/application-portal.conf
+        dest: /etc/nginx/sites-enabled/application-portal.conf
+        state: link
+      notify: Reload portal nginx
+
+- name: Disable portal virtual host when requested
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/application-portal.conf
+    state: absent
+  when: not (application_portal_enabled | bool)
+  notify: Reload portal nginx
+  tags: [application-portal]
+
+- name: Validate complete Nginx configuration before reload
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  tags: [application-portal]

@@ -434,6 +434,8 @@ nginx_apps:
     enabled: true
     server_names:
       - "{{ task_reminder_domain }}"
+    extra_listeners:
+      - "192.168.1.88:{{ task_reminder_host_port }}"
     upstream_host: "127.0.0.1"
     upstream_port: "{{ task_reminder_host_port }}"
     websocket: false
@@ -441,6 +443,8 @@ nginx_apps:
     enabled: "{{ hermes_enabled }}"
     server_names:
       - "{{ hermes_dashboard_domain }}"
+    extra_listeners:
+      - "192.168.1.88:{{ hermes_dashboard_host_port }}"
     upstream_host: "127.0.0.1"
     upstream_port: "{{ hermes_dashboard_host_port }}"
     websocket: true
@@ -482,6 +486,8 @@ nginx_apps:
     enabled: "{{ tovar_ai_enabled }}"
     server_names:
       - "{{ tovar_ai_domain }}"
+    extra_listeners:
+      - "192.168.1.88:{{ tovar_ai_host_port }}"
     upstream_host: "{{ tovar_ai_bind_host }}"
     upstream_port: "{{ tovar_ai_host_port }}"
     proxy_read_timeout: 360s

@@ -1,0 +1,6 @@
+---
+application_portal_enabled: false
+application_portal_host: "192.168.1.88"
+application_portal_root: /var/www/application-portal
+application_portal_title: abykovserv
+application_portal_apps: []

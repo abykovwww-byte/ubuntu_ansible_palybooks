@@ -1,0 +1,9 @@
+---
+- name: Publish the application portal and existing application entry points
+  hosts: server
+  become: true
+  roles:
+    - role: nginx
+      tags: [nginx]
+    - role: application_portal
+      tags: [application-portal]
