@@ -45,12 +45,12 @@ def main():
         proxy = env.from_string((ROOT / 'roles/nginx/templates/reverse_proxy.conf.j2').read_text())
         common = dict(nginx_client_max_body_size='64m', nginx_proxy_read_timeout='60s')
         # Synthetic fixture values only. Existing templates own both domain and LAN auth.
-        hermes = proxy.render(**common, item=dict(name='fixture', server_names=['hermes.fixture'],
+        protected = proxy.render(**common, item=dict(name='fixture', server_names=['auth.fixture'],
             extra_listeners=['0.0.0.0:19119'], upstream_host='127.0.0.1', upstream_port=19000,
             basic_auth=dict(enabled=True, realm='Fixture')))
         tovar = proxy.render(**common, item=dict(name='public-fixture', server_names=['tovar.fixture'],
             extra_listeners=['0.0.0.0:13101'], upstream_host='127.0.0.1', upstream_port=19000))
-        config = 'events {}\nhttp { include /etc/nginx/mime.types;\n' + portal + hermes + tovar
+        config = 'events {}\nhttp { include /etc/nginx/mime.types;\n' + portal + protected + tovar
         config += '\nserver { listen 127.0.0.1:19000; location / { return 200 "upstream fixture"; } }\n}\n'
         (stage / 'nginx.conf').write_text(config, encoding='utf-8')
         hashed = base64.b64encode(hashlib.sha1(b'fixture').digest()).decode()
@@ -81,9 +81,9 @@ def main():
                 assert request(ports[80], f'/assets/{app["id"]}.svg')[0] == 200
             assert request(ports[80], '/missing')[0] == 404
             # Domain access and the additional LAN listener must BOTH require auth.
-            assert request(ports[80], host='hermes.fixture')[0] == 401
+            assert request(ports[80], host='auth.fixture')[0] == 401
             assert request(ports[19119])[0] == 401
-            assert request(ports[80], host='hermes.fixture', auth=True)[:2] == (200, 'upstream fixture')
+            assert request(ports[80], host='auth.fixture', auth=True)[:2] == (200, 'upstream fixture')
             assert request(ports[19119], auth=True)[:2] == (200, 'upstream fixture')
             assert request(ports[80], host='tovar.fixture')[:2] == (200, 'upstream fixture')
             assert request(ports[13101])[:2] == (200, 'upstream fixture')

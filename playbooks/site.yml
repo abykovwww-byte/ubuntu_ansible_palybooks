@@ -15,6 +15,9 @@
       when: edr_agent_enabled | default(false) | bool
     - role: docker
       tags: [docker]
+    - role: retired_hermes
+      tags: [hermes-retirement]
+      when: hermes_retired | default(false) | bool
     - role: ngfw_lab
       tags: [ngfw-lab]
       when: ngfw_lab_enabled | default(false) | bool

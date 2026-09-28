@@ -1,0 +1,34 @@
+---
+- name: Find the exact retired Hermes container
+  ansible.builtin.command:
+    argv: [docker, container, ls, --all, --quiet, --filter, 'name=^/hermes$']
+  register: retired_hermes_container
+  changed_when: false
+  check_mode: false
+
+- name: Stop and remove the retired Hermes container without deleting volumes
+  ansible.builtin.command:
+    argv: [docker, container, rm, --force, hermes]
+  when: retired_hermes_container.stdout | trim | length > 0
+  changed_when: true
+
+- name: Remove the obsolete Hermes launch file
+  ansible.builtin.file:
+    path: /srv/apps/hermes/compose.yml
+    state: absent
+
+- name: Remove the retired Hermes portal illustration
+  ansible.builtin.file:
+    path: "{{ application_portal_root | default('/var/www/application-portal') }}/assets/hermes.svg"
+    state: absent
+
+- name: Remove retired Hermes nginx publication
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/nginx/sites-enabled/hermes-api.conf
+    - /etc/nginx/sites-enabled/hermes-dashboard.conf
+    - /etc/nginx/sites-available/hermes-api.conf
+    - /etc/nginx/sites-available/hermes-dashboard.conf
+  notify: Apply Hermes nginx retirement

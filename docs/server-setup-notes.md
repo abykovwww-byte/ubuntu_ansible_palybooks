@@ -353,38 +353,10 @@ If the task source repository is private, add a read-only GitHub token to `/etc/
 task_reminder_github_token: "github_pat_or_fine_grained_token_here"
 ```
 
-## Hermes Agent
+## Retired Hermes
 
-Hermes Agent is configured as a Docker Compose app:
-
-```text
-Container: hermes
-Project: /srv/apps/hermes
-Data: /srv/app-data/hermes
-Gateway API: 127.0.0.1:8642
-Dashboard: 127.0.0.1:9119
-```
-
-The service is published through Nginx:
-
-```text
-Dashboard: hermes.abykov.site -> 127.0.0.1:9119
-Gateway API: api_hermes.abykov.site -> 127.0.0.1:8642
-Gateway API alias: api-hermes.abykov.site -> 127.0.0.1:8642
-```
-
-Use `api-hermes.abykov.site` if DNS tooling rejects the underscore in `api_hermes.abykov.site`.
-
-The dashboard currently runs with Hermes `--insecure` because no dashboard auth provider is configured yet. Nginx Basic Auth is enabled on both Hermes vhosts as an outer access gate.
-
-Useful checks after apply:
-
-```bash
-docker ps --filter name=hermes
-curl -fsS http://127.0.0.1:8642/health
-sudo cat /etc/ansible/hermes-api-server-key
-sudo cat /etc/ansible/hermes-dashboard-password
-```
+Hermes is retired; use the [focused portal apply](application-portal.md).
+It removes the container and its publication while retaining `/srv/app-data/hermes`.
 
 ## OpenSearch AD Analysis
 

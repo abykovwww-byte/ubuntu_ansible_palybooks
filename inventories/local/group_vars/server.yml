@@ -102,29 +102,7 @@ task_reminder_github_tasks_url: https://raw.githubusercontent.com/abykovwww-byte
 task_reminder_github_sync_interval_seconds: 300
 task_reminder_github_token: ""
 
-hermes_enabled: true
-hermes_image: nousresearch/hermes-agent:latest
-hermes_project_dir: "{{ app_deploy_base_dir }}/hermes"
-hermes_data_dir: "{{ app_data_base_dir }}/hermes"
-hermes_log_dir: "{{ app_log_base_dir }}/hermes"
-hermes_bind_host: "127.0.0.1"
-hermes_gateway_host_port: 8642
-hermes_dashboard_host_port: 9119
-hermes_dashboard_domain: hermes.abykov.site
-hermes_api_domain: api_hermes.abykov.site
-hermes_api_alias_domain: api-hermes.abykov.site
-hermes_dashboard_enabled: true
-hermes_dashboard_insecure: true
-hermes_api_server_enabled: true
-hermes_api_server_key: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-api-server-key length=48 chars=ascii_letters,digits') }}"
-hermes_basic_auth_user: hermes
-hermes_basic_auth_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-dashboard-password length=24 chars=ascii_letters,digits') }}"
-hermes_basic_auth_salt: "{{ lookup('ansible.builtin.password', '/etc/ansible/hermes-dashboard-salt length=16 chars=ascii_letters,digits') }}"
-hermes_basic_auth_password_hash: "{{ lookup('ansible.builtin.pipe', 'openssl passwd -apr1 -salt ' ~ hermes_basic_auth_salt ~ ' ' ~ hermes_basic_auth_password) }}"
-hermes_api_server_cors_origins: "*"
-hermes_skip_config_migration: false
-hermes_memory_limit: 4G
-hermes_cpu_limit: "2.0"
+hermes_retired: true
 
 opensearch_ad_enabled: true
 opensearch_ad_version: "3.7.0"
@@ -326,15 +304,6 @@ docker_apps:
       - "{{ task_reminder_project_dir }}"
       - "{{ task_reminder_data_dir }}"
       - "{{ task_reminder_log_dir }}"
-  - name: hermes
-    enabled: "{{ hermes_enabled }}"
-    project_dir: "{{ hermes_project_dir }}"
-    compose_template: hermes.compose.yml.j2
-    compose_up: true
-    managed_directories:
-      - "{{ hermes_project_dir }}"
-      - "{{ hermes_data_dir }}"
-      - "{{ hermes_log_dir }}"
   - name: opensearch-ad
     enabled: "{{ opensearch_ad_enabled }}"
     project_dir: "{{ opensearch_ad_project_dir }}"
@@ -439,35 +408,6 @@ nginx_apps:
     upstream_host: "127.0.0.1"
     upstream_port: "{{ task_reminder_host_port }}"
     websocket: false
-  - name: hermes-dashboard
-    enabled: "{{ hermes_enabled }}"
-    server_names:
-      - "{{ hermes_dashboard_domain }}"
-    extra_listeners:
-      - "192.168.1.88:{{ hermes_dashboard_host_port }}"
-    upstream_host: "127.0.0.1"
-    upstream_port: "{{ hermes_dashboard_host_port }}"
-    websocket: true
-    proxy_read_timeout: 300s
-    basic_auth:
-      enabled: true
-      realm: Hermes
-      user: "{{ hermes_basic_auth_user }}"
-      password_hash: "{{ hermes_basic_auth_password_hash }}"
-  - name: hermes-api
-    enabled: "{{ hermes_enabled }}"
-    server_names:
-      - "{{ hermes_api_domain }}"
-      - "{{ hermes_api_alias_domain }}"
-    upstream_host: "127.0.0.1"
-    upstream_port: "{{ hermes_gateway_host_port }}"
-    websocket: true
-    proxy_read_timeout: 300s
-    basic_auth:
-      enabled: true
-      realm: Hermes API
-      user: "{{ hermes_basic_auth_user }}"
-      password_hash: "{{ hermes_basic_auth_password_hash }}"
   - name: opensearch-ad-dashboards
     enabled: "{{ opensearch_ad_enabled }}"
     server_names:

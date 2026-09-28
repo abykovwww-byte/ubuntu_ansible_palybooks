@@ -37,15 +37,6 @@ application_portal_apps:
     url: "http://{{ application_portal_host }}:{{ awareness_showroom_host_port }}/"
     address: ":{{ awareness_showroom_host_port }}"
     hint: Практика и обучение
-  - id: hermes
-    name: Hermes
-    subtitle: Панель AI-агента
-    category: ai
-    category_label: AI и сценарии
-    description: "Рабочее пространство AI-агента: диалоги, инструменты и выполнение задач."
-    url: "http://{{ application_portal_host }}:{{ hermes_dashboard_host_port }}/"
-    address: ":{{ hermes_dashboard_host_port }}"
-    hint: Вход по паролю
   - id: ngfw
     name: PT NGFW
     subtitle: Лаборатория
