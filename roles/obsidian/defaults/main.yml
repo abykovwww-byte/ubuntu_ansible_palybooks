@@ -9,8 +9,9 @@ obsidian_group: abykov
 obsidian_uid: 1000
 obsidian_gid: 1000
 obsidian_image: lscr.io/linuxserver/obsidian@sha256:0ae1b2ffe772a0b4b2107f24e3462d22fa6067706d5b2f8a7cde964f855db863
-obsidian_http_port: 3200
-obsidian_https_port: 443
+obsidian_lan_bind_host: 192.168.1.88
+obsidian_tailscale_bind_host: 100.117.52.16
+obsidian_browser_port: 3201
 obsidian_login: abykov
 obsidian_password_file: /etc/ansible/obsidian-password
 obsidian_memory_limit: 4g

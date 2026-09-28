@@ -6,15 +6,18 @@ The `obsidian` role is enabled in the local inventory. It is included in `site.y
 
 ## Access and data
 
-- Browser: `https://abykovserv.tailc799e4.ts.net/` from an authenticated Tailscale device.
-- Obsidian login: `abykov`, with a separate generated password; no inherited Tailscale application identity.
+- LAN browser: `https://192.168.1.88:3201/`.
+- Tailscale browser: `https://100.117.52.16:3201/` from a connected Tailscale device.
+- Both addresses open the same application and Work vault using the container's native HTTPS listener. No domain, reverse proxy or Tailscale Serve activation is required.
+- Both use the container's self-signed certificate. The browser asks the user to accept it on first use; agents must not bypass that browser warning.
+- Obsidian login: `abykov`, with one separate generated password shared by both addresses; no inherited Tailscale application identity.
 - Password file, operator-only: `/etc/ansible/obsidian-password`. Retrieve locally with `sudo cat /etc/ansible/obsidian-password`; do not copy it to Git or agent logs.
-- Only localhost port 3200 is exposed by Docker. Tailscale Serve provides private HTTPS, never Funnel.
+- Docker binds container HTTPS port 3001 only to the two configured IPv4 addresses at port 3201. HTTP is not published. Configure `obsidian_lan_bind_host`, `obsidian_tailscale_bind_host` and `obsidian_browser_port`; the role checks that both IPs belong to the host. Neither listener binds all interfaces. No Funnel is configured.
 - App: `/srv/apps/obsidian`; vault: `/srv/app-data/obsidian/vaults/Work`; settings: `/srv/app-data/obsidian/config`.
 - No GPU, Docker socket, privileged mode or broad host mounts. Container terminal/sudo/remote command UI is disabled. The authenticated user can edit vault content and install extensions, so only the intended user should have the password.
 - User decision on 2026-09-28: **no backups yet**. The file adapter keeps only audit hashes, not prior contents; content restoration is not provided.
 
-If Serve needs HTTPS activation, enable it using the official consent URL shown by the service, then restart `obsidian-serve`. Do not substitute public exposure. The initial application registry opens `/vault/Work`; existing settings and notes are never replaced by Ansible.
+The role stops, disables and removes the obsolete `obsidian-serve` systemd unit on upgrade. The initial application registry opens `/vault/Work`; existing settings and notes are never replaced by Ansible.
 
 ## LLM file workflow
 
@@ -26,8 +29,8 @@ The installed adapter uses host `python3-yaml`; the client wrapper uses only Pyt
 
 ## Acceptance and operations
 
-Check `docker compose ps` in `/srv/apps/obsidian`, no-auth HTTPS → 401, normal login, visible Russian note/link/attachment, adapter read-back, and persistence after a container restart. Run the adapter/import unit suite; Linux CI covers symlink rejection. Verify repeating an import creates no extra IDs and does not erase manual notes.
+Check `docker compose ps` in `/srv/apps/obsidian`, no-auth HTTPS → 401 on both IP addresses, normal login, and that both addresses display the same Russian note/link/attachment. Both use the documented self-signed certificate and require user acceptance in the browser. Confirm that HTTP has no published host port and the legacy `obsidian-serve` unit is removed. Check adapter read-back and persistence after a container restart. Run the adapter/import unit suite; Linux CI covers symlink rejection. Verify repeating an import creates no extra IDs and does not erase manual notes.
 
-To stop the HTTPS route: `sudo systemctl stop obsidian-serve`. To stop the application: `docker compose stop` in its project directory. Service rollback changes the image pin in IaC and reapplies; it must not replace or delete user data. No automatic full-vault rollback exists while backups are disabled.
+To stop the application and both entry points: `docker compose stop` in its project directory. Service rollback changes the image pin in IaC and reapplies; it must not replace or delete user data. No automatic full-vault rollback exists while backups are disabled.
 
-Sources: [LinuxServer Obsidian](https://docs.linuxserver.io/images/docker-obsidian/), [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve), [Bases](https://help.obsidian.md/bases).
+Sources: [LinuxServer Obsidian](https://docs.linuxserver.io/images/docker-obsidian/), [Bases](https://help.obsidian.md/bases).
