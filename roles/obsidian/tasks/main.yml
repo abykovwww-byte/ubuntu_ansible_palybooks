@@ -6,50 +6,36 @@
       - obsidian_vault_dir.startswith(obsidian_data_dir ~ '/')
       - obsidian_operations_dir.startswith(obsidian_data_dir ~ '/')
       - obsidian_login is match('^[A-Za-z0-9_.-]+$')
-      - obsidian_https_port | int > 0
       - obsidian_lan_bind_host in ansible_all_ipv4_addresses
+      - obsidian_tailscale_bind_host in ansible_all_ipv4_addresses
       - obsidian_lan_bind_host not in ['0.0.0.0', '127.0.0.1']
-      - obsidian_lan_https_port | int > 0
-      - obsidian_lan_https_port | int <= 65535
+      - obsidian_tailscale_bind_host not in ['0.0.0.0', '127.0.0.1']
+      - obsidian_lan_bind_host != obsidian_tailscale_bind_host
+      - obsidian_browser_port | int > 0
+      - obsidian_browser_port | int <= 65535
 
-- name: Read private network status
-  ansible.builtin.command: tailscale status --json
-  register: obsidian_tailnet_status
-  changed_when: false
-  no_log: true
+- name: Discover legacy Obsidian Serve unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/obsidian-serve.service
+  register: obsidian_legacy_unit_file
 
-- name: Parse private network status
-  ansible.builtin.set_fact:
-    obsidian_tailnet: "{{ obsidian_tailnet_status.stdout | from_json }}"
-  no_log: true
+- name: Stop and disable the obsolete Obsidian Serve entry
+  ansible.builtin.systemd:
+    name: obsidian-serve.service
+    state: stopped
+    enabled: false
+  when: obsidian_legacy_unit_file.stat.exists
 
-- name: Require a logged in Tailscale node
-  ansible.builtin.assert:
-    that:
-      - obsidian_tailnet.BackendState == 'Running'
-      - obsidian_tailnet.Self.DNSName | length > 0
-    fail_msg: Configure Tailscale before deploying the private HTTPS entry.
+- name: Remove the obsolete Obsidian Serve unit
+  ansible.builtin.file:
+    path: /etc/systemd/system/obsidian-serve.service
+    state: absent
+  register: obsidian_legacy_unit
 
-- name: Inspect existing Serve routes
-  ansible.builtin.command: tailscale serve status --json
-  register: obsidian_serve_status
-  changed_when: false
-
-- name: Refuse to replace another HTTPS route
-  vars:
-    serve_config: "{{ obsidian_serve_status.stdout | from_json }}"
-    serve_endpoint: "{{ obsidian_tailnet.Self.DNSName | regex_replace('\\.$', '') }}:{{ obsidian_https_port }}"
-    desired_handler:
-      /:
-        Proxy: "http://127.0.0.1:{{ obsidian_http_port }}"
-  ansible.builtin.assert:
-    that:
-      - >-
-        not (serve_config.TCP | default({})).get(obsidian_https_port | string)
-        or ((serve_config.TCP | default({})).get(obsidian_https_port | string) == {'HTTPS': true}
-            and (serve_config.Web | default({})).get(serve_endpoint, {}).get('Handlers') == desired_handler)
-      - not (serve_config.AllowFunnel | default({})).get(serve_endpoint, false)
-    fail_msg: The selected Tailscale HTTPS port already belongs to another service.
+- name: Reload systemd after removing the obsolete unit
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: obsidian_legacy_unit.changed
 
 - name: Install Obsidian host dependencies
   ansible.builtin.apt:
@@ -163,26 +149,9 @@
   register: obsidian_up
   changed_when: "'Started' in obsidian_up.stderr or 'Created' in obsidian_up.stderr or 'Recreated' in obsidian_up.stderr"
 
-- name: Install private HTTPS entry unit
-  ansible.builtin.template:
-    src: obsidian-serve.service.j2
-    dest: /etc/systemd/system/obsidian-serve.service
-    owner: root
-    group: root
-    mode: "0644"
-  register: obsidian_serve_unit
-
-- name: Report local Obsidian address
+- name: Report Obsidian IP addresses
   ansible.builtin.debug:
-    msg: "https://{{ obsidian_lan_bind_host }}:{{ obsidian_lan_https_port }}/ (container self-signed certificate; same Obsidian login/password)"
-
-- name: Start private HTTPS entry
-  ansible.builtin.systemd:
-    name: obsidian-serve
-    daemon_reload: true
-    enabled: true
-    state: "{{ 'restarted' if obsidian_serve_unit.changed else 'started' }}"
-
-- name: Report private Obsidian address
-  ansible.builtin.debug:
-    msg: "https://{{ obsidian_tailnet.Self.DNSName | regex_replace('\\.$', '') }}{{ '' if obsidian_https_port | int == 443 else ':' ~ obsidian_https_port | string }}/"
+    msg:
+      - "https://{{ obsidian_lan_bind_host }}:{{ obsidian_browser_port }}/"
+      - "https://{{ obsidian_tailscale_bind_host }}:{{ obsidian_browser_port }}/"
+      - "Both use the same Work vault, login/password and container self-signed certificate."
