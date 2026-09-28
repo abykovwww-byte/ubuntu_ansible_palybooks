@@ -1,0 +1,17 @@
+---
+obsidian_enabled: false
+obsidian_project_dir: /srv/apps/obsidian
+obsidian_data_dir: /srv/app-data/obsidian
+obsidian_vault_dir: "{{ obsidian_data_dir }}/vaults/Work"
+obsidian_operations_dir: "{{ obsidian_data_dir }}/operations"
+obsidian_owner: abykov
+obsidian_group: abykov
+obsidian_uid: 1000
+obsidian_gid: 1000
+obsidian_image: lscr.io/linuxserver/obsidian@sha256:0ae1b2ffe772a0b4b2107f24e3462d22fa6067706d5b2f8a7cde964f855db863
+obsidian_http_port: 3200
+obsidian_https_port: 443
+obsidian_login: abykov
+obsidian_password_file: /etc/ansible/obsidian-password
+obsidian_memory_limit: 4g
+obsidian_cpu_limit: "2.0"

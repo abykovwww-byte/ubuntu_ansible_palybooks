@@ -25,6 +25,9 @@
       when: ngfw_logs_enabled | default(false) | bool
     - role: nginx
       tags: [nginx]
+    - role: obsidian
+      tags: [obsidian]
+      when: obsidian_enabled | default(false) | bool
     - role: coolify
       tags: [coolify]
       when: coolify_enabled | bool

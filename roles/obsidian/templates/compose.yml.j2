@@ -1,0 +1,37 @@
+services:
+  obsidian:
+    image: "{{ obsidian_image }}"
+    container_name: obsidian
+    environment:
+      PUID: "{{ obsidian_uid }}"
+      PGID: "{{ obsidian_gid }}"
+      TZ: Europe/Moscow
+      LC_ALL: ru_RU.UTF-8
+      TITLE: Work — Obsidian
+      CUSTOM_USER: "{{ obsidian_login }}"
+      FILE__PASSWORD: /run/secrets/obsidian_password
+      HARDEN_DESKTOP: "true"
+      DISABLE_SUDO: "true"
+      DISABLE_TERMINALS: "true"
+      SELKIES_COMMAND_ENABLED: "false"
+    volumes:
+      - "{{ obsidian_data_dir }}/config:/config"
+      - "{{ obsidian_vault_dir }}:/vault/Work"
+      - "{{ obsidian_data_dir }}/secrets/password:/run/secrets/obsidian_password:ro"
+    ports:
+      - "127.0.0.1:{{ obsidian_http_port }}:3000"
+    shm_size: 1gb
+    mem_limit: "{{ obsidian_memory_limit }}"
+    cpus: "{{ obsidian_cpu_limit }}"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: [CMD-SHELL, 'test "$$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/)" = 401']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
