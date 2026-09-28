@@ -47,6 +47,8 @@ ngfw_lab_policy_listener_ranges: [[10000, 10991], [20000, 20099]]
 ngfw_logs_enabled: true
 ngfw_logs_start: true
 
+obsidian_enabled: true
+
 tailscale_enabled: true
 tailscale_hostname: abykovserv
 tailscale_node_ip: "100.117.52.16"

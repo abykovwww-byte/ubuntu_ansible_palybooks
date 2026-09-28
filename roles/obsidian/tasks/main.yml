@@ -1,0 +1,180 @@
+---
+- name: Validate Obsidian deployment parameters
+  ansible.builtin.assert:
+    that:
+      - obsidian_image is match('^lscr.io/linuxserver/obsidian@sha256:[0-9a-f]{64}$')
+      - obsidian_vault_dir.startswith(obsidian_data_dir ~ '/')
+      - obsidian_operations_dir.startswith(obsidian_data_dir ~ '/')
+      - obsidian_login is match('^[A-Za-z0-9_.-]+$')
+      - obsidian_https_port | int > 0
+
+- name: Read private network status
+  ansible.builtin.command: tailscale status --json
+  register: obsidian_tailnet_status
+  changed_when: false
+  no_log: true
+
+- name: Parse private network status
+  ansible.builtin.set_fact:
+    obsidian_tailnet: "{{ obsidian_tailnet_status.stdout | from_json }}"
+  no_log: true
+
+- name: Require a logged in Tailscale node
+  ansible.builtin.assert:
+    that:
+      - obsidian_tailnet.BackendState == 'Running'
+      - obsidian_tailnet.Self.DNSName | length > 0
+    fail_msg: Configure Tailscale before deploying the private HTTPS entry.
+
+- name: Inspect existing Serve routes
+  ansible.builtin.command: tailscale serve status --json
+  register: obsidian_serve_status
+  changed_when: false
+
+- name: Refuse to replace another HTTPS route
+  vars:
+    serve_config: "{{ obsidian_serve_status.stdout | from_json }}"
+    serve_endpoint: "{{ obsidian_tailnet.Self.DNSName | regex_replace('\\.$', '') }}:{{ obsidian_https_port }}"
+    desired_handler:
+      /:
+        Proxy: "http://127.0.0.1:{{ obsidian_http_port }}"
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (serve_config.TCP | default({})).get(obsidian_https_port | string)
+        or ((serve_config.TCP | default({})).get(obsidian_https_port | string) == {'HTTPS': true}
+            and (serve_config.Web | default({})).get(serve_endpoint, {}).get('Handlers') == desired_handler)
+      - not (serve_config.AllowFunnel | default({})).get(serve_endpoint, false)
+    fail_msg: The selected Tailscale HTTPS port already belongs to another service.
+
+- name: Install Obsidian host dependencies
+  ansible.builtin.apt:
+    name: [python3-yaml]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create managed Obsidian application directory
+  ansible.builtin.file:
+    path: "{{ obsidian_project_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create private user data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ obsidian_owner }}"
+    group: "{{ obsidian_group }}"
+    mode: "0700"
+  loop:
+    - "{{ obsidian_data_dir }}"
+    - "{{ obsidian_data_dir }}/config"
+    - "{{ obsidian_data_dir }}/config/.config"
+    - "{{ obsidian_data_dir }}/config/.config/obsidian"
+    - "{{ obsidian_data_dir }}/vaults"
+    - "{{ obsidian_vault_dir }}"
+    - "{{ obsidian_vault_dir }}/.obsidian"
+    - "{{ obsidian_operations_dir }}"
+
+- name: Create protected credential directory
+  ansible.builtin.file:
+    path: "{{ obsidian_data_dir }}/secrets"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Generate a persistent server-local login password
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.password', obsidian_password_file ~ ' length=24 chars=ascii_letters,digits') }}"
+    dest: "{{ obsidian_data_dir }}/secrets/password"
+    owner: root
+    group: root
+    mode: "0400"
+  no_log: true
+  register: obsidian_password_install
+
+- name: Install the canonical vault file adapter
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../codex-skills/obsidian-workspace/scripts/vault.py"
+    dest: "{{ obsidian_project_dir }}/vault.py"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure the immutable adapter path boundary
+  ansible.builtin.copy:
+    content: "{{ {'root': obsidian_vault_dir, 'operations': obsidian_operations_dir} | to_nice_json }}"
+    dest: "{{ obsidian_project_dir }}/vault-config.json"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Seed the application vault registry once
+  ansible.builtin.copy:
+    content: '{"vaults":{"01a0e80364ea7bb2":{"path":"/vault/Work","ts":1790599808000,"open":true}}}'
+    dest: "{{ obsidian_data_dir }}/config/.config/obsidian/obsidian.json"
+    force: false
+    owner: "{{ obsidian_owner }}"
+    group: "{{ obsidian_group }}"
+    mode: "0600"
+
+- name: Seed Obsidian preferences without replacing user settings
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ obsidian_vault_dir }}/.obsidian/{{ item.name }}"
+    force: false
+    owner: "{{ obsidian_owner }}"
+    group: "{{ obsidian_group }}"
+    mode: "0600"
+  loop:
+    - name: app.json
+      content: '{"alwaysUpdateLinks":true,"attachmentFolderPath":"_attachments","newFileLocation":"folder","newFileFolderPath":"01 Входящие"}'
+    - name: core-plugins.json
+      content: '["file-explorer","global-search","switcher","graph","backlink","outgoing-link","tag-pane","properties","page-preview","daily-notes","templates","note-composer","command-palette","editor-status","bookmarks","outline","word-count","bases"]'
+    - name: templates.json
+      content: '{"folder":"99 Служебное/Шаблоны"}'
+
+- name: Render isolated Obsidian Compose project
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ obsidian_project_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Validate Obsidian Compose
+  ansible.builtin.command:
+    cmd: docker compose config --quiet
+    chdir: "{{ obsidian_project_dir }}"
+  changed_when: false
+
+- name: Converge only the Obsidian container
+  ansible.builtin.command:
+    cmd: "docker compose up -d --wait --wait-timeout 180{{ ' --force-recreate' if obsidian_password_install.changed else '' }}"
+    chdir: "{{ obsidian_project_dir }}"
+  register: obsidian_up
+  changed_when: "'Started' in obsidian_up.stderr or 'Created' in obsidian_up.stderr or 'Recreated' in obsidian_up.stderr"
+
+- name: Install private HTTPS entry unit
+  ansible.builtin.template:
+    src: obsidian-serve.service.j2
+    dest: /etc/systemd/system/obsidian-serve.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: obsidian_serve_unit
+
+- name: Start private HTTPS entry
+  ansible.builtin.systemd:
+    name: obsidian-serve
+    daemon_reload: true
+    enabled: true
+    state: "{{ 'restarted' if obsidian_serve_unit.changed else 'started' }}"
+
+- name: Report private Obsidian address
+  ansible.builtin.debug:
+    msg: "https://{{ obsidian_tailnet.Self.DNSName | regex_replace('\\.$', '') }}{{ '' if obsidian_https_port | int == 443 else ':' ~ obsidian_https_port | string }}/"

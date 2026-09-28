@@ -1,0 +1,8 @@
+---
+- name: Configure only the private Obsidian workspace
+  hosts: server
+  become: true
+  roles:
+    - role: obsidian
+      tags: [obsidian]
+      when: obsidian_enabled | default(false) | bool

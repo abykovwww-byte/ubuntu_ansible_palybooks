@@ -13,6 +13,10 @@ deterministic-training platform:
 - [Operations and repository map](docs/wiki/09-operations-and-repository.md)
 - [Checked repository work standard](docs/repository-work-standard.md)
 
+## Obsidian Work
+
+Private browser-based Obsidian, ordinary login/password, persistent Markdown and a command-driven LLM skill: [deployment and operations](docs/obsidian.md). Managed by the dedicated `obsidian` role; no backups are configured by the user's current choice.
+
 ## Repository Layout
 
 ```text
