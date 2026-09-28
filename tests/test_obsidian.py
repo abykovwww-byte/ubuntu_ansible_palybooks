@@ -128,6 +128,39 @@ class VaultTests(unittest.TestCase):
 
 
 class ImportTests(unittest.TestCase):
+    def test_editorial_page_survives_changed_tracker_and_repeated_import(self):
+        task = {'id': 'TT-9999', 'title': 'EXAMPLE-123: IDM access model',
+                'workflow': {'status': 'waiting', 'status_reason': 'Waiting for sample'},
+                'priority': {'level': 'P1'}, 'schedule': {'due_at': None},
+                'ownership': {'owner': None}, 'outcome': 'Expected completed model'}
+        narrative = '# Понятное название\n\nСодержательный контекст.\n\n## Результаты\n\nПроверка ещё не закончена.'
+        manual = '\n\nРучной комментарий пользователя.\n'
+        for marker in (importer.SOURCE_MARKER, importer.LEGACY_SOURCE_MARKER):
+            with self.subTest(marker=marker):
+                previous = importer.frontmatter({'id': 'TT-9999', 'type': 'task',
+                    'title': 'Понятное название', 'editorial_content': True,
+                    'custom_property': 'keep', 'status': 'active'})
+                previous += narrative + '\n\n' + marker + '\nOld source\n\n' + importer.MARKER + manual
+                rendered = importer.render(task, '2026-09-28', 'b' * 40, previous)
+                meta = v.metadata(Path('task.md'), rendered.encode())
+                self.assertEqual(meta['title'], 'Понятное название')
+                self.assertEqual(meta['status'], 'waiting')
+                self.assertEqual(meta['custom_property'], 'keep')
+                self.assertEqual(importer.editorial_body(rendered), narrative)
+                self.assertEqual(importer.body_without_generated(rendered), manual)
+                self.assertNotIn('Old source', rendered)
+                self.assertEqual(rendered.count('> [!info]-'), 1)
+                self.assertEqual(importer.render(task, '2026-09-28', 'b' * 40, rendered), rendered)
+
+    def test_new_page_uses_human_title_and_no_empty_sections(self):
+        task = {'id': 'TT-9999', 'title': '[EXAMPLE-123] — IDM access model',
+                'workflow': {'status': 'waiting'}, 'priority': {'level': 'unknown'},
+                'schedule': {}, 'ownership': {}}
+        rendered = importer.render(task, '2026-09-28', 'a' * 40)
+        self.assertIn('# IDM access model\n', rendered)
+        self.assertNotIn(importer.MARKER, rendered)
+        self.assertNotIn('Не заданы', rendered)
+
     def test_manual_date_properties_survive_import(self):
         from datetime import date
         import yaml
