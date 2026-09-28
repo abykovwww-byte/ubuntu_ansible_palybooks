@@ -35,11 +35,16 @@ backends to loopback. The portal links to Obsidian's existing LAN HTTPS listener
 separately in PR #180) and does not proxy it or change its access policy. No firewall,
 Tailscale, other app authentication or VM policy is changed.
 
-Hermes is retired: the `retired_hermes` role removes only its named container,
-`/srv/apps/hermes/compose.yml`, both nginx site definitions and their enabled
-links. It preserves `/srv/app-data/hermes`, logs and credential files. The
-service has no deployment definition or portal card, so later applies cannot
-recreate it, even if an obsolete `hermes_enabled` override remains.
+Hermes is retired with complete data deletion, explicitly requested on
+2026-09-28. The `retired_hermes` role removes its named container and anonymous
+volumes, `/srv/apps/hermes`, `/srv/app-data/hermes`, `/var/log/apps/hermes`,
+`/srv/backups/hermes`, the three generated `/etc/ansible/hermes-*` credential
+files, both nginx Basic Auth files, both nginx site definitions and their
+enabled links. It also removes the dedicated `hermes_default` network and
+`nousresearch/hermes-agent:latest` image without forcing removal if they are
+in use elsewhere. No global Docker prune is used. The service has no deployment
+definition or portal card, so later applies cannot recreate it, even if an
+obsolete `hermes_enabled` override remains in the shared server overrides file.
 
 ## Delivery and rollback
 
@@ -69,7 +74,7 @@ positive/negative domain and additional-listener Basic Auth cases.
 For rollback, set `application_portal_enabled: false` and remove the two
 `extra_listeners` entries in inventory, then repeat the focused apply via the
 same PR flow. The role removes only its enabled-site link; app data is untouched.
-Disabling the portal does not undo Hermes retirement.
+Disabling the portal does not undo Hermes retirement or restore deleted data.
 
 Offline preview (Python with PyYAML and Jinja2):
 

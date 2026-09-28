@@ -278,10 +278,10 @@ task_reminder_github_token: "github_pat_or_fine_grained_token_here"
 
 ## Retired Hermes
 
-Hermes is retired. Its container, Compose launch file and nginx virtual hosts
-are removed by the `retired_hermes` role. Ports 8642 and 9119 are released.
-Persistent data in `/srv/app-data/hermes` and server-private credentials are
-retained; they are not read or deleted by retirement. See
+Hermes is retired. The `retired_hermes` role removes its container, dedicated
+application/data/log/backup directories, generated credentials, nginx virtual
+hosts, unused Docker network and image. Ports 8642 and 9119 are released.
+All dedicated Hermes data is deleted as explicitly requested on 2026-09-28. See
 [the portal apply](docs/application-portal.md) for the focused deployment.
 
 ## OpenSearch AD Analysis

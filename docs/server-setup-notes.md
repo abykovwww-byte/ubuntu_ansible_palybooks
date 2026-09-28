@@ -356,7 +356,8 @@ task_reminder_github_token: "github_pat_or_fine_grained_token_here"
 ## Retired Hermes
 
 Hermes is retired; use the [focused portal apply](application-portal.md).
-It removes the container and its publication while retaining `/srv/app-data/hermes`.
+It removes the container, publication and all dedicated Hermes data and credentials,
+as explicitly requested on 2026-09-28.
 
 ## OpenSearch AD Analysis
 
