@@ -276,37 +276,13 @@ If `abykovwww-byte/task.abykov.site` is private, set a read-only token in `/etc/
 task_reminder_github_token: "github_pat_or_fine_grained_token_here"
 ```
 
-## Hermes Agent
+## Retired Hermes
 
-Hermes Agent is deployed as a Docker Compose app when `hermes_enabled: true`.
-
-```text
-Project: /srv/apps/hermes
-Data: /srv/app-data/hermes
-Gateway API: 127.0.0.1:8642
-Dashboard: 127.0.0.1:9119
-```
-
-Hermes is also published through Nginx:
-
-```text
-Dashboard: http://hermes.abykov.site
-Gateway API: http://api_hermes.abykov.site
-Gateway API alias: http://api-hermes.abykov.site
-```
-
-`api_hermes.abykov.site` is included because it was requested, but underscores are not valid in strict DNS hostnames. Prefer `api-hermes.abykov.site` if the DNS provider or browser rejects the underscore name.
-
-The dashboard currently runs with Hermes `--insecure` because no dashboard auth provider is configured yet. Nginx Basic Auth is enabled on both Hermes vhosts as an outer access gate.
-
-Generated local secret:
-
-```bash
-sudo cat /etc/ansible/hermes-api-server-key
-sudo cat /etc/ansible/hermes-dashboard-password
-```
-
-Hermes stores its config, provider keys, sessions, skills, and memory in `/srv/app-data/hermes`, mounted into the container as `/opt/data`.
+Hermes is retired. The `retired_hermes` role removes its container, dedicated
+application/data/log/backup directories, generated credentials, nginx virtual
+hosts, unused Docker network and image. Ports 8642 and 9119 are released.
+All dedicated Hermes data is deleted as explicitly requested on 2026-09-28. See
+[the portal apply](docs/application-portal.md) for the focused deployment.
 
 ## OpenSearch AD Analysis
 

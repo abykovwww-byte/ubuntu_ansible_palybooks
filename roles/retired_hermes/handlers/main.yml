@@ -1,0 +1,11 @@
+---
+- name: Validate nginx after Hermes retirement
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  listen: Apply Hermes nginx retirement
+
+- name: Reload nginx after Hermes retirement
+  ansible.builtin.service:
+    name: nginx
+    state: reloaded
+  listen: Apply Hermes nginx retirement

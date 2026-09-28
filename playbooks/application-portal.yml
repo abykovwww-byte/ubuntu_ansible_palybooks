@@ -3,6 +3,9 @@
   hosts: server
   become: true
   roles:
+    - role: retired_hermes
+      tags: [hermes-retirement]
+      when: hermes_retired | default(false) | bool
     - role: nginx
       tags: [nginx]
     - role: application_portal

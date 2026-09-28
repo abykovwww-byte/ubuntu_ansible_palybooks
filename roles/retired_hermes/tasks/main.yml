@@ -1,0 +1,70 @@
+---
+- name: Find the exact retired Hermes container
+  ansible.builtin.command:
+    argv: [docker, container, ls, --all, --quiet, --filter, 'name=^/hermes$']
+  register: retired_hermes_container
+  changed_when: false
+  check_mode: false
+
+- name: Stop and remove the retired Hermes container and anonymous volumes
+  ansible.builtin.command:
+    argv: [docker, container, rm, --force, --volumes, hermes]
+  when: retired_hermes_container.stdout | trim | length > 0
+  changed_when: true
+
+- name: Remove all dedicated Hermes application data and credentials
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /srv/apps/hermes
+    - /srv/app-data/hermes
+    - /var/log/apps/hermes
+    - /srv/backups/hermes
+    - /etc/ansible/hermes-api-server-key
+    - /etc/ansible/hermes-dashboard-password
+    - /etc/ansible/hermes-dashboard-salt
+    - /etc/nginx/.htpasswd-hermes-api
+    - /etc/nginx/.htpasswd-hermes-dashboard
+
+- name: Find the obsolete Hermes Docker network
+  ansible.builtin.command:
+    argv: [docker, network, ls, --quiet, --filter, 'name=^hermes_default$']
+  register: retired_hermes_network
+  changed_when: false
+  check_mode: false
+
+- name: Remove the unused Hermes Docker network
+  ansible.builtin.command:
+    argv: [docker, network, rm, hermes_default]
+  when: retired_hermes_network.stdout | trim | length > 0
+  changed_when: true
+
+- name: Find the obsolete Hermes image
+  ansible.builtin.command:
+    argv: [docker, image, ls, --quiet, 'nousresearch/hermes-agent:latest']
+  register: retired_hermes_image
+  changed_when: false
+  check_mode: false
+
+- name: Remove the unused Hermes image without forcing shared-image removal
+  ansible.builtin.command:
+    argv: [docker, image, rm, 'nousresearch/hermes-agent:latest']
+  when: retired_hermes_image.stdout | trim | length > 0
+  changed_when: true
+
+- name: Remove the retired Hermes portal illustration
+  ansible.builtin.file:
+    path: "{{ application_portal_root | default('/var/www/application-portal') }}/assets/hermes.svg"
+    state: absent
+
+- name: Remove retired Hermes nginx publication
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/nginx/sites-enabled/hermes-api.conf
+    - /etc/nginx/sites-enabled/hermes-dashboard.conf
+    - /etc/nginx/sites-available/hermes-api.conf
+    - /etc/nginx/sites-available/hermes-dashboard.conf
+  notify: Apply Hermes nginx retirement
