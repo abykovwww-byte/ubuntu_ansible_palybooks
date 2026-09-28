@@ -53,7 +53,7 @@ def render(task, captured_at, blob_sha, previous=''):
     if previous.startswith('---\n'):
         import yaml
         existing = yaml.safe_load(previous.split('---', 2)[1]) or {}
-    values = {**existing, 'id': task['id'], 'type': 'task', 'projects': ['[[' + project + ']]'],
+    values = {**existing, 'id': task['id'], 'type': 'task', 'title': task['title'], 'projects': ['[[' + project + ']]'],
               'project_mapping': 'proposed', 'canonical_store': 'github-task-tracker',
               'status': workflow['status'], 'status_reason': workflow.get('status_reason'),
               'priority': priority['level'], 'priority_source': priority.get('source'),
