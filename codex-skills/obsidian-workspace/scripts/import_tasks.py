@@ -9,6 +9,8 @@ import subprocess
 import sys
 
 MARKER = '## Рабочие заметки'
+SOURCE_MARKER = '## Источники'
+LEGACY_SOURCE_MARKER = '## Снимок трекера'
 
 
 def frontmatter(values):
@@ -22,6 +24,18 @@ def frontmatter(values):
 
 def body_without_generated(text):
     return text.split(MARKER, 1)[1] if MARKER in text else '\n\n'
+
+
+def editorial_body(text):
+    body = text.split('---', 2)[2].lstrip() if text.startswith('---\n') else text
+    markers = [m.start() for m in re.finditer(
+        r'^(?:' + re.escape(SOURCE_MARKER) + '|' + re.escape(LEGACY_SOURCE_MARKER)
+        + '|' + re.escape(MARKER) + r')\s*$', body, re.M)]
+    return body[:min(markers)].rstrip() if markers else body.rstrip()
+
+
+def human_title(title):
+    return re.sub(r'^(?:\[?[A-Z][A-Z0-9_]*-\d+\]?\s*[:—–-]?\s*)+', '', title).strip() or title
 
 
 def project_for(task):
@@ -53,7 +67,9 @@ def render(task, captured_at, blob_sha, previous=''):
     if previous.startswith('---\n'):
         import yaml
         existing = yaml.safe_load(previous.split('---', 2)[1]) or {}
-    values = {**existing, 'id': task['id'], 'type': 'task', 'title': task['title'], 'projects': ['[[' + project + ']]'],
+    title = existing.get('title') if existing.get('editorial_content') else None
+    title = title or human_title(task['title'])
+    values = {**existing, 'id': task['id'], 'type': 'task', 'title': title, 'projects': ['[[' + project + ']]'],
               'project_mapping': 'proposed', 'canonical_store': 'github-task-tracker',
               'status': workflow['status'], 'status_reason': workflow.get('status_reason'),
               'priority': priority['level'], 'priority_source': priority.get('source'),
@@ -68,18 +84,27 @@ def render(task, captured_at, blob_sha, previous=''):
         values.setdefault('reconciliation', 'unknown')
     criteria = task.get('acceptance_criteria') or []
     blockers = task.get('blockers') or []
-    text = frontmatter(values) + '# ' + task['title'] + '\n\n## Снимок трекера\n\n'
-    text += '**Результат:** ' + (task.get('outcome') or 'Не определён в исходной карточке.') + '\n\n'
-    text += '**Следующий шаг:** ' + (task.get('next_action') or 'Не задан.') + '\n\n'
-    text += '**Основание статуса:** ' + (workflow.get('status_reason') or 'Не указано.') + '\n\n'
-    text += '**Критерии:**\n' + ('\n'.join('- ' + str(x) for x in criteria) if criteria else '- Не заданы в источнике.') + '\n\n'
+    narrative = editorial_body(previous) if existing.get('editorial_content') else '# ' + title
+    text = frontmatter(values) + narrative + '\n\n' + SOURCE_MARKER + '\n\n'
+    source = ''
+    for label, value in [('Ожидаемый результат в реестре', task.get('outcome')),
+                         ('Следующий шаг в реестре', task.get('next_action')),
+                         ('Основание статуса', workflow.get('status_reason'))]:
+        if value:
+            source += '**' + label + ':** ' + value + '\n\n'
+    if criteria:
+        source += '**Критерии:**\n' + '\n'.join('- ' + str(x) for x in criteria) + '\n\n'
     if blockers:
-        text += '**Блокеры:**\n' + '\n'.join('- ' + b.get('description', '') for b in blockers) + '\n\n'
-    text += 'Основной реестр: [GitHub task tracker](https://github.com/abykovwww-byte/codex-task-tracker/blob/main/data/tasks.json).\n\n'
-    text += 'Снимок реестра: ' + captured_at + '. Предлагаемая группировка: [[' + project + ']].\n\n'
+        source += '**Блокеры:**\n' + '\n'.join('- ' + b.get('description', '') for b in blockers) + '\n\n'
+    source += 'Основной реестр: [GitHub task tracker](https://github.com/abykovwww-byte/codex-task-tracker/blob/main/data/tasks.json).\n\n'
+    source += 'Снимок реестра: ' + captured_at + '. Предлагаемая группировка: [[' + project + ']].\n\n'
     if jira:
-        text += 'Jira: [' + jira['key'] + '](' + jira['url'] + '). Последняя синхронизация источника: ' + str(jira.get('last_sync')) + '. Jira заново этим импортом не опрашивалась.\n\n'
-    text += MARKER + body_without_generated(previous)
+        source += '[Исходная задача](' + jira['url'] + '). Последняя синхронизация источника: ' + str(jira.get('last_sync')) + '. Jira заново этим импортом не опрашивалась.\n'
+    text += '> [!info]- Учётные сведения и исходная задача\n'
+    text += '\n'.join('> ' + line if line else '>' for line in source.strip().splitlines()) + '\n'
+    manual = body_without_generated(previous)
+    if manual.strip():
+        text += '\n' + MARKER + manual
     return text
 
 
