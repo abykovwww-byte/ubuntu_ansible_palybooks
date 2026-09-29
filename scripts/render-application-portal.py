@@ -12,8 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def render_portal(output: Path):
     context = {}
     for relative in ('roles/application_portal/defaults/main.yml',
-                     'inventories/local/group_vars/server.yml',
-                     'inventories/local/group_vars/portal.yml'):
+                     'inventories/local/group_vars/server.yml'):
         context.update(yaml.safe_load((ROOT / relative).read_text(encoding='utf-8')))
     env = Environment(undefined=StrictUndefined, autoescape=False)
 

@@ -96,6 +96,8 @@ jobs:
           cache: pip
       - name: Install Ansible
         run: python -m pip install ansible-core
+      - name: Verify effective application portal inventory
+        run: python scripts/check-application-portal-inventory.py
       - name: Install Ansible collections
         run: ansible-galaxy collection install -r collections/requirements.yml
       - name: Check playbook syntax

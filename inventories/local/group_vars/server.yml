@@ -438,3 +438,94 @@ coolify_install_dir: /opt/coolify
 coolify_domain: ""
 coolify_email: ""
 coolify_version: "latest"
+
+# Portal variables belong to the existing server inventory group.
+application_portal_enabled: true
+application_portal_apps:
+  - id: tasks
+    name: Задачи
+    subtitle: Task Reminder
+    category: work
+    category_label: Работа
+    description: Личный список дел, приоритеты и напоминания. Всё, что нужно довести до результата.
+    url: "http://{{ application_portal_host }}:{{ task_reminder_host_port }}/"
+    address: ":{{ task_reminder_host_port }}"
+    hint: Личные задачи
+  - id: tovar
+    name: tovar.ai
+    subtitle: AI-помощник
+    category: work
+    category_label: Работа
+    description: Исследуйте товары и сравнивайте предложения с помощью искусственного интеллекта.
+    url: "http://{{ application_portal_host }}:{{ tovar_ai_host_port }}/"
+    address: ":{{ tovar_ai_host_port }}"
+    hint: Поиск и сравнение
+  - id: use
+    name: USE Framework
+    subtitle: Безопасность
+    category: security
+    category_label: Безопасность
+    description: Активы, связи и недопустимые события. Исследуйте ландшафт и контекст рисков.
+    url: "http://{{ application_portal_host }}:{{ use_framework_host_port }}/"
+    address: ":{{ use_framework_host_port }}"
+    hint: Граф и реестры
+  - id: showroom
+    name: Showroom
+    subtitle: Обучение и сценарии
+    category: ai
+    category_label: AI и сценарии
+    description: Интерактивные тренировки по безопасности. Пройдите сценарий и разберите свои решения.
+    url: "http://{{ application_portal_host }}:{{ awareness_showroom_host_port }}/"
+    address: ":{{ awareness_showroom_host_port }}"
+    hint: Практика и обучение
+  - id: ngfw
+    name: PT NGFW
+    subtitle: Лаборатория
+    category: security
+    category_label: Безопасность
+    description: Управление лабораторным межсетевым экраном, сетевыми правилами и журналами.
+    url: "https://{{ application_portal_host }}:8443/"
+    address: ":8443 · HTTPS"
+    hint: Управление стендом
+  - id: obsidian
+    name: Obsidian
+    subtitle: База знаний
+    category: work
+    category_label: Работа
+    description: Заметки, проекты и решения в связанном пространстве знаний Work.
+    url: "https://{{ application_portal_host }}:3201/"
+    address: ":3201 · HTTPS"
+    hint: Вход по паролю
+  - id: beszel
+    name: Beszel
+    subtitle: Мониторинг сервера
+    category: system
+    category_label: Система
+    description: Ресурсы сервера, контейнеры и история нагрузки в одном интерфейсе.
+    url: "http://{{ application_portal_host }}:{{ beszel_host_port }}/"
+    address: ":{{ beszel_host_port }}"
+    hint: Нагрузка и ресурсы
+    notice: Вход недоступен
+    note: На проверке 28.09.2026 веб-порт не отвечал. Требуется восстановить публикацию интерфейса.
+  - id: rp
+    name: RP Stack
+    subtitle: Истории и миры
+    category: ai
+    category_label: AI и сценарии
+    description: Ролевые истории с AI, персонажами и памятью о событиях вашего мира.
+    url: "http://{{ application_portal_host }}:{{ rp_stack_light_gui_host_port }}/"
+    address: ":{{ rp_stack_light_gui_host_port }}"
+    hint: Совместные истории
+    notice: Приостановлено
+    note: На проверке 28.09.2026 приложение было остановлено. Для входа потребуется его запуск.
+  - id: opensearch
+    name: OpenSearch
+    subtitle: Аналитика AD
+    category: system
+    category_label: Система
+    description: Поиск и анализ данных Active Directory, запросы и обзорные панели.
+    url: "http://{{ opensearch_ad_dashboards_domain }}/"
+    address: "{{ opensearch_ad_dashboards_domain }}"
+    hint: Поиск и аналитика
+    notice: Приостановлено
+    note: На проверке 28.09.2026 приложение было остановлено. Для входа нужны запуск сервиса и разрешение доменного имени.

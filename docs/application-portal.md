@@ -9,10 +9,15 @@ are present in the initial HTML and also work without JavaScript.
 
 The dedicated `application_portal` role owns `/var/www/application-portal` and
 `/etc/nginx/sites-available/application-portal.conf`. The catalogue is
-`inventories/local/group_vars/portal.yml`; change names, descriptions, artwork
+the `application_portal_apps` section of `inventories/local/group_vars/server.yml`;
+change names, descriptions, artwork
 IDs, URLs and operator notes there. Status notes are explicitly dated manual
 observations, not health monitoring. Remove/update them after restoring an app.
 No credentials belong in this catalogue or its URLs.
+These variables must belong to the existing `server` inventory group. A
+standalone `group_vars/portal.yml` would target a nonexistent `portal` group and
+silently leave the role disabled. CI checks the effective Ansible inventory for
+`localhost`, in addition to the rendered HTML and nginx checks.
 
 ## Entry points
 
