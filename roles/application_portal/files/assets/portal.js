@@ -18,7 +18,8 @@
     }
     document.querySelector('#result-count').textContent = count;
     document.querySelector('#empty-state').hidden = count !== 0;
-    document.querySelector('#search-status').textContent = `Найдено приложений: ${count}`;
+    const label = categories.find(button => button.dataset.category === category).dataset.label;
+    document.querySelector('#search-status').textContent = `${label}. Найдено приложений: ${count}`;
   }
 
   for (const button of categories) {
@@ -29,8 +30,6 @@
         other.classList.toggle('active', selected);
         other.setAttribute('aria-pressed', String(selected));
       }
-      const label = button.childNodes[1].textContent.trim();
-      document.querySelector('#catalog-title').firstChild.textContent = `${label} `;
       update();
     });
   }
