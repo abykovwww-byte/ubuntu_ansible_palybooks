@@ -73,7 +73,7 @@ def main():
                     if attempt == 29:
                         raise
                     time.sleep(.2)
-            assert status == 200 and 'Все приложения.' in html
+            assert status == 200 and 'id="applications"' in html
             assert html.count('class="app-card"') == len(context['application_portal_apps'])
             assert headers['Content-Security-Policy'] and headers['X-Content-Type-Options'] == 'nosniff'
             assert request(ports[80], '/assets/portal.css')[0] == 200

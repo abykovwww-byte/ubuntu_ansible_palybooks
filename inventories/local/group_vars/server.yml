@@ -447,64 +447,57 @@ application_portal_apps:
     subtitle: Task Reminder
     category: work
     category_label: Работа
-    description: Личный список дел, приоритеты и напоминания. Всё, что нужно довести до результата.
+    description: Список дел, приоритеты и напоминания.
     url: "http://{{ application_portal_host }}:{{ task_reminder_host_port }}/"
     address: ":{{ task_reminder_host_port }}"
-    hint: Личные задачи
   - id: tovar
     name: tovar.ai
     subtitle: AI-помощник
     category: work
     category_label: Работа
-    description: Исследуйте товары и сравнивайте предложения с помощью искусственного интеллекта.
+    description: Поиск товаров и сравнение предложений с AI.
     url: "http://{{ application_portal_host }}:{{ tovar_ai_host_port }}/"
     address: ":{{ tovar_ai_host_port }}"
-    hint: Поиск и сравнение
   - id: use
     name: USE Framework
     subtitle: Безопасность
     category: security
     category_label: Безопасность
-    description: Активы, связи и недопустимые события. Исследуйте ландшафт и контекст рисков.
+    description: Реестры активов, связи и недопустимые события.
     url: "http://{{ application_portal_host }}:{{ use_framework_host_port }}/"
     address: ":{{ use_framework_host_port }}"
-    hint: Граф и реестры
   - id: showroom
     name: Showroom
     subtitle: Обучение и сценарии
     category: ai
     category_label: AI и сценарии
-    description: Интерактивные тренировки по безопасности. Пройдите сценарий и разберите свои решения.
+    description: Учебные сценарии и тренировки по безопасности.
     url: "http://{{ application_portal_host }}:{{ awareness_showroom_host_port }}/"
     address: ":{{ awareness_showroom_host_port }}"
-    hint: Практика и обучение
   - id: ngfw
     name: PT NGFW
     subtitle: Лаборатория
     category: security
     category_label: Безопасность
-    description: Управление лабораторным межсетевым экраном, сетевыми правилами и журналами.
+    description: Управление межсетевым экраном лаборатории.
     url: "https://{{ application_portal_host }}:8443/"
     address: ":8443 · HTTPS"
-    hint: Управление стендом
   - id: obsidian
     name: Obsidian
     subtitle: База знаний
     category: work
     category_label: Работа
-    description: Заметки, проекты и решения в связанном пространстве знаний Work.
+    description: Рабочие заметки, проекты и база знаний.
     url: "https://{{ application_portal_host }}:3201/"
     address: ":3201 · HTTPS"
-    hint: Вход по паролю
   - id: beszel
     name: Beszel
     subtitle: Мониторинг сервера
     category: system
     category_label: Система
-    description: Ресурсы сервера, контейнеры и история нагрузки в одном интерфейсе.
+    description: Мониторинг сервера и контейнеров.
     url: "http://{{ application_portal_host }}:{{ beszel_host_port }}/"
     address: ":{{ beszel_host_port }}"
-    hint: Нагрузка и ресурсы
     notice: Вход недоступен
     note: На проверке 28.09.2026 веб-порт не отвечал. Требуется восстановить публикацию интерфейса.
   - id: rp
@@ -512,10 +505,9 @@ application_portal_apps:
     subtitle: Истории и миры
     category: ai
     category_label: AI и сценарии
-    description: Ролевые истории с AI, персонажами и памятью о событиях вашего мира.
+    description: Ролевые сценарии, персонажи и диалоги с AI.
     url: "http://{{ application_portal_host }}:{{ rp_stack_light_gui_host_port }}/"
     address: ":{{ rp_stack_light_gui_host_port }}"
-    hint: Совместные истории
     notice: Приостановлено
     note: На проверке 28.09.2026 приложение было остановлено. Для входа потребуется его запуск.
   - id: opensearch
@@ -523,9 +515,8 @@ application_portal_apps:
     subtitle: Аналитика AD
     category: system
     category_label: Система
-    description: Поиск и анализ данных Active Directory, запросы и обзорные панели.
+    description: Поиск и анализ данных Active Directory.
     url: "http://{{ opensearch_ad_dashboards_domain }}/"
     address: "{{ opensearch_ad_dashboards_domain }}"
-    hint: Поиск и аналитика
     notice: Приостановлено
     note: На проверке 28.09.2026 приложение было остановлено. Для входа нужны запуск сервиса и разрешение доменного имени.

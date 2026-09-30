@@ -2,15 +2,18 @@
 
 The server's default HTTP page is a small, self-contained application catalogue at
 `http://192.168.1.88/`. Nginx serves static HTML, CSS, JavaScript and local SVG
-illustrations; there is no application process, database, external font, CDN or
+icons; there is no application process, database, external font, CDN or
 Docker socket. Cards navigate in the same tab to the existing application.
-Search and category filters are optional progressive enhancements; all links
+The compact interface uses a neutral palette, a single header, category buttons
+and small service cards with descriptions and addresses. There is no hero,
+decorative artwork or sidebar. Search and category filters are optional
+progressive enhancements; all links
 are present in the initial HTML and also work without JavaScript.
 
 The dedicated `application_portal` role owns `/var/www/application-portal` and
 `/etc/nginx/sites-available/application-portal.conf`. The catalogue is
 the `application_portal_apps` section of `inventories/local/group_vars/server.yml`;
-change names, descriptions, artwork
+change names, descriptions, icon
 IDs, URLs and operator notes there. Status notes are explicitly dated manual
 observations, not health monitoring. Remove/update them after restoring an app.
 No credentials belong in this catalogue or its URLs.
