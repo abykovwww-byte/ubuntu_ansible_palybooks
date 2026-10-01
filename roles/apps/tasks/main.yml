@@ -369,6 +369,18 @@
   register: docker_app_runtime_files
   tags: [apps, runtime]
 
+- name: Ensure Docker app runtime source parent directories exist
+  ansible.builtin.file:
+    path: "{{ item.1.path | dirname }}"
+    state: directory
+    owner: "{{ item.1.owner | default(item.0.owner | default(docker_apps_default_owner)) }}"
+    group: "{{ item.1.group | default(item.0.group | default(docker_apps_default_group)) }}"
+    mode: "{{ item.0.directory_mode | default(docker_apps_default_directory_mode) }}"
+    follow: false
+  loop: "{{ docker_apps | subelements('runtime_source_files', skip_missing=True) }}"
+  when: item.0.enabled | default(true) | bool
+  tags: [apps, runtime]
+
 - name: Copy Docker app runtime source files when missing
   ansible.builtin.copy:
     src: "{{ item.1.src }}"
