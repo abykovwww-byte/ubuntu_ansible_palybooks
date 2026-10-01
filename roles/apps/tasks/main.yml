@@ -504,7 +504,7 @@
         ['docker', 'compose']
         + (
           app.compose_build_profiles | default([])
-          | map('regex_replace', '^(.*)$', '--profile=\\1')
+          | map('regex_replace', '^', '--profile=')
           | list
         )
         + ['build']
