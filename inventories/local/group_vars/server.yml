@@ -381,6 +381,9 @@ docker_apps:
     repo_version: "{{ pentestgpt_repo_version }}"
     repo_version_is_commit: true
     repo_token_required: false
+    # This is an immutable public source checkout. Reset tracked upstream files
+    # before updating so an interrupted overlay copy cannot block the next pull.
+    repo_force: true
     project_dir: "{{ pentestgpt_project_dir }}"
     owner: abykov
     group: abykov
@@ -393,10 +396,6 @@ docker_apps:
     compose_up: true
     compose_remove_orphans: true
     runtime_source_files:
-      - src: pentestgpt/.dockerignore
-        path: "{{ pentestgpt_project_dir }}/.dockerignore"
-        mode: "0644"
-        force: true
       - src: pentestgpt/Dockerfile.abykovserv
         path: "{{ pentestgpt_project_dir }}/Dockerfile.abykovserv"
         mode: "0644"
