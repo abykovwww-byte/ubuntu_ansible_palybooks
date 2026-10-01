@@ -485,6 +485,31 @@
     docker_app_changed_names: "{{ docker_app_changed_names | default([]) | unique | list }}"
   tags: [apps, compose]
 
+- name: Build changed one-shot Docker app images
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['docker', 'compose']
+        + (
+          app.compose_build_profiles | default([])
+          | map('regex_replace', '^(.*)$', '--profile=\\1')
+          | list
+        )
+        + ['build']
+      }}
+    chdir: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.compose_build | default(false) | bool
+    - app.name in (docker_app_changed_names | default([]))
+  register: docker_app_build
+  changed_when: true
+  tags: [apps, compose]
+
 - name: Check pending Showroom port handoff
   ansible.builtin.stat:
     path: "{{ awareness_showroom_data_dir | default('/srv/app-data/awareness-showroom') }}/.port-8011-handoff-pending"

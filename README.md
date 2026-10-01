@@ -23,6 +23,12 @@ Private browser-based Obsidian, ordinary login/password, persistent Markdown and
 descriptions, search and categories. See [portal deployment and operations](docs/application-portal.md)
 for the focused Ansible apply and application entry points.
 
+## PentestGPT
+
+The isolated, manually invoked PentestGPT Agent runner uses Codex CLI through a
+ChatGPT subscription, an exact target allowlist, bounded runs, and restricted
+egress. See [deployment, login, smoke test, and rollback](docs/pentestgpt.md).
+
 ## Repository Layout
 
 ```text

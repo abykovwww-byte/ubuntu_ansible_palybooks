@@ -55,6 +55,42 @@ jobs:
         shell: pwsh
         run: ./scripts/test-devkit.ps1
 
+  pentestgpt:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Compose template dependency
+        run: python -m pip install Jinja2==3.1.6
+      - name: Validate IaC and bounded launcher
+        run: |
+          python scripts/check-pentestgpt.py
+          python -m unittest tests/test_pentestgpt.py -v
+      - name: Fetch the exact upstream source
+        shell: bash
+        run: |
+          git clone --filter=blob:none https://github.com/GreyDGL/PentestGPT.git /tmp/PentestGPT
+          git -C /tmp/PentestGPT checkout --detach e8b1bb77d1ac00329675cec3b060aba971ec1ac8
+          test "$(git -C /tmp/PentestGPT rev-parse HEAD)" = "e8b1bb77d1ac00329675cec3b060aba971ec1ac8"
+          cp -a roles/apps/files/pentestgpt/. /tmp/PentestGPT/
+          python scripts/render-pentestgpt-compose.py /tmp/PentestGPT/compose.yml
+          docker compose --project-directory /tmp/PentestGPT --profile manual --profile fixture config --quiet
+      - name: Build the pinned runtime and restricted proxy
+        working-directory: /tmp/PentestGPT
+        run: |
+          docker build --file Dockerfile.abykovserv --build-arg PENTESTGPT_REVISION=e8b1bb77d1ac00329675cec3b060aba971ec1ac8 --tag pentestgpt-abykovserv:ci .
+          docker build --file Dockerfile.proxy --tag pentestgpt-egress-proxy:ci .
+      - name: Verify installed entry points
+        run: |
+          docker run --rm --entrypoint codex pentestgpt-abykovserv:ci --version
+          docker run --rm --entrypoint codex pentestgpt-abykovserv:ci login --help
+          docker run --rm --entrypoint pentestgpt-agent pentestgpt-abykovserv:ci --help
+          docker run --rm --entrypoint python pentestgpt-abykovserv:ci -c "import pentestgpt_agent, unified_agent; assert unified_agent.__version__ == '0.3.0'"
+          docker run --rm --entrypoint squid pentestgpt-egress-proxy:ci -k parse -f /etc/squid/squid.conf
+
   gateway:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
