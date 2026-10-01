@@ -70,6 +70,8 @@ $node = Resolve-Tool -Name "node" -OverrideEnvironmentVariable "CODEX_NODE" -Bun
 Push-Location $repoRoot
 try {
     Invoke-Checked "repository contracts" { & $python scripts/validate-repository.py }
+    Invoke-Checked "PentestGPT contracts" { & $python scripts/check-pentestgpt.py }
+    Invoke-Checked "PentestGPT scope guard tests" { & $python -m unittest tests/test_pentestgpt.py -v }
     if ([string]::IsNullOrWhiteSpace($env:CI)) {
         Invoke-Checked "installed Codex skill drift" {
             powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/sync-codex-skills.ps1 -Mode Check
