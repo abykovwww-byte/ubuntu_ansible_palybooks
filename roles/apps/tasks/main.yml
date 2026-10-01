@@ -486,6 +486,36 @@
     - item.item.0.name is defined
   tags: [apps, compose]
 
+- name: Inspect required one-shot Docker app images
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ item.1 }}"
+  loop: "{{ docker_apps | subelements('compose_required_images', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }}: {{ item.1 }}"
+  when: item.0.enabled | default(true) | bool
+  register: docker_app_required_image_inspect
+  changed_when: false
+  failed_when: false
+  tags: [apps, compose]
+
+- name: Mark Docker apps with missing required images for build
+  ansible.builtin.set_fact:
+    docker_app_changed_names: "{{ (docker_app_changed_names | default([])) + [item.item.0.name] }}"
+  loop: "{{ docker_app_required_image_inspect.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.0.name | default('unknown') }}"
+  when:
+    - not (item.skipped | default(false) | bool)
+    - item.rc | default(1) != 0
+    - item.item is defined
+    - item.item.0 is defined
+    - item.item.0.name is defined
+  tags: [apps, compose]
+
 - name: Mark RP Stack changed for retired training source cleanup
   ansible.builtin.set_fact:
     docker_app_changed_names: "{{ (docker_app_changed_names | default([])) + ['rp-stack'] }}"

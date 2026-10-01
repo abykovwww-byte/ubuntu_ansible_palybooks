@@ -393,6 +393,9 @@ docker_apps:
     compose_build_profiles:
       - manual
       - fixture
+    compose_required_images:
+      - "{{ pentestgpt_image }}"
+      - "{{ pentestgpt_proxy_image }}"
     compose_up: true
     compose_remove_orphans: true
     runtime_source_files:
