@@ -97,9 +97,15 @@ jobs:
           set -euo pipefail
           trap 'docker compose --file compose.yml --profile manual --profile fixture down --remove-orphans' EXIT
           sudo install -d -o 1000 -g 1000 /tmp/pentestgpt/runs /tmp/pentestgpt/workspace /tmp/pentestgpt/reports
-          docker compose --file compose.yml up -d --wait --wait-timeout 60 egress-proxy
+          docker compose --file compose.yml up -d --wait --wait-timeout 60 egress-proxy target-dns
           test "$(docker inspect pentestgpt-egress-proxy-1 --format '{{.State.Health.Status}}')" = "healthy"
+          test "$(docker inspect pentestgpt-target-dns-1 --format '{{.State.Health.Status}}')" = "healthy"
           test -z "$(docker port pentestgpt-egress-proxy-1)"
+          test -z "$(docker port pentestgpt-target-dns-1)"
+          docker compose --file compose.yml exec -T target-dns \
+            dig +short +time=2 +tries=1 @127.0.0.1 -p 5353 nubes.ru A | grep -q .
+          docker compose --file compose.yml exec -T target-dns \
+            dig +noall +comments +time=2 +tries=1 @127.0.0.1 -p 5353 example.com A | grep -Eq 'status: (NXDOMAIN|REFUSED)'
           docker compose --file compose.yml --profile manual run --rm --no-deps pentestgpt bash -ec '
             test -r /home/pentester/.codex/config.toml
             test -w /home/pentester/.codex
@@ -117,9 +123,15 @@ jobs:
           fi
           if docker compose --file compose.yml --profile manual run --rm --no-deps pentestgpt \
             curl --fail --connect-timeout 5 --max-time 8 https://example.com/; then
-            echo "proxy unexpectedly allowed a non-OpenAI destination" >&2
+            echo "proxy unexpectedly allowed an out-of-scope destination" >&2
             exit 1
           fi
+          for destination in notnubes.ru nubes.ru.example.com 127.0.0.1; do
+            status=$(docker compose --file compose.yml --profile manual run --rm --no-deps pentestgpt \
+              curl --silent --output /dev/null --write-out '%{http_connect}' --noproxy '' \
+              --connect-timeout 5 --max-time 8 "https://$destination/" || true)
+            test "$status" = 403
+          done
           test "$(docker network inspect pentestgpt_control --format '{{.Internal}}')" = "true"
           test "$(docker network inspect pentestgpt_target --format '{{.Internal}}')" = "true"
 

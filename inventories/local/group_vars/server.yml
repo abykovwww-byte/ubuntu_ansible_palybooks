@@ -298,6 +298,8 @@ pentestgpt_codex_model: gpt-5.5
 pentestgpt_codex_effort: medium
 pentestgpt_allowed_targets:
   - http://pentest-fixture:8080
+pentestgpt_allowed_target_domains:
+  - nubes.ru
 pentestgpt_max_runtime_seconds: 1800
 pentestgpt_max_decisions: 8
 pentestgpt_supervisor_max_turns: 4
@@ -424,6 +426,18 @@ docker_apps:
       - src: pentestgpt/squid.conf
         path: "{{ pentestgpt_project_dir }}/squid.conf"
         mode: "0644"
+        force: true
+      - src: pentestgpt/proxy-entrypoint.sh
+        path: "{{ pentestgpt_project_dir }}/proxy-entrypoint.sh"
+        mode: "0755"
+        force: true
+      - src: pentestgpt/dnsmasq.conf
+        path: "{{ pentestgpt_project_dir }}/dnsmasq.conf"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/dns-entrypoint.sh
+        path: "{{ pentestgpt_project_dir }}/dns-entrypoint.sh"
+        mode: "0755"
         force: true
       - src: pentestgpt/fixture/index.html
         path: "{{ pentestgpt_project_dir }}/fixture/index.html"
