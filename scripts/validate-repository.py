@@ -1380,6 +1380,84 @@ def validate_awareness_showroom_iac(errors: list[str]) -> None:
         fail(errors, "commit-pinned Docker apps require a server-side full-SHA preflight")
 
 
+def validate_deployment_bootstrap(errors: list[str]) -> None:
+    paths = {
+        "apply": ROOT / "scripts" / "apply-local.sh",
+        "requirements": ROOT / "requirements-ansible.txt",
+        "collections": ROOT / "collections" / "requirements.yml",
+        "apps": ROOT / "roles" / "apps" / "tasks" / "main.yml",
+        "defaults": ROOT / "roles" / "apps" / "defaults" / "main.yml",
+    }
+    for path in paths.values():
+        if not path.is_file():
+            fail(errors, f"missing deployment bootstrap contract: {path.relative_to(ROOT)}")
+    if any(not path.is_file() for path in paths.values()):
+        return
+
+    apply_local = paths["apply"].read_text(encoding="utf-8")
+    requirements = paths["requirements"].read_text(encoding="utf-8")
+    collections = paths["collections"].read_text(encoding="utf-8")
+    apps_tasks = paths["apps"].read_text(encoding="utf-8")
+    defaults = paths["defaults"].read_text(encoding="utf-8")
+
+    for marker in (
+        "retry git pull --ff-only",
+        "python -m pip install --requirement requirements-ansible.txt",
+        "ansible-galaxy collection install --no-cache --timeout 30",
+    ):
+        if marker not in apply_local:
+            fail(errors, f"local apply bootstrap missing resilient marker: {marker}")
+    if requirements.strip() != "ansible==14.0.0":
+        fail(errors, "local apply Ansible package must be exactly pinned")
+    for marker in ('name: ansible.posix\n    version: "2.2.0"', 'name: community.general\n    version: "13.0.1"'):
+        if marker not in collections:
+            fail(errors, f"Ansible collection requirement missing exact pin: {marker.splitlines()[0]}")
+    for marker in (
+        "docker_apps_repo_retries: 3",
+        "docker_apps_repo_retry_delay: 10",
+        "docker_apps_build_retries: 2",
+        "docker_apps_build_retry_delay: 15",
+    ):
+        if marker not in defaults:
+            fail(errors, f"apps retry defaults missing marker: {marker}")
+
+    for task_name in (
+        "Clone token-auth Docker app repositories",
+        "Clone commit-pinned token-auth Docker app repositories",
+        "Fetch token-auth Docker app repositories",
+        "Clone public Docker app repositories",
+    ):
+        task_match = re.search(
+            rf"(?ms)^- name: {re.escape(task_name)}\n(?P<body>.*?)(?=^- name:|\Z)",
+            apps_tasks,
+        )
+        if task_match is None:
+            fail(errors, f"missing resilient Git task: {task_name}")
+            continue
+        task_body = task_match.group("body")
+        for marker in ("GIT_HTTP_LOW_SPEED_LIMIT", "GIT_HTTP_LOW_SPEED_TIME", "\n  retries:", "\n  delay:", "\n  until:"):
+            if marker not in task_body:
+                fail(errors, f"{task_name} missing bounded retry marker: {marker.strip()}")
+
+    build_match = re.search(
+        r"(?ms)^- name: Build changed one-shot Docker app images\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if build_match is None:
+        fail(errors, "missing one-shot Docker image build task")
+    else:
+        for marker in ("['--file', app.compose_filename | default('compose.yml')]", "docker_apps_build_retries", "\n  until:"):
+            if marker not in build_match.group("body"):
+                fail(errors, f"one-shot Docker image build missing marker: {marker.strip()}")
+
+    start_match = re.search(
+        r"(?ms)^- name: Start changed Docker apps\n(?P<body>.*?)(?=^- name:|\Z)",
+        apps_tasks,
+    )
+    if start_match is None or "docker compose --file" not in start_match.group("body"):
+        fail(errors, "Docker app startup must use the explicitly rendered Compose file")
+
+
 def main() -> int:
     errors: list[str] = []
     validate_json(errors)
@@ -1392,6 +1470,7 @@ def main() -> int:
     validate_plugin(errors)
     validate_environment_contracts(errors)
     validate_awareness_showroom_iac(errors)
+    validate_deployment_bootstrap(errors)
     if errors:
         print("Repository validation failed:")
         for error in errors:

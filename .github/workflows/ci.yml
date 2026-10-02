@@ -77,7 +77,7 @@ jobs:
           test "$(git -C /tmp/PentestGPT rev-parse HEAD)" = "e8b1bb77d1ac00329675cec3b060aba971ec1ac8"
           cp -a roles/apps/files/pentestgpt/. /tmp/PentestGPT/
           python scripts/render-pentestgpt-compose.py /tmp/PentestGPT/compose.yml
-          docker compose --project-directory /tmp/PentestGPT --profile manual --profile fixture config --quiet
+          docker compose --project-directory /tmp/PentestGPT --file /tmp/PentestGPT/compose.yml --profile manual --profile fixture config --quiet
       - name: Build the pinned runtime and restricted proxy
         working-directory: /tmp/PentestGPT
         run: |
@@ -90,6 +90,38 @@ jobs:
           docker run --rm --entrypoint pentestgpt-agent pentestgpt-abykovserv:ci --help
           docker run --rm --entrypoint python pentestgpt-abykovserv:ci -c "import pentestgpt_agent, unified_agent; assert unified_agent.__version__ == '0.3.0'"
           docker run --rm --entrypoint squid pentestgpt-egress-proxy:ci -k parse -f /etc/squid/squid.conf
+      - name: Verify Compose runtime, mounts, health, and network isolation
+        working-directory: /tmp/PentestGPT
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker compose --file compose.yml --profile manual --profile fixture down --remove-orphans' EXIT
+          sudo install -d -o 1000 -g 1000 /tmp/pentestgpt/runs /tmp/pentestgpt/workspace /tmp/pentestgpt/reports
+          docker compose --file compose.yml up -d --wait --wait-timeout 60 egress-proxy
+          test "$(docker inspect pentestgpt-egress-proxy-1 --format '{{.State.Health.Status}}')" = "healthy"
+          test -z "$(docker port pentestgpt-egress-proxy-1)"
+          docker compose --file compose.yml --profile manual run --rm --no-deps pentestgpt bash -ec '
+            test -r /home/pentester/.codex/config.toml
+            test -w /home/pentester/.codex
+            touch /home/pentester/.codex/.write-test /runs/.write-test /workspace/.write-test /reports/.write-test
+            rm /home/pentester/.codex/.write-test /runs/.write-test /workspace/.write-test /reports/.write-test
+            codex --version
+            pentestgpt-agent --help >/dev/null
+            pentestgpt-run --help >/dev/null
+          '
+          if docker compose --file compose.yml --profile manual run --rm --no-deps pentestgpt \
+            env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+            curl --fail --connect-timeout 5 --max-time 8 https://example.com/; then
+            echo "direct runner egress unexpectedly succeeded" >&2
+            exit 1
+          fi
+          if docker compose --file compose.yml --profile manual run --rm --no-deps pentestgpt \
+            curl --fail --connect-timeout 5 --max-time 8 https://example.com/; then
+            echo "proxy unexpectedly allowed a non-OpenAI destination" >&2
+            exit 1
+          fi
+          test "$(docker network inspect pentestgpt_control --format '{{.Internal}}')" = "true"
+          test "$(docker network inspect pentestgpt_target --format '{{.Internal}}')" = "true"
 
   gateway:
     if: github.event_name != 'push'
@@ -131,11 +163,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install Ansible
-        run: python -m pip install ansible-core
+        run: python -m pip install --requirement requirements-ansible.txt
+      - name: Check local apply shell syntax
+        run: bash -n scripts/apply-local.sh
       - name: Verify effective application portal inventory
         run: python scripts/check-application-portal-inventory.py
       - name: Install Ansible collections
-        run: ansible-galaxy collection install -r collections/requirements.yml
+        run: ansible-galaxy collection install --no-cache --timeout 30 -r collections/requirements.yml
       - name: Check playbook syntax
         run: |
           ansible-playbook -i inventories/local/hosts.yml playbooks/site.yml --syntax-check
