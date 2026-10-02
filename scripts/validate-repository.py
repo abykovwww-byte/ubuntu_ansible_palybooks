@@ -1387,6 +1387,7 @@ def validate_deployment_bootstrap(errors: list[str]) -> None:
         "collections": ROOT / "collections" / "requirements.yml",
         "apps": ROOT / "roles" / "apps" / "tasks" / "main.yml",
         "defaults": ROOT / "roles" / "apps" / "defaults" / "main.yml",
+        "inventory": ROOT / "inventories" / "local" / "group_vars" / "server.yml",
     }
     for path in paths.values():
         if not path.is_file():
@@ -1399,6 +1400,7 @@ def validate_deployment_bootstrap(errors: list[str]) -> None:
     collections = paths["collections"].read_text(encoding="utf-8")
     apps_tasks = paths["apps"].read_text(encoding="utf-8")
     defaults = paths["defaults"].read_text(encoding="utf-8")
+    inventory = paths["inventory"].read_text(encoding="utf-8")
 
     for marker in (
         "retry git pull --ff-only",
@@ -1420,6 +1422,25 @@ def validate_deployment_bootstrap(errors: list[str]) -> None:
     ):
         if marker not in defaults:
             fail(errors, f"apps retry defaults missing marker: {marker}")
+
+    docker_apps_section = inventory.split("docker_apps:", 1)[-1]
+    app_blocks = re.finditer(
+        r"(?ms)^  - name: (?P<name>[^\n]+)\n(?P<body>.*?)(?=^  - name:|\Z)",
+        docker_apps_section,
+    )
+    for app_block in app_blocks:
+        app_name = app_block.group("name").strip()
+        app_body = app_block.group("body")
+        if "compose_up: true" in app_body and "\n    compose_filename:" not in app_body:
+            fail(errors, f"Docker app {app_name} must declare compose_filename explicitly")
+
+    for task_name in (
+        "Validate enabled Docker app Compose filenames",
+        "Inspect enabled Docker app Compose files",
+        "Require enabled Docker app Compose files",
+    ):
+        if f"- name: {task_name}" not in apps_tasks:
+            fail(errors, f"missing explicit Compose-file contract task: {task_name}")
 
     for task_name in (
         "Clone token-auth Docker app repositories",
@@ -1446,7 +1467,7 @@ def validate_deployment_bootstrap(errors: list[str]) -> None:
     if build_match is None:
         fail(errors, "missing one-shot Docker image build task")
     else:
-        for marker in ("['--file', app.compose_filename | default('compose.yml')]", "docker_apps_build_retries", "\n  until:"):
+        for marker in ("['--file', app.compose_filename]", "docker_apps_build_retries", "\n  until:"):
             if marker not in build_match.group("body"):
                 fail(errors, f"one-shot Docker image build missing marker: {marker.strip()}")
 

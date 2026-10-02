@@ -311,6 +311,7 @@ docker_apps:
     enabled: "{{ beszel_enabled }}"
     project_dir: "{{ beszel_project_dir }}"
     compose_template: beszel.compose.yml.j2
+    compose_filename: compose.yml
     env_template: beszel.env.j2
     env_example_template: beszel.env.example.j2
     env_mode: "0600"
@@ -325,6 +326,7 @@ docker_apps:
     source_dir: task-reminder
     project_dir: "{{ task_reminder_project_dir }}"
     compose_template: task-reminder.compose.yml.j2
+    compose_filename: compose.yml
     env_template: task-reminder.env.j2
     env_example_template: task-reminder.env.example.j2
     compose_up: true
@@ -336,6 +338,7 @@ docker_apps:
     enabled: "{{ opensearch_ad_enabled }}"
     project_dir: "{{ opensearch_ad_project_dir }}"
     compose_template: opensearch-ad.compose.yml.j2
+    compose_filename: compose.yml
     env_template: opensearch-ad.env.j2
     compose_up: true
     managed_directories:
@@ -349,6 +352,7 @@ docker_apps:
     repo_recreate_if_not_git: true
     project_dir: "{{ tovar_ai_project_dir }}"
     compose_template: tovar-ai.compose.yml.j2
+    compose_filename: compose.yml
     env_template: tovar-ai.env.j2
     env_example_template: tovar-ai.env.example.j2
     compose_up: true
@@ -363,6 +367,7 @@ docker_apps:
     repo_token_var: use_framework_github_token
     repo_recreate_if_not_git: true
     project_dir: "{{ use_framework_project_dir }}"
+    compose_filename: compose.yaml
     owner: abykov
     group: abykov
     directory_mode: "0750"
@@ -389,6 +394,7 @@ docker_apps:
     group: abykov
     directory_mode: "0750"
     compose_template: pentestgpt.compose.yml.j2
+    compose_filename: compose.yml
     compose_build: true
     compose_build_profiles:
       - manual
@@ -461,6 +467,7 @@ docker_apps:
     repo_token_required: false
     repo_normalize_ownership: true
     project_dir: "{{ awareness_showroom_project_dir }}"
+    compose_filename: compose.yml
     owner: abykov
     group: abykov
     directory_mode: "0750"
