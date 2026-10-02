@@ -120,6 +120,9 @@
       - "{{ app.repo_version | default('main') }}"
       - "{{ app.repo_url }}"
       - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+  environment:
+    GIT_HTTP_LOW_SPEED_LIMIT: "1"
+    GIT_HTTP_LOW_SPEED_TIME: "30"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app
@@ -135,6 +138,9 @@
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   no_log: true
   register: docker_app_token_clone
+  retries: "{{ app.repo_retries | default(docker_apps_repo_retries) }}"
+  delay: "{{ app.repo_retry_delay | default(docker_apps_repo_retry_delay) }}"
+  until: docker_app_token_clone.rc == 0
   tags: [apps, source, git]
 
 - name: Clone commit-pinned token-auth Docker app repositories
@@ -147,6 +153,9 @@
       - --no-checkout
       - "{{ app.repo_url }}"
       - "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+  environment:
+    GIT_HTTP_LOW_SPEED_LIMIT: "1"
+    GIT_HTTP_LOW_SPEED_TIME: "30"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app
@@ -162,6 +171,9 @@
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   no_log: true
   register: docker_app_token_commit_clone
+  retries: "{{ app.repo_retries | default(docker_apps_repo_retries) }}"
+  delay: "{{ app.repo_retry_delay | default(docker_apps_repo_retry_delay) }}"
+  until: docker_app_token_commit_clone.rc == 0
   tags: [apps, source, git]
 
 - name: Fetch token-auth Docker app repositories
@@ -177,6 +189,9 @@
       - fetch
       - origin
       - "{{ app.repo_version | default('main') }}"
+  environment:
+    GIT_HTTP_LOW_SPEED_LIMIT: "1"
+    GIT_HTTP_LOW_SPEED_TIME: "30"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app
@@ -187,6 +202,10 @@
     - app_repo_token | length > 0
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
+  register: docker_app_token_fetch
+  retries: "{{ app.repo_retries | default(docker_apps_repo_retries) }}"
+  delay: "{{ app.repo_retry_delay | default(docker_apps_repo_retry_delay) }}"
+  until: docker_app_token_fetch.rc == 0
   changed_when: false
   no_log: true
   tags: [apps, source, git]
@@ -226,6 +245,8 @@
     GIT_CONFIG_COUNT: "1"
     GIT_CONFIG_KEY_0: safe.directory
     GIT_CONFIG_VALUE_0: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
+    GIT_HTTP_LOW_SPEED_LIMIT: "1"
+    GIT_HTTP_LOW_SPEED_TIME: "30"
   loop: "{{ docker_apps }}"
   loop_control:
     loop_var: app
@@ -237,6 +258,9 @@
   vars:
     app_repo_token: "{{ lookup('vars', app.repo_token_var, default='') if app.repo_token_var is defined else '' }}"
   register: docker_app_public_repo
+  retries: "{{ app.repo_retries | default(docker_apps_repo_retries) }}"
+  delay: "{{ app.repo_retry_delay | default(docker_apps_repo_retry_delay) }}"
+  until: docker_app_public_repo is succeeded
   tags: [apps, source, git]
 
 - name: Normalize ownership for opt-in Docker app repositories
@@ -532,6 +556,7 @@
     argv: >-
       {{
         ['docker', 'compose']
+        + ['--file', app.compose_filename | default('compose.yml')]
         + (
           app.compose_build_profiles | default([])
           | map('regex_replace', '^', '--profile=')
@@ -549,6 +574,9 @@
     - app.compose_build | default(false) | bool
     - app.name in (docker_app_changed_names | default([]))
   register: docker_app_build
+  retries: "{{ app.compose_build_retries | default(docker_apps_build_retries) }}"
+  delay: "{{ app.compose_build_retry_delay | default(docker_apps_build_retry_delay) }}"
+  until: docker_app_build.rc == 0
   changed_when: true
   tags: [apps, compose]
 
@@ -695,7 +723,7 @@
 - name: Start changed Docker apps
   ansible.builtin.command:
     cmd: >-
-      docker compose up -d --build
+      docker compose --file {{ app.compose_filename | default('compose.yml') | quote }} up -d --build
       {{ '--remove-orphans' if app.compose_remove_orphans | default(false) | bool else '' }}
     chdir: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
   loop: "{{ docker_apps }}"
