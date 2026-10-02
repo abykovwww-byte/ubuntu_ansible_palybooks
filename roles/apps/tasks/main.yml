@@ -6,6 +6,23 @@
     fail_msg: "docker_apps must be a list of Docker Compose application definitions."
   tags: [apps, preflight]
 
+- name: Validate enabled Docker app Compose filenames
+  ansible.builtin.assert:
+    that:
+      - app.compose_filename is defined
+      - app.compose_filename is match('^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$')
+    fail_msg: >-
+      Enabled Docker app {{ app.name }} must declare a safe compose_filename;
+      Compose filename auto-discovery is forbidden.
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.compose_up | default(false) | bool
+  tags: [apps, preflight, compose]
+
 - name: Require credentials for private Docker app repositories
   ansible.builtin.assert:
     that:
@@ -421,7 +438,7 @@
 - name: Render Docker app compose files
   ansible.builtin.template:
     src: "{{ app.compose_template }}"
-    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/{{ app.compose_filename | default('compose.yml') }}"
+    dest: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/{{ app.compose_filename }}"
     owner: "{{ app.owner | default(docker_apps_default_owner) }}"
     group: "{{ app.group | default(docker_apps_default_group) }}"
     mode: "0644"
@@ -469,6 +486,33 @@
     - app.env_example_template is defined
   register: docker_app_env_example_templates
   tags: [apps, env]
+
+- name: Inspect enabled Docker app Compose files
+  ansible.builtin.stat:
+    path: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}/{{ app.compose_filename }}"
+  loop: "{{ docker_apps }}"
+  loop_control:
+    loop_var: app
+    label: "{{ app.name }}"
+  when:
+    - app.enabled | default(true) | bool
+    - app.compose_up | default(false) | bool
+  register: docker_app_compose_files
+  tags: [apps, preflight, compose]
+
+- name: Require enabled Docker app Compose files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: >-
+      Enabled Docker app {{ item.app.name }} is missing its declared Compose file
+      {{ item.app.compose_filename }}.
+  loop: "{{ docker_app_compose_files.results | default([]) }}"
+  loop_control:
+    label: "{{ item.app.name | default('unknown') }}"
+  when: not (item.skipped | default(false) | bool)
+  tags: [apps, preflight, compose]
 
 - name: Collect changed Docker apps from app-level tasks
   ansible.builtin.set_fact:
@@ -556,7 +600,7 @@
     argv: >-
       {{
         ['docker', 'compose']
-        + ['--file', app.compose_filename | default('compose.yml')]
+        + ['--file', app.compose_filename]
         + (
           app.compose_build_profiles | default([])
           | map('regex_replace', '^', '--profile=')
@@ -723,7 +767,7 @@
 - name: Start changed Docker apps
   ansible.builtin.command:
     cmd: >-
-      docker compose --file {{ app.compose_filename | default('compose.yml') | quote }} up -d --build
+      docker compose --file {{ app.compose_filename | quote }} up -d --build
       {{ '--remove-orphans' if app.compose_remove_orphans | default(false) | bool else '' }}
     chdir: "{{ app.project_dir | default(app_deploy_base_dir ~ '/' ~ app.name) }}"
   loop: "{{ docker_apps }}"
