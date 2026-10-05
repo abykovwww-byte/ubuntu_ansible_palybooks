@@ -292,10 +292,11 @@ pentestgpt_reports_dir: "{{ pentestgpt_data_dir }}/reports"
 pentestgpt_backup_dir: "{{ app_backup_base_dir }}/pentestgpt"
 pentestgpt_image: pentestgpt-abykovserv:e8b1bb77d1ac
 pentestgpt_proxy_image: pentestgpt-egress-proxy:e8b1bb77d1ac
-# This explicit model is known to work with the pinned UnifiedAgent/Codex
-# adapter. Revalidate before changing it; do not silently fall back to API auth.
-pentestgpt_codex_model: gpt-5.5
-pentestgpt_codex_effort: medium
+# Independent role providers; model access is verified separately after apply.
+pentestgpt_supervisor_model: gpt-6-astra
+pentestgpt_supervisor_effort: medium
+pentestgpt_executor_model: gpt-6.1-sol
+pentestgpt_executor_effort: medium
 pentestgpt_allowed_targets:
   - http://pentest-fixture:8080
 pentestgpt_allowed_target_domains:
@@ -422,6 +423,14 @@ docker_apps:
       - src: pentestgpt/scope_guard.py
         path: "{{ pentestgpt_project_dir }}/scope_guard.py"
         mode: "0755"
+        force: true
+      - src: pentestgpt/configure_role_models.py
+        path: "{{ pentestgpt_project_dir }}/configure_role_models.py"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/test_role_models.py
+        path: "{{ pentestgpt_project_dir }}/test_role_models.py"
+        mode: "0644"
         force: true
       - src: pentestgpt/squid.conf
         path: "{{ pentestgpt_project_dir }}/squid.conf"
