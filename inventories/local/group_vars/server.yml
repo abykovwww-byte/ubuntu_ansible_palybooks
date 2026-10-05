@@ -432,6 +432,14 @@ docker_apps:
         path: "{{ pentestgpt_project_dir }}/test_role_models.py"
         mode: "0644"
         force: true
+      - src: pentestgpt/configure_codex_runtime.py
+        path: "{{ pentestgpt_project_dir }}/configure_codex_runtime.py"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/test_codex_runtime.py
+        path: "{{ pentestgpt_project_dir }}/test_codex_runtime.py"
+        mode: "0644"
+        force: true
       - src: pentestgpt/squid.conf
         path: "{{ pentestgpt_project_dir }}/squid.conf"
         mode: "0644"
