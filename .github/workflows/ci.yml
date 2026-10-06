@@ -30,9 +30,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: uv sync --frozen
+      - run: uv sync --frozen --group network
       - name: Check case boundaries and real STDIO protocol with synthetic fixtures
         run: uv run --frozen pytest
+      - name: Build the isolated network qualification image
+        run: docker build -f Dockerfile.network-lab -t security-lab-network:ci .
+      - name: Qualify actual nftables and HTTPS interception in synthetic Docker networks
+        run: uv run --frozen --group network python lab/qualify_network.py --output /tmp/security-lab-receipts/network.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-lab-network-receipts
+          path: /tmp/security-lab-receipts/
 
   application-portal:
     runs-on: ubuntu-latest

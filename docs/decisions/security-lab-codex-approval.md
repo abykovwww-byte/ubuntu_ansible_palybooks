@@ -28,10 +28,12 @@ workers are enabled. Local tests demonstrate contract behavior and actual STDIO
 protocol exchange with a simulated host; they do not prove workstation/production
 credential isolation, human confirmation or target-network confinement.
 
-Per-job nftables and mitmproxy HTTP-aware enforcement remain mandatory. A URL
+Per-job nftables and mitmproxy HTTP-aware enforcement are implemented in the
+Security Lab prototype with an isolated Docker qualification job. A URL
 predicate, CONNECT ACL, disabled tool or mocked policy acknowledgement does not
 satisfy A10/A26. When the installed-client probe is complete, record its version,
-decision event and negative results; then implement and qualify the Linux job path.
+decision event and negative results. Linux fixture receipts qualify the tested
+path; protected production launcher/controller integration is a separate gate.
 
 No operator CLI or separate application chat is an acceptable substitute for the
 user's chosen interface. If elicitation is unsupported, keep execution disabled
