@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 import sys
 
+import pytest
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
@@ -17,6 +18,8 @@ def test_stdio_fixture_and_confirmation_protocol(tmp_path):
     async def run():
         elicited = []
         async def reply(context, params):
+            assert params.meta.model_dump()["codex_requires_user_input"] is True
+            assert params.requestedSchema["properties"]["confirm"]["type"] == "boolean"
             elicited.append(params.message)
             return types.ElicitResult(action="accept", content={"confirm": True})
 
@@ -54,6 +57,53 @@ def test_stdio_fixture_and_confirmation_protocol(tmp_path):
                 assert "SYNTHETIC" in resources.contents[0].text
                 forged = await session.call_tool("approve_scope", {"approved": True})
                 assert forged.isError
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("response,reason", [
+    (types.ElicitResult(action="decline"), "host_decline_without_user_receipt"),
+    (types.ElicitResult(action="cancel"), "host_cancel_without_user_receipt"),
+    (types.ElicitResult(action="accept", content={"confirm": True},
+                       _meta={"approvals_reviewer": "auto_review", "message": "DO NOT LOG THIS"}),
+     "automatic_response_blocked"),
+    (types.ElicitResult(action="decline", _meta={"approvals_reviewer": "auto_review"}),
+     "automatic_response_blocked"),
+    (types.ElicitResult(action="accept", content={"confirm": "true"}), "invalid_confirmation_content"),
+    (types.ElicitResult(action="accept", content={"confirm": True, "approved_by": "forged"}),
+     "invalid_confirmation_content"),
+    (types.ElicitResult(action="accept", content={"confirm": False}), "confirmation_not_given"),
+])
+def test_transport_responses_are_not_human_refusals_or_automatic_consent(tmp_path, response, reason):
+    async def run():
+        async def reply(context, params):
+            return response
+        params = StdioServerParameters(command=sys.executable,
+            args=[str(ROOT / "server.py"), "--data-dir", str(tmp_path), "--principal", "protocol-fixture"], cwd=str(ROOT))
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write, elicitation_callback=reply) as session:
+                await session.initialize()
+                case = await session.call_tool("create_case", {"seed": "example.com"})
+                case_id = case.structuredContent["id"]
+                import time
+                now = int(time.time())
+                body = scope_body()
+                body["expires_at"] = now + 3600
+                body["authorization"].update(valid_from=now-1, valid_until=now+7200)
+                draft = await session.call_tool("propose_scope", {"case_id": case_id, "manifest": body})
+                result = await session.call_tool("request_scope_confirmation",
+                    {"case_id": case_id, "manifest_id": draft.structuredContent["id"]})
+                assert not result.isError, result.content
+                assert result.structuredContent["status"] == "confirmation_not_approved"
+                assert result.structuredContent["reason"] == reason
+                assert result.structuredContent["manifest_status"] == "pending"
+                assert result.structuredContent["human_decision_observed"] is False
+                assert result.structuredContent["approved_by"] is None
+                report = (await session.call_tool("get_report", {"case_id": case_id})).structuredContent
+                assert report["manifests"][0]["status"] == "pending"
+                assert report["jobs"] == []
+                import json
+                assert "DO NOT LOG THIS" not in json.dumps(report)
+                assert report["audit"][-1]["event"] == "confirmation_not_approved"
     asyncio.run(run())
 
 

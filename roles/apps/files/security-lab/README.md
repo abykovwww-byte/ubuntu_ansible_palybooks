@@ -15,6 +15,8 @@ Implemented locally:
 - pause/resume that checks scope validity and preserves the recorded budget;
 - offline, explicitly synthetic discovery fixtures and escaped portable HTML;
 - actual STDIO MCP SDK protocol tests, including unsupported elicitation.
+- raw elicitation response diagnostics that preserve automatic-review provenance;
+  transport declines/cancellations do not invent a human refusal or approve a job.
 - pinned mitmproxy 12.2.3 per-job addon enforcing CONNECT/SNI/Host/HTTP2,
   method/path/exclusions, DNS pins, request budget and monotonic short leases;
 - nftables policy for dedicated gateway and worker namespaces, including IPv6,
@@ -47,6 +49,27 @@ The SDK documents that a generic MCP client can handle elicitation
 automatically. Therefore an `accept` response is meaningful only from the
 verified, trusted Codex confirmation transport; MCP support by itself does not
 prove a human clicked or replied. See the [pinned SDK context implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v1.26.0/src/mcp/server/fastmcp/server.py).
+
+The first installed-client probe (Desktop 26.930.7945.0, bundled Codex 0.160.1)
+returned `decline` in approximately 0.1 seconds. The user reported that no form
+appeared. The previous handler incorrectly stored this as `rejected`; that is
+historical transport evidence, not an observed human refusal. Human confirmation
+is still unqualified. Do not assume that changing approval mode fixes this.
+
+Confirmation protocol revision 2 uses the raw MCP session request instead of
+`Context.elicit`, which discards response `_meta` in SDK 1.26.0. It requests user
+input with `codex_requires_user_input`, requires a strict nonempty boolean form,
+and blocks any automatic-review response even if it contains `confirm=true`.
+This metadata is a routing hint, not an identity proof or a guaranteed UI fix.
+The handler records action, categorical reviewer, advertised elicitation/form
+support and elapsed milliseconds. It does not log arbitrary metadata, client
+arguments or response messages. Failed attempts consume their challenges while
+leaving the manifest pending for a fresh attempt after the integration is repaired.
+Actual user refusal can only be attributed after qualifying the host event path.
+
+`integration_status.confirmation_protocol_revision` reports the loaded revision.
+After replacing the server source, reload the MCP process before a new client
+probe. No global approval/sandbox settings need to be relaxed for diagnostics.
 
 ## Developer checks
 

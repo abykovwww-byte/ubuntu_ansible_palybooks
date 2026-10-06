@@ -213,7 +213,33 @@ class Controller:
         return {"challenge": secret, "manifest_id": manifest_id, "hash": m["hash"],
                 "kind": m["kind"], "version": m["version"], "manifest": json.loads(m["body"])}
 
-    def resolve_confirmation(self, challenge: str, session: str, accepted: bool, *, transport: str) -> dict:
+    def record_unconfirmed_response(self, challenge: str, session: str, status: str,
+                                    reason: str, diagnostics: dict) -> dict:
+        """Consume a failed attempt without inventing a human decision.
+
+        Timeouts/stops/changed manifests still need an audit outcome, so this
+        path checks ownership and session but never grants or changes a scope.
+        Only the internal transport handler calls this method.
+        """
+        if status not in {"confirmation_unavailable", "confirmation_not_approved"}:
+            raise Denied("Invalid transport outcome")
+        with self.transaction() as db:
+            h = hashlib.sha256(challenge.encode()).hexdigest()
+            r = db.execute("SELECT * FROM challenges WHERE hash=?", (h,)).fetchone()
+            if not r or r["consumed"] or r["owner"] != self.principal or r["session"] != session:
+                raise Denied("Invalid or already consumed challenge")
+            self.case(db, r["case_id"])
+            m = db.execute("SELECT * FROM manifests WHERE id=?", (r["manifest_id"],)).fetchone()
+            db.execute("UPDATE challenges SET consumed=1 WHERE hash=?", (h,))
+            self.audit(db, r["case_id"], status,
+                {"manifest_id": m["id"], "hash": m["hash"], "transport": "mcp_elicitation",
+                 "reason": reason, "diagnostics": diagnostics, "human_decision_observed": False})
+        return {"manifest_id": m["id"], "status": status, "manifest_status": m["status"],
+                "approved": False, "approved_by": None, "reason": reason,
+                "diagnostics": diagnostics, "human_decision_observed": False}
+
+    def resolve_confirmation(self, challenge: str, session: str, accepted: bool, *,
+                             transport: str, diagnostics: dict | None = None) -> dict:
         """Internal protocol callback only. Never expose accepted/transport as MCP arguments."""
         if transport != "mcp_elicitation":
             raise Denied("A trusted elicitation response is required")
@@ -243,7 +269,8 @@ class Controller:
                 state = "scope_approved" if m["kind"] == "scope" else "actions_approved"
                 db.execute("UPDATE cases SET state=? WHERE id=?", (state, c["id"]))
             self.audit(db, c["id"], "confirmation_" + status,
-                       {"manifest_id": m["id"], "hash": m["hash"], "transport": transport})
+                       {"manifest_id": m["id"], "hash": m["hash"], "transport": transport,
+                        "diagnostics": diagnostics or {}})
         return {"manifest_id": m["id"], "status": status, "approved_by": self.principal if accepted else None}
 
     def approved_scope(self, db: sqlite3.Connection, case_id: str) -> tuple[sqlite3.Row, Scope]:
@@ -317,6 +344,7 @@ class Controller:
 
     def integration_status(self) -> dict:
         return {"version": "0.1.0", "live_execution": False,
+                "confirmation_protocol_revision": 2,
                 "codex_desktop_confirmation": "requires_actual_client_probe",
                 "linux_network_enforcement": "requires_linux_lab",
                 "reason": "No live job is dispatched before the Codex and network acceptance gates pass"}

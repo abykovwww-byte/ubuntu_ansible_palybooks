@@ -39,3 +39,14 @@ No operator CLI or separate application chat is an acceptable substitute for the
 user's chosen interface. If elicitation is unsupported, keep execution disabled
 and implement a trusted Codex host user-event bridge, with separate protected
 credentials and the same immutable approval contract.
+
+The first real Desktop probe returned a rapid `decline` without displaying a
+form, as confirmed by the user. This has not qualified the host approval path.
+The SDK convenience handler lost response metadata and incorrectly labelled the
+outcome as a scope rejection. Protocol revision 2 preserves categorical source
+diagnostics and uses strict response validation. Automatic responses cannot grant
+consent; an unattributed decline/cancel leaves the manifest pending and consumes
+only the attempted challenge. The `codex_requires_user_input` routing hint does
+not constitute authenticated human evidence. Reload and repeat the installed
+client probe before claiming that a user saw or approved a form. Keep existing
+approval policies and all live execution gates in place during this diagnosis.

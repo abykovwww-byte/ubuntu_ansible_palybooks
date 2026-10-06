@@ -6,19 +6,16 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
 
+from .confirmation import classify_response, elicit_confirmation
 from .contracts import Denied
 from .controller import Controller
 from .reports import html_report
-
-
-class Confirmation(BaseModel):
-    confirm: bool = Field(description="Я подтверждаю показанные цели, ограничения и основание разрешения на тестирование")
 
 
 def build_server(directory: Path, principal: str) -> FastMCP:
@@ -83,14 +80,34 @@ def build_server(directory: Path, principal: str) -> FastMCP:
             + json.dumps(pending["manifest"], ensure_ascii=False, indent=2)
             + f"\nManifest hash: {pending['hash']}"
         )
+        client = ctx.session.client_params
+        caps = client.capabilities.elicitation if client else None
+        diagnostics = {"elicitation_advertised": caps is not None,
+                       "form_advertised": caps is not None and caps.form is not None}
+        started = time.monotonic()
         try:
-            reply = await asyncio.wait_for(ctx.elicit(message=message, schema=Confirmation), timeout=300)
+            if caps is None:
+                return c.record_unconfirmed_response(pending["challenge"], session,
+                    "confirmation_unavailable", "client_does_not_advertise_elicitation", diagnostics)
+            reply = await asyncio.wait_for(elicit_confirmation(ctx, message), timeout=300)
+        except asyncio.CancelledError:
+            diagnostics["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            c.record_unconfirmed_response(pending["challenge"], session,
+                "confirmation_unavailable", "request_cancelled", diagnostics)
+            raise
         except Exception as exc:
             # A missing host capability or protocol failure must never turn into consent.
-            return {"status": "confirmation_unavailable", "manifest_id": manifest_id,
-                    "reason": type(exc).__name__, "approved": False}
-        accepted = reply.action == "accept" and reply.data is not None and reply.data.confirm is True
-        return c.resolve_confirmation(pending["challenge"], session, accepted, transport="mcp_elicitation")
+            diagnostics["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            return c.record_unconfirmed_response(pending["challenge"], session,
+                "confirmation_unavailable", type(exc).__name__, diagnostics)
+        accepted, reason, response_diagnostics = classify_response(reply)
+        diagnostics.update(response_diagnostics)
+        diagnostics["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+        if not accepted:
+            return c.record_unconfirmed_response(pending["challenge"], session,
+                "confirmation_not_approved", reason, diagnostics)
+        return c.resolve_confirmation(pending["challenge"], session, True,
+            transport="mcp_elicitation", diagnostics=diagnostics)
 
     @server.tool(annotations=write)
     async def request_scope_confirmation(case_id: str, manifest_id: str, ctx: Context) -> dict[str, Any]:
