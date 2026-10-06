@@ -46,6 +46,7 @@ def qualify(image, output):
     worker_net, upstream_net = prefix + "-worker", prefix + "-upstream"
     gateway, worker, upstream = prefix + "-gateway", prefix + "-worker", prefix + "-upstream"
     containers, networks, receipts = [], [], []
+    completed = False
     root = Path(tempfile.mkdtemp(prefix=prefix))
     job, fixture, client = root / "job", root / "fixture", root / "client"
     for p in (job, fixture, client):
@@ -119,6 +120,8 @@ def qualify(image, output):
             wait_for(lambda: (job / "ca" / "mitmproxy-ca-cert.pem").exists())
             shutil.copyfile(job / "ca" / "mitmproxy-ca-cert.pem", client / "ca.pem")
             wait_for(lambda: "8080" in run("docker", "exec", gateway, "ss", "-ltn", check=False).stdout)
+            if worker in containers:
+                run("docker", "exec", worker, "ip", "neigh", "flush", "dev", "eth0")
 
         start_gateway()
         run("docker", "run", "-d", "--name", worker, "--network", worker_net,
@@ -208,13 +211,21 @@ def qualify(image, output):
 
         # A fresh short lease without renewal must close an existing stream.
         run("docker", "rm", "-f", gateway)
-        start_gateway(seconds=4)
+        start_gateway(seconds=8)
         time.sleep(0.12)
         start = time.monotonic()
-        result = curl("/public/stream", check=False)
+        before = len(received())
+        stream_loss = subprocess.Popen(["docker", "exec", worker, "setpriv", "--reuid=1000", "--regid=1000",
+            "--clear-groups", "--bounding-set=-all", "curl", "--silent", "--show-error", "--noproxy", "",
+            "--proxy", "http://172.30.51.2:8080", "--cacert", "/client/ca.pem", "--max-time", "15",
+            "--output", "/tmp/stream-loss", "https://fixture.example.test:8443/public/stream"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        wait_for(lambda: len(received()) == before+1, seconds=3)
+        wait_for(lambda: int(exec_worker("stat", "-c", "%s", "/tmp/stream-loss", check=False).stdout or "0") > 0,
+                 seconds=3)
+        stream_loss.communicate(timeout=12)
         elapsed = time.monotonic()-start
-        assert result.returncode != 0 and elapsed < 5
-        sets = run("docker", "exec", gateway, "nft", "list", "set", "inet", "sl_job", "worker4").stdout
+        assert stream_loss.returncode != 0 and 1 < elapsed < 10
         time.sleep(1.2)
         sets = run("docker", "exec", gateway, "nft", "list", "set", "inet", "sl_job", "worker4").stdout
         assert "172.30.51.3" not in sets
@@ -237,6 +248,7 @@ except (ssl.SSLError,ConnectionError,OSError):
         exec_worker("python", "-c", raw_probe)
         assert len(received()) == before
         receipt("connect_sni_mismatch_denied_before_upstream", upstream_new_requests=0)
+        completed = True
     finally:
         for container in reversed(containers):
             logs = run("docker", "logs", container, check=False)
@@ -248,7 +260,7 @@ except (ssl.SSLError,ConnectionError,OSError):
         if (job / "proxy.log").exists():
             shutil.copyfile(job / "proxy.log", output.with_name("proxy.log"))
         # No recursive filesystem deletion; CI runner removes its temp directory.
-        output.write_text(json.dumps({"synthetic": True, "private_lab_only": True,
+        output.write_text(json.dumps({"completed": completed, "synthetic": True, "private_lab_only": True,
                                       "receipts": receipts}, indent=2), "utf-8")
     return receipts
 
