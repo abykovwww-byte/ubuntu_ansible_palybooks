@@ -92,6 +92,36 @@ def test_confirmation_replay_and_wrong_session_denied(control):
         control.resolve_confirmation(p["challenge"], "session-1", True, transport="mcp_elicitation")
 
 
+def test_unconfirmed_transport_consumes_attempt_and_allows_fresh_challenge(control):
+    case_id = control.create_case("example.com")["id"]
+    draft = control.propose(case_id, "scope", scope_body())
+    pending = control.challenge(case_id, draft["id"], "s")
+    with pytest.raises(Denied):
+        control.record_unconfirmed_response(pending["challenge"], "other",
+            "confirmation_not_approved", "host_decline_without_user_receipt", {})
+    result = control.record_unconfirmed_response(pending["challenge"], "s",
+        "confirmation_not_approved", "host_decline_without_user_receipt", {"elapsed_ms": 100})
+    assert result["manifest_status"] == "pending"
+    with pytest.raises(Denied):
+        control.resolve_confirmation(pending["challenge"], "s", True, transport="mcp_elicitation")
+    with pytest.raises(Denied):
+        control.prepare_job(case_id, "worker", "target_http", 20)
+    fresh = control.challenge(case_id, draft["id"], "s")
+    control.resolve_confirmation(fresh["challenge"], "s", True, transport="mcp_elicitation")
+
+
+def test_timeout_after_stop_records_outcome_without_changing_manifest(control):
+    case_id = control.create_case("example.com")["id"]
+    draft = control.propose(case_id, "scope", scope_body())
+    pending = control.challenge(case_id, draft["id"], "s")
+    control.stop(case_id)
+    control.clock = lambda: NOW + 301
+    control.record_unconfirmed_response(pending["challenge"], "s",
+        "confirmation_unavailable", "TimeoutError", {})
+    assert control.get_case(case_id)["state"] == "paused"
+    assert control.get_case(case_id)["manifests"][0]["status"] == "pending"
+
+
 def test_scope_changed_while_confirmation_pending(control):
     case_id = control.create_case("example.com")["id"]
     a = control.propose(case_id, "scope", scope_body())
