@@ -190,13 +190,16 @@ def qualify(image, output):
         wait_for(lambda: "/public/stream" in {v["path"] for v in received()})
         time.sleep(0.3)
         start = time.monotonic()
-        run("docker", "exec", "-i", gateway, "nft", "-f", "-", input=revoke_job_firewall())
         revoked = Lease(job_id=policy.job_id, generation=1, scope_hash=policy.scope_hash,
                         sequence=2, valid_until=time.time()+10, revoked=True)
         temp = job / "lease.next"
         temp.write_text(revoked.model_dump_json(), "utf-8")
         temp.replace(job / "lease.json")
         stream.communicate(timeout=10)
+        # Revoke proxy first: it refuses new requests and closes transports while
+        # FIN can still pass. Then atomically remove packet permission. Doing
+        # this backwards silently drops FIN and leaves a stopped client waiting.
+        run("docker", "exec", "-i", gateway, "nft", "-f", "-", input=revoke_job_firewall())
         elapsed = time.monotonic()-start
         assert elapsed < 10 and stream.returncode != 0
         receipt("revoked_existing_https_stream_closed", seconds=round(elapsed, 3))
@@ -209,6 +212,8 @@ def qualify(image, output):
         result = curl("/public/stream", check=False)
         elapsed = time.monotonic()-start
         assert result.returncode != 0 and elapsed < 5
+        sets = run("docker", "exec", gateway, "nft", "list", "set", "inet", "sl_job", "worker4").stdout
+        time.sleep(1.2)
         sets = run("docker", "exec", gateway, "nft", "list", "set", "inet", "sl_job", "worker4").stdout
         assert "172.30.51.3" not in sets
         receipt("controller_loss_lease_expires_and_stream_closes", seconds=round(elapsed, 3))
@@ -238,6 +243,8 @@ except (ssl.SSLError,ConnectionError,OSError):
             run("docker", "rm", "-f", container, check=False)
         for network in reversed(networks):
             run("docker", "network", "rm", network, check=False)
+        if (job / "proxy.log").exists():
+            shutil.copyfile(job / "proxy.log", output.with_name("proxy.log"))
         # No recursive filesystem deletion; CI runner removes its temp directory.
         output.write_text(json.dumps({"synthetic": True, "private_lab_only": True,
                                       "receipts": receipts}, indent=2), "utf-8")

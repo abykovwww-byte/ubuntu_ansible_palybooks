@@ -62,6 +62,11 @@ class ScopeProxy:
             while True:
                 try:
                     self.refresh()
+                    # Close transports before the kernel lease expires, so a
+                    # client observes EOF as well as denied packets. No access
+                    # is extended: the proxy stops up to one second early.
+                    if self.lease.monotonic_until - self.lease.monotonic() <= 1:
+                        raise Denied("Lease approaching expiry")
                 except Exception:
                     log.warning("job_access_closed reason=lease_or_controller_loss")
                     ctx.master.shutdown()
