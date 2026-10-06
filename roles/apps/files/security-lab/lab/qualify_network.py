@@ -54,6 +54,8 @@ def qualify(image, output):
     root.chmod(0o755)
     (job / "ca").mkdir()
     run("sudo", "chown", "1000:1000", str(job / "ca"))
+    (job / "proxy.log").touch()
+    run("sudo", "chown", "0:0", str(job / "proxy.log"))
 
     def exec_worker(*args, check=True):
         return run("docker", "exec", worker, "setpriv", "--reuid=1000", "--regid=1000", "--clear-groups",
