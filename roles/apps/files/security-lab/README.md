@@ -15,6 +15,12 @@ Implemented locally:
 - pause/resume that checks scope validity and preserves the recorded budget;
 - offline, explicitly synthetic discovery fixtures and escaped portable HTML;
 - actual STDIO MCP SDK protocol tests, including unsupported elicitation.
+- pinned mitmproxy 12.2.3 per-job addon enforcing CONNECT/SNI/Host/HTTP2,
+  method/path/exclusions, DNS pins, request budget and monotonic short leases;
+- nftables policy for dedicated gateway and worker namespaces, including IPv6,
+  with no blanket established-connection exception and no embedded-DNS bypass;
+- isolated Docker network qualification with receiving-side HTTPS evidence,
+  curl positive/negative tests, active-stream revocation and lease loss.
 
 **Live collection and live jobs are disabled.** `integration_status` always
 reports this. No scanner, HTTP acquisition or external API is exposed by this
@@ -31,7 +37,7 @@ acceptance of the installed Codex Desktop or Linux network isolation.
 3. The trusted host/transport and server data must be isolated from the model's
    shell. This local developer prototype has ordinary workstation file rights;
    it **does not prove** production isolation of its database or host identity.
-4. Verify nftables gateway and mitmproxy addon in an isolated Linux job with
+4. Qualify the implemented nftables gateway and mitmproxy addon in an isolated Linux job with
    positive and negative TCP/IPv6/HTTPS tests, including revocation of an
    existing connection. They are not implemented by a Python URL predicate.
 5. Only after these gates may the next slices add live OSINT providers,
@@ -50,6 +56,20 @@ Use Python 3.12 and the tracked `uv.lock`:
 uv sync --frozen
 uv run --frozen pytest
 ```
+
+Network qualification uses a separate optional dependency group and fixture
+image. CI runs `uv sync --frozen --group network`, builds
+`Dockerfile.network-lab`, and runs `lab/qualify_network.py`. It uploads
+`network.json` receipts plus gateway logs even on failure. The lab creates only
+private synthetic networks, never contacts Internet targets and never changes
+host/Docker firewall tables. Root bootstrap capabilities exist only in the lab;
+actual HTTP requests run as uid 1000 with no effective capabilities.
+
+The production launcher is **not implemented** by this lab: protected policy
+delivery, gateway ACKs, Controller lease renewal, private DNS resolver and
+per-job runtime cleanup still require integration. The proxy currently uses
+host-provisioned DNS pins and denies any changed/extra answer. No target-network
+scanner profile or full scanner A26 acceptance is claimed.
 
 On this Windows host, use the project `.venv/Scripts/python.exe` and an approved
 unique pytest basetemp under the workspace when the sandbox blocks temp files.
