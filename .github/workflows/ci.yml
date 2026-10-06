@@ -17,6 +17,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  security-lab-control:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: roles/apps/files/security-lab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.10"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - name: Check case boundaries and real STDIO protocol with synthetic fixtures
+        run: uv run --frozen pytest
+
   application-portal:
     runs-on: ubuntu-latest
     steps:
