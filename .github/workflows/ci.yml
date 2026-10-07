@@ -37,7 +37,7 @@ jobs:
         run: docker build -f Dockerfile.network-lab -t security-lab-network:ci .
       - name: Qualify actual nftables and HTTPS interception in synthetic Docker networks
         run: uv run --frozen --group network python lab/qualify_network.py --output /tmp/security-lab-receipts/network.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: security-lab-network-receipts
