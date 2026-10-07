@@ -24,7 +24,7 @@ jobs:
         working-directory: roles/apps/files/security-lab
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           version: "0.12.10"
       - uses: actions/setup-python@v5
