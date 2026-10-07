@@ -33,8 +33,7 @@ def test_second_gate_is_distinct_and_bound_to_current_scope(control):
     action = control.propose(case_id, "actions", action_body())
     assert action["status"] == "pending"
     assert control.get_case(case_id)["state"] == "checks_review"
-    pending = control.challenge(case_id, action["id"], "action-session")
-    result = control.resolve_confirmation(pending["challenge"], "action-session", True, transport="mcp_elicitation")
+    result = control.activate_from_task(case_id, action["id"], "actions")
     assert result["status"] == "approved"
     assert control.get_case(case_id)["state"] == "actions_approved"
     # Resume may return to checks, never automatically re-execute an approved PoC.
@@ -42,7 +41,7 @@ def test_second_gate_is_distinct_and_bound_to_current_scope(control):
     assert control.resume(case_id)["state"] == "scope_approved"
 
 
-def test_old_action_confirmation_cannot_survive_new_scope(control):
+def test_old_action_task_cannot_survive_new_scope(control):
     case_id = control.create_case("example.com")["id"]
     body = scope_body()
     body["authorization"]["actions"] = ["checks", "poc"]
@@ -50,20 +49,21 @@ def test_old_action_confirmation_cannot_survive_new_scope(control):
     with control.transaction() as db:
         db.execute("UPDATE cases SET state='checks_review' WHERE id=?", (case_id,))
     action = control.propose(case_id, "actions", action_body())
-    pending = control.challenge(case_id, action["id"], "s")
     approve(control, case_id, body)
     with pytest.raises(Denied):
-        control.resolve_confirmation(pending["challenge"], "s", True, transport="mcp_elicitation")
+        control.activate_from_task(case_id, action["id"], "actions")
 
 
-def test_decline_and_expired_challenge_never_approve(control):
+def test_action_task_expiration_is_checked_again_on_activation(control):
     case_id = control.create_case("example.com")["id"]
-    scope = control.propose(case_id, "scope", scope_body())
-    pending = control.challenge(case_id, scope["id"], "s")
-    result = control.resolve_confirmation(pending["challenge"], "s", False, transport="mcp_elicitation")
-    assert result["status"] == "rejected"
-    scope = control.propose(case_id, "scope", scope_body())
-    pending = control.challenge(case_id, scope["id"], "s")
-    control.clock = lambda: NOW+301
-    with pytest.raises(Denied):
-        control.resolve_confirmation(pending["challenge"], "s", True, transport="mcp_elicitation")
+    body = scope_body()
+    body["authorization"]["actions"] = ["checks", "poc"]
+    approve(control, case_id, body)
+    with control.transaction() as db:
+        db.execute("UPDATE cases SET state='checks_review' WHERE id=?", (case_id,))
+    action = control.propose(case_id, "actions", action_body())
+    control.clock = lambda: NOW + 601
+    with pytest.raises(Denied, match="no longer authorized"):
+        control.activate_from_task(case_id, action["id"], "actions")
+    stored = next(m for m in control.get_case(case_id)["manifests"] if m["id"] == action["id"])
+    assert stored["status"] == "pending"

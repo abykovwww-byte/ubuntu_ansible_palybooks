@@ -32,9 +32,8 @@ def control(tmp_path):
 
 def approve(c, case_id, body=None):
     draft = c.propose(case_id, "scope", body or scope_body())
-    pending = c.challenge(case_id, draft["id"], "fixture-session")
-    c.resolve_confirmation(pending["challenge"], "fixture-session", True, transport="mcp_elicitation")
-    return draft, pending
+    result = c.activate_from_task(case_id, draft["id"], "scope")
+    return draft, result
 
 
 def test_fixture_preserves_provenance_and_dedup(control):
@@ -71,73 +70,71 @@ def test_scope_requires_matching_authorization():
         Scope.model_validate(body)
 
 
-def test_no_capability_without_real_approval(control):
+def test_pending_scope_cannot_issue_capability(control):
     case_id = control.create_case("example.com")["id"]
     control.propose(case_id, "scope", scope_body())
     with pytest.raises(Denied, match="approved scope"):
         control.prepare_job(case_id, "worker-1", "target_http", 20)
 
 
-def test_confirmation_replay_and_wrong_session_denied(control):
+def test_delegated_activation_replay_and_wrong_kind_denied(control):
     case_id = control.create_case("example.com")["id"]
     draft = control.propose(case_id, "scope", scope_body())
-    p = control.challenge(case_id, draft["id"], "session-1")
     with pytest.raises(Denied):
-        control.resolve_confirmation(p["challenge"], "session-2", True, transport="mcp_elicitation")
+        control.activate_from_task(case_id, draft["id"], "actions")
+    result = control.activate_from_task(case_id, draft["id"], "scope")
+    assert result["approved_by"] == "delegated:codex:fixture-operator"
+    assert result["authorization_source"] == "codex_operator_delegation"
     with pytest.raises(Denied):
-        control.resolve_confirmation(p["challenge"], "session-1", True, transport="model_claim")
-    result = control.resolve_confirmation(p["challenge"], "session-1", True, transport="mcp_elicitation")
-    assert result["approved_by"] == "fixture-operator"
-    with pytest.raises(Denied):
-        control.resolve_confirmation(p["challenge"], "session-1", True, transport="mcp_elicitation")
+        control.activate_from_task(case_id, draft["id"], "scope")
+    audit = json.loads(control.export(case_id)["audit"][-1]["details"])
+    assert audit["independent_human_receipt"] is False
 
 
-def test_unconfirmed_transport_consumes_attempt_and_allows_fresh_challenge(control):
+def test_task_activation_is_bound_to_case_and_configured_principal(control):
     case_id = control.create_case("example.com")["id"]
+    another_case = control.create_case("other.example.com")["id"]
     draft = control.propose(case_id, "scope", scope_body())
-    pending = control.challenge(case_id, draft["id"], "s")
     with pytest.raises(Denied):
-        control.record_unconfirmed_response(pending["challenge"], "other",
-            "confirmation_not_approved", "host_decline_without_user_receipt", {})
-    result = control.record_unconfirmed_response(pending["challenge"], "s",
-        "confirmation_not_approved", "host_decline_without_user_receipt", {"elapsed_ms": 100})
-    assert result["manifest_status"] == "pending"
-    with pytest.raises(Denied):
-        control.resolve_confirmation(pending["challenge"], "s", True, transport="mcp_elicitation")
-    with pytest.raises(Denied):
-        control.prepare_job(case_id, "worker", "target_http", 20)
-    fresh = control.challenge(case_id, draft["id"], "s")
-    control.resolve_confirmation(fresh["challenge"], "s", True, transport="mcp_elicitation")
-
-
-def test_timeout_after_stop_records_outcome_without_changing_manifest(control):
-    case_id = control.create_case("example.com")["id"]
-    draft = control.propose(case_id, "scope", scope_body())
-    pending = control.challenge(case_id, draft["id"], "s")
-    control.stop(case_id)
-    control.clock = lambda: NOW + 301
-    control.record_unconfirmed_response(pending["challenge"], "s",
-        "confirmation_unavailable", "TimeoutError", {})
-    assert control.get_case(case_id)["state"] == "paused"
+        control.activate_from_task(another_case, draft["id"], "scope")
+    control.principal = "another-operator"
+    with pytest.raises(Denied, match="not owned"):
+        control.activate_from_task(case_id, draft["id"], "scope")
+    control.principal = "fixture-operator"
     assert control.get_case(case_id)["manifests"][0]["status"] == "pending"
 
 
-def test_scope_changed_while_confirmation_pending(control):
+def test_scope_changed_before_task_activation(control):
     case_id = control.create_case("example.com")["id"]
-    a = control.propose(case_id, "scope", scope_body())
-    p = control.challenge(case_id, a["id"], "s")
+    old = control.propose(case_id, "scope", scope_body())
     control.propose(case_id, "scope", scope_body(targets=[{"host": "example.com", "paths": ["/public"]}]))
     with pytest.raises(Denied):
-        control.resolve_confirmation(p["challenge"], "s", True, transport="mcp_elicitation")
+        control.activate_from_task(case_id, old["id"], "scope")
 
 
-def test_stop_during_pending_confirmation(control):
+def test_stop_before_task_activation(control):
     case_id = control.create_case("example.com")["id"]
-    a = control.propose(case_id, "scope", scope_body())
-    p = control.challenge(case_id, a["id"], "s")
+    draft = control.propose(case_id, "scope", scope_body())
     control.stop(case_id)
     with pytest.raises(Denied):
-        control.resolve_confirmation(p["challenge"], "s", True, transport="mcp_elicitation")
+        control.activate_from_task(case_id, draft["id"], "scope")
+
+
+def test_expired_task_scope_denied(control):
+    case_id = control.create_case("example.com")["id"]
+    draft = control.propose(case_id, "scope", scope_body())
+    control.clock = lambda: NOW + 3601
+    with pytest.raises(Denied):
+        control.activate_from_task(case_id, draft["id"], "scope")
+
+
+def test_manifest_tampering_cannot_be_activated(control):
+    case_id = control.create_case("example.com")["id"]
+    draft = control.propose(case_id, "scope", scope_body())
+    with control.transaction() as db:
+        db.execute("UPDATE manifests SET body=? WHERE id=?", (json.dumps(scope_body(expires_at=NOW+1800)), draft["id"]))
+    with pytest.raises(Denied):
+        control.activate_from_task(case_id, draft["id"], "scope")
 
 
 def test_lease_expiry_stop_and_worker_binding(control):
