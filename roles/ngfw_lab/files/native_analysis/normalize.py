@@ -118,10 +118,17 @@ def iperf_observation(raw, kind, receipt):
             receiver, scope = server_end['sum'], 'server.end.sum'
         if not receiver and end.get('sum', {}).get('sender') is False:
             receiver, scope = end['sum'], 'client.end.sum_receiver'
-    if not receiver or receiver.get('sender') is True:
+    # iperf 3.12 TCP sum_received uses received bytes/time, while its sender
+    # flag describes the local stream role (iperf_api.c:3688-3698). Only this
+    # explicitly named TCP summary has that meaning; generic sum and UDP keep
+    # their receiver-role guards.
+    named_tcp_receiver = kind == 'tcp' and scope in ('client.end.sum_received', 'server.end.sum_received')
+    if not isinstance(receiver, dict) or not receiver or (receiver.get('sender') is True and not named_tcp_receiver):
         return result, observation, errors + ['receiver_summary_unavailable']
     observation.update(receiver_summary=receiver, receiver_scope=scope,
-                       sender_summary=end.get('sum_sent'), iperf_protocol=value.get('start', {}).get('test_start', {}).get('protocol'))
+                       sender_summary=end.get('sum_sent'), iperf_protocol=value.get('start', {}).get('test_start', {}).get('protocol'),
+                       iperf_version=value.get('start', {}).get('version'),
+                       iperf_reverse=value.get('start', {}).get('test_start', {}).get('reverse'))
     if str(observation['iperf_protocol']).lower() != kind:
         errors.append('iperf_protocol_mismatch')
     try:
