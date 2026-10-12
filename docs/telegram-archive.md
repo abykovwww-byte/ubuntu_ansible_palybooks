@@ -24,7 +24,7 @@ No Telegram client, session, API credential or message collector runs on the ser
 | Media directory | `/srv/data/tg-archive/media`, tgmedia-rw:tgmedia 2750; client path `/media` |
 | SFTP write account | `tgmedia-rw`, forced internal-sftp, umask 0027, no shell/forwarding |
 | SFTP read account | `tgmedia-ro`, forced internal-sftp -R, no shell/forwarding |
-| SFTP source check | Root-owned authorized key files use `from="<laptop Tailscale IP>",restrict`; restrictions remain in force for all source addresses |
+| SFTP source check | SSH Match denies both archive users outside the laptop's exact Tailscale IP; root-owned key files additionally use `from="<laptop Tailscale IP>",restrict` |
 
 `/srv/app-data` is group-writable in this repository. OpenSSH requires every
 chroot ancestor to be root-owned and not writable by group/others, so it cannot

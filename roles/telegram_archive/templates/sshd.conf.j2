@@ -18,4 +18,7 @@ Match User tgmedia-rw
 Match User tgmedia-ro
     ForceCommand internal-sftp -R -d /media
 
+Match User tgmedia-rw,tgmedia-ro Address *,!{{ telegram_archive_client_ip }}
+    DenyUsers tgmedia-rw tgmedia-ro
+
 Match all
