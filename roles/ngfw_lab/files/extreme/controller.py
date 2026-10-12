@@ -63,10 +63,202 @@ def artifact(ref, base):
     return payload
 
 
+def reference_path(ref, base):
+    path = Path(ref['path'])
+    return path if path.is_absolute() else Path(base) / path
+
+
+def validate_clock(ref, base, query_ref, raw, boot_id):
+    """Recompute host-minus-guest bounds from hashed clock/query evidence."""
+    alignment = json.loads(artifact(ref, base))
+    if not isinstance(alignment, dict):
+        raise Blocked('clock alignment must be an evidence object')
+    clock_base = reference_path(ref, base).parent
+    if (alignment.get('schema_version') != 1 or alignment.get('guest_boot_id') != boot_id
+            or alignment.get('scope') != 'bounded_clock_alignment_not_ntp_synchronization'
+            or alignment.get('query_evidence_sha256') != query_ref['sha256']
+            or alignment.get('query_bounds') != raw.get('query_bounds')):
+        raise Blocked('clock alignment/query identity mismatch')
+    limits = alignment.get('limits', {})
+    if not isinstance(limits, dict):
+        raise Blocked('clock limits unavailable')
+    for key, ceiling in (('max_uncertainty_seconds', 1), ('max_offset_spread_seconds', .5),
+                         ('max_clock_step_seconds', .05)):
+        if not measurement.number(limits.get(key)) or not 0 < limits[key] <= ceiling:
+            raise Blocked('clock alignment limits absent or wider than qualification gate')
+    step_ns = limits['max_clock_step_seconds'] * 1e9
+    rows, bounds = [], []
+    guest_keys = ('guest_epoch_ns', 'guest_monotonic_ns', 'guest_boot_id')
+    for name in ('before', 'after'):
+        row = alignment.get(name, {})
+        if not isinstance(row, dict):
+            raise Blocked('clock sample unavailable')
+        for key in ('host_send_epoch_ns', 'host_receive_epoch_ns', 'host_send_monotonic_ns',
+                    'host_receive_monotonic_ns', 'guest_epoch_ns', 'guest_monotonic_ns'):
+            if type(row.get(key)) is not int or row[key] < 0:
+                raise Blocked('clock sample requires integer nanosecond evidence')
+        guest = json.loads(artifact(row.get('guest_evidence'), clock_base))
+        if (not isinstance(guest, dict) or set(guest) != set(guest_keys) or any(guest[key] != row.get(key) for key in guest_keys)
+                or row.get('guest_boot_id') != boot_id):
+            raise Blocked('clock guest raw evidence/boot mismatch')
+        elapsed = row['host_receive_monotonic_ns'] - row['host_send_monotonic_ns']
+        wall_elapsed = row['host_receive_epoch_ns'] - row['host_send_epoch_ns']
+        if elapsed < 0 or wall_elapsed < 0 or abs(wall_elapsed - elapsed) > step_ns:
+            raise Blocked('host clock chronology unverified within alignment sample')
+        if wall_elapsed / 2e9 > limits['max_uncertainty_seconds']:
+            raise Blocked('clock alignment uncertainty exceeds limit')
+        bounds.append((row['host_send_epoch_ns'] - row['guest_epoch_ns'],
+                       row['host_receive_epoch_ns'] - row['guest_epoch_ns']))
+        rows.append(row)
+    before, after = rows
+    query = alignment['query_bounds']
+    if not isinstance(query, dict):
+        raise Blocked('query clock bounds unavailable')
+    for key in ('started_epoch_ns', 'completed_epoch_ns', 'started_monotonic_ns', 'completed_monotonic_ns'):
+        if type(query.get(key)) is not int or query[key] < 0:
+            raise Blocked('query clock bounds unavailable')
+    for domain in ('epoch', 'monotonic'):
+        if not (before['host_receive_' + domain + '_ns'] <= query['started_' + domain + '_ns']
+                <= query['completed_' + domain + '_ns'] <= after['host_send_' + domain + '_ns']):
+            raise Blocked('DB query is not bracketed by clock samples')
+    if abs((query['completed_epoch_ns'] - query['started_epoch_ns'])
+           - (query['completed_monotonic_ns'] - query['started_monotonic_ns'])) > step_ns:
+        raise Blocked('host clock chronology unverified during DB query')
+    for wall, mono in (('guest_epoch_ns', 'guest_monotonic_ns'),
+                       ('host_send_epoch_ns', 'host_send_monotonic_ns'),
+                       ('host_receive_epoch_ns', 'host_receive_monotonic_ns')):
+        if after[mono] <= before[mono] or abs((after[wall] - before[wall])
+                                           - (after[mono] - before[mono])) > step_ns:
+            raise Blocked('clock chronology unverified across query alignment')
+    low, high = min(row[0] for row in bounds), max(row[1] for row in bounds)
+    if high - low > limits['max_offset_spread_seconds'] * 1e9:
+        raise Blocked('clock offset spread exceeds query limit')
+    if alignment.get('offset_min_ns') != low or alignment.get('offset_max_ns') != high:
+        raise Blocked('declared clock offset differs from raw brackets')
+    return dict(offset_min_ns=low, offset_max_ns=high, uncertainty_seconds=(high-low)/2e9,
+                clock_alignment_sha256=ref['sha256'], alignment=alignment,
+                scope='bounded_clock_alignment_not_ntp_synchronization')
+
+
+def validate_audit_baseline(path, before, now, expected_profile):
+    """An explicit new qualification epoch retains, never clears, historical loss."""
+    path = Path(path)
+    baseline_bytes = path.read_bytes()
+    baseline = json.loads(baseline_bytes)
+    if not isinstance(baseline, dict) or baseline.get('schema_version') != 1:
+        raise Blocked('audit loss baseline schema unavailable')
+    if baseline.get('profile') not in ('A', 'B') or baseline['profile'] != expected_profile:
+        raise Blocked('audit loss baseline profile differs from selected window')
+    for field in ('rules_sha256', 'auditd_conf_sha256'):
+        if not isinstance(baseline.get(field), str) or not re.fullmatch(r'[0-9a-f]{64}', baseline[field]):
+            raise Blocked('audit loss baseline rules/config hash unavailable')
+    if (type(baseline.get('lost')) is not int or baseline['lost'] < 0
+            or not 0 <= now - epoch(baseline.get('readback_at')) <= 60):
+        raise Blocked('audit loss baseline invalid/stale; fresh raw read-back required')
+    incident = baseline.get('incident_ref')
+    if not isinstance(incident, str) or (baseline['lost'] and not incident.strip()):
+        raise Blocked('historical audit loss requires an explicit incident reference')
+    source_bytes = artifact(baseline.get('source_evidence'), path.parent)
+    source = json.loads(source_bytes)
+    if not isinstance(source, dict) or source.get('collected_at') != baseline['readback_at']:
+        raise Blocked('audit loss baseline read-back chronology mismatch')
+    if source.get('profile') != baseline['profile']:
+        raise Blocked('audit loss baseline source profile differs')
+    snapshot = source.get('snapshot', {})
+    fixed = baseline.get('fixed_controls')
+    if not isinstance(fixed, dict) or set(fixed) != set(measurement.AUDIT_FIXED_CONTROLS):
+        raise Blocked('audit loss baseline fixed controls unavailable')
+    for current in (snapshot, before):
+        if (current is before and isinstance(current, dict)
+                and current.get('boot_id') == baseline.get('guest_boot_id')
+                and isinstance(current.get('audit'), dict) and type(current['audit'].get('lost')) is int):
+            if current['audit']['lost'] > baseline['lost']:
+                raise legacy.WindowStop('GLOBAL_STOP', 'AuditD new loss since verified qualification epoch')
+            if current['audit']['lost'] < baseline['lost']:
+                raise Blocked('AuditD loss counter reset/regressed; window invalid')
+        validate_audit_epoch_inventory(baseline, current)
+        if (not isinstance(current, dict) or current.get('boot_id') != baseline.get('guest_boot_id')
+                or not isinstance(current.get('audit'), dict)
+                or type(current['audit'].get('lost')) is not int or current['audit']['lost'] != baseline['lost']
+                or any(type(fixed[key]) is not int or fixed[key] < 0
+                       or type(current['audit'].get(key)) is not int or current['audit'][key] != fixed[key]
+                       for key in measurement.AUDIT_FIXED_CONTROLS)):
+            raise Blocked('audit loss baseline differs from raw/current boot/counters/controls')
+    measurement.measure_probe.validate_process_boot_id(baseline.get('guest_boot_id'))
+    if fixed['enabled'] != 1 or fixed['failure'] not in (0, 1) or not fixed['pid']:
+        raise Blocked('audit loss baseline has unsafe fixed controls')
+    return dict(baseline=baseline, baseline_sha256=hashlib.sha256(baseline_bytes).hexdigest(),
+                source_sha256=baseline['source_evidence']['sha256'],
+                scope='new_qualification_epoch_preserving_historical_incident'), baseline_bytes, source_bytes
+
+
+def validate_audit_epoch_inventory(baseline, snapshot):
+    inventory = snapshot.get('inventory') if isinstance(snapshot, dict) else None
+    if not isinstance(inventory, dict) or any(
+            inventory.get(field) != baseline[field] for field in ('rules_sha256', 'auditd_conf_sha256')):
+        raise Blocked('audit loss epoch rules/config identity changed or unavailable; window invalid')
+
+
+def validate_audit_epoch_identity(baseline, identity):
+    profile = identity.get('profile_evidence') if isinstance(identity, dict) else None
+    if (not isinstance(profile, dict) or identity.get('profile') != baseline['profile']
+            or any(profile.get(field) != baseline[field] for field in ('rules_sha256', 'auditd_conf_sha256'))):
+        raise Blocked('audit loss epoch profile/rules identity changed or unavailable; window invalid')
+
+
+class EpochAuditGuard(legacy.Guard):
+    def __init__(self, limits, baseline):
+        super().__init__(limits, True, 'warn')
+        self.loss_baseline = baseline
+
+    def audit_loss_reasons(self, audit):
+        if audit.get('boot_id') != self.loss_baseline['guest_boot_id']:
+            return ['AuditD epoch boot changed; window invalid']
+        value = audit.get('audit_lost')
+        if type(value) is not int or value < self.loss_baseline['lost']:
+            return ['AuditD loss counter reset/regressed or unavailable; window invalid']
+        if value > self.loss_baseline['lost']:
+            return ['AuditD new loss since verified qualification epoch']
+        return []
+
+    def check(self, sample):
+        reasons = super().check(sample)
+        return ['appliance boot identity changed; window invalid' if reason == 'appliance rebooted' else reason
+                for reason in reasons]
+
+
+def window_clock_summary(before, after, measurement_bounds=None):
+    first, last = before['clock_alignment'], after['clock_alignment']
+    low = last['offset_min_ns'] - first['offset_max_ns']
+    high = last['offset_max_ns'] - first['offset_min_ns']
+    summary = dict(before_alignment_sha256=first['clock_alignment_sha256'],
+                   after_alignment_sha256=last['clock_alignment_sha256'],
+                   drift_min_seconds=low / 1e9, drift_max_seconds=high / 1e9,
+                   limit_seconds=1, status='BOUNDED', raw_source_timestamps_unchanged=True)
+    def reject(reason):
+        error = Blocked(reason)
+        error.clock_summary = dict(summary, status='INVALID', reason=reason)
+        raise error
+    if measurement_bounds is not None:
+        for domain in ('epoch', 'monotonic'):
+            if (first['alignment']['after']['host_receive_' + domain + '_ns'] > measurement_bounds['started_' + domain + '_ns']
+                    or last['alignment']['before']['host_send_' + domain + '_ns'] < measurement_bounds['completed_' + domain + '_ns']):
+                reject('before/after clock samples do not enclose measured window')
+        if abs((measurement_bounds['completed_epoch_ns'] - measurement_bounds['started_epoch_ns'])
+               - (measurement_bounds['completed_monotonic_ns'] - measurement_bounds['started_monotonic_ns'])) > 50_000_000:
+            reject('host clock chronology unverified: realtime/monotonic divergence over measured window')
+    # A separate window gate: per-query tight alignment alone is insufficient.
+    if max(abs(low), abs(high)) > 1_000_000_000:
+        reject('before/after window clock drift bound exceeds1s')
+    return summary
+
+
 def validate_native(path, boot_id, now):
     """Validate fresh DB read-back, not a boolean declaring collection healthy."""
     path = Path(path)
     receipt = read_json(path)
+    if receipt.get('schema_version') != 2 or receipt.get('status') != 'HEALTHY':
+        raise Blocked('native health producer has not confirmed aligned collection')
     interval = receipt.get('source_interval_seconds')
     if type(interval) not in (int, float) or not 1 <= interval <= 60:
         raise Blocked('native receipt lacks verified PT source interval')
@@ -78,23 +270,34 @@ def validate_native(path, boot_id, now):
             or not raw.get('database') or raw.get('database') != receipt.get('database')
             or raw.get('partial') is not False):
         raise Blocked('native query identity/database/completeness unavailable or changed')
+    clock = validate_clock(receipt.get('clock_alignment'), path.parent, receipt['query_evidence'], raw, boot_id)
+    if any(clock['alignment'][side]['guest_monotonic_ns'] < freshness * 1e9 for side in ('before', 'after')):
+        raise Blocked('guest boot too recent for native freshness; points have no boot tag')
     expected = receipt.get('required_measurements')
     if not isinstance(expected, list) or not expected or not all(isinstance(v, str) and v for v in expected):
         raise Blocked('native required measurement catalog is absent')
     points = raw.get('points')
     if not isinstance(points, list) or not points:
         raise Blocked('native DB query returned no points')
-    newest = {}
+    newest, newest_ns = {}, {}
     for point in points:
         stamp = epoch(point['time'])
+        ns = point.get('source_timestamp_ns')
+        if type(ns) is not int or abs(ns / 1e9 - stamp) > .000001:
+            raise Blocked('native raw timestamp nanosecond identity unavailable')
         name = point['measurement']
         newest[name] = max(newest.get(name, 0), stamp)
-    if any(name not in newest or not 0 <= now - newest[name] <= freshness for name in expected):
+        newest_ns[name] = max(newest_ns.get(name, ns), ns)
+    age_ranges = {name: {'min_seconds': (int(now * 1e9) - stamp - clock['offset_max_ns']) / 1e9,
+                         'max_seconds': (int(now * 1e9) - stamp - clock['offset_min_ns']) / 1e9}
+                  for name, stamp in newest_ns.items()}
+    if any(name not in age_ranges or not 0 <= age_ranges[name]['min_seconds']
+           <= age_ranges[name]['max_seconds'] <= min(30, freshness) for name in expected):
         raise Blocked('native required measurements missing/stale')
     return dict(receipt_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                 query_sha256=receipt['query_evidence']['sha256'], collected_at=receipt['collected_at'],
                 source_interval_seconds=interval, database=receipt['database'], newest=newest,
-                query_response=raw,
+                query_response=raw, clock_alignment=clock, age_ranges=age_ranges,
                 scope='freshness_only_not_full_window_completeness')
 
 
@@ -213,7 +416,7 @@ class NativeRunner(legacy.Runner):
     def monitor(self):
         try:
             health = validate_native(self.native_health, self.boot_id, time.time())
-        except (Blocked, OSError, ValueError, KeyError) as error:
+        except (Blocked, OSError, ValueError, KeyError, TypeError) as error:
             failure = dict(time=utc(), phase=self.context.get('phase'), outcome='INVALID_MEASUREMENT', reason=str(error))
             try:
                 failure['receipt'] = read_json(self.native_health)
@@ -267,6 +470,9 @@ def execute_components(monitor, window, campaign, phase, seconds, report, popen=
     handles = []
     monitor.context = dict(run_id=window['run_id'], phase=phase, offered=window['offered'], profile=window['profile'])
     monitor.monitor()
+    if phase == 'measure':
+        report['controller_measurement_bounds'] = dict(started_epoch_ns=time.time_ns(),
+            started_monotonic_ns=time.monotonic_ns(), scope='controller_envelope_not_workload_measurement')
     deadline = monotonic() + budget + 5
     starts = []
     with ExitStack() as stack:
@@ -313,6 +519,9 @@ def execute_components(monitor, window, campaign, phase, seconds, report, popen=
                 sleep(.2)
         finally:
             stop_jobs(monitor.backend, jobs, report['gaps'])
+            if phase == 'measure':
+                report['controller_measurement_bounds'].update(completed_epoch_ns=time.time_ns(),
+                    completed_monotonic_ns=time.monotonic_ns())
             for job in jobs:
                 if job['process'] is not None:
                     job['row'].update(exit_code=job['process'].poll(), process_end=job['row']['process_end'] or utc())
@@ -322,7 +531,7 @@ def execute_components(monitor, window, campaign, phase, seconds, report, popen=
             legacy.save(monitor.directory / 'receipt.json', report)
 
 
-def normalized(sample, baseline):
+def normalized(sample, baseline, audit_loss_baseline=None):
     if sample.get('unavailable') or not all(sample.get(k) for k in ('dataplane_ok', 'management_ok', 'mngt_ok', 'vms_ok')):
         return False
     audit, old_audit = sample.get('audit', {}), baseline.get('audit', {})
@@ -336,7 +545,9 @@ def normalized(sample, baseline):
         return False
     latency, old_latency = sample.get('service_probe_ms'), baseline.get('service_probe_ms')
     return (type(latency) in (int, float) and type(old_latency) in (int, float)
-            and latency <= max(20, old_latency * 2) and audit.get('audit_lost') == 0)
+            and latency <= max(20, old_latency * 2)
+            and audit.get('audit_lost') == (audit_loss_baseline['lost'] if audit_loss_baseline else 0)
+            and (audit_loss_baseline is None or audit.get('boot_id') == audit_loss_baseline['guest_boot_id']))
 
 
 def recover(monitor, baseline, seconds, timeout, monotonic=time.monotonic):
@@ -349,7 +560,8 @@ def recover(monitor, baseline, seconds, timeout, monotonic=time.monotonic):
     consecutive = 0
     while monotonic() - start <= timeout:
         monitor.monitor()
-        consecutive = consecutive + 1 if normalized(monitor.window_samples[-1], baseline) else 0
+        consecutive = consecutive + 1 if normalized(monitor.window_samples[-1], baseline,
+                                                    getattr(monitor, 'audit_loss_baseline', None)) else 0
         if consecutive >= 2:
             return {'status': 'RECOVERED', 'seconds': monotonic() - start, 'normalization': 'two consecutive healthy baseline-bound samples'}
         monitor.pause(monitor.config['sample_interval'])
@@ -357,7 +569,8 @@ def recover(monitor, baseline, seconds, timeout, monotonic=time.monotonic):
 
 
 def execute_window(campaign, window, config, backend, measure_config, identity_argv,
-                   identity_base, native_health, isolation_path, directory, recovery_timeout=600, campaign_base=None):
+                   identity_base, native_health, isolation_path, directory, recovery_timeout=600, campaign_base=None,
+                   audit_loss_baseline_file=None):
     report = dict(schema_version=1, run_id=window['run_id'], profile=window['profile'],
                   workload=window.get('workload', 'endurance'), regime='unclassified', offered_load=window['offered'],
                   process_start=utc(), process_end=None, outcome='INVALID_MEASUREMENT', valid=False,
@@ -368,7 +581,13 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
     monitor = None
     baseline = None
     before = None
+    audit_epoch = None
+    observation_ready = False
     try:
+        measure_config = measurement.validate(dict(measure_config, qualification_mode=True))
+        observation_ready = True
+        if audit_loss_baseline_file is None:
+            raise Blocked('explicit immutable audit loss epoch receipt required')
         snapshots = validate_campaign_artifacts(campaign, window, campaign_base or identity_base,
                                                backend, config, time.time())
         legacy.save(directory / 'snapshots-readback.json', snapshots)
@@ -382,11 +601,17 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
         legacy.save(directory / 'isolation.json', isolation)
         before = backend.extended_guest(inventory=True)
         legacy.save(directory / 'inventory-before.json', before)
-        risks = measurement.inventory_risks(before, measure_config)
+        epoch_proof, epoch_bytes, source_bytes = validate_audit_baseline(audit_loss_baseline_file, before, time.time(), window['profile'])
+        audit_epoch = epoch_proof['baseline']
+        report['audit_loss_epoch'] = epoch_proof
+        (directory / 'audit-loss-baseline.json').write_bytes(epoch_bytes)
+        (directory / 'audit-loss-source.json').write_bytes(source_bytes)
+        risks = measurement.inventory_risks(before, measure_config, audit_epoch)
         if risks:
             raise Blocked('; '.join(risks))
         identity = json.loads(backend.call(identity_argv, timeout=30))
         validate_identity(identity, campaign, window, before, topology, identity_base, time.time())
+        validate_audit_epoch_identity(audit_epoch, identity)
         legacy.save(directory / 'identity-before.json', identity)
         for name, reference in identity['artifacts'].items():
             if name in (*plan.HASH_FIELDS, 'profile'):
@@ -395,8 +620,9 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
                       profile_evidence=identity['profile_evidence'])
         report['native_preflight'] = validate_native(native_health, before['boot_id'], time.time())
         monitor = NativeRunner(config, backend, directory, report,
-            legacy.Guard(config['limits'], True, 'warn'), {}, measurement.Guard(measure_config, initial_guest=before))
+            EpochAuditGuard(config['limits'], audit_epoch), {}, measurement.Guard(measure_config, initial_guest=before))
         monitor.native_health, monitor.boot_id = native_health, before['boot_id']
+        monitor.audit_loss_baseline = audit_epoch
         previous_handlers = {}
         for sig in (signal.SIGINT, signal.SIGTERM):
             previous_handlers[sig] = signal.signal(sig, lambda *_: setattr(monitor, 'cancelled', True))
@@ -427,10 +653,22 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
         report['reason'] = str(error)
     finally:
         try:
+            if not observation_ready or before is None:
+                raise Blocked('selected observation configuration unavailable; guest discovery not attempted')
             after = backend.extended_guest(inventory=True)
             legacy.save(directory / 'inventory-after.json', after)
             if before:
                 changed = measurement.control_changes(before, after)
+                if audit_epoch is not None:
+                    if hashlib.sha256(Path(audit_loss_baseline_file).read_bytes()).hexdigest() != epoch_proof['baseline_sha256']:
+                        raise Blocked('immutable audit loss baseline changed during window')
+                    artifact(audit_epoch['source_evidence'], Path(audit_loss_baseline_file).parent)
+                    loss_reasons = EpochAuditGuard({}, audit_epoch).audit_loss_reasons(measurement.legacy_guest(after))
+                    if 'AuditD new loss since verified qualification epoch' in loss_reasons:
+                        report['outcome'] = 'SAFETY_STOP'
+                    changed.extend(loss_reasons)
+                    changed.extend(measurement.inventory_risks(after, measure_config, audit_epoch))
+                    validate_audit_epoch_inventory(audit_epoch, after)
                 if after.get('inventory') != before.get('inventory') or after.get('boot_id') != before.get('boot_id'):
                     changed.append('guest inventory/boot changed')
                 topology_after = backend.topology()
@@ -439,13 +677,21 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
                     changed.append('topology changed during window')
                 identity_after = json.loads(backend.call(identity_argv, timeout=30))
                 validate_identity(identity_after, campaign, window, after, topology_after, identity_base, time.time())
+                if audit_epoch is not None:
+                    validate_audit_epoch_identity(audit_epoch, identity_after)
                 legacy.save(directory / 'identity-after.json', identity_after)
+                if report.get('native_preflight'):
+                    report['native_postflight'] = validate_native(native_health, before['boot_id'], time.time())
+                    report['window_clock_alignment'] = window_clock_summary(report['native_preflight'], report['native_postflight'],
+                                                                           report.get('controller_measurement_bounds'))
                 if changed:
                     report['gaps'] += changed
                     if report['outcome'] != 'SAFETY_STOP':
                         report['outcome'] = 'INVALID_MEASUREMENT'
         except (legacy.Abort, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-            report['gaps'].append('after inventory unavailable: ' + type(error).__name__)
+            report['gaps'].append('after inventory unavailable: ' + (str(error) if isinstance(error, Blocked) else type(error).__name__))
+            if hasattr(error, 'clock_summary'):
+                report['window_clock_alignment'] = error.clock_summary
             if report['outcome'] != 'SAFETY_STOP':
                 report['outcome'] = 'INVALID_MEASUREMENT'
         report['process_end'] = utc()
@@ -465,7 +711,7 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('campaign', 'config', 'measurement-config', 'measurement-argv-file',
-                 'identity-argv-file', 'native-health', 'isolation'):
+                 'identity-argv-file', 'native-health', 'isolation', 'audit-loss-baseline-file'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--recovery-timeout', type=int, default=600)
@@ -477,7 +723,7 @@ def main():
     config = legacy.validate(read_json(args.config))
     if config['target'] != campaign['target']:
         raise Blocked('runner/campaign target differs')
-    measure = measurement.validate(read_json(args.measurement_config))
+    measure = measurement.validate(dict(read_json(args.measurement_config), qualification_mode=True))
     if measure.get('cpu_action') != 'warn':
         raise Blocked('cpu_action=warn is mandatory; CPU100 alone must not stop extreme trials')
     probe, identity = read_json(args.measurement_argv_file), read_json(args.identity_argv_file)
@@ -503,7 +749,7 @@ def main():
         try:
             result = execute_window(campaign, window, config, backend, measure, identity,
                 args.identity_argv_file.parent, args.native_health, args.isolation, directory, args.recovery_timeout,
-                args.campaign.parent)
+                args.campaign.parent, args.audit_loss_baseline_file)
         finally:
             backend.pool.shutdown(wait=True)
         print(json.dumps({'directory': str(directory), 'outcome': result['outcome'],

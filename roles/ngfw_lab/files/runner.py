@@ -157,6 +157,10 @@ class Guard:
         self.previous = None
         self.since = {}
 
+    def audit_loss_reasons(self, audit):
+        """Strict default; explicit qualification epochs override this decision only."""
+        return ["AuditD lost is nonzero"] if audit["audit_lost"] > 0 else []
+
     def held(self, key, condition, now, duration):
         if not condition:
             self.since.pop(key, None)
@@ -188,8 +192,7 @@ class Guard:
         if self.audit_required and (not mandatory <= audit.keys() or audit.get("audit_backlog_limit", 0) <= 0):
             reasons.append("AuditD probe incomplete or unavailable")
         if mandatory <= audit.keys() and audit["audit_backlog_limit"] > 0:
-            if audit["audit_lost"] > 0:
-                reasons.append("AuditD lost is nonzero")
+            reasons.extend(self.audit_loss_reasons(audit))
             if self.held("backlog", 100 * audit["audit_backlog"] / audit["audit_backlog_limit"] >= limits["backlog_pct"],
                          now, limits["backlog_seconds"]):
                 reasons.append("sustained AuditD backlog")
@@ -746,7 +749,7 @@ def main():
     config = validate(config)
     measure_config = measurement.validate(json.loads(args.measurement_config.read_text(encoding='utf-8'))) if args.measurement_config else None
     if config.get('qualification_mode') and measure_config:
-        measure_config = measure_config | {'cpu_action': 'warn', 'qualification_mode': True}
+        measure_config = measurement.validate(measure_config | {'cpu_action': 'warn', 'qualification_mode': True})
     context = measurement.load_context(args.run_context) if args.run_context else None
     if context and config.get('campaign_id') and context['campaign_id'] != config['campaign_id']:
         parser.error('run context campaign differs from T00 campaign')

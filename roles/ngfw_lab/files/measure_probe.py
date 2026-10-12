@@ -241,6 +241,8 @@ def selected_process_counters(names, targets):
 def process_counters(names, targets=None):
     if targets is not None:
         return selected_process_counters(names, targets)
+    if not names:
+        return {'values': {}, 'scan_truncated': False, 'requested_not_found': [], 'mode': 'disabled'}
     result = {}
     scanned = 0
     truncated = False

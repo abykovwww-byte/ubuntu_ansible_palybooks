@@ -11,6 +11,27 @@ from test_runner import r, ROOT
 
 
 class Rendering(unittest.TestCase):
+    def test_extreme_modes_accept_actual_compose_config(self):
+        from extreme import control_capacity
+        values = yaml.safe_load((ROOT / "defaults/main.yml").read_text())
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        env.filters["to_nice_json"] = json.dumps
+        for key in ('ngfw_lab_traffic_client_cpus', 'ngfw_lab_traffic_server_cpus',
+                    'ngfw_lab_traffic_client_memory', 'ngfw_lab_traffic_server_memory'):
+            values[key] = env.from_string(str(values[key])).render(values)
+        for mode in ('ngfw', 'direct'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                project = Path(tmp)
+                values.update(ngfw_lab_extreme_enabled=True, ngfw_lab_endpoint_path=mode)
+                candidate = project / 'compose.yml'
+                candidate.write_text(env.from_string(
+                    (ROOT / 'templates/compose.yml.j2').read_text()).render(values))
+                result = subprocess.run(['docker', 'compose', '--project-directory', str(project),
+                                         '-f', str(candidate), 'config', '--format', 'json'],
+                                        check=True, capture_output=True, text=True)
+                self.assertEqual(control_capacity.validate_install_config(
+                    json.loads(result.stdout), project), mode == 'direct')
+
     def test_local_policy_listeners_persist_without_enabling_the_lab(self):
         values = yaml.safe_load((ROOT / "defaults/main.yml").read_text())
         self.assertEqual(values["ngfw_lab_policy_listener_ranges"], [])

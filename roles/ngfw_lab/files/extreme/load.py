@@ -12,6 +12,7 @@ import hashlib
 import ipaddress
 import json
 import math
+import os
 from pathlib import Path
 import socket
 import signal
@@ -278,7 +279,10 @@ async def client(args):
 async def serve(args):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'traffic'))
     from held_receiver import Receiver
+    from policy_probe import Receiver as PolicyReceiver
+    from policy_probe import reply as policy_reply
     held = None
+    policy = None
     iperf = None
     server = None
     transport = None
@@ -293,12 +297,19 @@ async def serve(args):
         receiver['http_requests'] += 1
         try:
             data = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 3)
-            if not data.startswith(b'GET /health HTTP/1.'):
+            method, path, version = data.split(b'\r\n', 1)[0].decode('ascii').split()
+            if method != 'GET' or not version.startswith('HTTP/1.'):
                 raise ValueError('unsupported request')
-            writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\n' + PAYLOAD)
+            if path == '/health':
+                payload = PAYLOAD
+            elif path.startswith('/policy-probe/'):
+                payload = policy_reply(path, writer.get_extra_info('peername'), writer.get_extra_info('sockname'))
+            else:
+                raise ValueError('unsupported request')
+            writer.write(f'HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\nConnection: close\r\n\r\n'.encode() + payload)
             await asyncio.wait_for(writer.drain(), 2)
             receiver['http_success'] += 1
-        except (OSError, ValueError, asyncio.TimeoutError, asyncio.IncompleteReadError):
+        except (OSError, ValueError, UnicodeError, asyncio.TimeoutError, asyncio.IncompleteReadError):
             receiver['http_errors'] += 1
         finally:
             writer.close()
@@ -316,6 +327,9 @@ async def serve(args):
         def error_received(self, error):
             receiver['dns_send_errors'] += 1
     try:
+        policy_ranges = json.loads(os.environ.get('NGFW_POLICY_LISTEN_RANGES', '[]'))
+        if policy_ranges:
+            policy = PolicyReceiver(policy_ranges, bind=args.bind)
         held = Receiver(host=args.bind, port=args.tcp_port, max_connections=args.max_sessions, max_runs=10000,
                         state_path=args.state_path)
         server = await asyncio.start_server(http, args.bind, args.http_port, backlog=8192)
@@ -326,6 +340,8 @@ async def serve(args):
         while not stop.is_set():
             if held.error:
                 raise RuntimeError(held.error)
+            if policy and policy.error:
+                raise RuntimeError('policy receiver exited: ' + policy.error)
             if iperf is not None and iperf.poll() is not None:
                 raise RuntimeError('iperf3 receiver exited: ' + str(iperf.returncode))
             emit(dict(record_type='receiver_progress', time=time.time(), counters=dict(receiver),
@@ -342,6 +358,8 @@ async def serve(args):
             await server.wait_closed()
         if held:
             held.close()
+        if policy:
+            policy.close()
         stop_child(iperf)
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)

@@ -145,3 +145,123 @@ Remaining live proof: installed PT compatibility and source buffer behavior,
 local InfluxDB writes/queries, measured peak storage rate and observer impact,
 source-loss alarms, actual sender process crash and machine restart, configured
 external API idempotency/readback, InfluxDB backup/restore and repeat analysis.
+
+## Native measurement-liveness health producer
+
+`files/native_health.py` is a read-only InfluxDB API reader for the extreme-run
+controller. It proves recent observations of one verified field per required
+measurement for an exact observed host selector. It does **not** prove freshness
+of every field/series, complete sampling through an experiment window, NTP
+synchronization, throughput, or downstream EDR event receipt. The deployment
+and periodic invocation are owned by the integration playbook; this component
+does not install a timer, modify Telegraf, or choose credentials/SSH endpoints.
+
+The operator supplies four paths and one private configuration. No actual host,
+measurement family, field, database name, or boot ID is guessed by the code:
+
+```sh
+python3 native_health.py \
+  --config /private/native-health-config.json \
+  --catalog /private/native-health-catalog.json \
+  --clock-argv-file /private/guest-clock-argv.json \
+  --output /private/native-health-latest.json \
+  --evidence-dir /private/native-health-evidence
+```
+
+The configuration requires `influx_url`, a bare HTTP(S) origin without userinfo,
+query or fragment. The deployed unauthenticated loopback API needs no credentials.
+Default limits are `query_timeout_seconds: 2`, `query_budget_seconds: 10`,
+`max_response_bytes: 65536`, `max_uncertainty_seconds: 1`,
+`max_offset_spread_seconds: 0.5`, and `max_clock_step_seconds: 0.05`.
+Clock limits may be tightened; widening beyond these research gate ceilings is
+refused. These are methodology limits, not PT specifications. The complete set
+of queries must fit the overall monotonic budget; each clock command has its
+own five-second deadline and bounded stdout/stderr. The clock adapter must be
+a fixed, operator-controlled, read-only command with bounded transport behavior.
+
+The catalog has this schema (values below are placeholders, not discovered facts):
+
+```json
+{
+  "schema_version": 1,
+  "database": "observed_database",
+  "source_interval_seconds": 10,
+  "host_selector": {"tag": "observed_host_tag", "value": "observed_host_value"},
+  "measurements": [{"name": "observed_measurement", "field": "observed_field"}],
+  "observation_evidence": {"path": "raw-observed-api.json", "sha256": "ACTUAL_64_HEX_SHA256"},
+  "interval_evidence": {
+    "path": "raw-source-config-discovery.json",
+    "sha256": "ACTUAL_64_HEX_SHA256",
+    "json_pointer": "/observed_interval"
+  }
+}
+```
+
+Both evidence references must hash-match actual source receipts. Relative paths
+resolve against the catalog directory. The observation receipt must contain
+raw Influx `series` objects with integer ns time, the exact selected field, a
+non-null value, and the exact host tag/value; nested baseline query receipts are
+supported. A field declaration without an observed point/host does not qualify.
+The JSON pointer must resolve to the configured numeric interval or its `Ns`
+string form in the hashed source discovery receipt. Do not point this at an
+invented interval declaration. The caller owns source provenance; a hash detects
+file changes but does not authenticate a fabricated source. Catalog and source
+receipts are copied into the content-addressed evidence directory.
+
+The clock argv file is a JSON array of fixed command arguments, executed without
+a shell and without stdin. No SSH password, sudo, config inspection, or network
+endpoint discovery is implemented here. The independent clock adapter must emit
+exactly this JSON shape, with positive integer nanoseconds and the actual boot ID:
+
+```json
+{"guest_epoch_ns": 1790000000000000000, "guest_monotonic_ns": 123000000000, "guest_boot_id": "11111111-2222-4333-8444-555555555555"}
+```
+
+The producer brackets this command with actual host realtime and monotonic
+timestamps before and after the bounded API-query phase. Boot IDs must match.
+Guest monotonic uptime must already exceed the freshness bound (30 seconds at
+the observed 10-second interval) so an immediate reboot cannot qualify a recent
+ordinary preboot sample. Boot association is via the fresh clock identity and
+verified host selector; native points do not gain an invented boot-ID tag.
+It detects host/guest realtime-versus-monotonic steps and limits the entire
+host-minus-guest offset envelope to 0.5 seconds. An absolute guest clock lag of
+22 seconds is neither erased nor treated as synchronization: the offset remains
+in explicit evidence. Separate before/after **experiment-window** drift checks
+belong to the controller; these per-query checks cannot replace them.
+
+For each verified measurement, the query is a bounded
+`SELECT LAST("field") AS "value" ... WHERE "host_tag"='exact_host' AND time >= ... AND time <= ...`
+with `epoch=ns`. The source-clock window derives from the fresh clock bracket,
+not host `now()`. There is no wildcard `SELECT *`. Empty/malformed/partial,
+truncated, error, wrong-measurement, null-value or float-timestamp responses fail
+closed. Each received HTTP body is saved byte-for-byte with its SHA256, bounded
+request/response times, SQL text, database, endpoint and completeness metadata.
+No API response is silently shortened and then accepted as complete.
+
+The latest receipt is atomically replaced after each poll, including failures.
+It has `status: HEALTHY|BLOCKED`, actual `collected_at`, source interval, required
+measurement names, database, boot ID, hashed `query_evidence`, and hashed
+`clock_alignment`. Original source timestamps remain both integer
+`source_timestamp_ns` and exact RFC3339 `time`; they are never shifted to make
+the controller pass. Raw query evidence retains `query_bounds`, request receipts
+and points. Alignment contains before/after host/guest clock brackets, hashed
+three-field guest evidence, the same query bounds, and `query_evidence_sha256`,
+binding the clock proof to that exact query receipt without a circular hash.
+
+Freshness uses the full possible age interval
+`[host_now - (source_time + offset_max), host_now - (source_time + offset_min)]`.
+The entire interval must lie in `[0, 2 * source_interval + 10 seconds]`.
+Controller integration must independently validate the hashes/brackets and
+recompute age at consumption time; a producer's `HEALTHY` string is insufficient.
+Content-addressed files are never overwritten by the producer, and existing
+digest mismatches fail. This is integrity checking, not filesystem WORM storage.
+Failed polls retain available raw API/clock evidence and cannot leave a prior
+healthy latest receipt in place. Store-unavailable failures require the caller
+to treat a missing/unchanged poll result as a failed producer invocation.
+
+Focused tests: `python -m unittest discover -s roles/ngfw_metrics/tests -p test_native_health.py -v`.
+They use injected clocks/API responses, including a guest lagging 22 seconds,
+and assert unchanged source ns values, conservative freshness, raw/hash retention,
+tamper rejection, partial/truncation refusal, boot/clock-step detection, explicit
+catalog provenance and atomic failure publication. They are local validation;
+actual database/transport polling is a separate live check.
