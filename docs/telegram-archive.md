@@ -14,7 +14,7 @@ No Telegram client, session, API credential or message collector runs on the ser
 | Compose/config | `/srv/apps/context-postgres`, root-owned |
 | PostgreSQL data | `/srv/app-data/context-postgres/data`, private to container UID 999 |
 | Server secret files | `/srv/app-data/context-postgres/secrets`, directory 0700, files 0400 |
-| Database listener | `100.117.52.16:5432`, exact Tailscale bind, one Compose bridge |
+| Database listener | `100.117.52.16:5432`, exact PostgreSQL listen address in Linux host network mode |
 | Client authentication | `pg_hba` allows only the configured laptop `/32` and named database/roles, SCRAM; other TCP sources rejected |
 | Local administration | Container-local postgres OS identity via Unix peer authentication; no remote superuser HBA entry |
 | Archive owner | `tg_owner`: owns database/schema, runs migrations |
@@ -32,9 +32,16 @@ be used as the SFTP chroot parent. The role validates existing ancestors before
 creating `/srv/data/tg-archive` and does not weaken shared directory permissions.
 See [OpenSSH ChrootDirectory](https://man.openbsd.org/sshd_config#ChrootDirectory).
 
-The Compose bridge is dedicated to this instance and not attached to other app
-networks. The published host address and HBA provide its inbound boundary.
-See [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/)
+Linux host network mode preserves the real Tailscale source for exact HBA rules.
+The PostgreSQL listener itself is bound only to `100.117.52.16`; Docker has no
+published-port mapping and PostgreSQL does not listen on wildcard/LAN addresses.
+The container shares the host network namespace, while its files and process
+namespace remain separate. Docker daemon/network settings for other apps are
+not changed. The earlier published bridge port made PostgreSQL see the bridge
+gateway rather than the laptop on this server; allowing the gateway would
+weaken the client boundary, so that address is not added to HBA.
+See [Docker host networking](https://docs.docker.com/engine/network/drivers/host/),
+[PostgreSQL listener settings](https://www.postgresql.org/docs/17/runtime-config-connection.html)
 and [PostgreSQL HBA](https://www.postgresql.org/docs/17/auth-pg-hba-conf.html).
 Docker does not persist PostgreSQL stdout/stderr (`logging.driver: none`):
 an SQL error DETAIL can contain row text even with statement logging disabled.
@@ -98,6 +105,13 @@ a regex as a mapping instead of a condition string.
 
 These fixtures do not prove production source filtering or filesystem access.
 The laptop live verifier after apply is required for those boundaries.
+CI also exercises the rendered host-network templates on a loopback-only,
+temporary PostgreSQL fixture: it checks the server-seen client IP, rejects a
+different source before password authentication, and refuses another listener
+address. A LAN destination can be reached over Tailscale subnet routing, so
+LAN address alone is not evidence of a different source. The laptop verifier
+tests a server-origin SSH connection through an admin tunnel, keeping private
+keys on the laptop and allowing only the actual laptop source.
 
 If the first owner apply fails after the provisioning script has consumed its
 staging directory, credentials are already in the server-private overrides.

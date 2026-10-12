@@ -8,8 +8,9 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_INITDB_ARGS: --auth-local=peer --auth-host=scram-sha-256
     command: [postgres, -c, config_file=/etc/postgresql/postgresql.conf]
-    ports:
-      - "{{ context_postgres_bind_host }}:{{ context_postgres_port }}:5432"
+    # Keep the original Tailscale client IP for exact pg_hba /32 rules.
+    # The PostgreSQL listener itself is restricted to the Tailscale host address.
+    network_mode: host
     volumes:
       - "{{ context_postgres_data_dir }}/data:/var/lib/postgresql/data"
       - "{{ context_postgres_project_dir }}/config:/etc/postgresql:ro"
@@ -21,12 +22,8 @@ services:
       # PostgreSQL error DETAIL can contain an entire row even with log_statement=none.
       driver: none
     healthcheck:
-      test: [CMD, pg_isready, -U, postgres, -d, postgres]
+      test: [CMD, pg_isready, -p, "{{ context_postgres_port }}", -U, postgres, -d, postgres]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
-    networks: [database]
-networks:
-  database:
-    driver: bridge
