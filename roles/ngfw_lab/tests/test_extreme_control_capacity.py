@@ -272,12 +272,17 @@ class IaCTests(unittest.TestCase):
             candidate.write_text('services: {}\n')
             value = self.docker_config(project)
             backend = Mock(config={'project_dir': str(project), 'reports_dir': str(reports)}, compose=['docker', 'compose'])
-            backend.call.side_effect = [json.dumps(value), '', '']
+            backend.call.side_effect = [json.dumps(value), '']
             backend.probe_endpoint.return_value = True
-            with patch.object(c.runner, 'validate'), patch.object(c, 'inspect_endpoints', return_value={'mode': 'direct'}):
+            with patch.object(c.runner, 'validate'), patch.object(c, 'inspect_endpoints', return_value={'mode': 'direct'}), \
+                    patch.object(c, 'ensure_endpoint_image', return_value={'image_id': 'sha256:' + 'a'*64}), \
+                    patch.object(c, 'verify_endpoint_image') as verify:
                 c.install_endpoints(backend, candidate, stage)
+            verify.assert_called_once_with(backend, 'sha256:' + 'a'*64)
             self.assertEqual((project / 'extreme/load.py').read_text(), '# public new revision\n')
             self.assertIn('--force-recreate', backend.call.call_args_list[-1].args[0])
+            up = backend.call.call_args_list[-1].args[0]
+            self.assertEqual(up[up.index('--pull') + 1], 'never')
             backend.probe_endpoint.assert_called_once_with('traffic-server', '127.0.0.1')
             self.assertEqual(c.controller.read_json(reports / 'endpoint-switch.json')['status'], 'INSTALLED')
 
@@ -308,6 +313,185 @@ class IaCTests(unittest.TestCase):
             c.save(Path(tmp) / 'endpoint-switch.json', {'status': 'FAILED', 'managed_extreme': True})
             with self.assertRaises(c.Blocked):
                 c.reject_legacy_downgrade({'reports_dir': tmp})
+
+
+class ImageBuildTests(unittest.TestCase):
+    IMAGE = 'sha256:' + 'a' * 64
+    OTHER = 'sha256:' + 'b' * 64
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.project = Path(self.temp.name)
+        traffic = self.project / 'traffic'
+        traffic.mkdir()
+        # Use the repository's real COPY inputs, not a simplified Dockerfile.
+        for source in (ROOT / 'files/traffic').iterdir():
+            if source.is_file() and (source.name == 'Dockerfile' or source.suffix == '.py'):
+                (traffic / source.name).write_bytes(source.read_bytes())
+        self.config = {'services': {name: {'image': 'ngfw-lab-traffic:1', 'build': {'context': str(traffic)}}
+                                    for name in c.SERVICES}}
+        self.backend = Mock(config={'project_dir': str(self.project), 'reports_dir': str(self.project)},
+                            compose=['docker', 'compose'])
+        self.candidate = self.project / 'compose.pending.yml'
+        self.receipt = self.project / 'endpoint-image-build.json'
+
+    def build(self, image=None):
+        self.backend.call.side_effect = ['', json.dumps([{'Id': image or self.IMAGE}])]
+        return c.ensure_endpoint_image(self.backend, self.candidate, self.config, self.project)
+
+    def test_first_apply_builds_shared_image_once_and_records_actual_identity_and_inputs(self):
+        result = self.build()
+        self.assertEqual(result['action'], 'BUILT')
+        self.assertEqual(result['image_id'], self.IMAGE)
+        self.assertEqual(self.backend.call.call_args_list[0].args[0][-2:], ['build', 'traffic-client'])
+        pointer = c.controller.read_json(self.receipt)
+        self.assertEqual(pointer['build_receipt'], result['build_receipt'])
+        receipt = json.loads(c.controller.artifact(pointer['build_receipt'], self.project))
+        self.assertEqual(receipt['image_id'], self.IMAGE)
+        self.assertEqual(receipt['input_sha256'], c.plan.fingerprint(receipt['inputs']))
+        self.assertEqual(set(receipt['inputs']['files']), {'Dockerfile', 'endpoint.py', 'job.py',
+                        'policy_probe.py', 'probe_diagnostics.py', 'held_receiver.py',
+                        '.dockerignore', 'Dockerfile.dockerignore'})
+
+    def test_original_receipt_reference_survives_later_rebuild(self):
+        first = self.build()
+        old_ref = first['build_receipt']
+        old_bytes = c.controller.artifact(old_ref, self.project)
+        (self.project / 'traffic/job.py').write_text('# source changes for second image')
+        second = self.build(self.OTHER)
+        self.assertNotEqual(old_ref['path'], second['build_receipt']['path'])
+        self.assertEqual(c.controller.artifact(old_ref, self.project), old_bytes)
+        self.assertEqual(json.loads(c.controller.artifact(second['build_receipt'], self.project))['image_id'], self.OTHER)
+        self.assertEqual(c.controller.read_json(self.receipt)['build_receipt'], second['build_receipt'])
+
+    def test_cache_pointer_with_wrong_receipt_hash_never_grants_reuse(self):
+        first = self.build()
+        pointer = c.controller.read_json(self.receipt)
+        pointer['build_receipt']['sha256'] = '0'*64
+        c.save(self.receipt, pointer)
+        self.backend.reset_mock()
+        result = self.build()
+        self.assertEqual(result['action'], 'BUILT')
+        self.assertEqual(self.backend.call.call_args_list[0].args[0][-2:], ['build', 'traffic-client'])
+        self.assertEqual(json.loads(c.controller.artifact(first['build_receipt'], self.project))['image_id'], self.IMAGE)
+
+    def test_network_only_switch_reuses_exact_current_image_without_build(self):
+        self.build()
+        before = self.receipt.read_bytes()
+        for service in self.config['services'].values():
+            service['networks'] = {'control': None}
+        self.backend.reset_mock()
+        self.backend.call.side_effect = [json.dumps([{'Id': self.IMAGE}])]
+        result = c.ensure_endpoint_image(self.backend, self.candidate, self.config, self.project)
+        self.assertEqual(result['action'], 'REUSED')
+        self.backend.call.assert_called_once_with(['docker', 'image', 'inspect', '--', 'ngfw-lab-traffic:1'], timeout=30)
+        self.assertEqual(self.receipt.read_bytes(), before)
+
+    def test_changed_copy_dockerfile_or_ignore_bytes_require_new_build(self):
+        self.build()
+        for filename in ('job.py', 'Dockerfile', '.dockerignore', 'Dockerfile.dockerignore'):
+            with self.subTest(filename=filename):
+                path = self.project / 'traffic' / filename
+                path.write_bytes((path.read_bytes() if path.exists() else b'') + b'\n# changed\n')
+                self.backend.reset_mock()
+                result = self.build(self.OTHER)
+                self.assertEqual(result['action'], 'BUILT')
+                self.assertEqual(self.backend.call.call_count, 2)
+
+    def test_changed_tag_identity_forces_build_and_records_new_actual_id(self):
+        self.build()
+        self.backend.reset_mock()
+        self.backend.call.side_effect = [json.dumps([{'Id': self.OTHER}]), '', json.dumps([{'Id': self.OTHER}])]
+        result = c.ensure_endpoint_image(self.backend, self.candidate, self.config, self.project)
+        self.assertEqual(result['action'], 'BUILT')
+        self.assertEqual(result['image_id'], self.OTHER)
+        self.assertEqual(self.backend.call.call_args_list[1].args[0][-2:], ['build', 'traffic-client'])
+
+    def test_missing_image_rebuilds_but_malformed_new_identity_never_creates_proof(self):
+        self.build()
+        before = self.receipt.read_bytes()
+        self.backend.call.side_effect = [c.runner.Abort('missing image'), '', json.dumps([{'Id': 'unproven'}])]
+        with self.assertRaisesRegex(c.Blocked, 'identity readback invalid'):
+            c.ensure_endpoint_image(self.backend, self.candidate, self.config, self.project)
+        self.assertEqual(self.receipt.read_bytes(), before)
+
+    def test_failed_build_keeps_prior_success_receipt_and_does_not_start(self):
+        self.build()
+        before = self.receipt.read_bytes()
+        (self.project / 'traffic/job.py').write_text('# changed input')
+        self.backend.reset_mock()
+        self.backend.call.side_effect = c.runner.Abort('build failed')
+        with self.assertRaises(c.runner.Abort):
+            c.ensure_endpoint_image(self.backend, self.candidate, self.config, self.project)
+        self.assertEqual(self.receipt.read_bytes(), before)
+        self.assertEqual(self.backend.call.call_count, 1)
+        self.assertNotIn('up', self.backend.call.call_args.args[0])
+
+    def test_failed_install_build_does_not_promote_compose_or_start_endpoints(self):
+        self.build()
+        before = self.receipt.read_bytes()
+        (self.project / 'traffic/job.py').write_text('# changed input')
+        self.candidate.write_text('new candidate')
+        active = self.project / 'compose.yml'
+        active.write_text('original compose')
+        self.backend.reset_mock()
+        self.backend.call.side_effect = [json.dumps(self.config), c.runner.Abort('build failed')]
+        with patch.object(c.runner, 'validate'), patch.object(c, 'validate_install_config', return_value=True):
+            with self.assertRaises(c.runner.Abort):
+                c.install_endpoints(self.backend, self.candidate)
+        self.assertEqual(active.read_text(), 'original compose')
+        self.assertEqual(self.receipt.read_bytes(), before)
+        self.assertTrue((self.project / '.extreme-managed').exists())
+        self.assertFalse((self.project / 'endpoint-switch.json').exists())
+        self.backend.probe_endpoint.assert_not_called()
+        self.assertFalse(any('up' in call.args[0] for call in self.backend.call.call_args_list))
+
+    def test_unknown_or_corrupt_receipt_never_grants_reuse(self):
+        for text in ('{broken', '[]', '{}', '{"schema":1,"image_id":"' + self.IMAGE + '"}'):
+            with self.subTest(receipt=text):
+                self.receipt.write_text(text)
+                result = self.build()
+                self.assertEqual(result['action'], 'BUILT')
+
+    def test_unhashed_build_features_and_different_service_builds_block(self):
+        for update in ({'args': {'EXTRA': 'untracked'}}, {'context': str(self.project)}, {'dockerfile': 'Other'}):
+            with self.subTest(update=update):
+                bad = copy.deepcopy(self.config)
+                bad['services']['traffic-client']['build'].update(update)
+                with self.assertRaises(c.Blocked):
+                    c.image_build_inputs(bad, self.project)
+        bad = copy.deepcopy(self.config)
+        bad['services']['traffic-client']['image'] = 'other:1'
+        with self.assertRaises(c.Blocked):
+            c.image_build_inputs(bad, self.project)
+        for instruction in ('COPY ../secret ./', 'COPY *.py ./', 'COPY --from=other file ./',
+                            'ADD https://example.invalid/file ./', 'RUN --mount=type=bind echo x'):
+            with self.subTest(instruction=instruction):
+                (self.project / 'traffic/Dockerfile').write_text('FROM python:3.12\n' + instruction + '\n')
+                with self.assertRaises(c.Blocked):
+                    c.image_build_inputs(self.config, self.project)
+        self.backend.call.assert_not_called()
+
+    def test_input_change_during_build_does_not_create_receipt(self):
+        def call(argv, **kwargs):
+            if 'build' in argv:
+                (self.project / 'traffic/job.py').write_text('# concurrent change')
+                return ''
+            return json.dumps([{'Id': self.IMAGE}])
+        self.backend.call.side_effect = call
+        with self.assertRaisesRegex(c.Blocked, 'inputs changed during build'):
+            c.ensure_endpoint_image(self.backend, self.candidate, self.config, self.project)
+        self.assertFalse(self.receipt.exists())
+
+    def test_each_recreated_container_must_match_selected_image(self):
+        self.backend.call.side_effect = ['1'*64, json.dumps([{'Image': self.IMAGE}]),
+                                         '2'*64, json.dumps([{'Image': self.OTHER}])]
+        with self.assertRaisesRegex(c.Blocked, 'running endpoint image differs'):
+            c.verify_endpoint_image(self.backend, self.IMAGE)
+        self.backend.call.side_effect = ['1'*64, json.dumps([{'Image': self.IMAGE}]),
+                                         '2'*64, json.dumps([{'Image': self.IMAGE}])]
+        c.verify_endpoint_image(self.backend, self.IMAGE)
 
 
 if __name__ == '__main__':

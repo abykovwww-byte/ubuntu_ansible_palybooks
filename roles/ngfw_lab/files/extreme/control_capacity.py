@@ -544,6 +544,126 @@ def reject_legacy_downgrade(config):
         raise Blocked('lab is extreme-managed; normal legacy apply cannot downgrade runtime')
 
 
+def image_build_inputs(config, project):
+    """Hash the supported local Dockerfile and every file its COPY reads.
+
+    Unsupported build features fail closed rather than omitting an input from
+    the reuse decision. Network attachment and bind-mounted code are not image
+    inputs; the latter still requires endpoint recreation on every install.
+    """
+    specs = []
+    for name in SERVICES:
+        service = config['services'][name]
+        build, tag = service.get('build'), service.get('image')
+        if (not isinstance(build, dict) or set(build) - {'context', 'dockerfile'}
+                or not isinstance(tag, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/:@-]*', tag)
+                or service.get('platform') or service.get('pull_policy')):
+            raise Blocked('unsupported endpoint image build settings')
+        context = Path(build.get('context', ''))
+        context = context if context.is_absolute() else project / context
+        if context.is_symlink() or context.resolve() != (project / 'traffic').resolve():
+            raise Blocked('endpoint build context must be local traffic directory')
+        if build.get('dockerfile', 'Dockerfile') != 'Dockerfile':
+            raise Blocked('unsupported endpoint Dockerfile path')
+        specs.append({'context': str(context.resolve()), 'tag': tag})
+    if specs[0] != specs[1]:
+        raise Blocked('endpoints must share the same image build inputs and tag')
+    context = Path(specs[0]['context'])
+    dockerfile = context / 'Dockerfile'
+    if dockerfile.is_symlink() or not dockerfile.is_file():
+        raise Blocked('endpoint Dockerfile missing or symlinked')
+    raw = dockerfile.read_bytes()
+    logical = re.sub(r'\\\r?\n', ' ', raw.decode('utf-8'))
+    copied = set()
+    for line in logical.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        instruction, _, args = line.partition(' ')
+        instruction = instruction.upper()
+        if instruction not in {'FROM', 'ENV', 'RUN', 'WORKDIR', 'COPY', 'USER', 'ENTRYPOINT', 'CMD', 'LABEL'}:
+            raise Blocked('unsupported Dockerfile instruction for image reuse')
+        if instruction == 'RUN' and '--mount' in args:
+            raise Blocked('external Dockerfile RUN mount inputs unsupported')
+        if instruction == 'COPY':
+            parts = args.split()
+            if (len(parts) < 2 or parts[-1] != './'
+                    or any(not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*', part) for part in parts[:-1])):
+                raise Blocked('unsupported Dockerfile COPY inputs for image reuse')
+            copied.update(parts[:-1])
+    if not copied:
+        raise Blocked('endpoint Dockerfile has no supported COPY inputs')
+    hashes = {'Dockerfile': hashlib.sha256(raw).hexdigest()}
+    for name in sorted(copied | {'.dockerignore', 'Dockerfile.dockerignore'}):
+        path = context / name
+        if path.is_symlink() or (name in copied and not path.is_file()):
+            raise Blocked('endpoint image input missing or symlinked')
+        hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+    return dict(specs[0], files=hashes)
+
+
+def image_identity(backend, tag):
+    value = json.loads(backend.call(['docker', 'image', 'inspect', '--', tag], timeout=30))
+    if (not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict)
+            or not re.fullmatch(r'sha256:[0-9a-f]{64}', str(value[0].get('Id', '')))):
+        raise Blocked('Docker image identity readback invalid')
+    return value[0]['Id']
+
+
+def ensure_endpoint_image(backend, candidate, config, project):
+    """Reuse only a locally observed successful build with an unchanged tag ID."""
+    inputs = image_build_inputs(config, project)
+    fingerprint = plan.fingerprint(inputs)
+    path = Path(backend.config['reports_dir']) / 'endpoint-image-build.json'
+    try:
+        pointer = controller.read_json(path)
+        prior_ref = pointer.get('build_receipt') if isinstance(pointer, dict) else None
+        prior = json.loads(controller.artifact(prior_ref, path.parent))
+    except (OSError, ValueError, TypeError, Blocked):
+        prior = {}
+    if (isinstance(prior, dict) and prior.get('schema') == 1
+            and prior.get('inputs') == inputs and prior.get('input_sha256') == fingerprint
+            and re.fullmatch(r'sha256:[0-9a-f]{64}', str(prior.get('image_id', '')))):
+        try:
+            current = image_identity(backend, inputs['tag'])
+        except runner.Abort:
+            current = None
+        if current == prior['image_id']:
+            return dict(action='REUSED', image_id=current, input_sha256=fingerprint, build_receipt=prior_ref)
+    # Both services have identical image inputs. Build once; separate builds of
+    # the same tag can regenerate OCI index/attestation IDs despite equal layers.
+    backend.call(backend.compose + ['--file', str(candidate), 'build', 'traffic-client'], timeout=300)
+    image_id = image_identity(backend, inputs['tag'])
+    if image_build_inputs(config, project) != inputs:
+        raise Blocked('endpoint build inputs changed during build')
+    receipt = dict(schema=1, built_at=controller.utc(), inputs=inputs,
+                   input_sha256=fingerprint, image_id=image_id)
+    archive = path.parent / 'endpoint-image-builds'
+    archive.mkdir(exist_ok=True)
+    immutable = archive / (plan.fingerprint(receipt) + '.json')
+    if immutable.exists():
+        if controller.read_json(immutable) != receipt:
+            raise Blocked('immutable image build receipt already differs')
+    else:
+        save(immutable, receipt)
+    ref = reference(immutable)
+    # Only this cache pointer changes; archived endpoint-switch references keep
+    # their original build evidence after later source changes and rebuilds.
+    save(path, dict(schema=1, build_receipt=ref))
+    return dict(action='BUILT', image_id=image_id, input_sha256=fingerprint, build_receipt=ref)
+
+
+def verify_endpoint_image(backend, image_id):
+    for service in SERVICES:
+        cid = backend.call(backend.compose + ['ps', '-q', service], timeout=15).strip()
+        if not re.fullmatch(r'[0-9a-f]{12,64}', cid):
+            raise Blocked('endpoint container identity readback invalid')
+        entries = json.loads(backend.call(['docker', 'inspect', cid], timeout=15))
+        if (not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict)
+                or entries[0].get('Image') != image_id):
+            raise Blocked('running endpoint image differs from selected build identity')
+
+
 def install_endpoints(backend, candidate, source_tree=None, legacy=False, start=True):
     """Called by Ansible while holding the same lock as every traffic executor."""
     project = Path(backend.config['project_dir']).resolve()
@@ -580,7 +700,7 @@ def install_endpoints(backend, candidate, source_tree=None, legacy=False, start=
     # Build before replacing active Compose. A failed up is retained as a failed
     # switch, never reported as restored or a capacity pass.
     if start:
-        backend.call(backend.compose + ['--file', str(candidate), 'build'], timeout=300)
+        image = ensure_endpoint_image(backend, candidate, config, project)
     dest = project / 'compose.yml'
     temporary = project / 'compose.promote.yml'
     shutil.copyfile(candidate, temporary)
@@ -593,7 +713,8 @@ def install_endpoints(backend, candidate, source_tree=None, legacy=False, start=
         return state
     # Bind-mounted Python can change without a Compose config/image change.
     # Recreate even in same-path installs so source hashes describe loaded code.
-    backend.call(backend.compose + ['up', '--detach', '--no-build', '--force-recreate'], timeout=120)
+    backend.call(backend.compose + ['up', '--detach', '--no-build', '--pull', 'never', '--force-recreate'], timeout=120)
+    verify_endpoint_image(backend, image['image_id'])
     state = {'mode': 'legacy', 'topology': backend.topology()} if legacy else inspect_endpoints(backend, 'direct' if direct else 'ngfw')
     deadline = time.monotonic() + 30
     while True:
@@ -605,7 +726,8 @@ def install_endpoints(backend, candidate, source_tree=None, legacy=False, start=
             if time.monotonic() >= deadline:
                 raise Blocked('receiver readiness deadline exceeded')
             time.sleep(1)
-    save(Path(backend.config['reports_dir']) / 'endpoint-switch.json', {'status': 'INSTALLED', 'managed_extreme': not legacy, 'state': state})
+    save(Path(backend.config['reports_dir']) / 'endpoint-switch.json',
+         {'status': 'INSTALLED', 'managed_extreme': not legacy, 'state': state, 'image': image})
     return state
 
 
