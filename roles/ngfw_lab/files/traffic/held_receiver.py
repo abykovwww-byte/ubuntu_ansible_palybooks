@@ -6,6 +6,8 @@ from pathlib import Path
 import struct
 import threading
 import time
+import uuid
+from collections import Counter
 
 FRAME = struct.Struct("!8sQIIQ")
 MAGIC = b"NGFWHOLD"
@@ -22,9 +24,10 @@ class Receiver:
         self.error = None
         self.loop = self.stop = None
         self.ready = threading.Event()
-        self.state = dict(kind="held-session-receiver", active=0, peak=0,
+        self.state = dict(kind="held-session-receiver", receiver_instance=uuid.uuid4().hex, active=0, peak=0,
                           messages=0, errors=0, runs={})
         self.writers, self.tasks, self.seen = set(), set(), {}
+        self.echo_rounds = {}
         self.thread = threading.Thread(target=self._thread, daemon=True)
         self.thread.start()
         if not self.ready.wait(5):
@@ -38,6 +41,16 @@ class Receiver:
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(value), encoding="utf-8")
         temporary.replace(self.path)
+
+    def _record_echo(self, run, previous, sequence):
+        self.state['messages'] += 1
+        self.state['runs'][run]['messages'] += 1
+        rounds = self.echo_rounds[run]
+        if previous >= 0:
+            rounds[previous + 1] -= 1
+            if not rounds[previous + 1]: del rounds[previous + 1]
+        rounds[sequence + 1] += 1
+        self.state['runs'][run]['minimum_echoes'] = min(rounds)
 
     async def _handle(self, reader, writer):
         task = asyncio.current_task()
@@ -71,8 +84,10 @@ class Receiver:
                     if key not in self.state["runs"]:
                         if len(self.state["runs"]) >= self.max_runs:
                             raise ValueError("held-session run limit")
-                        self.state["runs"][key] = dict(active=0, peak=0, messages=0, connections=0)
+                        self.state["runs"][key] = dict(active=0, peak=0, messages=0, connections=0,
+                            peak_reached_at=None, first_disconnect_at=None, minimum_echoes=0)
                         self.seen[key] = set()
+                        self.echo_rounds[key] = Counter()
                     if cid in self.seen[key]:
                         raise ValueError("duplicate held-session connection id")
                     self.seen[key].add(cid)
@@ -80,15 +95,16 @@ class Receiver:
                     row = self.state["runs"][run]
                     row["active"] += 1
                     row["connections"] += 1
-                    row["peak"] = max(row["peak"], row["active"])
+                    if row["active"] > row["peak"]:
+                        row["peak"] = row["active"]
+                        row["peak_reached_at"] = time.time()
                     self.state["active"] += 1
                     self.state["peak"] = max(self.state["peak"], self.state["active"])
                 elif str(ident) != run or cid != connection_id:
                     raise ValueError("held-session identity changed")
                 writer.write(data)
                 await asyncio.wait_for(writer.drain(), 2)
-                self.state["messages"] += 1
-                self.state["runs"][run]["messages"] += 1
+                self._record_echo(run, seq_previous, seq)
                 seq_previous = seq
                 first = await asyncio.wait_for(reader.readexactly(8), self.idle_timeout)
         except asyncio.IncompleteReadError:
@@ -97,6 +113,8 @@ class Receiver:
             self.state["errors"] += 1
         finally:
             if run is not None:
+                if self.state["runs"][run]["first_disconnect_at"] is None:
+                    self.state["runs"][run]["first_disconnect_at"] = time.time()
                 self.state["active"] -= 1
                 self.state["runs"][run]["active"] -= 1
             self.writers.discard(writer)

@@ -213,8 +213,15 @@ make a window eligible. Validity requires explicit observed window validation.
         result.update(measured)
         result['workload_observation'] = observation
         errors.extend(issues)
-        if kind == 'held' and receipt.get('held_receiver_window_validated') is not True:
-            errors.append('independent_held_receiver_window_unverified')
+        if kind == 'held':
+            try:
+                from extreme import held_evidence
+                if receipt.get('held_receiver_window_validated') is not True:
+                    raise ValueError('held receiver proof absent')
+                observation['held_receiver'] = held_evidence.verify(receipt.get('held_receiver_evidence'),
+                    Path(workload_path).parent, raw, window['offered'], ident)
+            except (OSError, ValueError, KeyError, TypeError):
+                errors.append('independent_held_receiver_window_unverified')
     except (OSError, ValueError, TypeError, UnicodeError, AttributeError):
         errors.append('workload_source_missing_or_malformed')
         result['raw_source'] = {'path': str(workload_path), 'status': 'UNAVAILABLE_OR_MALFORMED'}
@@ -255,6 +262,7 @@ def normalize_campaign(plan, receipts, base_dir):
         components = [c for c in all_components if isinstance(c, dict) and c.get('phase') == 'measure'] or [{}]
         offered = window.get('offered', {})
         expected = offered.get('components', []) if offered.get('kind') == 'mixed' else [offered]
+        first_run = len(runs)
         # Preserve a missing component as an invalid run too.
         for index in range(max(len(components), len(expected))):
             component = components[index] if index < len(components) else {}
@@ -287,6 +295,25 @@ def normalize_campaign(plan, receipts, base_dir):
             run['controller_component'] = component
             run['nonmeasurement_components'] = [c for c in all_components if isinstance(c, dict) and c.get('phase') != 'measure']
             runs.append(run)
+        if offered.get('kind') == 'mixed':
+            mixed_runs = runs[first_run:]
+            try:
+                from extreme import plan as extreme_plan
+                from extreme.control_capacity import mixed_timing
+                nominal = window['measure_seconds']
+                seconds = extreme_plan.component_seconds(offered, nominal)
+                if (window.get('component_measure_seconds') != seconds
+                        or receipt.get('measure_seconds') != nominal
+                        or receipt.get('component_measure_seconds') != seconds
+                        or any(c.get('requested_duration_seconds') != seconds for c in components)):
+                    raise ValueError('mixed declared timing contract missing or differs')
+                timing = mixed_timing([{'actual': r, 'observation': r['workload_observation']} for r in mixed_runs], nominal)
+                for run in mixed_runs: run['mixed_measurement_window'] = timing
+            except (RuntimeError, ValueError, KeyError, TypeError):
+                for run in mixed_runs:
+                    run['valid'] = False
+                    run['normalization_errors'].append('mixed_full_concurrent_window_unverified')
+                    if run['outcome'] != 'SAFETY_STOP': run['outcome'] = 'INVALID_MEASUREMENT'
     for ident, (receipt, path) in loaded.items():
         runs.append({'run_id': ident, 'valid': False, 'outcome': 'INVALID_MEASUREMENT',
                      'evidence': [str(path)], 'normalization_errors': ['unplanned_controller_receipt']})

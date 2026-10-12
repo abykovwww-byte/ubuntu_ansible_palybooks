@@ -273,6 +273,48 @@ class Monitor:
             time.sleep(min(self.limits['sample_seconds'], max(0, end - time.monotonic())))
 
 
+def performance_errors(part, value, observation, duration, limits):
+    """Shared receiver-work criteria for direct capacity and prior stable windows."""
+    errors = []
+    if part['kind'] in ('tcp', 'udp'):
+        receiver = observation.get('receiver_summary', {})
+        if receiver.get('seconds', 0) < duration - .1:
+            errors.append('measurement_shorter_than_requested')
+        if value.get('achieved', {}).get('value', 0) < part['bps'] * limits['success_ratio']:
+            errors.append('receiver_offered_rate_not_achieved')
+        if part['kind'] == 'udp' and (type(receiver.get('lost_percent')) not in (int, float)
+                or not math.isfinite(receiver['lost_percent'])
+                or not 0 <= receiver['lost_percent'] <= limits['max_udp_loss_pct']):
+            errors.append('receiver_loss_exceeds_threshold_or_missing')
+    else:
+        final = observation.get('final', {})
+        if final.get('seconds', 0) < duration - .1:
+            errors.append('measurement_shorter_than_requested')
+        if final.get('errors', 1) / max(1, final.get('attempted_requests', 0)) > limits['max_error_ratio']:
+            errors.append('application_error_ratio')
+        if part['kind'] != 'held' and value.get('achieved', {}).get('value', 0) < part['rate'] * limits['success_ratio']:
+            errors.append('successful_offered_rate_not_achieved')
+    return errors
+
+
+def mixed_timing(measured, duration):
+    """Prove full common time conservatively; retain the full export union."""
+    if len(measured) < 2: raise Blocked('mixed component timing absent')
+    starts = [controller.epoch(row['actual']['start']) for row in measured]
+    ends = [controller.epoch(row['actual']['end']) for row in measured]
+    uncertainty = max(row['observation'].get('wall_timestamp_resolution_seconds', 0) for row in measured)
+    component_duration = plan.component_seconds({'kind': 'mixed'}, duration)
+    if any(end - start < component_duration for start, end in zip(starts, ends)):
+        raise Blocked('mixed actual component duration shorter than declared')
+    common = min(ends) - max(starts) - uncertainty
+    if common < duration: raise Blocked('mixed full concurrent duration unproven')
+    return dict(measure_seconds=duration, component_measure_seconds=component_duration,
+                conservative_common_seconds=common, wall_timestamp_resolution_seconds=uncertainty,
+                common_start_epoch_seconds=max(starts), common_end_epoch_seconds=min(ends),
+                export_union_start_epoch_seconds=min(starts), export_union_end_epoch_seconds=max(ends),
+                scope='full_component_union_for_native_export_conservative_common_interval_for_mixed')
+
+
 def measure_results(report, directory, offered, duration, limits, samples):
     parts = offered.get('components', [offered])
     issues, measured = [], []
@@ -284,22 +326,10 @@ def measure_results(report, directory, offered, duration, limits, samples):
         kind = part['kind']
         if kind in ('tcp', 'udp'):
             value, observation, errors = iperf_observation(raw, kind, {})
-            receiver = observation.get('receiver_summary', {})
-            if receiver.get('seconds', 0) < duration - .1:
-                errors.append('measurement_shorter_than_requested')
-            if value.get('achieved', {}).get('value', 0) < part['bps'] * limits['success_ratio']:
-                errors.append('receiver_offered_rate_not_achieved')
-            if kind == 'udp' and (type(receiver.get('lost_percent')) not in (int, float)
-                                 or receiver['lost_percent'] > limits['max_udp_loss_pct']):
-                errors.append('receiver_loss_exceeds_threshold_or_missing')
         else:
             value, observation, errors = extreme_observation(raw, report['run_id'], kind)
             rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
             final = next((row for row in reversed(rows) if row.get('record_type') == 'final'), {})
-            if final.get('seconds', 0) < duration - .1:
-                errors.append('measurement_shorter_than_requested')
-            if final.get('errors', 1) / max(1, final.get('attempted_requests', 0)) > limits['max_error_ratio']:
-                errors.append('application_error_ratio')
             if kind == 'held':
                 key = str(int.from_bytes(hashlib.sha256(report['run_id'].encode()).digest()[:8], 'big'))
                 start, end = final.get('measure_start'), final.get('time_end')
@@ -309,12 +339,23 @@ def measure_results(report, directory, offered, duration, limits, samples):
                         or any(h is None or h['status'] != 'running' or h['runs'].get(key, {}).get('active') != part['sessions'] for h in held)
                         or any(b['runs'][key]['messages'] <= a['runs'][key]['messages'] for a, b in zip(held, held[1:]))):
                     errors.append('receiver_sustained_held_population_unproven')
-            elif value.get('achieved', {}).get('value', 0) < part['rate'] * limits['success_ratio']:
-                errors.append('successful_offered_rate_not_achieved')
+        if offered['kind'] == 'mixed':
+            expected_seconds = plan.component_seconds(offered, duration)
+            if (report.get('measure_seconds') != duration
+                    or report.get('component_measure_seconds') != expected_seconds
+                    or component.get('requested_duration_seconds') != expected_seconds):
+                errors.append('mixed_declared_component_duration_differs')
+            if kind in ('tcp', 'udp') and json.loads(raw).get('start', {}).get('test_start', {}).get('duration') != expected_seconds:
+                errors.append('mixed_actual_iperf_requested_duration_differs')
+        errors.extend(performance_errors(part, value, observation, plan.component_seconds(offered, duration), limits))
         if component['exit_code'] != 0:
             errors.append('workload_nonzero_exit')
         measured.append({'kind': kind, 'actual': value, 'observation': observation, 'errors': errors})
         issues.extend(kind + ':' + item for item in errors)
+    if offered['kind'] == 'mixed':
+        try: report['mixed_measurement_window'] = mixed_timing(measured, duration)
+        except (Blocked, KeyError, ValueError, TypeError) as error:
+            issues.append('mixed_timing_invalid:' + str(error))
     return measured, issues
 
 
@@ -386,6 +427,8 @@ def run_capacity(backend, campaign, anchor_path, workload, directory, seconds, l
         for sig in (signal.SIGINT, signal.SIGTERM):
             previous[sig] = signal.signal(sig, lambda *_: setattr(monitor, 'cancelled', True))
         window = {'run_id': report['run_id'], 'offered': offered, 'profile': 'DIRECT'}
+        if offered['kind'] == 'mixed':
+            window.update(measure_seconds=seconds, component_measure_seconds=plan.component_seconds(offered, seconds))
         controller.execute_components(monitor, window, direct_campaign, 'measure', seconds, report)
         if report['gaps']:
             raise Blocked('remote job cleanup not confirmed; recovery cannot be claimed')
@@ -476,6 +519,9 @@ def finalize(backend, path, isolation=None):
                'resources_unlimited': report['resources_unlimited'], 'resource_scope': report['resource_scope'],
                'endpoint_config_hashes': {k: report['campaign']['invariants'][k] for k in ('generator', 'receiver')},
                'evidence': report['evidence'] + [reference(path), reference(directory / 'dut-return.json'), reference(isolation)]}
+    if report['offered']['kind'] == 'mixed':
+        receipt['component_measure_seconds'] = plan.component_seconds(report['offered'], report['duration_seconds'])
+        receipt['mixed_measurement_window'] = mixed_timing(report['measurements'], report['duration_seconds'])
     save(directory / 'control-capacity.json', receipt)
     return receipt
 

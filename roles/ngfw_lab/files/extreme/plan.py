@@ -50,17 +50,26 @@ def validate_load(load):
     return load
 
 
-def commands(load, target, seconds, run_id, source_ips=(), tool_path='/opt/extreme/load.py'):
+def component_seconds(load, seconds, phase='measure'):
+    if type(seconds) is not int or not 1 <= seconds <= 3600 or phase not in ('measure', 'stabilization'):
+        raise ValueError('bounded nominal duration 1..3600 and known phase required')
+    return seconds + (2 if load['kind'] == 'mixed' and phase == 'measure' else 0)
+
+
+def commands(load, target, seconds, run_id, source_ips=(), tool_path='/opt/extreme/load.py', phase='measure'):
     """Return independent argv arrays; root controller owns concurrent mixed start/stop."""
     validate_load(load)
     address = ipaddress.ip_address(target)
     if address.version != 4 or not address.is_private:
         raise ValueError('explicit private IPv4 lab target required')
-    if not 1 <= seconds <= 3600:
-        raise ValueError('bounded duration 1..3600 required')
+    actual_seconds = component_seconds(load, seconds, phase)
     if load['kind'] == 'mixed':
-        return [argv for component in load['components']
-                for argv in commands(component, target, seconds, run_id, source_ips, tool_path)]
+        return [_command(component, target, actual_seconds, run_id, source_ips, tool_path)
+                for component in load['components']]
+    return [_command(load, target, actual_seconds, run_id, source_ips, tool_path)]
+
+
+def _command(load, target, seconds, run_id, source_ips, tool_path):
     if load['kind'] in ('tcp', 'udp'):
         parallel = load.get('parallel', 1)
         argv = ['iperf3', '-c', target, '-t', str(seconds), '-J', '-P', str(parallel),
@@ -68,7 +77,7 @@ def commands(load, target, seconds, run_id, source_ips=(), tool_path='/opt/extre
                 '--get-server-output']
         if load['kind'] == 'udp':
             argv += ['-u', '-l', str(load['payload_bytes'])]
-        return [argv]
+        return argv
     argv = ['python3', tool_path, 'client', '--kind', load['kind'], '--target', target,
             '--duration', str(seconds), '--run-id', run_id]
     if load['kind'] == 'held':
@@ -82,7 +91,7 @@ def commands(load, target, seconds, run_id, source_ips=(), tool_path='/opt/extre
         if not ipaddress.ip_address(source).is_private:
             raise ValueError('source address must be private')
         argv += ['--source-ip', source]
-    return [argv]
+    return argv
 
 
 def readiness(config):
@@ -156,6 +165,9 @@ def materialize(config):
                                   stabilization_seconds=warmup, recovery_seconds=recovery,
                                   wait_until_recovered=True, argv=commands(chosen['offered'], config['target'],
                                   3600, ident, config.get('source_ips', []))))
+    for window in windows + endurance:
+        if window['offered']['kind'] == 'mixed':
+            window['component_measure_seconds'] = component_seconds(window['offered'], window['measure_seconds'])
     return dict(schema_version=1, campaign_id=config['campaign_id'], config_hash=fingerprint(config),
                 invariants=config.get('invariants', {}), blockers=readiness(config), windows=windows,
                 endurance=endurance, endurance_pending=[p for p in ('A', 'B') if not config.get('endurance_selection', {}).get(p)],
