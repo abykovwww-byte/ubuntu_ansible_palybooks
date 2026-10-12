@@ -412,6 +412,18 @@ docker_apps:
         path: "{{ pentestgpt_project_dir }}/Dockerfile.abykovserv"
         mode: "0644"
         force: true
+      - src: pentestgpt/install_pd_tools.py
+        path: "{{ pentestgpt_project_dir }}/install_pd_tools.py"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/test_pd_tools.py
+        path: "{{ pentestgpt_project_dir }}/test_pd_tools.py"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/tool-lock.json
+        path: "{{ pentestgpt_project_dir }}/tool-lock.json"
+        mode: "0644"
+        force: true
       - src: pentestgpt/Dockerfile.proxy
         path: "{{ pentestgpt_project_dir }}/Dockerfile.proxy"
         mode: "0644"

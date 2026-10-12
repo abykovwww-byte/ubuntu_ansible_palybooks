@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "profile_revision": 1,
+  "reviewed_on": "2026-10-06",
+  "verification": "GitHub REST commit and non-truncated recursive Git tree; pinned raw files read for license and methodology review",
+  "reuse_policy": "Original local profile informed by selected workflow ideas; no upstream code, substantial text, persona, runtime, or third-party methodology files are vendored or executed",
+  "provider_entitlements": "Not established by this source lock; free account support and current quotas must be verified per implemented adapter",
+  "sources": [
+    {
+      "repository": "frangelbarrera/osint-agent-skills",
+      "url": "https://github.com/frangelbarrera/osint-agent-skills",
+      "commit": "5d4bc7bcc6f611c7361998ed50826727ad422e14",
+      "commit_time": "2026-10-02T18:57:06Z",
+      "license": {
+        "status": "verified",
+        "spdx": "MIT",
+        "copyright": "2026 Frangel Raúl Crespo Barrera",
+        "path": "LICENSE",
+        "url": "https://github.com/frangelbarrera/osint-agent-skills/blob/5d4bc7bcc6f611c7361998ed50826727ad422e14/LICENSE"
+      },
+      "reuse": "Methodology reference only: seed-domain pivots, source scrutiny and shared-provider caveats; original local wording, no copied implementation",
+      "consulted_files": [
+        {"path": "LICENSE", "git_blob_oid": "4e018951b3afd5f1ec5de6eb23404e64e1326c7a"},
+        {"path": "knowledge/pivot-playbooks/domain-to-infrastructure.md", "git_blob_oid": "6fd30e260449a5f4cba9cad035f80dd84b10a0f7"},
+        {"path": "knowledge/pivot-playbooks/ip-to-attribution.md", "git_blob_oid": "0bf372245539cd65cf5d166bead8f57f902b3b36"},
+        {"path": "knowledge/methodologies/source-verification.md", "git_blob_oid": "a52a0e0145a0f0cf720ddc89566b3de2e1155f3d"}
+      ]
+    },
+    {
+      "repository": "buriedsignals/spotlight",
+      "url": "https://github.com/buriedsignals/spotlight",
+      "commit": "3c846ad82545a1481efbae5c0bcfcb4e4b702517",
+      "commit_time": "2026-10-05T19:11:14Z",
+      "license": {
+        "status": "verified",
+        "spdx": "MIT",
+        "copyright": "2026 Buried Signals",
+        "path": "LICENSE",
+        "url": "https://github.com/buriedsignals/spotlight/blob/3c846ad82545a1481efbae5c0bcfcb4e4b702517/LICENSE",
+        "caveat": "Root license lists third-party methodology, including CC BY-ND 4.0 material. No such third-party texts or files are copied; the root MIT identifier is not asserted to relicense every external reference."
+      },
+      "reuse": "Methodology reference only: independent evidence pass, gap-directed cycles and public Git attribution cautions; no upstream approval/publication gates or autonomous runtime",
+      "consulted_files": [
+        {"path": "LICENSE", "git_blob_oid": "2431801aac8bf1e05857059943a4fe79cd5f6de2"},
+        {"path": "docs/fact-checking.md", "git_blob_oid": "23ba680bceaeb9100b97d487575b8f8173300e8e"},
+        {"path": "skills/spotlight/references/pipeline.md", "git_blob_oid": "ec2d33a6966b095761ef592696fb2415c0bde81b"},
+        {"path": "skills/technical-investigation/references/github-public-compact.md", "git_blob_oid": "2e286595a01761ab3c8e4457a1253d3d8af5acd7"}
+      ]
+    },
+    {
+      "repository": "OpenOSINT/OpenOSINT",
+      "url": "https://github.com/OpenOSINT/OpenOSINT",
+      "commit": "3f5dfa442ea768e2f2965a4249e3dcf3948e3c9b",
+      "commit_time": "2026-10-06T10:36:51Z",
+      "license": {
+        "status": "verified",
+        "spdx": "MIT",
+        "copyright": "2026 OpenOSINT",
+        "path": "LICENSE",
+        "url": "https://github.com/OpenOSINT/OpenOSINT/blob/3f5dfa442ea768e2f2965a4249e3dcf3948e3c9b/LICENSE"
+      },
+      "reuse": "Recipe reference only: registration, DNS, search and subdomain stages; search_domain.py inspected but not copied/imported; no model REPL, actor or subscription dependency",
+      "consulted_files": [
+        {"path": "LICENSE", "git_blob_oid": "234ae4f0e9e8eced1045c9034d3f40528c72ce65"},
+        {"path": "openosint/playbooks/recipes/domain.yaml", "git_blob_oid": "46adadea5a088e1714be34e907eb27a7d996304e"},
+        {"path": "openosint/tools/search_domain.py", "git_blob_oid": "f9fd4ac0eb4884a6f2bf91c9607cadaca3a3673c"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends nftables iproute2 curl util-linux openssl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=ghcr.io/astral-sh/uv:0.12.10 /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+COPY security_lab ./security_lab
+COPY lab ./lab
+ENV PATH="/app/.venv/bin:${PATH}" PYTHONPATH=/app
+# Owned synthetic fixture only; never enabled in production inventory.

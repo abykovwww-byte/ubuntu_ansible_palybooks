@@ -1,13 +1,12 @@
 [project]
 name = "security-lab-control"
-version = "0.1.0"
+version = "0.3.0"
 description = "Evidence-backed OSINT and PentestGPT control plane for Codex"
 requires-python = ">=3.12,<3.15"
 dependencies = ["mcp==1.26.0"]
 
 [dependency-groups]
 dev = ["pytest==8.4.2"]
-network = ["mitmproxy==12.2.3"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

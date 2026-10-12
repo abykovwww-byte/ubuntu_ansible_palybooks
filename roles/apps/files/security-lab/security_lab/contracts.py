@@ -8,7 +8,7 @@ import json
 import re
 from urllib.parse import unquote, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 
 class Denied(ValueError):
@@ -106,6 +106,57 @@ class Target(Contract):
             return False
 
 
+_PRIVATE_V4 = tuple(ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+_PRIVATE_V6 = ipaddress.ip_network("fc00::/7")
+
+
+def is_private_network_address(value: str) -> bool:
+    address = ipaddress.ip_address(value)
+    return address in _PRIVATE_V6 if address.version == 6 else any(address in network for network in _PRIVATE_V4)
+
+
+def network_address(value: str) -> str:
+    """One unicast public/RFC1918/ULA IP; permission is checked separately."""
+    if type(value) is not str or "%" in value:
+        raise ValueError("Expected an exact IP address without a zone identifier")
+    address = ipaddress.ip_address(value)
+    if (address.is_loopback or address.is_link_local or address.is_unspecified
+            or address.is_multicast or address.is_reserved):
+        raise ValueError("Unsupported special-purpose network address")
+    if not address.is_global and not is_private_network_address(str(address)):
+        raise ValueError("Only public, RFC1918 or ULA unicast network addresses are supported")
+    return str(address)
+
+
+class NetworkTarget(Contract):
+    """Explicit TCP scan permission, independent of HTTP services and paths."""
+
+    host: str
+    tcp_ports: list[int] = Field(min_length=1, max_length=1024)
+    addresses: list[str] = Field(default_factory=list, max_length=64)
+
+    _host = field_validator("host")(hostname)
+
+    @field_validator("addresses")
+    @classmethod
+    def exact_address_grants(cls, values: list[str]) -> list[str]:
+        return sorted(set(network_address(value) for value in values))
+
+    @model_serializer(mode="wrap")
+    def compatible_network_permission(self, handler):
+        data = handler(self)
+        if not self.addresses:
+            data.pop("addresses", None)
+        return data
+
+    @field_validator("tcp_ports")
+    @classmethod
+    def explicit_tcp_ports(cls, values: list[int]) -> list[int]:
+        if any(type(value) is not int or not 1 <= value <= 65535 for value in values):
+            raise ValueError("Expected explicit integer TCP ports")
+        return sorted(set(values))
+
+
 class Budget(Contract):
     seconds: int = Field(default=7200, ge=1, le=7200)
     rps: int = Field(default=2, ge=1, le=10)
@@ -139,11 +190,22 @@ class Authorization(Contract):
 
 class Scope(Contract):
     schema_version: int = 1
-    targets: list[Target] = Field(min_length=1, max_length=2000)
+    targets: list[Target] = Field(default_factory=list, max_length=2000)
+    network_targets: list[NetworkTarget] = Field(default_factory=list, max_length=2000)
     authorization: Authorization
     expires_at: int
     allowed_actions: list[str] = Field(default_factory=lambda: ["checks"])
     budget: Budget = Field(default_factory=Budget)
+
+    @model_serializer(mode="wrap")
+    def compatible_manifest(self, handler):
+        data = handler(self)
+        # This additive contract preserves canonical hashes of stored v1 HTTP
+        # manifests. Never rewrite historical manifests simply to add an empty
+        # network permission; nonempty network targets participate in the hash.
+        if not self.network_targets:
+            data.pop("network_targets", None)
+        return data
 
     @model_validator(mode="after")
     def valid(self) -> "Scope":
@@ -151,10 +213,14 @@ class Scope(Contract):
             raise ValueError("First scope approves checks only")
         if "checks" not in self.authorization.actions or self.expires_at > self.authorization.valid_until:
             raise ValueError("Scope exceeds authorization")
-        if any(t.host not in self.authorization.hosts for t in self.targets):
+        if not self.targets and not self.network_targets:
+            raise ValueError("Scope requires an explicit HTTP or network target")
+        if any(t.host not in self.authorization.hosts for t in [*self.targets, *self.network_targets]):
             raise ValueError("Target missing from authorization")
         if len({(t.host, t.scheme, t.port) for t in self.targets}) != len(self.targets):
             raise ValueError("Duplicate service targets must be merged explicitly")
+        if len({t.host for t in self.network_targets}) != len(self.network_targets):
+            raise ValueError("Duplicate network targets must be merged explicitly")
         return self
 
     def check_window(self, now: float) -> None:
