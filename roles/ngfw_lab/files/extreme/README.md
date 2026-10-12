@@ -52,6 +52,16 @@ iperf3 server supports one active test, so mixed plans permit only one iperf
 component plus DNS and new TCP/HTTP connections. The receiver uses a separate
 thread for held echoes; measure receiver CPU and FD pressure at direct capacity.
 
+Extreme Compose reserves the base service ports on both endpoints and each
+configured policy-listener range additionally on the receiver. This prevents
+namespace ephemeral allocation (including Docker's embedded DNS sockets) from
+occupying a wildcard policy listener's port before receiver startup. The client
+keeps its separate 64,508-port configured pool; reserving receiver policy ranges
+on the client would reduce the headroom for 60,000 held sessions. Actual occupied
+ports and resource margins still require read-back. Direct and NGFW modes use
+the same per-endpoint reservations; changing these settings requires fresh
+endpoint identity and control-capacity evidence.
+
 Client example after resources and source addresses are provisioned:
 
 ```text

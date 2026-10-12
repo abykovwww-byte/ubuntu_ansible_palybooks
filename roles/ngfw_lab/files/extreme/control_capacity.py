@@ -530,7 +530,7 @@ def validate_install_config(config, project, legacy=False):
     services = config['services']
     if set(services) != set(SERVICES):
         raise Blocked('only existing two endpoint services may be installed')
-    for service in services.values():
+    for service_name, service in services.items():
         if (service.get('ports') or service.get('privileged') or service.get('cap_add') or not service.get('read_only')
                 or service.get('cap_drop') != ['ALL'] or len(service.get('networks', {})) != 1
                 or service.get('network_mode') or service.get('pid') == 'host' or service.get('devices')):
@@ -540,7 +540,7 @@ def validate_install_config(config, project, legacy=False):
             if not 0 < float(service.get('cpus', 0)) <= 4 or compose_integer(service.get('mem_limit', 0)) <= 0:
                 raise Blocked('legacy endpoint resource bounds missing')
         else:
-            validate_extreme_resources(service, nofile)
+            validate_extreme_resources(service, nofile, service_name)
         mounts = service.get('volumes', [])
         if (len(mounts) != 1 or mounts[0].get('type') != 'bind' or mounts[0].get('target') != '/opt/extreme'
                 or mounts[0].get('read_only') is not True
@@ -568,15 +568,40 @@ def compose_integer(value):
     raise Blocked('candidate integer resource is not a normalized decimal value')
 
 
-def validate_extreme_resources(service, nofile):
+def receiver_reserved_ports(service):
+    """Exact declared policy listeners, matching policy_probe.parse_ports bounds."""
+    base = '5201,5353,8080,9000'
+    try:
+        ranges = json.loads(service['environment']['NGFW_POLICY_LISTEN_RANGES'])
+        if not isinstance(ranges, list):
+            raise ValueError('ranges must be a list')
+        occupied = set()
+        for pair in ranges:
+            if not isinstance(pair, list) or len(pair) != 2:
+                raise ValueError('range must be a pair')
+            first, last = pair
+            if type(first) is not int or type(last) is not int or not 10000 <= first <= last <= 20999:
+                raise ValueError('range outside policy listener bounds')
+            ports = set(range(first, last + 1))
+            if occupied & ports:
+                raise ValueError('policy listener ranges overlap')
+            occupied.update(ports)
+            base += ',' + str(first) + '-' + str(last)
+    except (KeyError, TypeError, ValueError) as error:
+        raise Blocked('candidate policy listener ranges invalid or unavailable') from error
+    return base
+
+
+def validate_extreme_resources(service, nofile, service_name='traffic-client'):
     if (not 2 <= float(service.get('cpus', 0)) <= 4
             or not 2147483648 <= compose_integer(service.get('mem_limit', 0)) <= 4294967296
             or not 131072 <= compose_integer(nofile.get('soft', 0)) <= compose_integer(nofile.get('hard', 0)) <= 262144
             or not 96 <= compose_integer(service.get('pids_limit', 0)) <= 512):
         raise Blocked('candidate lacks bounded approved endpoint resources')
     sysctls = service.get('sysctls', {})
+    reserved = receiver_reserved_ports(service) if service_name == 'traffic-server' else '5201,5353,8080,9000'
     if (sysctls.get('net.ipv4.ip_local_port_range') != '1024 65535'
-            or sysctls.get('net.ipv4.ip_local_reserved_ports') != '5201,5353,8080,9000'
+            or sysctls.get('net.ipv4.ip_local_reserved_ports') != reserved
             or str(sysctls.get('net.ipv4.ip_forward')) != '0'):
         raise Blocked('candidate namespace tuple/forwarding bounds differ')
 
