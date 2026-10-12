@@ -98,6 +98,23 @@ class TransactionTests(unittest.TestCase):
             self.assertFalse((directory / 'backups').exists())
             self.assertEqual(list(directory.glob('.ngfw-route-candidate-*')), [])
 
+    def test_failed_filtered_candidate_probe_never_mutates_or_restarts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            includes = directory / 'includes'
+            includes.mkdir()
+            (includes / 'system.conf').write_bytes(b'[[inputs.system]]\n')
+            restart = Mock()
+            outputs = [Mock(stdout=b'> system,host=synthetic uptime=10i 123\n'),
+                       r.subprocess.CalledProcessError(1, ['telegraf'])]
+            with patch.object(r, 'INCLUDES', includes), patch.object(r.subprocess, 'run', side_effect=outputs):
+                with self.assertRaisesRegex(r.RouteError, 'bounded_filtered_validation_failed'):
+                    self.call(directory, validator=r.validate_installed, restart_service=restart)
+            restart.assert_not_called()
+            self.assertEqual((directory / 'telegraf.conf').read_bytes(), SOURCE)
+            self.assertFalse((directory / 'backups').exists())
+            self.assertEqual(list(directory.glob('.ngfw-route-candidate-*')), [])
+
     def test_apply_idempotent_no_second_restart_restore_exact_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -221,6 +238,53 @@ class TransactionTests(unittest.TestCase):
             self.assertEqual(r.metadata(path), owner)
             r.atomic_write(path, SOURCE + b'\n', owner)
             self.assertEqual(r.metadata(path), owner)
+
+
+class InstalledValidationTests(unittest.TestCase):
+    def test_system_in_main_or_include_uses_bounded_filtered_probe(self):
+        for in_main in (True, False):
+            with self.subTest(in_main=in_main), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                config = directory / 'source.conf'
+                includes = directory / 'includes'
+                includes.mkdir()
+                config.write_bytes(SOURCE + (b'[[inputs.system]]\n' if in_main else b''))
+                if not in_main:
+                    (includes / 'system.conf').write_bytes(b'[[inputs.system]]\n')
+                with patch.object(r, 'INCLUDES', includes), patch.object(r.subprocess, 'run',
+                        return_value=Mock(stdout=b'> system,host=synthetic uptime=10i 123\n')) as run:
+                    self.assertIsNone(r.validate_installed(config))
+                run.assert_called_once_with(
+                    ['/usr/bin/telegraf', '--config', str(config), '--config-directory', str(includes),
+                     '--test', '--input-filter', 'system', '--quiet'],
+                    check=True, stdout=r.subprocess.PIPE, stderr=r.subprocess.DEVNULL, timeout=45)
+
+    def test_missing_system_input_refuses_before_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            config = directory / 'source.conf'
+            config.write_bytes(SOURCE)
+            with patch.object(r, 'INCLUDES', directory / 'empty'), patch.object(r.subprocess, 'run') as run:
+                with self.assertRaisesRegex(r.RouteError, 'configured_system_input_required'):
+                    r.validate_installed(config)
+                run.assert_not_called()
+
+    def test_empty_wrong_measurement_nonzero_and_timeout_probes_reject(self):
+        outcomes = (Mock(stdout=b''), Mock(stdout=b'> cpu,host=synthetic usage=1 123\n'),
+                    Mock(stdout=b'I! Loaded inputs: system\n'),
+                    r.subprocess.CalledProcessError(1, ['telegraf'], output=b'private'),
+                    r.subprocess.TimeoutExpired(['telegraf'], 45, output=b'private'))
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            config = directory / 'source.conf'
+            config.write_bytes(SOURCE + b'[[inputs.system]]\n')
+            for index, outcome in enumerate(outcomes):
+                kwargs = {'side_effect': outcome} if isinstance(outcome, Exception) else {'return_value': outcome}
+                with self.subTest(index=index), patch.object(r, 'INCLUDES', directory / 'empty'), \
+                        patch.object(r.subprocess, 'run', **kwargs):
+                    with self.assertRaises(r.RouteError) as error:
+                        r.validate_installed(config)
+                    self.assertNotIn('private', str(error.exception))
 
 
 if __name__ == '__main__':

@@ -124,10 +124,25 @@ def safe_command(argv, timeout=45):
 
 
 def validate_installed(path):
-    # Telegraf1.33 --test gathers inputs but does not run outputs. It never writes
-    # to localhost/destination; all plugin output, including errors, is discarded.
-    safe_command(['/usr/bin/telegraf', '--config', str(path), '--config-directory', str(INCLUDES),
-                  '--test', '--test-wait', '1', '--quiet'])
+    # Smoke-test an existing lightweight input only. Running vendor exec inputs
+    # again alongside the service adds observers and is not needed for URL-only
+    # routing. Full native collection requires independent post-apply readback.
+    documents = [parse(Path(path).read_bytes())]
+    documents.extend(parse(include.read_bytes()) for include in sorted(INCLUDES.glob('*.conf')))
+    if not any(isinstance(document.get('inputs', {}).get('system'), list)
+               and document['inputs']['system'] for document in documents):
+        raise RouteError('configured_system_input_required_for_preflight')
+    try:
+        result = subprocess.run(
+            ['/usr/bin/telegraf', '--config', str(path), '--config-directory', str(INCLUDES),
+             '--test', '--input-filter', 'system', '--quiet'],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=45)
+    except (OSError, subprocess.SubprocessError):
+        raise RouteError('bounded_filtered_validation_failed') from None
+    # Keep captured metrics in memory only; never return or print private tags.
+    if not any(re.match(rb'^> system(?:,[^\r\n]*)? [^\r\n]+$', line)
+               for line in result.stdout.splitlines()):
+        raise RouteError('filtered_validation_no_system_metrics')
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

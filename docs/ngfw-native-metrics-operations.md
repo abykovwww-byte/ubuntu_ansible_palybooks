@@ -99,9 +99,12 @@ belong in the command's extra vars, chat, Git or published evidence. A historica
 hash is not an automatic default. The helper refuses a mismatch, extra influxdb
 outputs, unrelated edits or an unfinished prior transaction.
 
-Plan and apply test the installed Telegraf configuration and the destination
-`/ping` before mutation. Telegraf `--test` gathers inputs once, so schedule these
-operations outside measured windows. Apply restarts the service only when the
+Plan and apply test the original and candidate with installed Telegraf
+`--test --input-filter system --quiet` and check destination `/ping` before mutation.
+This bounded 45-second smoke test requires configured `inputs.system` and an emitted
+system metric; it does not rerun native exec inputs or prove their collection.
+Private output is never logged. Schedule these operations outside measured windows
+and retain the full native DB/journal read-back gate below. Apply restarts the service only when the
 URL changes. Explicit restore always reloads the original configuration, including
 recovery after an interrupted file restore. The guest-local private backup preserves prior bytes, uid/gid/mode;
 failed apply automatically restores and checks them, or reports rollback as
