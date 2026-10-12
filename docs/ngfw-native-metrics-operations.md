@@ -214,6 +214,13 @@ come from full-window database read-back, never from the controller sample rate.
 
 ## Delivery and resumption
 
+For a live-derived SQLite snapshot and bounded ingest-minute evidence, use the
+separate opt-in [owner evidence playbook](../roles/ngfw_metrics/README.md#owner-generated-evidence-without-changing-live-access)
+after active windows close. It runs existing backup/restore/status/sizing as the
+spool owner and exports verified private artifacts through Ansible, without
+changing the source ACL or restarting collection. Its collection status is not
+24h buffering,30d/90d retention or external-delivery acceptance.
+
 The deployment skill requires the operator to run host apply interactively:
 
 ```bash

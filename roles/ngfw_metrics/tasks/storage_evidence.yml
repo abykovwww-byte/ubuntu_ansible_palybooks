@@ -1,0 +1,186 @@
+---
+- name: Require an explicit bounded storage evidence request
+  ansible.builtin.assert:
+    that:
+      - ngfw_metrics_evidence_enabled | bool
+      - not ansible_check_mode
+      - ngfw_metrics_evidence_request_id is match('^[a-z0-9][a-z0-9-]{0,63}$')
+      - ngfw_metrics_evidence_operator is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - ngfw_metrics_evidence_operator not in ['root', 'ngfw-metrics']
+      - ngfw_metrics_evidence_start_epoch | float > 0
+      - ngfw_metrics_evidence_end_epoch | float > ngfw_metrics_evidence_start_epoch | float
+      - ngfw_metrics_evidence_end_epoch | float - ngfw_metrics_evidence_start_epoch | float <= 604800
+      - ngfw_metrics_evidence_timeout_seconds | int >= 120
+      - ngfw_metrics_evidence_timeout_seconds | int <= 600
+      - ngfw_metrics_evidence_max_snapshot_bytes | int > 0
+      - ngfw_metrics_evidence_max_snapshot_bytes | int <= 137438953472
+      - ngfw_metrics_evidence_reserve_bytes | int >= 0
+    fail_msg: Explicit operator, new request ID, bounded past host interval and resource limits are required; run after active measurements.
+
+- name: Verify the existing artifact recipient account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ ngfw_metrics_evidence_operator }}"
+
+- name: Inspect the already deployed source and helper without following symlinks
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ ngfw_metrics_data }}/spool/metrics.sqlite"
+    - "{{ ngfw_metrics_root }}/metrics_spool.py"
+  register: ngfw_metrics_evidence_source
+
+- name: Require existing regular source files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+  loop: "{{ ngfw_metrics_evidence_source.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Install only the standalone evidence helper without restart notifications
+  ansible.builtin.copy:
+    src: storage_evidence.py
+    dest: "{{ ngfw_metrics_root }}/storage_evidence.py"
+    owner: root
+    group: ngfw-metrics
+    mode: "0750"
+
+- name: Create the owner-private snapshot parent outside the live spool
+  ansible.builtin.file:
+    path: "{{ ngfw_metrics_data }}/evidence"
+    state: directory
+    owner: ngfw-metrics
+    group: ngfw-metrics
+    mode: "0700"
+
+- name: Snapshot and analyze as the existing spool owner with exclusive evidence lock
+  become: true
+  become_user: ngfw-metrics
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/flock
+      - --nonblock
+      - "{{ ngfw_metrics_data }}/evidence/.snapshot.lock"
+      - /usr/bin/timeout
+      - --signal=TERM
+      - --kill-after=10
+      - "{{ ngfw_metrics_evidence_timeout_seconds | int + 10 }}"
+      - /usr/bin/python3
+      - "{{ ngfw_metrics_root }}/storage_evidence.py"
+      - --source
+      - "{{ ngfw_metrics_data }}/spool/metrics.sqlite"
+      - --helper
+      - "{{ ngfw_metrics_root }}/metrics_spool.py"
+      - --output-dir
+      - "{{ ngfw_metrics_data }}/evidence/{{ ngfw_metrics_evidence_request_id }}"
+      - --start-epoch
+      - "{{ ngfw_metrics_evidence_start_epoch }}"
+      - --end-epoch
+      - "{{ ngfw_metrics_evidence_end_epoch }}"
+      - --max-snapshot-bytes
+      - "{{ ngfw_metrics_evidence_max_snapshot_bytes }}"
+      - --reserve-bytes
+      - "{{ ngfw_metrics_evidence_reserve_bytes }}"
+      - --timeout-seconds
+      - "{{ ngfw_metrics_evidence_timeout_seconds }}"
+  register: ngfw_metrics_evidence_result
+  changed_when: false
+
+- name: Inspect export directories before privileged copying
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ ngfw_metrics_data }}/evidence-export"
+    - "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}"
+  register: ngfw_metrics_export_paths
+
+- name: Refuse export directory symlinks or other file types
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+  loop: "{{ ngfw_metrics_export_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Create a root-controlled export parent
+  ansible.builtin.file:
+    path: "{{ ngfw_metrics_data }}/evidence-export"
+    state: directory
+    owner: root
+    group: root
+    mode: "0711"
+
+- name: Keep the export private to Ansible until all copies verify
+  ansible.builtin.file:
+    path: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Inspect any existing export files without following symlinks
+  ansible.builtin.stat:
+    path: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
+    follow: false
+  loop: &ngfw_metrics_evidence_files
+    - backup.sqlite
+    - backup.sqlite.sha256
+    - status.json
+    - sizing.json
+    - ingest-minutes.json
+    - manifest.json
+  register: ngfw_metrics_export_existing
+
+- name: Refuse existing export links or nonregular files
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg and not item.stat.islnk)
+  loop: "{{ ngfw_metrics_export_existing.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Export only completed hashed artifacts through privileged Ansible
+  ansible.builtin.copy:
+    src: "{{ ngfw_metrics_data }}/evidence/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
+    dest: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
+    remote_src: true
+    owner: "{{ ngfw_metrics_evidence_operator }}"
+    mode: "0600"
+    force: false
+  loop: *ngfw_metrics_evidence_files
+
+- name: Hash owner originals and copied artifacts
+  ansible.builtin.stat:
+    path: "{{ ngfw_metrics_data }}/{{ item.0 }}/{{ ngfw_metrics_evidence_request_id }}/{{ item.1 }}"
+    checksum_algorithm: sha256
+    follow: false
+  loop: "{{ ['evidence', 'evidence-export'] | product(ngfw_metrics_evidence_files_list) | list }}"
+  vars:
+    ngfw_metrics_evidence_files_list: *ngfw_metrics_evidence_files
+  register: ngfw_metrics_export_hashes
+
+- name: Require exact exported bytes before handing over the directory
+  ansible.builtin.assert:
+    that:
+      - ngfw_metrics_export_hashes.results[item].stat.checksum == ngfw_metrics_export_hashes.results[item + 6].stat.checksum
+      - ngfw_metrics_export_hashes.results[item].stat.size == ngfw_metrics_export_hashes.results[item + 6].stat.size
+  loop: "{{ range(0, 6) | list }}"
+
+- name: Hand over only the verified private artifact directory
+  ansible.builtin.file:
+    path: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}"
+    state: directory
+    owner: "{{ ngfw_metrics_evidence_operator }}"
+    mode: "0700"
+
+- name: Report the private evidence directory and exact scope
+  ansible.builtin.debug:
+    msg:
+      directory: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}"
+      collection: "{{ ngfw_metrics_evidence_result.stdout | from_json }}"
+      scope: Online snapshot and bounded ingest observations; not storage or external delivery acceptance.

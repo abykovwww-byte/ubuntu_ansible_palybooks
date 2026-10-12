@@ -7,6 +7,7 @@ on:
       - 'roles/ngfw_native_route/**'
       - 'roles/ngfw_lab/**'
       - 'playbooks/ngfw-metrics.yml'
+      - 'playbooks/ngfw-metrics-evidence.yml'
       - 'playbooks/ngfw-native-discovery.yml'
       - 'playbooks/ngfw-native-route.yml'
       - 'playbooks/ngfw-extreme-endpoints.yml'
@@ -33,6 +34,7 @@ jobs:
       - run: python scripts/check-ngfw-native-metrics.py
       - run: ansible-galaxy collection install -r collections/requirements.yml
       - run: ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-metrics.yml --syntax-check
+      - run: ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-metrics-evidence.yml --syntax-check
       - run: ansible-playbook -i inventories/ngfw-audit-source/hosts.yml playbooks/ngfw-native-discovery.yml --syntax-check
       - run: ansible-playbook -i inventories/ngfw-audit-source/hosts.yml playbooks/ngfw-native-route.yml --syntax-check
       - run: ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-extreme-endpoints.yml --syntax-check

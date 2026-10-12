@@ -1,0 +1,13 @@
+---
+- name: Explicit owner-generated NGFW spool evidence
+  hosts: server
+  connection: local
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Collect only the explicitly requested storage evidence
+      ansible.builtin.import_role:
+        name: ngfw_metrics
+        tasks_from: storage_evidence
