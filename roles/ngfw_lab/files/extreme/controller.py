@@ -4,6 +4,7 @@ No profile, snapshot, route, policy or native collector mutation is performed.
 Receipt producer contracts are documented in README.md. Missing proof blocks load.
 """
 import argparse
+import base64
 from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
@@ -254,18 +255,161 @@ def window_clock_summary(before, after, measurement_bounds=None):
     return summary
 
 
+class NativeSourceAgeStale(Blocked):
+    """Only a fully proven old generation may wait for one atomic replacement."""
+    def __init__(self, message, health, identity):
+        super().__init__(message)
+        self.health, self.identity = health, identity
+
+
+NATIVE_RECEIPT_BYTES = 1024 * 1024
+NATIVE_REFRESH_WAIT_SECONDS = 1.0
+NATIVE_REFRESH_POLL_SECONDS = .05
+
+
+def native_snapshot(path):
+    snapshot = {'path': Path(path), 'payload': b'', 'receipt': None}
+    try:
+        with Path(path).open('rb') as stream:
+            snapshot['payload'] = stream.read(NATIVE_RECEIPT_BYTES + 1)
+        snapshot['sha256'] = hashlib.sha256(snapshot['payload']).hexdigest()
+        if len(snapshot['payload']) > NATIVE_RECEIPT_BYTES:
+            snapshot['truncated'] = True
+            raise Blocked('native receipt exceeds byte bound')
+        snapshot['receipt'] = json.loads(snapshot['payload'])
+        if not isinstance(snapshot['receipt'], dict):
+            raise Blocked('native receipt must be an object')
+        return snapshot
+    except (Blocked, OSError, ValueError, KeyError, TypeError) as error:
+        error.native_snapshot = snapshot
+        raise
+
+
+def native_generation_identity(snapshot, health):
+    """Bind retry generations to the same immutable selected-field catalog."""
+    receipt, raw, base = snapshot['receipt'], health['query_response'], snapshot['path'].parent
+    ref = receipt.get('catalog_evidence')
+    catalog = json.loads(artifact(ref, base))
+    source_refs = receipt.get('catalog_source_evidence')
+    if (raw.get('catalog_evidence') != ref or not isinstance(source_refs, dict)
+            or set(source_refs) != {'interval', 'observation'}):
+        raise Blocked('native refresh catalog/source identity unavailable')
+    for name in ('interval', 'observation'):
+        artifact(source_refs[name], base)
+        if source_refs[name]['sha256'] != catalog[name + '_evidence']['sha256']:
+            raise Blocked('native refresh catalog source differs')
+    fields = sorted((entry['name'], entry['field']) for entry in catalog['measurements'])
+    points = sorted((point['measurement'], point.get('selected_field')) for point in raw['points'])
+    if (catalog.get('schema_version') != 1 or catalog['database'] != receipt['database']
+            or catalog['source_interval_seconds'] != receipt['source_interval_seconds']
+            or fields != points or sorted(name for name, _ in fields) != sorted(receipt['required_measurements'])):
+        raise Blocked('native refresh selected catalog differs')
+    return dict(guest_boot_id=receipt['guest_boot_id'], database=receipt['database'],
+                interval=receipt['source_interval_seconds'], fields=fields, host_selector=catalog['host_selector'],
+                catalog_sha256=ref['sha256'], sources={name: source_refs[name]['sha256'] for name in source_refs})
+
+
 def validate_native(path, boot_id, now):
+    """Pure offline-compatible validation of one exact latest-file snapshot."""
+    snapshot = native_snapshot(path)
+    try:
+        return _validate_native_snapshot(snapshot, boot_id, now)
+    except (Blocked, OSError, ValueError, KeyError, TypeError) as error:
+        error.native_snapshot = snapshot
+        raise
+
+
+def native_refresh_event(directory, phase, event):
+    with (Path(directory) / 'native-health-refresh.ndjson').open('a', encoding='utf-8') as output:
+        output.write(json.dumps(dict(phase=phase, **event)) + '\n')
+        output.flush(); os.fsync(output.fileno())
+
+
+def read_native_current(path, boot_id, record, *, wall=None, monotonic=None, sleep=None):
+    """Wait <=1s for ONE newer atomic generation; never accept historical health.
+
+The deadline bounds polling/acceptance, including validation. Filesystem calls
+are synchronous; a stalled call is rejected on return, not reported as timely.
+"""
+    wall, monotonic, sleep = wall or time.time, monotonic or time.monotonic, sleep or time.sleep
+    initial = native_snapshot(path)
+    try:
+        return _validate_native_snapshot(initial, boot_id, wall)
+    except NativeSourceAgeStale as stale:
+        baseline = stale
+    except (Blocked, OSError, ValueError, KeyError, TypeError) as error:
+        error.native_snapshot = initial
+        raise
+    started = monotonic(); deadline = started + NATIVE_REFRESH_WAIT_SECONDS
+    current = initial; polls = 0
+    def event(status, reason):
+        return dict(status=status, reason=reason, observed_at=utc(), checked_epoch=wall(),
+                    waited_seconds=monotonic()-started, wait_limit_seconds=NATIVE_REFRESH_WAIT_SECONDS,
+                    polls=polls, receipt_sha256=current.get('sha256'),
+                    receipt_bytes_base64=base64.b64encode(current['payload']).decode('ascii'),
+                    receipt_truncated=current.get('truncated', False),
+                    scope='pending_current_native_generation_not_accepted_historical_health')
+    try:
+        record(event('PENDING', str(baseline)))
+        while True:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise Blocked('native refresh deadline expired without a valid newer generation')
+            sleep(min(NATIVE_REFRESH_POLL_SECONDS, remaining))
+            if monotonic() >= deadline:
+                raise Blocked('native refresh deadline expired without a valid newer generation')
+            polls += 1
+            current = native_snapshot(path)
+            if current['sha256'] == initial['sha256']:
+                continue
+            health = _validate_native_snapshot(current, boot_id, wall)
+            if native_generation_identity(current, health) != baseline.identity:
+                raise Blocked('native refresh boot/catalog/source identity changed')
+            old, new = baseline.health['query_response'], health['query_response']
+            if (health['query_sha256'] == baseline.health['query_sha256']
+                    or epoch(health['collected_at']) < epoch(baseline.health['collected_at'])
+                    or any(new['query_bounds'][key] <= old['query_bounds'][key] for key in
+                           ('started_epoch_ns', 'completed_epoch_ns', 'started_monotonic_ns', 'completed_monotonic_ns'))):
+                raise Blocked('native refresh query generation did not advance')
+            stamps = {p['measurement']: p['source_timestamp_ns'] for p in old['points']}
+            if any(p['source_timestamp_ns'] < stamps[p['measurement']] for p in new['points']):
+                raise Blocked('native refresh source timestamp regressed')
+            # Artifact/catalog validation may take time: recompute source age
+            # once more at actual acceptance, without reading latest again.
+            health = _validate_native_snapshot(current, boot_id, wall)
+            if monotonic() > deadline:
+                raise Blocked('native refresh validation exceeded bounded deadline')
+            record(event('CANDIDATE_VALIDATED', 'new generation validated; final acceptance follows evidence fsync'))
+            # Recording can stall too. Never call that provisional event an
+            # accepted result until the deadline and actual ages still pass.
+            health = _validate_native_snapshot(current, boot_id, wall)
+            if monotonic() > deadline:
+                raise Blocked('native refresh evidence recording exceeded bounded deadline')
+            health['refresh_wait'] = dict(status='RESOLVED', waited_seconds=monotonic()-started, polls=polls,
+                previous_receipt_sha256=initial['sha256'], receipt_sha256=current['sha256'],
+                scope='new_generation_validated_at_actual_acceptance_after_evidence_recording')
+            return health
+    except (Blocked, OSError, ValueError, KeyError, TypeError) as error:
+        current = getattr(error, 'native_snapshot', current)
+        error.native_snapshot = current
+        try:
+            record(event('FAILED', str(error)))
+        except (OSError, ValueError, TypeError) as logging_error:
+            logging_error.native_snapshot = current
+            raise logging_error from error
+        raise
+
+
+def _validate_native_snapshot(snapshot, boot_id, now):
     """Validate fresh DB read-back, not a boolean declaring collection healthy."""
-    path = Path(path)
-    receipt = read_json(path)
+    path = snapshot['path']
+    receipt = snapshot['receipt']
     if receipt.get('schema_version') != 2 or receipt.get('status') != 'HEALTHY':
         raise Blocked('native health producer has not confirmed aligned collection')
     interval = receipt.get('source_interval_seconds')
     if type(interval) not in (int, float) or not 1 <= interval <= 60:
         raise Blocked('native receipt lacks verified PT source interval')
     freshness = 2 * interval + 10
-    if not 0 <= now - epoch(receipt.get('collected_at')) <= freshness:
-        raise Blocked('native-health query receipt is stale or in the future')
     raw = json.loads(artifact(receipt.get('query_evidence'), path.parent))
     if (raw.get('guest_boot_id') != boot_id or receipt.get('guest_boot_id') != boot_id
             or not raw.get('database') or raw.get('database') != receipt.get('database')
@@ -289,17 +433,35 @@ def validate_native(path, boot_id, now):
         name = point['measurement']
         newest[name] = max(newest.get(name, 0), stamp)
         newest_ns[name] = max(newest_ns.get(name, ns), ns)
+    now = now() if callable(now) else now
+    receipt_age = now - epoch(receipt.get('collected_at'))
+    if receipt_age < 0:
+        raise Blocked('native-health query receipt is stale or in the future')
     age_ranges = {name: {'min_seconds': (int(now * 1e9) - stamp - clock['offset_max_ns']) / 1e9,
                          'max_seconds': (int(now * 1e9) - stamp - clock['offset_min_ns']) / 1e9}
                   for name, stamp in newest_ns.items()}
     if any(name not in age_ranges or not 0 <= age_ranges[name]['min_seconds']
-           <= age_ranges[name]['max_seconds'] <= min(30, freshness) for name in expected):
-        raise Blocked('native required measurements missing/stale')
-    return dict(receipt_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+           <= age_ranges[name]['max_seconds'] for name in expected):
+        raise Blocked('native required measurements missing/stale or future')
+    result = dict(receipt_sha256=snapshot['sha256'],
                 query_sha256=receipt['query_evidence']['sha256'], collected_at=receipt['collected_at'],
                 source_interval_seconds=interval, database=receipt['database'], newest=newest,
                 query_response=raw, clock_alignment=clock, age_ranges=age_ranges,
                 scope='freshness_only_not_full_window_completeness')
+    if receipt_age > freshness or any(age_ranges[name]['max_seconds'] > min(30, freshness) for name in expected):
+        # Retry eligibility requires proof this exact generation was healthy at
+        # producer evaluation, not merely a historical HEALTHY declaration.
+        evaluated = raw.get('evaluated_at_epoch_ns')
+        if (type(evaluated) is not int or not raw['query_bounds']['completed_epoch_ns'] <= evaluated
+                <= int(epoch(receipt['collected_at']) * 1e9) + 1000):
+            raise Blocked('native stale receipt lacks prior evaluation chronology')
+        if any(not 0 <= (evaluated - newest_ns[name] - clock['offset_max_ns']) / 1e9
+               <= (evaluated - newest_ns[name] - clock['offset_min_ns']) / 1e9 <= min(30, freshness)
+               for name in expected):
+            raise Blocked('native source was already stale/future at producer evaluation')
+        identity = native_generation_identity(snapshot, result)
+        raise NativeSourceAgeStale('native required measurements stale at consumer', result, identity)
+    return result
 
 
 def validate_identity(receipt, campaign, window, before, topology, base, now):
@@ -547,13 +709,14 @@ class NativeRunner(legacy.Runner):
 
     def monitor(self):
         try:
-            health = validate_native(self.native_health, self.boot_id, time.time())
+            health = read_native_current(self.native_health, self.boot_id,
+                lambda event: native_refresh_event(self.directory, self.context.get('phase'), event))
         except (Blocked, OSError, ValueError, KeyError, TypeError) as error:
             failure = dict(time=utc(), phase=self.context.get('phase'), outcome='INVALID_MEASUREMENT', reason=str(error))
-            try:
-                failure['receipt'] = read_json(self.native_health)
-            except (OSError, ValueError):
-                failure['receipt'] = None
+            snapshot = getattr(error, 'native_snapshot', {})
+            failure['receipt'] = snapshot.get('receipt')
+            failure['receipt_sha256'] = snapshot.get('sha256')
+            failure['receipt_bytes_base64'] = base64.b64encode(snapshot.get('payload', b'')).decode('ascii')
             with (self.directory / 'native-health-failures.ndjson').open('a', encoding='utf-8') as output:
                 output.write(json.dumps(failure) + '\n')
                 output.flush()
@@ -800,7 +963,8 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
                 (directory / ('identity-artifact-' + name + '.bin')).write_bytes(artifact(reference, identity_base))
         report.update(versions=identity['versions'], config_hashes=identity['config_hashes'],
                       profile_evidence=identity['profile_evidence'])
-        report['native_preflight'] = validate_native(native_health, before['boot_id'], time.time())
+        report['native_preflight'] = read_native_current(native_health, before['boot_id'],
+            lambda event: native_refresh_event(directory, 'preflight', event))
         monitor = NativeRunner(config, backend, directory, report,
             EpochAuditGuard(config['limits'], audit_epoch), {}, measurement.Guard(measure_config, initial_guest=before))
         monitor.native_health, monitor.boot_id = native_health, before['boot_id']
@@ -877,7 +1041,8 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
                     validate_audit_epoch_identity(audit_epoch, identity_after)
                 legacy.save(directory / 'identity-after.json', identity_after)
                 if report.get('native_preflight'):
-                    report['native_postflight'] = validate_native(native_health, before['boot_id'], time.time())
+                    report['native_postflight'] = read_native_current(native_health, before['boot_id'],
+                        lambda event: native_refresh_event(directory, 'postflight', event))
                     report['window_clock_alignment'] = window_clock_summary(report['native_preflight'], report['native_postflight'],
                                                                            report.get('controller_measurement_bounds'))
                 if changed:

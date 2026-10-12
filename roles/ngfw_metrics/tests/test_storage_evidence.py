@@ -2,7 +2,7 @@
 import hashlib
 from contextlib import closing
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sqlite3
 import subprocess
 import sys
@@ -73,6 +73,15 @@ class StorageEvidenceTests(unittest.TestCase):
         self.assertEqual(minutes['missing_minutes'], [self.minute + 1])
         self.assertIsNone(minutes['queue_24h_payload_bytes_30pct_margin'])
 
+    def test_completed_request_reexport_does_not_recollect_changed_live_source(self):
+        original = self.collect()
+        snapshot = (self.output / 'backup.sqlite').read_bytes()
+        self.spool.accept(PAYLOAD, now=(self.minute + 1) * 60 + 30)
+        result = self.collect(run=mock.Mock(side_effect=AssertionError('no second snapshot')))
+        self.assertEqual(result, original)
+        self.assertEqual((self.output / 'backup.sqlite').read_bytes(), snapshot)
+        self.assertNotEqual(self.read_tables(self.source), self.read_tables(self.output / 'backup.sqlite'))
+
     def test_backup_includes_committed_wal_without_repointing_or_stopping_source(self):
         with closing(sqlite3.connect(self.source)) as keeper:
             keeper.execute('SELECT COUNT(*) FROM batches').fetchone()
@@ -127,6 +136,57 @@ class StorageEvidenceTests(unittest.TestCase):
 
 
 class EvidencePlaybookTests(unittest.TestCase):
+    def test_export_ancestry_and_real_recipient_readback(self):
+        defaults = yaml.safe_load((FILES.parent / 'defaults/main.yml').read_text())
+        tasks = yaml.safe_load((FILES.parent / 'tasks/storage_evidence.yml').read_text())
+        live = PurePosixPath(defaults['ngfw_metrics_data'])
+        export = PurePosixPath(defaults['ngfw_metrics_evidence_export_root'])
+        self.assertEqual(str(export), '/srv/app-data/ngfw-metrics-evidence-export')
+        self.assertNotEqual(live, export)
+        self.assertNotIn(live, export.parents)
+        # POSIX ancestor search access: a recipient-owned leaf below the old
+        # owner0700 data directory is still inaccessible. New root0711 is not.
+        def traversable(leaf, modes):
+            return all(owner == 'operator' and mode & 0o100 or mode & 0o001
+                       for ancestor in (leaf, *leaf.parents)
+                       for owner, mode in [modes.get(ancestor, ('root', 0o755))])
+        old = live / 'evidence-export' / 'request'
+        self.assertFalse(traversable(old, {live: ('ngfw-metrics', 0o700),
+            old.parent: ('root', 0o711), old: ('operator', 0o700)}))
+        parent_task = next(t['ansible.builtin.file'] for t in tasks
+                           if t['name'] == 'Create a root-controlled export parent')
+        child_task = next(t['ansible.builtin.file'] for t in tasks
+                          if t['name'] == 'Hand over only the verified private artifact directory')
+        self.assertEqual(parent_task['owner'], 'root')
+        self.assertEqual(parent_task['mode'], '0711')
+        self.assertEqual(child_task['owner'], '{{ ngfw_metrics_evidence_operator }}')
+        self.assertEqual(child_task['mode'], '0700')
+        self.assertTrue(traversable(export / 'request', {live: ('ngfw-metrics', 0o700),
+            export: (parent_task['owner'], int(parent_task['mode'], 8)),
+            export / 'request': ('operator', int(child_task['mode'], 8))}))
+        copies = [t['ansible.builtin.copy'] for t in tasks if t.get('ansible.builtin.copy', {}).get('remote_src')]
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(copies[0]['dest'], '{{ ngfw_metrics_evidence_export_root }}/{{ ngfw_metrics_evidence_request_id }}/{{ item }}')
+        self.assertFalse(copies[0]['force'])
+        reader = next(t for t in tasks if t.get('register') == 'ngfw_metrics_export_recipient')
+        self.assertTrue(reader['become'])
+        self.assertEqual(reader['become_user'], '{{ ngfw_metrics_evidence_operator }}')
+        self.assertEqual(reader['ansible.builtin.stat']['checksum_algorithm'], 'sha256')
+        self.assertEqual(set(reader['loop']), set(evidence.EXPORT_FILES))
+        gate = next(t for t in tasks if 'Require recipient-readable' in t['name'])
+        self.assertTrue(any('checksum == ngfw_metrics_export_hashes' in assertion
+                            for assertion in gate['ansible.builtin.assert']['that']))
+        self.assertLess(tasks.index(reader), tasks.index(gate))
+        self.assertLess(tasks.index(gate), len(tasks) - 1)
+        # Retry still addresses the same immutable owner snapshot, never the
+        # new export destination; directory chmod cannot open the live parent.
+        command = next(t['ansible.builtin.command']['argv'] for t in tasks if 'ansible.builtin.command' in t)
+        self.assertEqual(command[command.index('--output-dir') + 1], '{{ ngfw_metrics_data }}/evidence/{{ ngfw_metrics_evidence_request_id }}')
+        for task in tasks:
+            if 'ansible.builtin.file' in task:
+                self.assertNotIn(task['ansible.builtin.file']['path'],
+                                 ('{{ ngfw_metrics_data }}', '{{ ngfw_metrics_data }}/spool'))
+
     def test_focused_owner_boundary_and_no_runtime_provisioning(self):
         repo = FILES.parents[2]
         play = yaml.safe_load((repo / 'playbooks/ngfw-metrics-evidence.yml').read_text())[0]
