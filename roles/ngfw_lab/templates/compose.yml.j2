@@ -51,6 +51,12 @@ services:
     cpus: {{ ngfw_lab_extreme_cpus if extreme else ngfw_lab_traffic_server_cpus }}
     mem_limit: {{ ngfw_lab_extreme_memory_bytes if extreme else ngfw_lab_traffic_server_memory }}
 {% if extreme %}
+    # Receiver listeners must not collide with namespace ephemeral allocation.
+    # Keep the client's independent source-port budget unchanged.
+    sysctls:
+      net.ipv4.ip_local_port_range: "{{ ngfw_lab_extreme_port_range }}"
+      net.ipv4.ip_local_reserved_ports: "{{ ngfw_lab_extreme_reserved_ports }}{% for first, last in ngfw_lab_policy_listener_ranges %},{{ first }}-{{ last }}{% endfor %}"
+      net.ipv4.ip_forward: "0"
     entrypoint: ["python3", "/opt/extreme/load.py"]
     command: ["serve", "--bind", "0.0.0.0", "--max-sessions", "{{ ngfw_lab_extreme_max_sessions }}", "--with-iperf"]
 {% else %}

@@ -192,12 +192,13 @@ class MeasurementTests(unittest.TestCase):
 
 
 class IaCTests(unittest.TestCase):
-    def render(self, mode, enabled=True):
+    def render(self, mode, enabled=True, policy_ranges=None):
         import jinja2
         import yaml
         values = yaml.safe_load((ROOT / 'defaults/main.yml').read_text())
         values.update(ngfw_lab_extreme_enabled=enabled, ngfw_lab_endpoint_path=mode,
-                      ngfw_lab_policy_listener_ranges=[[10000, 10991], [20000, 20099]])
+                      ngfw_lab_policy_listener_ranges=([[10000, 10991], [20000, 20099]]
+                                                       if policy_ranges is None else policy_ranges))
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         env.filters['to_nice_json'] = json.dumps
         for key in ('ngfw_lab_traffic_client_cpus', 'ngfw_lab_traffic_server_cpus',
@@ -228,6 +229,48 @@ class IaCTests(unittest.TestCase):
         self.assertIn('/opt/traffic/endpoint.py', value['services']['traffic-server']['entrypoint'])
         self.assertNotIn('control', value['networks'])
         self.assertNotIn('ulimits', value['services']['traffic-client'])
+
+    def test_policy_ports_reserved_only_on_receiver_and_client_held_margin_retained(self):
+        for mode in ('direct', 'ngfw'):
+            services = self.render(mode)['services']
+            for name, expected in (('traffic-client', '5201,5353,8080,9000'),
+                                   ('traffic-server', '5201,5353,8080,9000,10000-10991,20000-20099')):
+                service = services[name]
+                self.assertEqual(service['sysctls']['net.ipv4.ip_local_reserved_ports'], expected)
+                c.validate_extreme_resources(service, service['ulimits']['nofile'], name)
+            # Use the existing resource-snapshot shape, not a claimed live capacity.
+            snapshot = dict(ports=[1024, 65535], reserved_ports=services['traffic-client']['sysctls']['net.ipv4.ip_local_reserved_ports'], sockets=[])
+            self.assertEqual(c.tuple_capacity(snapshot), (64508, 64508))
+            self.assertGreaterEqual(c.tuple_capacity(snapshot)[1], 60000 + 4096)
+
+    def test_no_policy_ranges_keep_base_reservations_on_both_endpoints(self):
+        for service_name, service in self.render('direct', policy_ranges=[])['services'].items():
+            self.assertEqual(service['sysctls']['net.ipv4.ip_local_reserved_ports'], '5201,5353,8080,9000')
+            c.validate_extreme_resources(service, service['ulimits']['nofile'], service_name)
+
+    def test_receiver_reservations_must_match_declared_ranges_exactly(self):
+        project = Path('synthetic-project').resolve()
+        original = self.docker_config(project)
+        for reservation in ('5201,5353,8080,9000', '5201,5353,8080,9000,10000-10991',
+                            '5201,5353,8080,9000,10000-10991,20000-20100',
+                            '5201,5353,8080,9000,10000-10991,20000-20099,40000'):
+            with self.subTest(reservation=reservation), self.assertRaises(c.Blocked):
+                bad = copy.deepcopy(original)
+                bad['services']['traffic-server']['sysctls']['net.ipv4.ip_local_reserved_ports'] = reservation
+                c.validate_install_config(bad, project)
+        bad = copy.deepcopy(original)
+        bad['services']['traffic-client']['sysctls']['net.ipv4.ip_local_reserved_ports'] += ',10000-10991'
+        with self.assertRaises(c.Blocked):
+            c.validate_install_config(bad, project)
+
+    def test_malformed_or_overlapping_policy_ranges_cannot_grant_install(self):
+        project = Path('synthetic-project').resolve()
+        for ranges in (None, {}, [[9999, 10000]], [[10000, 21000]], [[10000]],
+                       [[True, 10000]], [[10000, 10002], [10002, 10003]], 'not-json'):
+            with self.subTest(ranges=ranges), self.assertRaises(c.Blocked):
+                bad = self.docker_config(project)
+                bad['services']['traffic-server']['environment']['NGFW_POLICY_LISTEN_RANGES'] = json.dumps(ranges)
+                c.validate_install_config(bad, project)
 
     def docker_config(self, project, legacy=False):
         value = self.render('ngfw' if legacy else 'direct', not legacy)
