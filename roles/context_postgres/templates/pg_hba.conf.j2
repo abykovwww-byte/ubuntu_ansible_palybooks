@@ -1,0 +1,11 @@
+# Superuser administration is container-local, using the postgres OS identity.
+local all postgres peer
+local all all reject
+{% if telegram_archive_enabled | default(false) %}
+host tgarchive tg_owner,tg_writer,tg_reader {{ telegram_archive_client_ip }}/32 scram-sha-256
+{% endif %}
+{% for rule in context_postgres_client_rules %}
+host {{ rule.database }} {{ rule.user }} {{ rule.client_ip }}/32 scram-sha-256
+{% endfor %}
+host all all 0.0.0.0/0 reject
+host all all ::/0 reject

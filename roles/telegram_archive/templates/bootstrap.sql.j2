@@ -1,0 +1,40 @@
+\set ON_ERROR_STOP on
+\set owner_password `cat /run/secrets/tg_owner_password`
+\set writer_password `cat /run/secrets/tg_writer_password`
+\set reader_password `cat /run/secrets/tg_reader_password`
+
+SELECT 'CREATE ROLE ' || quote_ident(name) || ' LOGIN'
+FROM (VALUES ('tg_owner'), ('tg_writer'), ('tg_reader')) AS needed(name)
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = name) \gexec
+
+ALTER ROLE tg_owner LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD :'owner_password';
+ALTER ROLE tg_writer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD :'writer_password';
+ALTER ROLE tg_reader LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD :'reader_password';
+REVOKE tg_owner FROM tg_writer, tg_reader;
+REVOKE tg_writer FROM tg_reader;
+\unset owner_password
+\unset writer_password
+\unset reader_password
+
+SELECT 'CREATE DATABASE tgarchive OWNER tg_owner'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'tgarchive') \gexec
+ALTER DATABASE tgarchive OWNER TO tg_owner;
+REVOKE ALL ON DATABASE tgarchive FROM PUBLIC;
+GRANT CONNECT ON DATABASE tgarchive TO tg_owner, tg_writer, tg_reader;
+ALTER ROLE tg_reader IN DATABASE tgarchive SET default_transaction_read_only = on;
+ALTER ROLE tg_reader IN DATABASE tgarchive SET statement_timeout = '5s';
+
+\connect tgarchive
+ALTER SCHEMA public OWNER TO tg_owner;
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO tg_writer, tg_reader;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tg_writer;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO tg_writer;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO tg_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE tg_owner IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO tg_writer;
+ALTER DEFAULT PRIVILEGES FOR ROLE tg_owner IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO tg_writer;
+ALTER DEFAULT PRIVILEGES FOR ROLE tg_owner IN SCHEMA public
+  GRANT SELECT ON TABLES TO tg_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE tg_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;

@@ -1,0 +1,133 @@
+---
+- name: Validate the archive storage and exact client boundary
+  ansible.builtin.assert:
+    that:
+      - telegram_archive_base == '/srv/data/tg-archive'
+      - telegram_archive_client_ip is match('^100\.[0-9]+\.[0-9]+\.[0-9]+$')
+      - telegram_archive_rw_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')
+      - telegram_archive_ro_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')
+      - telegram_archive_rw_public_key != telegram_archive_ro_public_key
+
+- name: Require private archive role passwords
+  ansible.builtin.assert:
+    that:
+      - telegram_archive_owner_password | length >= 32
+      - telegram_archive_writer_password | length >= 32
+      - telegram_archive_reader_password | length >= 32
+      - telegram_archive_owner_password != telegram_archive_writer_password
+      - telegram_archive_writer_password != telegram_archive_reader_password
+      - telegram_archive_owner_password != telegram_archive_reader_password
+  no_log: true
+
+- name: Install private archive role password files
+  ansible.builtin.copy:
+    content: "{{ item.password }}"
+    dest: "{{ context_postgres_data_dir }}/secrets/{{ item.name }}_password"
+    owner: "{{ context_postgres_uid }}"
+    group: "{{ context_postgres_gid }}"
+    mode: "0400"
+  loop:
+    - {name: tg_owner, password: "{{ telegram_archive_owner_password }}"}
+    - {name: tg_writer, password: "{{ telegram_archive_writer_password }}"}
+    - {name: tg_reader, password: "{{ telegram_archive_reader_password }}"}
+  no_log: true
+
+- name: Install the repeatable archive bootstrap
+  ansible.builtin.template:
+    src: bootstrap.sql.j2
+    dest: "{{ context_postgres_project_dir }}/config/tgarchive-bootstrap.sql"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Converge archive database privileges
+  ansible.builtin.command:
+    argv: [docker, compose, exec, -T, --user, postgres, postgres, psql, --no-psqlrc, -v, ON_ERROR_STOP=1, -d, postgres, -f, /etc/postgresql/tgarchive-bootstrap.sql]
+    chdir: "{{ context_postgres_project_dir }}"
+  register: telegram_archive_bootstrap
+  changed_when: "'CREATE ROLE' in telegram_archive_bootstrap.stdout or 'CREATE DATABASE' in telegram_archive_bootstrap.stdout"
+  no_log: true
+
+- name: Install SFTP service
+  ansible.builtin.apt:
+    name: openssh-server
+    state: present
+
+- name: Create the media read group
+  ansible.builtin.group:
+    name: tgmedia
+    system: true
+
+- name: Create shell-less SFTP accounts
+  ansible.builtin.user:
+    name: "{{ item }}"
+    group: tgmedia
+    home: /media
+    create_home: false
+    shell: /usr/sbin/nologin
+    password_lock: true
+    system: true
+  loop: [tgmedia-rw, tgmedia-ro]
+
+- name: Inspect existing chroot ancestors
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: [/srv, /srv/data, "{{ telegram_archive_base }}"]
+  register: telegram_archive_ancestors
+
+- name: Reject writable or redirected chroot ancestors
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir and not item.stat.islnk and item.stat.uid == 0 and not item.stat.wgrp and not item.stat.woth)
+  loop: "{{ telegram_archive_ancestors.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Create root-owned chroot directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [/srv/data, "{{ telegram_archive_base }}"]
+
+- name: Create the media write directory
+  ansible.builtin.file:
+    path: "{{ telegram_archive_base }}/media"
+    state: directory
+    owner: tgmedia-rw
+    group: tgmedia
+    mode: "2750"
+
+- name: Create root-owned authorized key directory
+  ansible.builtin.file:
+    path: /etc/ssh/tg-archive-keys
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install source-restricted SFTP public keys
+  ansible.builtin.copy:
+    content: 'from="{{ telegram_archive_client_ip }}",restrict {{ item.key }}{{ "\n" }}'
+    dest: "/etc/ssh/tg-archive-keys/{{ item.user }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - {user: tgmedia-rw, key: "{{ telegram_archive_rw_public_key }}"}
+    - {user: tgmedia-ro, key: "{{ telegram_archive_ro_public_key }}"}
+
+- name: Render SSH restrictions for archive accounts
+  ansible.builtin.template:
+    src: sshd.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-tg-archive.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload archive SSH configuration
+
+- name: Validate complete SSH configuration before reload
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false

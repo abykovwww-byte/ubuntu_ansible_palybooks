@@ -1,0 +1,21 @@
+# Apply all restrictions regardless of source. Wrong addresses cannot authenticate.
+Match User tgmedia-rw,tgmedia-ro
+    ChrootDirectory {{ telegram_archive_base }}
+    AuthorizedKeysFile /etc/ssh/tg-archive-keys/%u
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PubkeyAuthentication yes
+    DisableForwarding yes
+    PermitTTY no
+    PermitUserRC no
+    X11Forwarding no
+    MaxSessions 1
+
+Match User tgmedia-rw
+    ForceCommand internal-sftp -d /media -u 0027
+
+Match User tgmedia-ro
+    ForceCommand internal-sftp -R -d /media
+
+Match all

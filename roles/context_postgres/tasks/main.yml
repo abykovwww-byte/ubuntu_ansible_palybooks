@@ -1,0 +1,88 @@
+---
+- name: Validate the shared PostgreSQL boundary
+  ansible.builtin.assert:
+    that:
+      - context_postgres_image is match('^postgres:17\.[0-9]+-bookworm$')
+      - context_postgres_bind_host is match('^100\.[0-9]+\.[0-9]+\.[0-9]+$')
+      - context_postgres_bind_host in ansible_all_ipv4_addresses
+      - context_postgres_port | int > 0
+      - context_postgres_port | int <= 65535
+      - context_postgres_project_dir == '/srv/apps/context-postgres'
+      - context_postgres_data_dir == '/srv/app-data/context-postgres'
+
+- name: Validate additional exact PostgreSQL client rules
+  ansible.builtin.assert:
+    that:
+      - item.database is match('^[a-z][a-z0-9_]*$')
+      - item.user is match('^[a-z][a-z0-9_]*$')
+      - item.client_ip is match('^100\.[0-9]+\.[0-9]+\.[0-9]+$')
+  loop: "{{ context_postgres_client_rules }}"
+
+- name: Require a private server-local superuser password
+  ansible.builtin.assert:
+    that: ["context_postgres_password | length >= 32"]
+    fail_msg: PostgreSQL credentials must be set in server-local overrides.
+  no_log: true
+
+- name: Create PostgreSQL configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ context_postgres_project_dir }}"
+    - "{{ context_postgres_project_dir }}/config"
+
+- name: Create private PostgreSQL data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ context_postgres_uid }}"
+    group: "{{ context_postgres_gid }}"
+    mode: "0700"
+  loop:
+    - "{{ context_postgres_data_dir }}"
+    - "{{ context_postgres_data_dir }}/data"
+    - "{{ context_postgres_data_dir }}/secrets"
+
+- name: Install the private PostgreSQL password file
+  ansible.builtin.copy:
+    content: "{{ context_postgres_password }}"
+    dest: "{{ context_postgres_data_dir }}/secrets/postgres_password"
+    owner: "{{ context_postgres_uid }}"
+    group: "{{ context_postgres_gid }}"
+    mode: "0400"
+  no_log: true
+
+- name: Render shared PostgreSQL configuration
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ context_postgres_project_dir }}/config/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [postgresql.conf, pg_hba.conf]
+  register: context_postgres_config
+
+- name: Render the shared PostgreSQL Compose project
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ context_postgres_project_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Validate shared PostgreSQL Compose
+  ansible.builtin.command:
+    cmd: docker compose config --quiet
+    chdir: "{{ context_postgres_project_dir }}"
+  changed_when: false
+
+- name: Converge the shared PostgreSQL instance
+  ansible.builtin.command:
+    cmd: "docker compose up -d --wait --wait-timeout 120{{ ' --force-recreate' if context_postgres_config.changed else '' }}"
+    chdir: "{{ context_postgres_project_dir }}"
+  register: context_postgres_up
+  changed_when: "'Started' in context_postgres_up.stderr or 'Created' in context_postgres_up.stderr or 'Recreated' in context_postgres_up.stderr"

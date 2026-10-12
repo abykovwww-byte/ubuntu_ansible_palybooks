@@ -1,0 +1,32 @@
+name: context-postgres
+services:
+  postgres:
+    image: "{{ context_postgres_image }}"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --auth-local=peer --auth-host=scram-sha-256
+    command: [postgres, -c, config_file=/etc/postgresql/postgresql.conf]
+    ports:
+      - "{{ context_postgres_bind_host }}:{{ context_postgres_port }}:5432"
+    volumes:
+      - "{{ context_postgres_data_dir }}/data:/var/lib/postgresql/data"
+      - "{{ context_postgres_project_dir }}/config:/etc/postgresql:ro"
+      - "{{ context_postgres_data_dir }}/secrets:/run/secrets:ro"
+    restart: unless-stopped
+    mem_limit: "{{ context_postgres_memory_limit }}"
+    cpus: "{{ context_postgres_cpu_limit }}"
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+    healthcheck:
+      test: [CMD, pg_isready, -U, postgres, -d, postgres]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [database]
+networks:
+  database:
+    driver: bridge

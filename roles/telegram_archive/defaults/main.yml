@@ -1,0 +1,10 @@
+---
+telegram_archive_enabled: false
+telegram_archive_client_ip: ""
+# /srv/app-data is group-writable and cannot be a chroot ancestor.
+telegram_archive_base: /srv/data/tg-archive
+telegram_archive_owner_password: ""
+telegram_archive_writer_password: ""
+telegram_archive_reader_password: ""
+telegram_archive_rw_public_key: "{{ lookup('ansible.builtin.file', role_path ~ '/files/tgmedia-rw.pub') }}"
+telegram_archive_ro_public_key: "{{ lookup('ansible.builtin.file', role_path ~ '/files/tgmedia-ro.pub') }}"
