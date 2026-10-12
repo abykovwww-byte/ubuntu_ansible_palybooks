@@ -85,6 +85,28 @@ def selected_sample(t=0):
 
 
 class Probe(unittest.TestCase):
+    def test_empty_process_selection_does_not_enumerate_proc(self):
+        with patch.object(Path, 'iterdir', side_effect=AssertionError('no broad scan')):
+            self.assertEqual(probe.process_counters([]), {
+                'values': {}, 'scan_truncated': False, 'requested_not_found': [], 'mode': 'disabled'})
+
+    def test_qualification_requires_selected_process_identity_before_probe(self):
+        with self.assertRaisesRegex(ValueError, 'runtime discovery forbidden'):
+            m.validate(config() | {'qualification_mode': True})
+        self.assertEqual(m.validate(process_config() | {'qualification_mode': True})['guest_process_targets'],
+                         process_targets())
+
+    def test_qualification_rejects_interior_clock_steps_without_extra_probe(self):
+        cfg = process_config() | {'qualification_mode': True}
+        guard = m.Guard(cfg)
+        first, later = selected_sample(), selected_sample(10)
+        for side in ('host', 'guest'):
+            first['measurement'][side]['wall_time'] = 1000
+            later['measurement'][side]['wall_time'] = 1010
+        self.assertFalse(any('clock' in reason for reason in guard.check(first)))
+        later['measurement']['guest']['wall_time'] += .2
+        self.assertTrue(any('guest clock chronology unavailable: realtime/monotonic divergence' in reason for reason in guard.check(later)))
+
     def test_selected_processes_never_enumerate_proc_and_read_only_explicit_paths(self):
         fields = ['S'] + ['0'] * 21
         fields[11], fields[12], fields[19], fields[21] = '100', '10', '10', '7'

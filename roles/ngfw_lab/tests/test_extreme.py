@@ -187,11 +187,21 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                 sock.bind(('127.0.0.1', 0))
                 return sock.getsockname()[1]
         tcp, http, dns = port(), port(), port(socket.SOCK_DGRAM)
+        policy_port = None
+        for candidate in range(10000, 10100):
+            with socket.socket() as probe:
+                try:
+                    probe.bind(('127.0.0.1', candidate))
+                    policy_port = candidate
+                    break
+                except OSError:
+                    pass
+        self.assertIsNotNone(policy_port, 'one free bounded policy test port required')
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / 'receiver.json'
             args = self.args(bind='127.0.0.1', max_sessions=10, state_path=str(state),
                              tcp_port=tcp, http_port=http, dns_port=dns, with_iperf=False)
-            with patch.object(l, 'emit'):
+            with patch.object(l, 'emit'), patch.dict(l.os.environ, {'NGFW_POLICY_LISTEN_RANGES': f'[[{policy_port},{policy_port}]]'}):
                 task = asyncio.create_task(l.serve(args))
                 try:
                     for _ in range(100):
@@ -206,6 +216,19 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                         self.fail('receiver startup timeout')
                     await l.request('short-tcp', '127.0.0.1', None, 2, ports=(tcp, http, dns))
                     await l.request('dns', '127.0.0.1', None, 3, ports=(tcp, http, dns))
+                    # Preserve the original NAT/policy probe protocol on8080.
+                    import json
+                    for probe_port in (http, policy_port):
+                        reader, writer = await asyncio.open_connection('127.0.0.1', probe_port)
+                        nonce = 'a' * 32
+                        writer.write(f'GET /policy-probe/{nonce} HTTP/1.1\r\nHost: lab.invalid\r\n\r\n'.encode())
+                        await writer.drain()
+                        head = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 2)
+                        self.assertIn(b'200 OK', head)
+                        response = json.loads(await asyncio.wait_for(reader.read(), 2))
+                        self.assertEqual(response, dict(nonce=nonce, peer='127.0.0.1', local='127.0.0.1', port=probe_port))
+                        writer.close()
+                        await writer.wait_closed()
                     args = self.args(kind='held', tcp_port=tcp, source_ip=['127.0.0.1'],
                                      heartbeat=.02, rate=200, duration=.15)
                     stats = l.Stats(args)

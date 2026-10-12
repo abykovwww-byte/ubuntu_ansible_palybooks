@@ -10,7 +10,7 @@ from test_runner import r, e, config, ROOT
 import qualification as q
 import campaign as c
 from test_campaign import runs
-from test_measurement import config as measure_config, sample as measure_sample
+from test_measurement import config as measure_config, sample as measure_sample, process_config
 import measurement
 
 
@@ -142,7 +142,7 @@ class Qualification(unittest.TestCase):
             r.validate_isolation(evidence, evidence['topology'], 200000, None, 'another')
 
     def test_temperature_only_hard_safety_threshold(self):
-        cfg = measure_config() | {'qualification_mode': True, 'cpu_action': 'warn'}
+        cfg = process_config() | {'qualification_mode': True, 'cpu_action': 'warn'}
         guard = measurement.Guard(cfg)
         row = measure_sample()
         row['measurement']['host']['temperature_c']['cpu/package'] = 70

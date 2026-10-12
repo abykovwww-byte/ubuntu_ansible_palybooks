@@ -108,6 +108,8 @@ def validate(config):
         validate_busy_poll_baseline(config['guest_busy_poll_baseline'])
     if ('guest_process_targets' in config) != ('guest_process_boot_id' in config):
         raise ValueError('guest_process_targets and guest_process_boot_id must be set together')
+    if config.get('qualification_mode') and 'guest_process_targets' not in config:
+        raise ValueError('qualification requires selected guest process targets and boot identity; runtime discovery forbidden')
     if 'guest_process_targets' in config:
         measure_probe.validate_process_targets(config['guest_process_targets'], config['process_names'])
         measure_probe.validate_process_boot_id(config['guest_process_boot_id'])
@@ -187,7 +189,7 @@ def selected_process_risks(current, targets, boot_id=None):
     return reasons
 
 
-def inventory_risks(snapshot, config=None):
+def inventory_risks(snapshot, config=None, audit_loss_baseline=None):
     problems = control_changes(snapshot, snapshot)
     audit = snapshot.get('audit') or {}
     inv = snapshot.get('inventory') or {}
@@ -204,8 +206,16 @@ def inventory_risks(snapshot, config=None):
                                                config.get('guest_process_boot_id')))
     # The operator selected the existing EDR runtime profile as baseline.
     # Both silent (0) and printk (1) are availability-preserving; panic (2) is not.
-    if audit.get('enabled') != 1 or audit.get('failure') not in (0, 1) or audit.get('lost') != 0:
+    if audit.get('enabled') != 1 or audit.get('failure') not in (0, 1):
+        problems.append('audit controls missing/unsafe: require enabled=1, failure=0 or 1')
+    if audit_loss_baseline is None and audit.get('lost') != 0:
         problems.append('audit controls missing/unsafe: require enabled=1, failure=0 or 1, lost=0')
+    elif audit_loss_baseline is not None:
+        # Only extreme passes a separately source-verified immutable epoch receipt.
+        if (type(audit_loss_baseline.get('lost')) is not int or audit_loss_baseline['lost'] < 0
+                or type(audit.get('lost')) is not int or audit['lost'] != audit_loss_baseline['lost']
+                or snapshot.get('boot_id') != audit_loss_baseline.get('guest_boot_id')):
+            problems.append('audit loss/boot changed from verified qualification epoch')
     if not inv.get('rules_sha256') or not inv.get('auditd_conf_sha256'):
         problems.append('effective rules/config identity unavailable')
     if not inv.get('auditd_active') or not inv.get('dataplane_active'):
@@ -364,6 +374,13 @@ class Guard:
                 reasons.append(side + ' extended measurement unavailable')
                 continue
             old = self.previous.get(side)
+            if cfg.get('qualification_mode'):
+                if not number(current.get('wall_time')) or not number(current.get('monotonic')):
+                    reasons.append(side + ' clock chronology unavailable')
+                elif old and (not number(old.get('wall_time')) or not number(old.get('monotonic'))
+                        or abs((current['wall_time'] - old['wall_time'])
+                               - (current['monotonic'] - old['monotonic'])) > 0.05):
+                    reasons.append(side + ' clock chronology unavailable: realtime/monotonic divergence; window invalid')
             if side == 'guest':
                 reasons.extend(selected_process_risks(current, cfg.get('guest_process_targets'),
                                                       cfg.get('guest_process_boot_id')))

@@ -1,3 +1,4 @@
+{% set extreme = ngfw_lab_extreme_enabled | string | lower in ['true', 'yes', '1'] %}
 x-endpoint: &endpoint
   image: {{ ngfw_lab_traffic_image }}
   build:
@@ -7,6 +8,16 @@ x-endpoint: &endpoint
   cpus: {{ ngfw_lab_traffic_cpus }}
   mem_limit: {{ ngfw_lab_traffic_memory }}
   pids_limit: {{ ngfw_lab_traffic_pids }}
+{% if extreme %}
+  ulimits:
+    nofile:
+      soft: {{ ngfw_lab_extreme_nofile }}
+      hard: {{ ngfw_lab_extreme_nofile }}
+  sysctls:
+    net.ipv4.ip_local_port_range: "{{ ngfw_lab_extreme_port_range }}"
+    net.ipv4.ip_local_reserved_ports: "{{ ngfw_lab_extreme_reserved_ports }}"
+    net.ipv4.ip_forward: "0"
+{% endif %}
   read_only: true
   volumes:
     - ./extreme:/opt/extreme:ro
@@ -23,39 +34,63 @@ x-endpoint: &endpoint
 services:
   traffic-client:
     <<: *endpoint
-    cpus: {{ ngfw_lab_traffic_client_cpus }}
-    mem_limit: {{ ngfw_lab_traffic_client_memory }}
+    cpus: {{ ngfw_lab_extreme_cpus if extreme else ngfw_lab_traffic_client_cpus }}
+    mem_limit: {{ ngfw_lab_extreme_memory_bytes if extreme else ngfw_lab_traffic_client_memory }}
     entrypoint: ["sleep", "infinity"]
     command: []
     networks:
+{% if ngfw_lab_endpoint_path == 'direct' %}
+      - control
+{% else %}
       left:
         ipv4_address: {{ ngfw_lab_left_client_address }}
+{% endif %}
 
   traffic-server:
     <<: *endpoint
-    cpus: {{ ngfw_lab_traffic_server_cpus }}
-    mem_limit: {{ ngfw_lab_traffic_server_memory }}
+    cpus: {{ ngfw_lab_extreme_cpus if extreme else ngfw_lab_traffic_server_cpus }}
+    mem_limit: {{ ngfw_lab_extreme_memory_bytes if extreme else ngfw_lab_traffic_server_memory }}
+{% if extreme %}
+    entrypoint: ["python3", "/opt/extreme/load.py"]
+    command: ["serve", "--bind", "0.0.0.0", "--max-sessions", "{{ ngfw_lab_extreme_max_sessions }}", "--with-iperf"]
+{% else %}
     entrypoint: ["python3", "/opt/traffic/endpoint.py"]
     command: ["server"]
+{% endif %}
     environment:
       NGFW_POLICY_LISTEN_RANGES: '{{ ngfw_lab_policy_listener_ranges | to_nice_json | replace("\n", " ") }}'
+{% if not extreme %}
     ulimits:
       nofile:
         soft: 16384
         hard: 16384
+{% endif %}
     healthcheck:
       test: ["CMD", "python3", "/opt/traffic/endpoint.py", "probe", "--target", "127.0.0.1"]
       interval: 10s
       timeout: 3s
       retries: 3
     networks:
+{% if ngfw_lab_endpoint_path == 'direct' %}
+      - control
+{% else %}
       right:
         ipv4_address: {{ ngfw_lab_right_server_address }}
+{% endif %}
 
 networks:
+{% if ngfw_lab_endpoint_path == 'direct' %}
+  control:
+    driver: bridge
+    internal: true
+    enable_ipv6: false
+    labels:
+      ngfw.lab.scope: direct-control-only
+{% else %}
   left:
     external: true
     name: {{ ngfw_lab_left_docker_network }}
   right:
     external: true
     name: {{ ngfw_lab_right_docker_network }}
+{% endif %}

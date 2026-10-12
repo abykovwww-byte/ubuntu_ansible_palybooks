@@ -29,6 +29,28 @@ def file_ref(directory, name, value):
     return {'path': name, 'sha256': hashlib.sha256(data).hexdigest()}
 
 
+def aligned_query(directory, raw, offset_ns=0):
+    """Synthetic clock/query receipts; never claims real NTP synchronization."""
+    bounds = dict(started_epoch_ns=998_000_000_000, completed_epoch_ns=998_200_000_000,
+                  started_monotonic_ns=98_000_000_000, completed_monotonic_ns=98_200_000_000)
+    raw['query_bounds'] = bounds
+    query_ref = file_ref(directory, 'query.json', raw)
+    alignment = dict(schema_version=1, scope='bounded_clock_alignment_not_ntp_synchronization',
+                     guest_boot_id=raw['guest_boot_id'], query_bounds=bounds,
+                     query_evidence_sha256=query_ref['sha256'],
+                     offset_min_ns=offset_ns-50_000_000, offset_max_ns=offset_ns+50_000_000,
+                     limits=dict(max_uncertainty_seconds=1, max_offset_spread_seconds=.5, max_clock_step_seconds=.05))
+    for name, send in (('before', 997_800_000_000), ('after', 998_300_000_000)):
+        guest = dict(guest_epoch_ns=send+50_000_000-offset_ns,
+                     guest_monotonic_ns=send-900_000_000_000+50_000_000,
+                     guest_boot_id=raw['guest_boot_id'])
+        alignment[name] = dict(host_send_epoch_ns=send, host_receive_epoch_ns=send+100_000_000,
+                               host_send_monotonic_ns=send-900_000_000_000,
+                               host_receive_monotonic_ns=send-900_000_000_000+100_000_000,
+                               **guest, guest_evidence=file_ref(directory, 'guest-clock-' + name + '.json', guest))
+    return query_ref, file_ref(directory, 'alignment.json', alignment)
+
+
 class Clock:
     def __init__(self):
         self.now = 0
@@ -90,14 +112,30 @@ def window(mixed=False):
 
 
 class NativeReceiptTests(unittest.TestCase):
+    def test_real_producer_schema_integrates_with_independent_controller_validator(self):
+        producer_tests = ROOT.parents[1] / 'ngfw_metrics/tests/test_native_health.py'
+        spec = importlib.util.spec_from_file_location('native_health_contract_fixture', producer_tests)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        fixture = module.NativeHealthTests('test_skew_alignment_preserves_original_nanosecond_timestamp')
+        fixture.setUp()
+        try:
+            receipt = fixture.collect()
+            self.assertEqual(receipt['status'], 'HEALTHY')
+            result = c.validate_native(fixture.output, module.BOOT, fixture.clock.time_ns() / 1e9)
+            self.assertEqual(result['query_response']['points'][0]['source_timestamp_ns'], fixture.last_source_timestamp)
+            self.assertLess(result['age_ranges']['native_measurement']['max_seconds'], 16)
+        finally:
+            fixture.tearDown()
+
     def fixture(self, directory):
         raw = {'database': 'lab', 'guest_boot_id': 'boot', 'partial': False,
-               'points': [{'measurement': 'native_dp', 'time': timestamp(990)},
-                          {'measurement': 'net', 'time': timestamp(995)}]}
-        ref = file_ref(directory, 'query.json', raw)
-        receipt = {'database': 'lab', 'guest_boot_id': 'boot', 'collected_at': timestamp(999),
+               'points': [{'measurement': 'native_dp', 'time': timestamp(990), 'source_timestamp_ns': 990_000_000_000},
+                          {'measurement': 'net', 'time': timestamp(995), 'source_timestamp_ns': 995_000_000_000}]}
+        ref, clock_ref = aligned_query(directory, raw)
+        receipt = {'schema_version': 2, 'status': 'HEALTHY', 'database': 'lab', 'guest_boot_id': 'boot', 'collected_at': timestamp(999),
                    'source_interval_seconds': 10, 'required_measurements': ['native_dp', 'net'],
-                   'query_evidence': ref}
+                   'query_evidence': ref, 'clock_alignment': clock_ref}
         path = directory / 'health.json'
         path.write_text(json.dumps(receipt))
         return path, receipt, raw
@@ -120,7 +158,7 @@ class NativeReceiptTests(unittest.TestCase):
             directory = Path(tmp)
             path, receipt, raw = self.fixture(directory)
             raw['points'] = [raw['points'][1]]
-            receipt['query_evidence'] = file_ref(directory, 'query.json', raw)
+            receipt['query_evidence'], receipt['clock_alignment'] = aligned_query(directory, raw)
             receipt['healthy'] = True
             path.write_text(json.dumps(receipt))
             with self.assertRaisesRegex(c.Blocked, 'missing/stale'):
@@ -138,6 +176,75 @@ class NativeReceiptTests(unittest.TestCase):
             row = json.loads((Path(tmp) / 'native-health-failures.ndjson').read_text())
             self.assertEqual(row['outcome'], 'INVALID_MEASUREMENT')
             self.assertIsNone(row['receipt'])
+
+    def test_guest_offset_is_bounded_without_changing_raw_timestamps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            path, receipt, raw = self.fixture(directory)
+            for point in raw['points']:
+                point['source_timestamp_ns'] -= 22_000_000_000
+                point['time'] = timestamp(point['source_timestamp_ns'] / 1e9)
+            receipt['query_evidence'], receipt['clock_alignment'] = aligned_query(directory, raw, 22_000_000_000)
+            path.write_text(json.dumps(receipt))
+            result = c.validate_native(path, 'boot', 1000)
+            self.assertEqual(result['query_response']['points'], raw['points'])
+            self.assertEqual(result['age_ranges']['net'], {'min_seconds': 4.95, 'max_seconds': 5.05})
+            raw['points'][1].update(time=timestamp(978), source_timestamp_ns=978_000_000_000)
+            receipt['query_evidence'], receipt['clock_alignment'] = aligned_query(directory, raw, 22_000_000_000)
+            path.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(c.Blocked, 'missing/stale'):
+                c.validate_native(path, 'boot', 1000)  # full interval reaches future for latest point
+
+    def test_clock_identity_steps_limits_and_query_binding_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            for change in ('no-proof', 'guest-tamper', 'step', 'wide-policy', 'wrong-query'):
+                path, receipt, raw = self.fixture(directory)
+                alignment = json.loads((directory / 'alignment.json').read_text())
+                if change == 'no-proof':
+                    del receipt['clock_alignment']
+                elif change == 'guest-tamper':
+                    (directory / 'guest-clock-before.json').write_text('{}')
+                else:
+                    if change == 'step':
+                        alignment['before']['host_receive_epoch_ns'] += 100_000_000
+                    elif change == 'wide-policy':
+                        alignment['limits']['max_offset_spread_seconds'] = 2
+                    else:
+                        alignment['query_evidence_sha256'] = '0' * 64
+                    receipt['clock_alignment'] = file_ref(directory, 'alignment.json', alignment)
+                path.write_text(json.dumps(receipt))
+                with self.subTest(change=change), self.assertRaises(c.Blocked):
+                    c.validate_native(path, 'boot', 1000)
+
+    def test_whole_window_drift_is_separate_from_freshness(self):
+        before = {'clock_alignment': dict(offset_min_ns=21_950_000_000, offset_max_ns=22_050_000_000,
+                                         clock_alignment_sha256='a'*64)}
+        after = copy.deepcopy(before)
+        after['clock_alignment']['offset_min_ns'] += 500_000_000
+        after['clock_alignment']['offset_max_ns'] += 500_000_000
+        self.assertEqual(c.window_clock_summary(before, after)['drift_max_seconds'], .6)
+        after['clock_alignment']['offset_max_ns'] += 500_000_000
+        with self.assertRaisesRegex(c.Blocked, 'drift'):
+            c.window_clock_summary(before, after)
+
+    def test_post_label_is_insufficient_when_clock_bracket_precedes_measure_end(self):
+        base = dict(offset_min_ns=0, offset_max_ns=100_000_000, clock_alignment_sha256='a'*64)
+        before = {'clock_alignment': dict(base, alignment={'after': {
+            'host_receive_epoch_ns': 100_000_000_000, 'host_receive_monotonic_ns': 10_000_000_000}})}
+        after = {'clock_alignment': dict(base, alignment={'before': {
+            'host_send_epoch_ns': 109_000_000_000, 'host_send_monotonic_ns': 19_000_000_000}})}
+        bounds = dict(started_epoch_ns=101_000_000_000, completed_epoch_ns=110_000_000_000,
+                      started_monotonic_ns=11_000_000_000, completed_monotonic_ns=20_000_000_000)
+        with self.assertRaisesRegex(c.Blocked, 'do not enclose') as caught:
+            c.window_clock_summary(before, after, bounds)
+        self.assertEqual(caught.exception.clock_summary['status'], 'INVALID')
+        after['clock_alignment']['alignment']['before'].update(host_send_epoch_ns=111_000_000_000,
+                                                               host_send_monotonic_ns=21_000_000_000)
+        self.assertEqual(c.window_clock_summary(before, after, bounds)['status'], 'BOUNDED')
+        after['clock_alignment']['alignment']['before']['host_send_monotonic_ns'] = 19_000_000_000
+        with self.assertRaisesRegex(c.Blocked, 'do not enclose'):
+            c.window_clock_summary(before, after, bounds)
 
 
 class IdentityTests(unittest.TestCase):
@@ -236,6 +343,119 @@ class IdentityTests(unittest.TestCase):
             c.duration_budget({'kind': 'held', 'sessions': 60000, 'open_rate': 1}, 3600)
 
 
+class AuditEpochTests(unittest.TestCase):
+    def fixture(self, directory):
+        boot = '12345678-1234-1234-1234-123456789abc'
+        fixed = dict(enabled=1, failure=1, pid=100, rate_limit=0, backlog_limit=8192, backlog_wait_time=1)
+        before = dict(boot_id=boot, audit=dict(fixed, lost=60925),
+                      inventory=dict(rules_sha256='a' * 64, auditd_conf_sha256='b' * 64))
+        raw = dict(collected_at=timestamp(999), profile='B', snapshot=before)
+        baseline = dict(schema_version=1, guest_boot_id=boot, lost=60925, readback_at=timestamp(999),
+                        profile='B', rules_sha256='a' * 64, auditd_conf_sha256='b' * 64,
+                        fixed_controls=fixed, incident_ref='synthetic-historical-incident',
+                        source_evidence=file_ref(directory, 'audit-source.json', raw))
+        path = directory / 'baseline.json'
+        path.write_text(json.dumps(baseline))
+        return path, baseline, before
+
+    def test_epoch_requires_fresh_raw_identical_boot_loss_controls_and_incident(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            path, baseline, before = self.fixture(directory)
+            proof, original, source = c.validate_audit_baseline(path, before, 1000, 'B')
+            self.assertEqual(proof['baseline']['lost'], 60925)
+            self.assertEqual(original, path.read_bytes())
+            changed = copy.deepcopy(before)
+            changed['audit']['lost'] = 60926
+            with self.assertRaises(c.legacy.WindowStop) as caught:
+                c.validate_audit_baseline(path, changed, 1000, 'B')
+            self.assertEqual(caught.exception.outcome, 'GLOBAL_STOP')
+            for field, value in (('pid', 101),):
+                changed = copy.deepcopy(before)
+                changed['audit'][field] = value
+                with self.assertRaisesRegex(c.Blocked, 'differs'):
+                    c.validate_audit_baseline(path, changed, 1000, 'B')
+            with self.assertRaisesRegex(c.Blocked, 'stale'):
+                c.validate_audit_baseline(path, before, 1060, 'B')
+            baseline['incident_ref'] = ''
+            path.write_text(json.dumps(baseline))
+            with self.assertRaisesRegex(c.Blocked, 'incident'):
+                c.validate_audit_baseline(path, before, 1000, 'B')
+            baseline['incident_ref'] = 'synthetic-historical-incident'
+            path.write_text(json.dumps(baseline))
+            (directory / 'audit-source.json').write_text('{}')
+            with self.assertRaisesRegex(c.Blocked, 'hash changed'):
+                c.validate_audit_baseline(path, before, 1000, 'B')
+
+    def test_epoch_binds_source_current_and_returned_profile_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            path, baseline, before = self.fixture(directory)
+            with self.assertRaisesRegex(c.Blocked, 'profile differs'):
+                c.validate_audit_baseline(path, before, 1000, 'A')
+            for field in ('rules_sha256', 'auditd_conf_sha256'):
+                incomplete = baseline.copy()
+                incomplete.pop(field)
+                path.write_text(json.dumps(incomplete))
+                with self.assertRaisesRegex(c.Blocked, 'hash unavailable'):
+                    c.validate_audit_baseline(path, before, 1000, 'B')
+            path.write_text(json.dumps(baseline))
+            identity = dict(profile='B', profile_evidence=before['inventory'].copy())
+            c.validate_audit_epoch_identity(baseline, identity)
+            for field in ('rules_sha256', 'auditd_conf_sha256'):
+                changed = copy.deepcopy(before)
+                changed['inventory'][field] = 'c' * 64
+                with self.assertRaisesRegex(c.Blocked, 'identity changed'):
+                    c.validate_audit_baseline(path, changed, 1000, 'B')
+                with self.assertRaisesRegex(c.Blocked, 'identity changed'):
+                    c.validate_audit_epoch_inventory(baseline, changed)
+                changed_identity = copy.deepcopy(identity)
+                changed_identity['profile_evidence'][field] = 'c' * 64
+                with self.assertRaisesRegex(c.Blocked, 'identity changed'):
+                    c.validate_audit_epoch_identity(baseline, changed_identity)
+            with self.assertRaisesRegex(c.Blocked, 'identity changed'):
+                c.validate_audit_epoch_identity(baseline, identity | {'profile': 'A'})
+            raw = dict(collected_at=timestamp(999), profile='A', snapshot=before)
+            baseline['source_evidence'] = file_ref(directory, 'audit-source.json', raw)
+            path.write_text(json.dumps(baseline))
+            with self.assertRaisesRegex(c.Blocked, 'source profile differs'):
+                c.validate_audit_baseline(path, before, 1000, 'B')
+            raw['profile'] = 'B'
+            raw['snapshot']['inventory']['rules_sha256'] = 'd' * 64
+            baseline['source_evidence'] = file_ref(directory, 'audit-source.json', raw)
+            path.write_text(json.dumps(baseline))
+            with self.assertRaisesRegex(c.Blocked, 'identity changed'):
+                c.validate_audit_baseline(path, before, 1000, 'B')
+
+    def test_strict_legacy_and_explicit_epoch_preserve_original_counter(self):
+        from test_runner import LIMITS, sample
+        baseline = {'lost': 60925, 'guest_boot_id': 'boot-1'}
+        row = sample()
+        row['audit']['audit_lost'] = 60925
+        self.assertIn('AuditD lost is nonzero', c.legacy.Guard(LIMITS, True).check(copy.deepcopy(row)))
+        guard = c.EpochAuditGuard(LIMITS, baseline)
+        self.assertEqual(guard.check(row), [])
+        self.assertEqual(row['audit']['audit_lost'], 60925)
+        later = sample(10)
+        later['audit']['audit_lost'] = 60926
+        self.assertIn('AuditD new loss since verified qualification epoch', guard.check(later))
+        later['audit']['audit_lost'] = 0
+        self.assertTrue(any('reset/regressed' in reason for reason in guard.audit_loss_reasons(later['audit'])))
+        later['audit'].update(audit_lost=60925, boot_id='another-boot')
+        self.assertTrue(any('boot changed' in reason for reason in guard.audit_loss_reasons(later['audit'])))
+        self.assertNotIn('appliance rebooted', guard.check(later))
+
+    def test_recovery_requires_same_absolute_epoch_not_zeroing_loss(self):
+        row = healthy()
+        row['audit'].update(audit_lost=60925, boot_id='boot')
+        baseline = {'lost': 60925, 'guest_boot_id': 'boot'}
+        self.assertFalse(c.normalized(row, row))
+        self.assertTrue(c.normalized(row, row, baseline))
+        changed = copy.deepcopy(row)
+        changed['audit']['audit_lost'] += 1
+        self.assertFalse(c.normalized(changed, row, baseline))
+
+
 class ExecutionTests(unittest.TestCase):
     def run_case(self, tmp, fail_at=None, child_code=0, fail_spawn=False):
         clock = Clock()
@@ -310,6 +530,17 @@ class ExecutionTests(unittest.TestCase):
             self.assertFalse(report['valid'])
             self.assertTrue((Path(tmp) / 'manifest.json').exists())
             self.assertTrue((Path(tmp) / 'receipts-index.json').exists())
+
+    def test_missing_selected_targets_never_starts_guest_discovery(self):
+        from test_measurement import config
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = Mock()
+            selected = dict(window(), measure_seconds=300, workload='short-tcp')
+            report = c.execute_window({}, selected, {'sample_interval': 10}, backend, config(), [],
+                Path(tmp), Path(tmp) / 'health.json', Path(tmp) / 'isolation.json', Path(tmp))
+            self.assertEqual(report['outcome'], 'INVALID_MEASUREMENT')
+            self.assertIn('runtime discovery forbidden', report['reason'])
+            backend.extended_guest.assert_not_called()
 
 
 if __name__ == '__main__':

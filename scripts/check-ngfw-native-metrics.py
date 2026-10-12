@@ -9,7 +9,7 @@ role = root / 'roles/ngfw_metrics'
 for folder in (role, root / 'roles/ngfw_native_source', root / 'roles/ngfw_native_route'):
     for path in folder.rglob('*.yml'):
         yaml.safe_load(path.read_text(encoding='utf-8'))
-for name in ('site', 'ngfw-metrics', 'ngfw-native-discovery', 'ngfw-native-route'):
+for name in ('site', 'ngfw-metrics', 'ngfw-native-discovery', 'ngfw-native-route', 'ngfw-extreme-endpoints'):
     yaml.safe_load((root / f'playbooks/{name}.yml').read_text(encoding='utf-8'))
 values = yaml.safe_load((role / 'defaults/main.yml').read_text(encoding='utf-8'))
 values['ngfw_metrics_influx_image'] = 'influxdb:1.0.0@sha256:' + '0' * 64

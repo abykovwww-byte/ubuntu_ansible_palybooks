@@ -118,6 +118,67 @@ prepared delivery mechanism; it is not a claim that routing has been applied.
 
 ## Workload integration gate
 
+### Explicit idle endpoint preparation and direct control
+
+After the reviewed revision is merged, the existing ordinary lab owner can run
+the focused playbook from that exact clean Git checkout using the existing
+Ansible environment. It changes only the existing user-owned lab runtime and
+its Docker endpoints; it does not install host packages, edit VM/network policy,
+or launch a workload:
+
+```bash
+/opt/ubuntu_ansible_palybooks/.venv/bin/ansible-playbook \
+  -i inventories/local/hosts.yml playbooks/ngfw-extreme-endpoints.yml \
+  -e ngfw_lab_enabled=true -e ngfw_lab_extreme_enabled=true \
+  -e ngfw_lab_endpoint_path=ngfw -e ngfw_lab_start_traffic=true
+```
+
+Use `ngfw_lab_endpoint_path=direct` for the separately measured internal Docker
+control network, then explicitly return to `ngfw`. Both modes use the same
+endpoint image, workload programs, policy listeners and resource settings; each
+endpoint has exactly one network. Direct network addresses come from Docker's
+actual allocation and read-back. The helper stages Git sources before acquiring
+the shared experiment lock, then promotes and starts idle endpoints while holding
+that lock. Check mode validates input gates only. An install or mode switch is
+not a capacity result. Failed operations and workload receipts must be retained.
+The ordinary role uses the same lock for runtime updates. After extreme mode has
+been installed, an ordinary apply without explicit extreme enablement fails
+before changing runtime sources; it cannot silently downgrade active endpoints.
+
+The direct capacity producer captures the actual DUT endpoint configuration,
+measures the offered workload and endpoint/host limits for a complete window,
+and verifies the same configuration, actual addresses and routes after return to
+the DUT path. A fresh negative isolation check with the NGFW powered off after
+the direct run, followed by restored dataplane health, is required before a usable
+control receipt. Required thresholds are explicit research parameters.
+If offered load or headroom is not established, preserve the failed capacity
+result; do not lower the requested workload silently or label it an NGFW limit.
+
+### Native freshness, clocks and historical audit loss
+
+The [native health producer](../roles/ngfw_metrics/README.md) verifies a catalog
+against actual source/API receipts, then queries one observed field per required
+measurement. Its scope is measurement liveness. Complete window coverage and
+all-series/field preservation need separate evidence.
+
+Clock samples surround API queries through an existing private authenticated SSH
+session. The read-only guest clock probe requires no sudo and performs no process
+enumeration. Native timestamps stay unchanged. Separate host-minus-guest offset
+bounds, realtime/monotonic consistency and before/after measurement-window drift
+are validated. The one-second window drift bound is a research policy, not a
+vendor guarantee or proof of NTP synchronization. Missing, stale or too uncertain
+clock evidence makes the window invalid.
+
+Qualification requires explicit previously identified guest PID/start-time/boot
+identities; a missing or changed process cannot fall back to a broad `/proc` scan.
+A historical nonzero audit loss counter is retained through an explicit immutable
+baseline linked to raw read-back and the incident record. Every measurement and
+recovery sample must preserve that boot, fixed audit controls and absolute loss
+counter. Profile and rules/configuration hashes must also match the baseline and
+independent before/after identity receipts. Any new loss stops the window; reset, regression or reboot invalidates
+the measurement. This does not recover lost events or establish central EDR
+receipt. Legacy callers retain their strict zero-loss default.
+
 The extreme planner and client are tools, not an unattended privileged profile
 switcher. The leading operator must preserve a single experiment lock, guest
 health/AuditD monitoring, isolation negative check, powered-off A/B snapshots,

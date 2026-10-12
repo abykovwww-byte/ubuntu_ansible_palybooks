@@ -21,6 +21,17 @@
       - ngfw_lab_traffic_server_cpus | float > 0
       - ngfw_lab_traffic_server_cpus | float <= 4
       - ngfw_lab_traffic_pids | int >= 96
+      - ngfw_lab_endpoint_path in ['ngfw', 'direct']
+      - ngfw_lab_endpoint_path != 'direct' or ngfw_lab_extreme_enabled | bool
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_cpus | float >= 2
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_cpus | float <= 4
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_memory_bytes | int >= 2147483648
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_memory_bytes | int <= 4294967296
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_nofile | int >= 131072
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_nofile | int <= 262144
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_max_sessions | int == 60000
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_port_range == '1024 65535'
+      - not (ngfw_lab_extreme_enabled | bool) or ngfw_lab_extreme_reserved_ports == '5201,5353,8080,9000'
       - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_address != '0.0.0.0'
       - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_port | int > 0
       - not (ngfw_lab_mngt_proxy_enabled | bool) or ngfw_lab_mngt_proxy_listen_port | int < 65536
@@ -33,6 +44,19 @@
       - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_target_port | int > 0
       - not (ngfw_lab_xdr_relay_enabled | bool) or ngfw_lab_xdr_relay_target_port | int < 65536
     fail_msg: PT NGFW lab variables are incomplete or unsafe.
+  tags: [ngfw-lab, preflight]
+
+- name: Read persistent extreme runtime ownership marker before normal role changes
+  ansible.builtin.stat:
+    path: "{{ ngfw_lab_reports_dir }}/.extreme-managed"
+  register: ngfw_lab_extreme_marker
+  tags: [ngfw-lab, preflight]
+
+- name: Refuse a normal-role downgrade of an extreme-managed lab
+  ansible.builtin.assert:
+    that:
+      - not ngfw_lab_extreme_marker.stat.exists or ngfw_lab_extreme_enabled | bool
+    fail_msg: This lab is extreme-managed; explicitly select extreme mode before applying the normal role.
   tags: [ngfw-lab, preflight]
 
 - name: Read host CPU flags
@@ -438,109 +462,12 @@
   when: item.rc != 0
   tags: [ngfw-lab, traffic, networks]
 
-- name: Install traffic runner and endpoint source
-  ansible.builtin.copy:
-    src: "{{ item.src }}"
-    dest: "{{ ngfw_lab_project_dir }}/{{ item.dest }}"
-    owner: "{{ ngfw_lab_owner }}"
-    group: "{{ ngfw_lab_group }}"
-    mode: "0644"
-    directory_mode: "0750"
-  loop:
-    - {src: "traffic/", dest: "traffic/"}
-    - {src: "extreme/", dest: "extreme/"}
-    - {src: "native_analysis/", dest: "native_analysis/"}
-    - {src: runner.py, dest: runner.py}
-    - {src: measure_probe.py, dest: measure_probe.py}
-    - {src: measurement.py, dest: measurement.py}
-    - {src: interactive_probe.py, dest: interactive_probe.py}
-    - {src: monitor.py, dest: monitor.py}
-    - {src: monitor/, dest: monitor/}
-    - {src: audit_evidence.py, dest: audit_evidence.py}
-    - {src: campaign.py, dest: campaign.py}
-    - {src: qualification.py, dest: qualification.py}
-    - {src: audit_profile_ctl.py, dest: audit_profile_ctl.py}
-    - {src: plans/, dest: plans/}
-    - {src: ngfw_probe.sh, dest: ngfw_probe.sh}
-  register: ngfw_lab_traffic_source
-  tags: [ngfw-lab, traffic]
-
-- name: Permit unprivileged endpoint traversal of public extreme tool directory
-  ansible.builtin.file:
-    path: "{{ ngfw_lab_project_dir }}/extreme"
-    state: directory
-    owner: "{{ ngfw_lab_owner }}"
-    group: "{{ ngfw_lab_group }}"
-    mode: "0755"
-  tags: [ngfw-lab, traffic]
-
-- name: Render traffic runner configuration
-  ansible.builtin.template:
-    src: runner.json.j2
-    dest: "{{ ngfw_lab_project_dir }}/runner.json"
-    owner: "{{ ngfw_lab_owner }}"
-    group: "{{ ngfw_lab_group }}"
-    mode: "0644"
-  tags: [ngfw-lab, traffic]
-
-- name: Validate traffic matrix without running traffic
-  ansible.builtin.command:
-    argv:
-      - python3
-      - "{{ ngfw_lab_project_dir }}/runner.py"
-      - plan
-  changed_when: false
-  tags: [ngfw-lab, traffic, validate]
-
-- name: Render traffic generator Compose file
-  ansible.builtin.template:
-    src: compose.yml.j2
-    dest: "{{ ngfw_lab_project_dir }}/compose.yml"
-    owner: "{{ ngfw_lab_owner }}"
-    group: "{{ ngfw_lab_group }}"
-    mode: "0644"
-  register: ngfw_lab_compose_template
-  tags: [ngfw-lab, traffic]
-
-- name: Validate traffic generator Compose file
-  ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - --project-directory
-      - "{{ ngfw_lab_project_dir }}"
-      - config
-      - --quiet
-  changed_when: false
-  tags: [ngfw-lab, traffic, validate]
-
-- name: Build traffic endpoint image when explicitly enabled
-  ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - --project-directory
-      - "{{ ngfw_lab_project_dir }}"
-      - build
-  changed_when: true
-  when: ngfw_lab_start_traffic | bool
-  tags: [ngfw-lab, traffic]
-
-- name: Start idle traffic endpoints when explicitly enabled
-  ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - --project-directory
-      - "{{ ngfw_lab_project_dir }}"
-      - up
-      - --detach
-  register: ngfw_lab_compose_up
-  changed_when: >-
-    'Started' in ngfw_lab_compose_up.stderr or
-    'Created' in ngfw_lab_compose_up.stderr or
-    'Recreated' in ngfw_lab_compose_up.stderr
-  when: ngfw_lab_start_traffic | bool
+- name: Stage all runtime changes through the shared locked installer
+  ansible.builtin.import_tasks: extreme_endpoints.yml
+  become: true
+  become_user: "{{ ngfw_lab_owner }}"
+  vars:
+    ngfw_lab_legacy_runtime_install: "{{ not (ngfw_lab_extreme_enabled | bool) }}"
   tags: [ngfw-lab, traffic]
 
 - name: Check PT NGFW base images

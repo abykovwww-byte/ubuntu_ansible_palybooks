@@ -51,6 +51,19 @@ def sample(now=0):
 
 
 class Guards(unittest.TestCase):
+    def test_qualification_cli_requires_selected_targets_before_backend_or_probe(self):
+        from test_measurement import config as measurement_config
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg_path, measure_path = root / 'config.json', root / 'measure.json'
+            cfg_path.write_text(json.dumps(config() | {'qualification_mode': True}))
+            measure_path.write_text(json.dumps(measurement_config()))
+            argv = ['runner.py', 'plan', '--config', str(cfg_path), '--measurement-config', str(measure_path)]
+            with patch.object(sys, 'argv', argv), patch.object(r, 'Backend') as backend:
+                with self.assertRaisesRegex(ValueError, 'runtime discovery forbidden'):
+                    r.main()
+                backend.assert_not_called()
+
     def test_cpu_action_defaults_to_stop_and_rejects_unknown_values(self):
         self.assertEqual(r.Guard(LIMITS, True).cpu_action, 'stop')
         for action in ('stop', 'warn'):

@@ -1,0 +1,98 @@
+---
+- name: Require explicit isolated endpoint operation
+  ansible.builtin.assert:
+    that:
+      - ngfw_lab_enabled | bool
+      - (ngfw_lab_extreme_enabled | bool) or (ngfw_lab_legacy_runtime_install | default(false) | bool)
+      - ngfw_lab_endpoint_path in ['ngfw', 'direct']
+      - inventory_hostname == 'localhost'
+      - ngfw_lab_project_dir == '/srv/apps/ngfw-lab'
+      - ngfw_lab_reports_dir == '/srv/app-data/ngfw-lab/reports'
+    fail_msg: Explicit lab enablement and the authorized endpoint operation are required.
+
+- name: Read unprivileged lab operator identity
+  ansible.builtin.command:
+    argv: [id, -un]
+  register: ngfw_extreme_operator
+  changed_when: false
+  check_mode: false
+
+- name: Require existing lab owner permissions without sudo
+  ansible.builtin.assert:
+    that:
+      - ngfw_extreme_operator.stdout == ngfw_lab_owner
+    fail_msg: Run this focused operation as the existing lab owner, without sudo.
+
+- name: Stage immutable Git sources before the locked endpoint transition
+  when: not ansible_check_mode
+  block:
+    - name: Create a private staging directory beneath lab reports
+      ansible.builtin.tempfile:
+        path: "{{ ngfw_lab_reports_dir }}"
+        state: directory
+        prefix: .extreme-iac-stage-
+      register: ngfw_extreme_stage
+
+    - name: Stage public runtime directories from the checked out Git revision
+      ansible.builtin.copy:
+        src: "{{ item }}/"
+        dest: "{{ ngfw_extreme_stage.path }}/{{ item }}/"
+        mode: "0644"
+        directory_mode: "0755"
+      loop: [traffic, extreme, native_analysis, plans, monitor]
+
+    - name: Stage public root runtime modules
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ ngfw_extreme_stage.path }}/{{ item | basename }}"
+        mode: "0644"
+      loop: "{{ lookup('ansible.builtin.fileglob', role_path + '/files/*.py', wantlist=True) }}"
+
+    - name: Stage the legacy bounded audit probe used by the controller
+      ansible.builtin.copy:
+        src: ngfw_probe.sh
+        dest: "{{ ngfw_extreme_stage.path }}/ngfw_probe.sh"
+        mode: "0644"
+
+    - name: Stage runner configuration without changing active endpoints
+      ansible.builtin.template:
+        src: runner.json.j2
+        dest: "{{ ngfw_extreme_stage.path }}/runner.json"
+        mode: "0644"
+
+    - name: Stage the explicitly selected endpoint topology
+      ansible.builtin.template:
+        src: compose.yml.j2
+        dest: "{{ ngfw_extreme_stage.path }}/compose.pending.yml"
+        mode: "0644"
+
+    - name: Validate and install endpoints while holding the experiment lock
+      ansible.builtin.command:
+        argv: >-
+          {{ ['python3', ngfw_extreme_stage.path + '/extreme/control_capacity.py',
+              'install-endpoints', '--config', ngfw_extreme_stage.path + '/runner.json',
+              '--candidate', ngfw_extreme_stage.path + '/compose.pending.yml',
+              '--source-tree', ngfw_extreme_stage.path]
+             + ([] if (ngfw_lab_extreme_enabled | bool) else ['--legacy'])
+             + ([] if (ngfw_lab_start_traffic | bool) else ['--no-start']) }}
+      register: ngfw_extreme_install
+      changed_when: true
+
+    - name: Show the endpoint operation receipt
+      ansible.builtin.debug:
+        var: ngfw_extreme_install.stdout
+
+  always:
+    - name: Remove only this operation's private staging directory
+      ansible.builtin.file:
+        path: "{{ ngfw_extreme_stage.path }}"
+        state: absent
+      when:
+        - ngfw_extreme_stage is defined
+        - ngfw_extreme_stage.path is defined
+        - ngfw_extreme_stage.path is match('^/srv/app-data/ngfw-lab/reports/\.extreme-iac-stage-[A-Za-z0-9_]+$')
+
+- name: Explain check mode boundaries
+  ansible.builtin.debug:
+    msg: Check mode validates explicit inputs only; no endpoint transition or capacity claim was made.
+  when: ansible_check_mode
