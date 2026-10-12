@@ -1,5 +1,5 @@
-listen_addresses = '*'
-port = 5432
+listen_addresses = '{{ context_postgres_bind_host }}'
+port = {{ context_postgres_port }}
 hba_file = '/etc/postgresql/pg_hba.conf'
 password_encryption = 'scram-sha-256'
 max_connections = 40

@@ -32,13 +32,16 @@ class ArchiveBoundaryTests(unittest.TestCase):
         config = yaml.safe_load(render('context_postgres', 'compose.yml'))
         self.assertEqual(list(config['services']), ['postgres'])
         pg = config['services']['postgres']
-        self.assertEqual(pg['ports'], ['100.117.52.16:5432:5432'])
+        self.assertEqual(pg['network_mode'], 'host')
+        self.assertNotIn('ports', pg)
+        self.assertNotIn('networks', config)
+        listener = render('context_postgres', 'postgresql.conf')
+        self.assertIn("listen_addresses = '100.117.52.16'", listener)
+        self.assertIn('port = 5432', listener)
+        self.assertNotIn("listen_addresses = '*'", listener)
         self.assertEqual(pg['image'], 'postgres:17.11-bookworm')
         self.assertNotIn('POSTGRES_PASSWORD', pg['environment'])
         self.assertEqual(pg['environment']['POSTGRES_PASSWORD_FILE'], '/run/secrets/postgres_password')
-        self.assertEqual(config['networks']['database']['driver'], 'bridge')
-        self.assertNotIn('external', config['networks']['database'])
-        self.assertNotIn('network_mode', pg)
         self.assertEqual(pg['logging']['driver'], 'none')
 
     def test_hba_exact_clients_and_other_databases_rejected(self):
@@ -64,6 +67,11 @@ class ArchiveBoundaryTests(unittest.TestCase):
         self.assertIn('ForceCommand internal-sftp -R -d /media', config)
         self.assertIn('ForceCommand internal-sftp -d /media -u 0027', config)
         self.assertIn('PermitUserRC no', config)
+
+    def test_non_default_port_is_used_by_listener_and_healthcheck(self):
+        compose = yaml.safe_load(render('context_postgres', 'compose.yml', context_postgres_port=5543))
+        self.assertIn('5543', compose['services']['postgres']['healthcheck']['test'])
+        self.assertIn('port = 5543', render('context_postgres', 'postgresql.conf', context_postgres_port=5543))
 
     def test_secrets_are_private_and_roles_are_disabled_by_default(self):
         for role in ('context_postgres', 'telegram_archive'):
