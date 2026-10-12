@@ -95,6 +95,73 @@ provisioning; neither label replaces actual capacity and recovery evidence.
 
 ## Operator commands (on the deployed host)
 
+### Owner-generated evidence without changing live access
+
+The separate `playbooks/ngfw-metrics-evidence.yml` is opt-in and is never invoked
+by the normal role or `site.yml`. After active measurement windows have closed,
+an authorized operator can run it through the existing privileged local Ansible
+path. It installs only `storage_evidence.py`; it does not provision/restart a
+service, change the spool ACL, configure a sink, or read private `spool.json`.
+
+Supply a private, non-secret request vars file with explicit values:
+
+```yaml
+ngfw_metrics_evidence_enabled: true
+ngfw_metrics_evidence_request_id: example-storage-observation
+ngfw_metrics_evidence_operator: existing_operator_account
+ngfw_metrics_evidence_start_epoch: 1600000020
+ngfw_metrics_evidence_end_epoch: 1600000620
+```
+
+The names/times above are placeholders, not actual host evidence. Replace them
+with the existing recipient account and the real **host** bounds of a completed
+workload. From the deployed checkout, using its installed Ansible environment:
+
+```sh
+sudo .venv/bin/ansible-playbook -i inventories/local/hosts.yml \
+  playbooks/ngfw-metrics-evidence.yml -e @/approved/private/storage-request.yml
+```
+
+This uses the already installed spool/helper paths from inventory. It does not
+require runtime credentials. The source must exist; a missing source is never
+created. The account `ngfw-metrics` runs the existing online-backup CLI under an
+exclusive evidence lock. Each child command has at most120 seconds; the evidence
+deadline defaults to180 seconds, with an outer process-group timeout and kill
+grace. The default snapshot bound is1GiB and free-space admission requires three
+times that bound plus the existing live disk reserve (snapshot, working copy,
+operator export). The bound and deadline are explicit variables, not measured
+capacity. Partial/failed output remains private and requires a new request ID;
+it is never published as a completed snapshot.
+
+An immutable `backup.sqlite` and SHA sidecar preserve committed WAL state, exact
+batch payloads and independent cursors. Restore/status/sizing operate on a new
+working copy. Source file logical/allocated sizes are captured separately;
+`status.json` filesystem sizes describe that working copy. The bounded
+`ingest-minutes.json` includes at most10080 complete minutes (seven days), exact
+accepted-byte/LP-line counters, missing minutes and the selected host bounds.
+It excludes partial workload-edge and snapshot minutes. Missing minutes suppress
+queue/retention estimates. The retained `sizing.json` is the existing CLI's
+all-history observation, not the workload-specific peak proof.
+
+Completed artifacts are copied by privileged Ansible into
+`{{ ngfw_metrics_data }}/evidence-export/REQUEST_ID`: files0600, recipient
+directory0700. Their hashes and sizes are compared to the owner originals before
+handover. The root-controlled parent permits traversal but not listing or
+replacement. The live spool remains0700 and no supplemental group, HTTP endpoint,
+Docker bind or sudo allowlist is added. An identical completed request can be
+verified/exported again; changed inputs or hashes are refused. Backups, working
+copies and exported copies are not automatically deleted: retain or remove them
+under the operator's evidence/archive policy after verified transfer.
+
+`COLLECTED_SQLITE_SNAPSHOT` is a collection result, never storage acceptance.
+The raw export can support an **observed-workload** peak-minute calculation:
+`queue24_payload_with_30pct = peak_minute_bytes * 1872`. Physical SQLite/Influx
+overhead, bursts, long-duration retention and outage/drain behavior require
+separate evidence. An absent external endpoint still blocks external delivery
+acceptance. Snapshot/replay tests on local fixtures are not live spool recovery.
+
+### Individual CLI operations
+
 Use the installed `/usr/bin/python3` and paths rendered by Ansible:
 
 ```sh

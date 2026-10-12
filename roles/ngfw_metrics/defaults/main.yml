@@ -27,5 +27,14 @@ ngfw_metrics_external_headers: {}
 ngfw_metrics_ingest_token: ""
 ngfw_metrics_allowed_sources:
   - "127.0.0.1/32"
+# Dedicated ngfw-metrics-evidence.yml only; never executed by normal provisioning.
+ngfw_metrics_evidence_enabled: false
+ngfw_metrics_evidence_request_id: ""
+ngfw_metrics_evidence_operator: ""
+ngfw_metrics_evidence_start_epoch: 0
+ngfw_metrics_evidence_end_epoch: 0
+ngfw_metrics_evidence_timeout_seconds: 180
+ngfw_metrics_evidence_max_snapshot_bytes: 1073741824
+ngfw_metrics_evidence_reserve_bytes: "{{ ngfw_metrics_disk_reserve_bytes }}"
 # A non-loopback bind is restricted by actual interface/address checks, exact
 # application source CIDRs and a managed source-specific firewall rule.
