@@ -137,7 +137,12 @@ Use `ngfw_lab_endpoint_path=direct` for the separately measured internal Docker
 control network, then explicitly return to `ngfw`. Both modes use the same
 endpoint image, workload programs, policy listeners and resource settings; each
 endpoint has exactly one network. Direct network addresses come from Docker's
-actual allocation and read-back. The helper stages Git sources before acquiring
+actual allocation and read-back. A network-only switch reuses the locally verified
+image ID when its Dockerfile and copied inputs still match a successful build
+receipt. Changed or unproven inputs require a new build and a new DUT anchor;
+historical build receipts remain immutable. Starting endpoints cannot pull a
+different image, and both running image IDs are checked before accepting a switch.
+The helper stages Git sources before acquiring
 the shared experiment lock, then promotes and starts idle endpoints while holding
 that lock. Check mode validates input gates only. An install or mode switch is
 not a capacity result. Failed operations and workload receipts must be retained.
