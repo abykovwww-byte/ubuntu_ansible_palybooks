@@ -91,11 +91,21 @@ def main():
             query('tg_reader', 'SELECT value FROM future_fixture', expected='7')
             query('tg_writer', 'DELETE FROM boundary_fixture')
             query('tg_reader', 'SELECT count(*) FROM boundary_fixture', expected='0')
-            # Reapply bootstrap with existing tables, then recheck reader after it.
+            # Convergence must also remove accidental direct grants on existing data.
+            docker('exec', '-u', 'postgres', name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+                   '-d', 'tgarchive', '-c',
+                   'GRANT INSERT, DELETE ON future_fixture TO tg_reader; '
+                   'GRANT CREATE ON SCHEMA public TO tg_writer; '
+                   'GRANT TEMPORARY ON DATABASE tgarchive TO tg_writer; '
+                   'GRANT tg_owner TO tg_reader;')
             docker('exec', '-u', 'postgres', name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
                    '-d', 'postgres', '-f', '/etc/fixture/bootstrap.sql')
             query('tg_reader', 'SELECT value FROM future_fixture', expected='7')
             query('tg_reader', 'SET default_transaction_read_only=off; DELETE FROM future_fixture', False)
+            query('tg_reader', 'SET default_transaction_read_only=off; INSERT INTO future_fixture VALUES (9)', False)
+            query('tg_writer', 'CREATE TABLE forbidden (id int)', False)
+            query('tg_writer', 'CREATE TEMP TABLE forbidden (id int)', False)
+            query('tg_reader', 'SET ROLE tg_owner', False)
             print(json.dumps({'fixture': 'isolated-postgresql', 'checks': checks,
                               'bootstrap_runs': 3, 'status': 'ok', 'real_archive_data': False}))
         finally:

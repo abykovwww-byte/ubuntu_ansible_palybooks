@@ -18,8 +18,8 @@ services:
     mem_limit: "{{ context_postgres_memory_limit }}"
     cpus: "{{ context_postgres_cpu_limit }}"
     logging:
-      driver: json-file
-      options: {max-size: 10m, max-file: "3"}
+      # PostgreSQL error DETAIL can contain an entire row even with log_statement=none.
+      driver: none
     healthcheck:
       test: [CMD, pg_isready, -U, postgres, -d, postgres]
       interval: 10s

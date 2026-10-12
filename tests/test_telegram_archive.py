@@ -32,6 +32,7 @@ class ArchiveBoundaryTests(unittest.TestCase):
         self.assertEqual(config['networks']['database']['driver'], 'bridge')
         self.assertNotIn('external', config['networks']['database'])
         self.assertNotIn('network_mode', pg)
+        self.assertEqual(pg['logging']['driver'], 'none')
 
     def test_hba_exact_clients_and_other_databases_rejected(self):
         hba = render('context_postgres', 'pg_hba.conf')

@@ -36,7 +36,10 @@ The Compose bridge is dedicated to this instance and not attached to other app
 networks. The published host address and HBA provide its inbound boundary.
 See [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/)
 and [PostgreSQL HBA](https://www.postgresql.org/docs/17/auth-pg-hba-conf.html).
-Passwords/parameters/SQL statements are not logged. Image `postgres:17.11-bookworm`
+Docker does not persist PostgreSQL stdout/stderr (`logging.driver: none`):
+an SQL error DETAIL can contain row text even with statement logging disabled.
+Ordinary SQL error logging and parameter/statement logging are disabled in PostgreSQL.
+Bootstrap output is covered by Ansible `no_log`. Image `postgres:17.11-bookworm`
 is pinned to the upstream [17.11 release](https://www.postgresql.org/docs/release/17.11/).
 
 No backups are configured for this archive, as required by its specification.
