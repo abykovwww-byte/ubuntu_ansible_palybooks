@@ -23,6 +23,12 @@
       when: ngfw_lab_enabled | default(false) | bool
     - role: apps
       tags: [apps]
+    - role: context_postgres
+      tags: [context-postgres, telegram-archive]
+      when: (context_postgres_enabled | default(false) | bool) or (telegram_archive_enabled | default(false) | bool)
+    - role: telegram_archive
+      tags: [telegram-archive]
+      when: telegram_archive_enabled | default(false) | bool
     - role: ngfw_logs
       tags: [ngfw-logs]
       when: ngfw_logs_enabled | default(false) | bool

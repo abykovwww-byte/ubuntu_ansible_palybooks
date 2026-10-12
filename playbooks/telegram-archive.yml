@@ -1,0 +1,9 @@
+---
+- name: Converge shared PostgreSQL and Telegram Archive SFTP
+  hosts: server
+  become: true
+  roles:
+    - role: context_postgres
+      when: telegram_archive_enabled | default(false) | bool
+    - role: telegram_archive
+      when: telegram_archive_enabled | default(false) | bool

@@ -1,0 +1,14 @@
+---
+context_postgres_enabled: false
+context_postgres_image: postgres:17.11-bookworm
+context_postgres_project_dir: /srv/apps/context-postgres
+context_postgres_data_dir: /srv/app-data/context-postgres
+context_postgres_bind_host: 100.117.52.16
+context_postgres_port: 5432
+context_postgres_uid: 999
+context_postgres_gid: 999
+context_postgres_password: ""
+# Additional databases can add exact database/user/client rules to this instance.
+context_postgres_client_rules: []
+context_postgres_memory_limit: 1g
+context_postgres_cpu_limit: "2.0"
