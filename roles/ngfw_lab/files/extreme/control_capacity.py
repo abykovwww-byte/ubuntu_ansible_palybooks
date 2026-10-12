@@ -491,7 +491,7 @@ def validate_install_config(config, project, legacy=False):
             raise Blocked('candidate introduces privileges, exposure or multiple endpoint networks')
         nofile = service.get('ulimits', {}).get('nofile', {})
         if legacy:
-            if not 0 < float(service.get('cpus', 0)) <= 4 or service.get('mem_limit', 0) <= 0:
+            if not 0 < float(service.get('cpus', 0)) <= 4 or compose_integer(service.get('mem_limit', 0)) <= 0:
                 raise Blocked('legacy endpoint resource bounds missing')
         else:
             validate_extreme_resources(service, nofile)
@@ -515,16 +515,24 @@ def validate_install_config(config, project, legacy=False):
     return direct
 
 
+def compose_integer(value):
+    # Compose emits normalized byte counts as decimal strings in some versions.
+    if type(value) is int or (isinstance(value, str) and re.fullmatch(r'[0-9]+', value)):
+        return int(value)
+    raise Blocked('candidate integer resource is not a normalized decimal value')
+
+
 def validate_extreme_resources(service, nofile):
-        if (not 2 <= float(service.get('cpus', 0)) <= 4 or not 2147483648 <= service.get('mem_limit', 0) <= 4294967296
-                or not 131072 <= nofile.get('soft', 0) <= nofile.get('hard', 0) <= 262144
-                or not 96 <= service.get('pids_limit', 0) <= 512):
-            raise Blocked('candidate lacks bounded approved endpoint resources')
-        sysctls = service.get('sysctls', {})
-        if (sysctls.get('net.ipv4.ip_local_port_range') != '1024 65535'
-                or sysctls.get('net.ipv4.ip_local_reserved_ports') != '5201,5353,8080,9000'
-                or str(sysctls.get('net.ipv4.ip_forward')) != '0'):
-            raise Blocked('candidate namespace tuple/forwarding bounds differ')
+    if (not 2 <= float(service.get('cpus', 0)) <= 4
+            or not 2147483648 <= compose_integer(service.get('mem_limit', 0)) <= 4294967296
+            or not 131072 <= compose_integer(nofile.get('soft', 0)) <= compose_integer(nofile.get('hard', 0)) <= 262144
+            or not 96 <= compose_integer(service.get('pids_limit', 0)) <= 512):
+        raise Blocked('candidate lacks bounded approved endpoint resources')
+    sysctls = service.get('sysctls', {})
+    if (sysctls.get('net.ipv4.ip_local_port_range') != '1024 65535'
+            or sysctls.get('net.ipv4.ip_local_reserved_ports') != '5201,5353,8080,9000'
+            or str(sysctls.get('net.ipv4.ip_forward')) != '0'):
+        raise Blocked('candidate namespace tuple/forwarding bounds differ')
 
 
 def reject_legacy_downgrade(config):

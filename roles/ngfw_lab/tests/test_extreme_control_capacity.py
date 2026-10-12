@@ -251,6 +251,16 @@ class IaCTests(unittest.TestCase):
                 bad['services']['traffic-client'].update(update)
                 c.validate_install_config(bad, project)
 
+    def test_compose_decimal_string_resources_preserve_exact_bounds(self):
+        project = Path('synthetic-project').resolve()
+        value = self.docker_config(project)
+        for service in value['services'].values():
+            service['mem_limit'] = str(service['mem_limit'])
+        self.assertTrue(c.validate_install_config(value, project))
+        for invalid in ('2gb', '2147483648.0', True, 2147483648.5, None):
+            with self.subTest(value=invalid), self.assertRaises(c.Blocked):
+                c.compose_integer(invalid)
+
     def test_same_mode_source_promotion_forces_recreate_and_waits_for_receiver(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
