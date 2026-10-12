@@ -77,7 +77,7 @@ class HeldEvidenceTests(unittest.TestCase):
             monitor=object.__new__(c.NativeRunner)
             monitor.directory=Path(directory);monitor.backend=SimpleNamespace(endpoint=Mock(side_effect=TimeoutError))
             monitor.native_health=Path(directory)/'health';monitor.boot_id='boot';monitor.context={};monitor.held_capture=True
-            with patch.object(c,'validate_native',return_value={}),patch.object(c.legacy.Runner,'monitor',side_effect=c.legacy.Abort('safety original')):
+            with patch.object(c,'read_native_current',return_value={}),patch.object(c.legacy.Runner,'monitor',side_effect=c.legacy.Abort('safety original')):
                 with self.assertRaisesRegex(c.legacy.Abort,'safety original'):monitor.monitor()
             row=json.loads((monitor.directory/'held-receiver.ndjson').read_text())
             self.assertEqual(row['error'],'TimeoutError')
