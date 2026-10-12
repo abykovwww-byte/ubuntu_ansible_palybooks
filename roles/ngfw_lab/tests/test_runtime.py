@@ -118,6 +118,15 @@ class Runtime(unittest.TestCase):
         self.assertEqual(proc.wait(timeout=5), 124)
         self.assertFalse(Path("/tmp", "ngfw-" + job + ".json").exists())
 
+    def test_endurance_watchdog_is_bounded_and_accepts_short_job(self):
+        for deadline, expected in ((4500, 0), (4501, 2)):
+            job = uuid.uuid4().hex
+            result = subprocess.run([sys.executable, str(TRAFFIC / 'job.py'), 'run',
+                '--timeout', str(deadline), job, '--', 'python3', '-c', 'raise SystemExit(0)'],
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, expected, result.stderr)
+            self.assertFalse(Path('/tmp', 'ngfw-' + job + '.json').exists())
+
     def test_stop_kills_only_named_job(self):
         job, proc = self.start_job(10)
         marker = Path("/tmp", "ngfw-" + job + ".json")

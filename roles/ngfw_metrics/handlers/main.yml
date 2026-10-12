@@ -1,0 +1,6 @@
+---
+- name: Restart NGFW metrics spool
+  ansible.builtin.systemd:
+    name: ngfw-metrics-spool.service
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,28 @@
+---
+# Disabled until actual PT Telegraf binary/config and compatibility are recorded.
+ngfw_metrics_enabled: false
+ngfw_metrics_pt_compatibility_confirmed: false
+ngfw_metrics_influx_image: ""
+ngfw_metrics_root: /srv/apps/ngfw-metrics
+ngfw_metrics_data: /srv/app-data/ngfw-metrics
+ngfw_metrics_bind_address: "127.0.0.1"
+ngfw_metrics_ingest_port: 18086
+ngfw_metrics_influx_bind_address: "127.0.0.1"
+ngfw_metrics_influx_port: 18087
+ngfw_metrics_db: telegraf
+ngfw_metrics_retention_days: 30
+ngfw_metrics_archive_days: 90
+ngfw_metrics_spool_payload_budget_bytes: 0
+ngfw_metrics_disk_reserve_bytes: 2147483648
+ngfw_metrics_memory_max: 536870912
+ngfw_metrics_cpu_quota: "50%"
+ngfw_metrics_influx_cpus: "0.5"
+ngfw_metrics_influx_memory: 1g
+ngfw_metrics_drain_bytes_per_second: 1048576
+ngfw_metrics_external_write_url: ""
+ngfw_metrics_external_headers: {}
+ngfw_metrics_ingest_token: ""
+ngfw_metrics_allowed_sources:
+  - "127.0.0.1/32"
+# Bind away from loopback only after lab firewall/source ACL was verified.
+ngfw_metrics_isolated_ingest_confirmed: false

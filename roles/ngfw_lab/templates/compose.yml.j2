@@ -8,6 +8,8 @@ x-endpoint: &endpoint
   mem_limit: {{ ngfw_lab_traffic_memory }}
   pids_limit: {{ ngfw_lab_traffic_pids }}
   read_only: true
+  volumes:
+    - ./extreme:/opt/extreme:ro
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=16m,mode=1777
   cap_drop: [ALL]

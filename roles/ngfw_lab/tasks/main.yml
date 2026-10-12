@@ -448,6 +448,8 @@
     directory_mode: "0750"
   loop:
     - {src: "traffic/", dest: "traffic/"}
+    - {src: "extreme/", dest: "extreme/"}
+    - {src: "native_analysis/", dest: "native_analysis/"}
     - {src: runner.py, dest: runner.py}
     - {src: measure_probe.py, dest: measure_probe.py}
     - {src: measurement.py, dest: measurement.py}
@@ -461,6 +463,15 @@
     - {src: plans/, dest: plans/}
     - {src: ngfw_probe.sh, dest: ngfw_probe.sh}
   register: ngfw_lab_traffic_source
+  tags: [ngfw-lab, traffic]
+
+- name: Permit unprivileged endpoint traversal of public extreme tool directory
+  ansible.builtin.file:
+    path: "{{ ngfw_lab_project_dir }}/extreme"
+    state: directory
+    owner: "{{ ngfw_lab_owner }}"
+    group: "{{ ngfw_lab_group }}"
+    mode: "0755"
   tags: [ngfw-lab, traffic]
 
 - name: Render traffic runner configuration

@@ -1,0 +1,35 @@
+---
+- name: Collect native source metadata without exposing credentials
+  ansible.builtin.script:
+    cmd: discover.py
+    executable: /usr/bin/python3
+  register: native_source_discovery
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Select unique immutable capture filename
+  ansible.builtin.set_fact:
+    ngfw_native_capture_file: "{{ ngfw_native_evidence_dir }}/native-source-{{ (native_source_discovery.stdout | from_json).captured_at_epoch | string | replace('.', '-') }}.json"
+
+- name: Create private controller evidence directory
+  ansible.builtin.file:
+    path: "{{ ngfw_native_evidence_dir }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+
+- name: Save source metadata on controller outside the appliance
+  ansible.builtin.copy:
+    content: "{{ native_source_discovery.stdout | from_json | to_nice_json }}"
+    dest: "{{ ngfw_native_capture_file }}"
+    force: false
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Show evidence location without private configuration
+  ansible.builtin.debug:
+    msg: "Read-only discovery saved to {{ ngfw_native_capture_file }} on controller"
