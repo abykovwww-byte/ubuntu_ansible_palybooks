@@ -91,6 +91,36 @@ class PlanTests(unittest.TestCase):
             p.validate_load(dict(kind='mixed', components=[dict(kind='tcp', bps=900000000),
                 dict(kind='udp', bps=50000000, payload_bytes=64), dict(kind='dns', rate=5000, concurrency=512)]))
 
+    def test_mixed_declares_padded_components_without_changing_standalone_or_stabilization(self):
+        mixed={'kind':'mixed','components':[{'kind':'tcp','bps':900000000},
+               {'kind':'http','rate':100,'concurrency':10},{'kind':'dns','rate':100,'concurrency':10}]}
+        for seconds in (300,3600):
+            argv=p.commands(mixed,'10.77.20.10',seconds,'same-id')
+            for command in argv:
+                duration_arg='-t' if command[0]=='iperf3' else '--duration'
+                self.assertEqual(command[command.index(duration_arg)+1],str(seconds+2))
+                if '--run-id' in command:self.assertEqual(command[command.index('--run-id')+1],'same-id')
+        warm=p.commands(mixed,'10.77.20.10',30,'warm',phase='stabilization')
+        self.assertEqual(warm[0][warm[0].index('-t')+1],'30')
+        standalone=p.commands(mixed['components'][0],'10.77.20.10',3600,'single')[0]
+        self.assertEqual(standalone[standalone.index('-t')+1],'3600')
+        with self.assertRaises(ValueError):p.commands(mixed['components'][0],'10.77.20.10',3602,'single')
+        conf=config();conf['workloads'][0]['offered']=mixed
+        conf['endurance_selection']={'A':{'offered':mixed,'stable_receipt':'prior.json'}}
+        materialized=p.materialize(conf)
+        self.assertEqual(materialized['windows'][0]['component_measure_seconds'],302)
+        self.assertEqual(materialized['endurance'][0]['component_measure_seconds'],3602)
+
+    def test_client_parser_accepts_bounded_mixed_endurance_padding_without_running_load(self):
+        import sys
+        argv=['load.py','client','--kind','http','--target','10.77.20.10','--duration','3602']
+        with patch.object(sys,'argv',argv),patch.object(l.asyncio,'run',side_effect=lambda coro:coro.close()) as run:
+            l.main()
+            run.assert_called_once()
+        with patch.object(sys,'argv',argv[:-1]+['3603']),patch.object(l.asyncio,'run') as run,contextlib.redirect_stderr(__import__('io').StringIO()):
+            with self.assertRaises(SystemExit):l.main()
+            run.assert_not_called()
+
     def test_attribution_needs_evidence_and_cpu_is_not_stop(self):
         evidence = dict(complete=True, identical_invariants=True, offered_achieved=True, cpu=100)
         self.assertEqual(p.classify(evidence), 'STABLE_LIMIT_NOT_ESTABLISHED')

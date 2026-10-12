@@ -22,9 +22,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import runner as legacy
 import measurement
 try:
-    from . import plan
+    from . import plan, held_evidence
 except ImportError:
     import plan
+    import held_evidence
 
 
 class Blocked(legacy.Abort):
@@ -334,6 +335,114 @@ def validate_identity(receipt, campaign, window, before, topology, base, now):
     return receipt
 
 
+def validate_stable_window(campaign, window, base, now):
+    """Endurance selection must reference actual validated prior window evidence.
+
+The selected artifact is the derived receipt, retaining its hashed original
+controller receipt and native export's hashed workload bytes. A stable label
+does not establish a maximum capacity, and never substitutes for 3600s control.
+"""
+    from native_analysis.normalize import iperf_observation, extreme_observation
+    from extreme.control_capacity import capacity_limits, performance_errors, mixed_timing
+    ref = window.get('stable_receipt')
+    stable = json.loads(artifact(ref, base))
+    stable_base = reference_path(ref, base).parent
+    if (stable.get('valid') is not True or stable.get('window_validated') is not True
+            or stable.get('regime') != 'stable' or stable.get('outcome') != 'STABLE_LIMIT_NOT_ESTABLISHED'
+            or stable.get('profile') != window['profile'] or stable.get('offered_load') != window['offered']
+            or stable.get('config_hashes') != campaign['invariants']
+            or not stable.get('run_id') or stable['run_id'] == window['run_id']):
+        raise Blocked('endurance stable receipt profile/load/outcome/invariants differ')
+    original_ref = stable.get('original_controller')
+    original = json.loads(artifact(original_ref, stable_base))
+    for key in ('run_id', 'profile', 'offered_load', 'config_hashes', 'profile_evidence', 'components'):
+        if original.get(key) != stable.get(key): raise Blocked('stable source identity differs: ' + key)
+    if original.get('outcome') != 'COMPLETED' or original.get('recovery', {}).get('status') != 'RECOVERED':
+        raise Blocked('stable source did not complete and recover')
+    profile = campaign['profiles'][window['profile']]
+    if any(stable.get('profile_evidence', {}).get(key) != value for key, value in profile.items()):
+        raise Blocked('stable profile evidence differs from campaign')
+    native = stable.get('native_completeness', {})
+    if (native.get('status') != 'COMPLETE_WITHIN_DECLARED_CATALOG_AND_CADENCE'
+            or native.get('scope') != 'native_telemetry' or type(native.get('expected')) is not int
+            or native['expected'] <= 0 or native.get('observed') != native['expected']
+            or native.get('missing') != 0 or native.get('gaps') or not native.get('evidence')):
+        raise Blocked('stable native completeness absent')
+    hashes = set()
+    for evidence in native['evidence']:
+        artifact(evidence, stable_base); hashes.add(evidence['sha256'])
+    offered = window['offered']
+    parts = offered.get('components', [offered])
+    components = [c for c in original.get('components', []) if c.get('phase') == 'measure']
+    if len(parts) != len(components): raise Blocked('stable workload component count differs')
+    retained = stable.get('stable_workload_evidence')
+    if not isinstance(retained, list) or len(retained) != len(components):
+        raise Blocked('stable explicit workload evidence mapping absent')
+    criterion_ref = stable.get('stable_criterion')
+    criterion = json.loads(held_evidence.referenced(criterion_ref, stable_base))
+    seconds = criterion.get('duration_seconds')
+    if criterion.get('offered') != offered or type(seconds) is not int or seconds < 300:
+        raise Blocked('stable criterion offered load or duration differs')
+    limits = capacity_limits(criterion.get('thresholds', {}))
+    actual_seconds = plan.component_seconds(offered, seconds)
+    if offered['kind'] == 'mixed':
+        if (criterion.get('component_measure_seconds') != actual_seconds
+                or stable.get('component_measure_seconds') != actual_seconds
+                or original.get('component_measure_seconds') != actual_seconds
+                or stable.get('measure_seconds') != seconds or original.get('measure_seconds') != seconds):
+            raise Blocked('stable mixed nominal/component duration contract differs')
+    declared = epoch(criterion.get('declared_at') or criterion.get('started_at'))
+    if declared > epoch(original.get('process_start')):
+        raise Blocked('stable criterion was not declared before source window')
+    expected_commands = plan.commands(offered, campaign['target'], seconds, stable['run_id'], campaign.get('source_ips', []))
+    durations, mixed_observations = [], []
+    for index, (part, component, evidence) in enumerate(zip(parts, components, retained)):
+        if component.get('kind') != part['kind'] or component.get('exit_code') != 0:
+            raise Blocked('stable workload component failed')
+        if offered['kind'] == 'mixed' and component.get('requested_duration_seconds') != actual_seconds:
+            raise Blocked('stable mixed component requested duration differs')
+        argv = component.get('argv', [])
+        duration_arg = '-t' if part['kind'] in ('tcp', 'udp') else '--duration'
+        try: requested_seconds = int(argv[argv.index(duration_arg) + 1])
+        except (ValueError, IndexError, TypeError): raise Blocked('stable workload invocation absent') from None
+        if requested_seconds != actual_seconds or argv != expected_commands[index]:
+            raise Blocked('stable workload invocation differs from offered load')
+        if (not isinstance(evidence, dict) or evidence.get('component_path') != component.get('path')
+                or evidence.get('kind') != part['kind']):
+            raise Blocked('stable workload evidence association differs')
+        raw = held_evidence.referenced(evidence.get('reference'), stable_base)
+        if hashlib.sha256(raw).hexdigest() not in hashes:
+            raise Blocked('stable workload lacks retained hash evidence')
+        if part['kind'] in ('tcp', 'udp'):
+            source_load = json.loads(raw).get('start', {}).get('test_start', {})
+            parallel = part.get('parallel', 1)
+            if (source_load.get('num_streams') != parallel
+                    or source_load.get('target_bitrate') != int(part['bps'] / parallel)
+                    or source_load.get('duration') != actual_seconds
+                    or part['kind'] == 'udp' and source_load.get('blksize') != part['payload_bytes']):
+                raise Blocked('stable actual iperf offered load differs')
+            measured, observation, errors = iperf_observation(raw, part['kind'], {})
+        else:
+            measured, observation, errors = extreme_observation(raw, stable['run_id'], part['kind'])
+            expected_rate = part['open_rate'] if part['kind'] == 'held' else part['rate']
+            if observation.get('final', {}).get('requested_rate') != expected_rate:
+                raise Blocked('stable actual offered request rate differs')
+        errors.extend(performance_errors(part, measured, observation, actual_seconds, limits))
+        if errors: raise Blocked('stable actual workload invalid: ' + ','.join(errors))
+        duration = epoch(measured['end']) - epoch(measured['start'])
+        if duration < requested_seconds or epoch(measured['end']) > now:
+            raise Blocked('stable actual workload duration or chronology invalid')
+        if part['kind'] == 'held':
+            held_evidence.verify(stable.get('held_receiver_evidence'), stable_base, raw, part, stable['run_id'])
+        durations.append(duration)
+        mixed_observations.append(dict(actual=measured, observation=observation))
+    if len(parts) > 1: mixed_timing(mixed_observations, seconds)
+    return {'source': ref, 'original_controller': original_ref, 'run_id': stable['run_id'],
+            'stable_criterion': criterion_ref,
+            'profile': stable['profile'], 'load_hash': plan.fingerprint(offered),
+            'actual_component_seconds': durations, 'scope': 'validated_stable_load_not_maximum_capacity'}
+
+
 def validate_campaign_artifacts(campaign, window, base, backend, config, now):
     def scoped(raw, name):
         if (raw.get('kind') != name or raw.get('scope') != 'isolated-ngfw-lab'
@@ -388,9 +497,20 @@ def validate_campaign_artifacts(campaign, window, base, backend, config, now):
             or raw.get('control_topology_hash') in (None, campaign['invariants']['topology'])
             or raw.get('endpoint_config_hashes') != {k: campaign['invariants'][k] for k in ('generator', 'receiver')}):
         raise Blocked('actual direct-path receipt does not support selected full-duration load')
+    if window['offered']['kind'] == 'mixed':
+        timing = raw.get('mixed_measurement_window', {})
+        if (raw.get('component_measure_seconds') != plan.component_seconds(window['offered'], raw['duration_seconds'])
+                or timing.get('measure_seconds') != raw['duration_seconds']
+                or timing.get('component_measure_seconds') != raw['component_measure_seconds']
+                or type(timing.get('conservative_common_seconds')) not in (int, float)
+                or not math.isfinite(timing['conservative_common_seconds'])
+                or timing['conservative_common_seconds'] < raw['duration_seconds']):
+            raise Blocked('direct mixed full concurrent duration evidence absent')
     control_topology = json.loads(artifact(raw.get('control_topology_evidence'), base))
     if plan.fingerprint(control_topology) != raw['control_topology_hash']:
         raise Blocked('direct control topology evidence differs')
+    if window.get('phase') == 'endurance':
+        snapshots['endurance_stable_window'] = validate_stable_window(campaign, window, base, now)
     return snapshots
 
 
@@ -413,6 +533,18 @@ def selected_window(campaign, run_id):
 
 
 class NativeRunner(legacy.Runner):
+    def capture_held_receiver(self):
+        row = {'phase': 'measure', 'host_requested_at': time.time()}
+        try:
+            row.update(json.loads(self.backend.endpoint('traffic-server', ['python3', '-c', held_evidence.PROBE], timeout=5)))
+        except Exception as error:
+            row['error'] = type(error).__name__
+            raise Blocked('independent held receiver readback failed') from error
+        finally:
+            row['host_received_at'] = time.time()
+            with (self.directory / 'held-receiver.ndjson').open('a', encoding='utf-8') as output:
+                output.write(json.dumps(row) + '\n'); output.flush(); os.fsync(output.fileno())
+
     def monitor(self):
         try:
             health = validate_native(self.native_health, self.boot_id, time.time())
@@ -429,7 +561,46 @@ class NativeRunner(legacy.Runner):
             raise Blocked('native collection health invalid: ' + str(error)) from error
         with (self.directory / 'native-health.ndjson').open('a', encoding='utf-8') as output:
             output.write(json.dumps(dict(time=utc(), **health)) + '\n')
-        super().monitor()
+        try:
+            super().monitor()
+        finally:
+            if getattr(self, 'held_capture', False): final_held_readback(self)
+
+
+def final_held_readback(monitor, terminal=False):
+    """Archive readback failure without replacing an in-flight safety exception."""
+    primary = sys.exc_info()[1]
+    try:
+        if terminal: time.sleep(1.1)  # receiver publishes once per second
+        monitor.capture_held_receiver()
+    except Exception:
+        if primary is None: raise
+    finally:
+        if terminal: monitor.held_capture = False
+
+
+def execute_measurement(monitor, window, campaign, report):
+    held = window['offered']['kind'] == 'held'
+    try:
+        if held:
+            monitor.held_capture = True
+            monitor.capture_held_receiver()
+        execute_components(monitor, window, campaign, 'measure', window['measure_seconds'], report)
+    finally:
+        if held: final_held_readback(monitor, terminal=True)
+    if window['offered']['kind'] == 'mixed':
+        from native_analysis.normalize import iperf_observation, extreme_observation
+        from extreme.control_capacity import mixed_timing
+        observations = []
+        for component in report['components']:
+            if component['phase'] != 'measure': continue
+            raw = held_evidence.read_bounded(monitor.directory / component['path'])
+            kind = component['kind']
+            actual, observation, errors = (iperf_observation(raw, kind, {}) if kind in ('tcp', 'udp')
+                else extreme_observation(raw, window['run_id'], kind))
+            if errors: raise Blocked('mixed component timing source invalid: ' + ','.join(errors))
+            observations.append(dict(actual=actual, observation=observation))
+        report['mixed_measurement_window'] = mixed_timing(observations, window['measure_seconds'])
 
 
 def duration_budget(offered, seconds):
@@ -463,9 +634,14 @@ def execute_components(monitor, window, campaign, phase, seconds, report, popen=
                        monotonic=time.monotonic, sleep=time.sleep):
     """Capture every component from launch; one failure stops all our sibling jobs."""
     ident = window['run_id'] + ('-stabilization' if phase == 'stabilization' else '')
-    argv_set = plan.commands(window['offered'], campaign['target'], seconds, ident, campaign.get('source_ips', []))
+    argv_set = plan.commands(window['offered'], campaign['target'], seconds, ident, campaign.get('source_ips', []), phase=phase)
     parts = window['offered'].get('components', [window['offered']])
-    budget = duration_budget(window['offered'], seconds)
+    actual_seconds = plan.component_seconds(window['offered'], seconds, phase)
+    budget = duration_budget(window['offered'], actual_seconds)
+    if window['offered']['kind'] == 'mixed' and phase == 'measure':
+        if window.get('component_measure_seconds', actual_seconds) != actual_seconds:
+            raise Blocked('mixed declared component duration differs')
+        report.update(measure_seconds=seconds, component_measure_seconds=actual_seconds)
     jobs = []
     handles = []
     monitor.context = dict(run_id=window['run_id'], phase=phase, offered=window['offered'], profile=window['profile'])
@@ -488,6 +664,7 @@ def execute_components(monitor, window, campaign, phase, seconds, report, popen=
                     '/opt/traffic/job.py', 'run', '--timeout', str(budget), jid, '--'] + argv
                 row = dict(kind=parts[index]['kind'], phase=phase, path=outpath.name, stderr=errpath.name,
                            job_id=jid, argv=argv, process_start=utc(), process_end=None, exit_code=None)
+                if window['offered']['kind'] == 'mixed': row['requested_duration_seconds'] = actual_seconds
                 report['components'].append(row)
                 job = dict(job_id=jid, process=None, row=row)
                 jobs.append(job)
@@ -558,12 +735,17 @@ def recover(monitor, baseline, seconds, timeout, monotonic=time.monotonic):
     start = monotonic()
     monitor.pause(seconds)
     consecutive = 0
+    consumed = len(monitor.window_samples)
     while monotonic() - start <= timeout:
         monitor.monitor()
-        consecutive = consecutive + 1 if normalized(monitor.window_samples[-1], baseline,
-                                                    getattr(monitor, 'audit_loss_baseline', None)) else 0
+        for sample in monitor.window_samples[consumed:]:
+            consecutive = consecutive + 1 if normalized(sample, baseline,
+                getattr(monitor, 'audit_loss_baseline', None)) else 0
+        consumed = len(monitor.window_samples)
         if consecutive >= 2:
-            return {'status': 'RECOVERED', 'seconds': monotonic() - start, 'normalization': 'two consecutive healthy baseline-bound samples'}
+            return {'status': 'RECOVERED', 'seconds': monotonic() - start,
+                    'normalization': 'two consecutive healthy baseline-bound samples',
+                    'normalization_sample_indices': [consumed - 2, consumed - 1]}
         monitor.pause(monitor.config['sample_interval'])
     raise legacy.Abort('recovery did not normalize before deadline')
 
@@ -632,7 +814,21 @@ def execute_window(campaign, window, config, backend, measure_config, identity_a
             warmup = window['stabilization_seconds']
             if warmup:
                 execute_components(monitor, window, campaign, 'stabilization', warmup, report)
-            execute_components(monitor, window, campaign, 'measure', window['measure_seconds'], report)
+            held = window['offered']['kind'] == 'held'
+            execute_measurement(monitor, window, campaign, report)
+            if held:
+                component = next(c for c in report['components'] if c['phase'] == 'measure')
+                raw_path = directory / component['path']
+                rows = [json.loads(line) for line in held_evidence.read_bounded(directory / 'held-receiver.ndjson').splitlines()]
+                finals = [r for r in map(json.loads, held_evidence.read_bounded(raw_path).splitlines()) if r.get('record_type') == 'final']
+                if len(finals) != 1: raise Blocked('held final measurement missing')
+                proof = held_evidence.validate(rows, finals[0], window['offered'], window['run_id'],
+                    config['sample_interval'] + measure_config['max_sample_seconds'] + 5.2)
+                proof.update(receiver_evidence=held_evidence.reference(directory / 'held-receiver.ndjson'),
+                             workload_evidence=held_evidence.reference(raw_path))
+                legacy.save(directory / 'held-receiver-window.json', proof)
+                report.update(held_receiver_window_validated=True,
+                              held_receiver_evidence=held_evidence.reference(directory / 'held-receiver-window.json'))
             report['outcome'] = 'COMPLETED'
         finally:
             if baseline is not None:

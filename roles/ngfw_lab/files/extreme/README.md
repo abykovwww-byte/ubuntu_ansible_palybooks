@@ -114,6 +114,54 @@ unless all requested sessions stayed active and each echoed during measurement.
 Join five-second progress records and receiver counters to verify sustained
 heartbeat coverage; one final union of confirmed IDs alone is insufficient. Independently compare
 receiver run counters keyed by the first8 bytes of SHA256(run_id), big-endian.
+Held controller windows additionally retain `held-receiver.ndjson` and a hashed
+`held-receiver-window.json` proof. The bounded endpoint read runs only for held,
+at the existing observer cadence plus initial/terminal reads. It checks receiver
+instance continuity, fresh published states, measurement bracketing, exact run
+population, no disconnect during measurement, and minimum echo-round progression
+across all connections. Receiver snapshots are sampled evidence, not packet
+capture. The normalizer rechecks both raw source hashes and the proof's content;
+`held_receiver_window_validated: true` alone is insufficient. Failed readbacks
+remain in the raw timeline and invalidate the proof. These reads change the held
+observer source/configuration identity and require new observer qualification
+before a live held comparison; they do not add probes to TCP windows.
+Each proof and raw source read is bounded to16MiB; oversized evidence is rejected.
+
+An endurance `stable_receipt` is a `{path, sha256}` reference to a prior derived
+receipt with validated stable outcome for the same profile, load and invariant
+hashes. Before load, the controller verifies its hashed original controller
+receipt, completion/recovery, native completeness evidence and hashed successful
+workload bytes with at least300 actual seconds. It also verifies actual offered
+iperf/request settings and held receiver proof where applicable. This proves a
+previous window against its hashed, predeclared `stable_criterion` (exact offered
+load, duration and bounded capacity thresholds). The derived receipt must retain
+ordered `stable_workload_evidence` entries with `component_path`, `kind` and a
+hashed `reference` to the preserved raw bytes. Component paths identify the
+original invocation; they are not resolved relative to relocated controller files.
+Receiver throughput, error ratio and UDP loss are recomputed using the shared
+direct-capacity criteria; native export must have status
+`COMPLETE_WITHIN_DECLARED_CATALOG_AND_CADENCE`. Mixed windows additionally need
+the full common measurement interval after timestamp uncertainty. Older receipts
+without the explicit mapping and criterion cannot authorize endurance. This proves a
+previous stable load, not maximum capacity; a separate matching3600s direct
+capacity receipt remains required. Transport lifetime and full-hour native export
+must also be provisioned by the caller; the controller does not extend them.
+
+Mixed measurement explicitly distinguishes nominal `measure_seconds`300/3600
+from `component_measure_seconds`302/3602. Every component executes the padded
+duration with the same offered settings and run ID. The2s allowance covers the
+existing1s launch bound plus iperf timestamp resolution; it does not prove
+simultaneity. Controller, direct capacity and normalization require every actual
+component to cover its full declared duration and the conservative common
+interval to cover the nominal duration. They retain the complete component union
+in `mixed_measurement_window`; native export must cover that union, including
+the padding. Stabilization and standalone commands retain their prior durations.
+The mixed stable criterion must bind both durations before the window starts.
+
+Recovery examines every appended sample, including samples produced by `pause()`.
+After the mandatory minimum wait, an intervening failed baseline check resets
+the consecutive-success count. A failed held readback is retained but cannot
+replace an already raised safety-stop exception.
 Successful latency histogram has noncumulative `counts`, upper `bounds_ms`, and
 one extra unbounded overflow bucket. Do not average precalculated quantiles.
 Failed attempts are outside the successful latency histogram and counted separately.

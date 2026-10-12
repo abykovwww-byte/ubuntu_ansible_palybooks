@@ -486,6 +486,10 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(monitor.backend.endpoint.call_count, 3)
             self.assertEqual(len(json.loads((Path(tmp) / 'receipt.json').read_text())['components']), 3)
             self.assertTrue(all((Path(tmp) / row['path']).read_text() for row in report['components']))
+            self.assertEqual(report['measure_seconds'],300)
+            self.assertEqual(report['component_measure_seconds'],302)
+            self.assertTrue(all(row['requested_duration_seconds']==302 for row in report['components']))
+            self.assertEqual(c.duration_budget(window(mixed=True)['offered'],3602),3622)
 
     def test_failed_component_stops_still_running_siblings(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -517,6 +521,27 @@ class ExecutionTests(unittest.TestCase):
             current = healthy()
             current['audit']['audit_lost'] = 1
             self.assertFalse(c.normalized(current, baseline))
+
+    def test_recovery_consumes_pause_failures_between_explicit_good_samples(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for eventually_healthy in (False,True):
+                clock=Clock();monitor=Monitor(Path(tmp),clock)
+                baseline=healthy();baseline['audit']['audit_backlog']=10
+                pauses=[]
+                def pause(seconds):
+                    clock.sleep(seconds);row=healthy()
+                    if seconds!=120 and (not eventually_healthy or len(pauses)<3):
+                        row['audit']['audit_backlog']=204
+                    pauses.append(row);monitor.window_samples.append(row)
+                monitor.pause=pause
+                if eventually_healthy:
+                    result=c.recover(monitor,baseline,120,132,monotonic=clock.time)
+                    self.assertGreaterEqual(result['seconds'],126)
+                    self.assertEqual(result['normalization_sample_indices'],[len(monitor.window_samples)-2,len(monitor.window_samples)-1])
+                    self.assertTrue(all(c.normalized(s,baseline) for s in monitor.window_samples[-2:]))
+                else:
+                    with self.assertRaisesRegex(c.legacy.Abort,'did not normalize'):
+                        c.recover(monitor,baseline,120,126,monotonic=clock.time)
 
     def test_malformed_after_inventory_still_writes_terminal_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:

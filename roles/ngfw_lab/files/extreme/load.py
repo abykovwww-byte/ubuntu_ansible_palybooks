@@ -413,7 +413,7 @@ def main():
     args = parser.parse_args()
     if any(not 1 <= port <= 65535 for port in (args.tcp_port, args.http_port, args.dns_port, args.iperf_port)):
         parser.error('invalid service port')
-    if not (1 <= args.duration <= 3600 and 0 < args.rate <= 1_000_000 and 1 <= args.concurrency <= 20000
+    if not (1 <= args.duration <= 3602 and 0 < args.rate <= 1_000_000 and 1 <= args.concurrency <= 20000
             and 1 <= args.sessions <= 1_000_000 and 1 <= args.heartbeat <= 10 and 1 <= args.max_sessions <= 1_000_000):
         parser.error('outside explicit bounded workload limits')
     if args.action == 'client':
