@@ -21,6 +21,13 @@ def render(role, filename, **overrides):
 
 
 class ArchiveBoundaryTests(unittest.TestCase):
+    def test_assert_conditions_remain_strings_after_yaml_parsing(self):
+        for role in ('context_postgres', 'telegram_archive'):
+            for path in (ROOT / 'roles' / role / 'tasks').glob('*.yml'):
+                for task in yaml.safe_load(path.read_text(encoding='utf-8')):
+                    for condition in task.get('ansible.builtin.assert', {}).get('that', []):
+                        self.assertIsInstance(condition, str, (path.name, task['name']))
+
     def test_compose_has_one_instance_exact_bind_and_no_secret_values(self):
         config = yaml.safe_load(render('context_postgres', 'compose.yml'))
         self.assertEqual(list(config['services']), ['postgres'])

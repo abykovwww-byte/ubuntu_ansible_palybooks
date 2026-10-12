@@ -90,9 +90,19 @@ with no network, no published port, tmpfs data and synthetic passwords. It
 checks real grants, DDL denials, read-only bypass resistance and repeat bootstrap.
 `scripts/test-telegram-archive-ssh.py` checks OpenSSH parsing and effective Match
 rules without starting a daemon. Ansible syntax checks cover both playbooks.
+`scripts/test-telegram-archive-ansible.py` executes the role's actual preflight
+with one valid and four invalid synthetic configurations, without become or
+mutating tasks. This catches conditional evaluation failures which a syntax
+check alone does not exercise, including YAML treating an unquoted `: ` inside
+a regex as a mapping instead of a condition string.
 
 These fixtures do not prove production source filtering or filesystem access.
 The laptop live verifier after apply is required for those boundaries.
+
+If the first owner apply fails after the provisioning script has consumed its
+staging directory, credentials are already in the server-private overrides.
+After the fix is merged, retry `sudo systemctl start ansible-local-apply.service`;
+do not rerun the removed staging script or regenerate credentials for a code error.
 
 To stop archive access, the owner can stop the `context-postgres` Compose
 project and revoke its two authorized key files while preparing an IaC revert.

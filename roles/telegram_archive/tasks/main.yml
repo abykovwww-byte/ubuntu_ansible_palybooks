@@ -1,23 +1,6 @@
 ---
-- name: Validate the archive storage and exact client boundary
-  ansible.builtin.assert:
-    that:
-      - telegram_archive_base == '/srv/data/tg-archive'
-      - telegram_archive_client_ip is match('^100\.[0-9]+\.[0-9]+\.[0-9]+$')
-      - telegram_archive_rw_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')
-      - telegram_archive_ro_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')
-      - telegram_archive_rw_public_key != telegram_archive_ro_public_key
-
-- name: Require private archive role passwords
-  ansible.builtin.assert:
-    that:
-      - telegram_archive_owner_password | length >= 32
-      - telegram_archive_writer_password | length >= 32
-      - telegram_archive_reader_password | length >= 32
-      - telegram_archive_owner_password != telegram_archive_writer_password
-      - telegram_archive_writer_password != telegram_archive_reader_password
-      - telegram_archive_owner_password != telegram_archive_reader_password
-  no_log: true
+- name: Validate archive parameters before modifying services
+  ansible.builtin.import_tasks: preflight.yml
 
 - name: Install private archive role password files
   ansible.builtin.copy:
