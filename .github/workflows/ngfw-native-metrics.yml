@@ -8,6 +8,7 @@ on:
       - 'playbooks/ngfw-metrics.yml'
       - 'playbooks/ngfw-native-discovery.yml'
       - '.github/workflows/ngfw-native-metrics.yml'
+      - 'scripts/check-ngfw-native-metrics.py'
   workflow_dispatch:
 permissions:
   contents: read

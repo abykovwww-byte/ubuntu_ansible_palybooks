@@ -35,7 +35,8 @@ def main():
     command = args.command
     if command and command[0] == "--":
         command = command[1:]
-    if not 1 <= args.timeout <= 3620 or not command or command[0] not in ("iperf3", "python3"):
+    # One-hour held measurement plus a bounded <=10-minute buildup and cleanup.
+    if not 1 <= args.timeout <= 4500 or not command or command[0] not in ("iperf3", "python3"):
         parser.error("invalid bounded job")
     if cancelled.exists():
         cancelled.unlink()

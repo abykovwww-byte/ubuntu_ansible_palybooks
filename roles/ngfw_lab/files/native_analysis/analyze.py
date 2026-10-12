@@ -117,7 +117,11 @@ def analyze(document):
         summary = {'run_id': run.get('run_id'), 'eligible': not reasons, 'reasons': reasons,
                    'profile': run.get('profile'), 'regime': run.get('regime'), 'outcome': run.get('outcome'),
                    'achieved': run.get('achieved'), 'completeness': run.get('completeness'),
-                   'evidence': run.get('evidence'), 'errors': run.get('errors'), 'loss': run.get('loss')}
+                   'evidence': run.get('evidence'), 'errors': run.get('errors'), 'loss': run.get('loss'),
+                   'normalization_errors': run.get('normalization_errors', []),
+                   'stop_reason': (run.get('workload_observation', {}).get('final', {}).get('stop_reason')
+                                   or run.get('controller_observation', {}).get('reason')),
+                   'controller_gaps': run.get('controller_observation', {}).get('gaps')}
         try:
             if 'latency_ms' in run:
                 summary['latency'] = {'method': 'raw_nearest_rank', 'quantiles_ms': quantiles(run['latency_ms'])}

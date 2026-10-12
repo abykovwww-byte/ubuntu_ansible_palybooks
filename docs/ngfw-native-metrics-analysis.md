@@ -86,9 +86,72 @@ The workload planner is not a normalized evidence manifest. A plan's intended
 offered load, duration, validity or profile does not establish that the actual
 run met it. The integration step must join actual workload receipts, observation
 receipts, invariant hashes and profile discovery before creating the above
-contract. This deliberate boundary prevents treating a generated plan as a
-successful experiment. Unknown completeness or profile evidence blocks paired
+contract. The implemented adapter below joins those receipts without promoting
+plan flags to observed facts. Unknown completeness or profile evidence blocks paired
 inference; failed windows remain in output with reasons.
+
+## Workload receipt adapter
+
+Run the controller's receipt index through the adapter, then the analyzer:
+
+```text
+python -m native_analysis.normalize --plan plan.json --receipts receipts-index.json --output normalized.json
+python -m native_analysis analyze normalized.json --output campaign-analysis.json
+```
+
+`receipts-index.json` is `{"receipts":["run-directory/receipt.json", "..."]}`.
+Paths are relative to the index directory; raw component paths are relative to
+their receipt directory. Absolute archived paths are also supported. The output
+is created exclusively and cannot overwrite an earlier normalized manifest.
+Original plan/index and workload files are hashed. All referenced controller
+receipt filenames remain in the normalized artifact, including unreadable ones.
+
+The controller receipt supplies actual `run_id`, `profile`, `workload`, `regime`,
+`offered_load`, `versions`, `config_hashes`, `profile_evidence`, `outcome`, `valid`,
+`window_validated` and `evidence`; the adapter does not fill them from plan
+readiness flags. `valid:true` and `window_validated:true` mean a controller has
+independently checked the complete actual window, not merely run a process.
+Each receipt has `components:[{kind,phase,path,exit_code,...}]` in planned component
+order. Only explicit `phase:"measure"` components are analyzed; stabilization
+and unknown-phase components remain separately referenced. A failed exit, missing output, truncated JSONL, duplicate final, identity
+mismatch or unknown profile preserves the window and marks it invalid.
+
+Native observation completeness comes from `native_completeness` with
+`expected`, `observed`, `missing` and nonempty `evidence` references. Alternatively
+`completeness` may explicitly carry `scope:"native_telemetry"` plus those fields.
+The controller's ordinary health-monitor cadence stays in
+`controller_completeness`; it never proves native point completeness. Current
+controller receipts intentionally remain invalid until actual native full-window
+read-back and regime classification exist. `unclassified` is not silently
+converted to stable. A missing producer therefore blocks real acceptance.
+
+For `extreme/load.py` JSONL, the adapter uses actual `measure_start`/`time_end`,
+checks duration and counter conservation, and recomputes successful work per
+second. `achieved_rate` in that generator currently means **attempted** rate and
+is never used as successful throughput. Histogram counts must sum to successful
+requests; the extra overflow bucket gets an explicit `+Inf` upper bound. Failed,
+censored-at-boundary and pending operations remain separate. A held window
+additionally requires all requested sessions active throughout, no stale final
+echoes, and `held_receiver_window_validated:true` from independent receiver and
+progress read-back. Its achieved rate is successful echoes/s, not session capacity.
+
+For iperf JSON, only a receiver summary supplies successful bytes/s; sender
+throughput is never substituted. Receiver `bytes*8/seconds` gives bit/s, and the
+adapter checks any supplied rate for agreement. Exact controller
+`measurement_window:{start,end,time_source}` is accepted only when duration
+matches the receiver. Otherwise the adapter combines iperf's actual
+`start.timestamp.timesecs` with receiver start/end offsets and labels its
+one-second wall-clock resolution. Controller process start/end are not called
+exact measurement bounds. UDP loss counters are preserved; version-dependent
+packet counters are not silently converted to PPS. Receiver-only UDP schemas
+use `sender:false`; absent receiver evidence makes the window invalid.
+
+Mixed components become separate runs with stable component suffixes, keeping
+the complete offered mixture as the comparison condition. Rates with different
+units are never summed. Every planned window/component remains represented
+even when the receipt is missing. Unplanned receipts are separately retained as
+invalid. The analyzer exposes normalization failure reasons and actual workload
+stop reasons, so an unsuccessful run is inspectable after report generation.
 
 For each eligible ABA or BAB block the analyzer compares B with A, averaging
 only same-profile achieved **rates** inside that block. It also reports the

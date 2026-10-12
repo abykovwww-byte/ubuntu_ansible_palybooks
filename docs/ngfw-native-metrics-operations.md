@@ -4,7 +4,8 @@ Acceptance contract: [ТЗ](ngfw-native-metrics-TZ.md).
 Analysis: [native metrics analysis](ngfw-native-metrics-analysis.md).
 
 This delivery prepares opt-in storage/export, native source discovery, explicit
-extreme workload commands and analysis. It does **not** certify live native
+extreme workload commands, a guarded single-window controller and raw-result
+normalization/analysis. It does **not** certify live native
 collection, A/B results, capacity, observer impact or appliance compatibility.
 An unset compatibility pin prevents deployment. Raw laboratory receipts stay
 outside this public repository.
@@ -73,6 +74,19 @@ load per block, return controls, 300-second measurement and >=120-second recover
 and 3600-second endurance after per-profile stable limits are measured. CPU100%
 alone is not a stop. Management loss, reboot, OOM, disk or mandatory audit loss
 stop the load. Save failed windows before cleanup and recovery.
+
+The [controller contract](../roles/ngfw_lab/files/extreme/README.md) requires
+hashed, scoped prerequisite artifacts, current snapshot read-back, direct-path
+capacity evidence, and fresh identity/native-health producers. Those producers
+still require the actual guest and native database discovery. Missing evidence
+blocks execution. The controller uses the existing host lock, stops every
+launched remote job even after a local exec failure, and preserves failed raw
+output before recovery. Its completed process is not a validated A/B result.
+
+The normalizer consumes controller receipts and actual workload outputs. Only
+explicit measurement-phase components enter analysis; warmup is retained
+separately. Missing or stopped windows remain invalid. Native completeness must
+come from full-window database read-back, never from the controller sample rate.
 
 ## Delivery and resumption
 

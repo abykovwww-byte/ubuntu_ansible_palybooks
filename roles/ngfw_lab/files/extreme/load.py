@@ -399,6 +399,8 @@ def main():
             and 1 <= args.sessions <= 1_000_000 and 1 <= args.heartbeat <= 10 and 1 <= args.max_sessions <= 1_000_000):
         parser.error('outside explicit bounded workload limits')
     if args.action == 'client':
+        if args.kind == 'held' and args.sessions / args.rate > 600:
+            parser.error('held buildup schedule must fit within 600 seconds')
         if not args.target or not ipaddress.ip_address(args.target).is_private:
             parser.error('explicit private lab target required')
         if args.kind == 'held' and not args.source_ip:

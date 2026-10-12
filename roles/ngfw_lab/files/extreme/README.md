@@ -6,7 +6,8 @@ lock, isolation receipts, native collection, health guards, process watchdogs,
 mixed start synchronization, recovery, and restoration. `plan.py` does not run
 its output. `load.py` runs a bounded client or an explicitly started receiver.
 Neither changes routes, EDR, AuditD, VM resources, or firewall policies.
-There is no unlocked live campaign controller in this directory.
+The single-window controller below uses the existing host lock; it does not
+automate an entire profile-switching campaign.
 
 ## Execution contract
 
@@ -30,11 +31,12 @@ prove the content. The controller must validate content and freshness against
 current topology before executing any argv.
 
 The existing `traffic/job.py` can supervise the emitted `python3`/`iperf3` argv;
-it accepts watchdog timeouts up to 3620 seconds. For held sessions, add
-`ceil(sessions/open_rate)+10` buildup time to the measurement deadline.
-**A 3600-second held endurance exceeds the legacy job watchdog including buildup:**
-integration must extend that watchdog with an explicit bounded held deadline
-or run the duration-bounded client through an equivalent controller watchdog.
+it accepts watchdog timeouts up to 4500 seconds. For held sessions, add
+`ceil(sessions/open_rate)+10` buildup time and a bounded cleanup margin to the
+measurement deadline. The client refuses a held buildup schedule above 600
+seconds, leaving room for a 3600-second measurement inside the bounded watchdog.
+Ansible installs the public tool directory with 0755 traversal for UID 65534;
+Compose mounts it read-only at `/opt/extreme` on both endpoints.
 Do not silently shorten endurance. Capture stdout JSONL and stderr from start,
 including nonzero exits, cancellation, failed buildup and every five-second
 progress record. Send each measurement phase to a unique run directory. A
@@ -133,3 +135,122 @@ limitation and invalid measurement stay separate. Actual policy hits require
 native counters/read-back; ACL/NAT inventory count alone is not coverage.
 
 No live capacity or safety claim is established by unit tests of this adapter.
+
+## One-window guarded controller
+
+`controller.py` is the executable integration with the existing `runner.Backend`,
+`Runner.monitor/pause`, basic AuditD guard and extended measurement guard. It
+holds the same `reports_dir/.runner.lock` with nonblocking `fcntl`, rejects reused
+run directories, recomputes argv from the selected offered load and target, and
+requires `cpu_action: warn`. It uses the configured observer sample cadence and
+does not accelerate it. This still does not establish a tested live harness:
+guest access and the actual receipt-producing adapters remain prerequisites.
+
+```text
+python3 extreme/controller.py --campaign campaign.json --run-id <selected-run-id> --config runner.json --measurement-config measurement.json --measurement-argv-file /etc/ngfw-lab/measurement-argv.json --identity-argv-file /etc/ngfw-lab/identity-argv.json --native-health /srv/app-data/ngfw-lab/native-health.json --isolation /srv/app-data/ngfw-lab/reports/isolation.json
+```
+
+The identity command must be a read-only collector configured by the operator;
+it is executed before and after the window, not supplied by a remote receipt.
+Measurement argv must terminate in `python3 -` for the existing bounded probe.
+No credentials belong in these evidence documents or the Git repository.
+
+The controller executes **one** selected comparison or endurance window. It
+never switches EDR, restores snapshots, changes policies or provisions routes.
+Mixed components start together with recorded process timestamps; launch skew
+greater than1s invalidates the window. These are process timestamps, not exact
+iperf measurement boundaries. Each component is supervised by `traffic/job.py`
+with duration plus held buildup and cleanup, bounded by4500s. Error, guard or
+signal stops all jobs belonging to this window. Raw stdout/stderr are opened
+before launch and flushed/fsynced on success or failure. Failed windows remain.
+
+Recovery reuses monitored pauses for at least120s, then requires two consecutive
+healthy observations: management/VM/dataplane available, no missing metrics,
+AuditD lost0, guest/host memory within5 percentage points of baseline, backlog
+within10 entries and service probe latency below max(20ms, twice baseline).
+CPU saturation alone is not a recovery failure. Other existing guard conditions
+including mandatory audit, disk, temperature and sustained service latency
+remain active. Default normalization deadline is600s; a failed/deadline recovery
+is an explicit SAFETY_STOP and never starts another workload.
+
+### Hashed prerequisite contract
+
+For controller execution, each `campaign.receipts` entry and the selected
+`control_capacity.receipt` must be `{ "path": "...", "sha256": "..." }`, not a
+string or boolean. Paths are relative to the campaign file or absolute. Every
+JSON prerequisite requires `kind` matching its entry name, `scope` equal to
+`isolated-ngfw-lab`, `campaign_id`, `target`, `config_hashes` exactly matching the
+campaign invariants, timezone-aware `observed_at` no older than24h and an
+`evidence` list of hash-checked raw-file references. Missing producer data blocks
+execution. These schemas describe required evidence; writing matching labels
+does not replace actual collection.
+
+- `snapshot_A` and `snapshot_B` additionally name `snapshot_name`, `vm` and
+  `creation_state: "shut off"`. Current read-only `virsh snapshot-info` must
+  confirm that exact VM, snapshot and shutoff state. Its output is saved.
+- `rollback` includes a nonempty `steps` array and hashed
+  `restore_verification_evidence`. The procedure remains operator-controlled.
+- `observer_impact.observer_configuration_sha256` must match the observation
+  invariant. Its raw comparison evidence must cover the chosen observer.
+- `resource_reservations.headroom` contains positive `fd_slots`,
+  `source_port_tuples`, `receiver_sessions`, `host_memory_bytes`, with the
+  underlying resource read-back in `evidence`.
+- The actual `control_capacity` JSON requires `status: "VALID"`, `load_hash`,
+  `topology_hash` matching the DUT campaign, `offered_achieved: true`,
+  `resources_unlimited: true`, `duration_seconds` covering the selected window,
+  `path_kind: "direct_control"`, `traverses_ngfw: false`, and
+  `endpoint_config_hashes` equal to the generator/receiver invariants. Its
+  distinct `control_topology_hash` must match canonical JSON content from
+  `control_topology_evidence`; a copy of the DUT topology cannot qualify.
+
+### Current identity command output
+
+The identity argv returns JSON with `collected_at` (age<=60s), `profile`,
+`guest_boot_id`, `versions`, `config_hashes`, `profile_evidence` and `artifacts`.
+The `artifacts` map contains hashed-file references for every plan invariant and
+`profile`, relative to the identity argv file. All non-topology invariant hashes
+are SHA256 of exact artifact bytes. The topology artifact is parsed JSON equal
+to `Backend.topology()`, and its invariant uses `plan.fingerprint(topology)`.
+The profile artifact's JSON equals `profile_evidence`.
+
+`profile_evidence` requires `edr_installed`, `audit_profile` (`stock` or `full`),
+`rules_sha256` and `auditd_conf_sha256`; B additionally requires
+`audit_rule_count:116`. A requires package absence, not an inactive service.
+The actual extended guest inventory must independently match the effective
+rules/config hashes and boot identity. The controller copies identity evidence
+and inventories into the run directory and repeats current identity checks after
+load/recovery. No current provider for the additional package/policy/build
+identity adapter is claimed by this implementation.
+
+### Native-health producer output
+
+An independent local-DB reader must refresh `--native-health` atomically. The
+receipt includes `collected_at`, `source_interval_seconds` (actual PT interval),
+`database`, `guest_boot_id`, `required_measurements` from the observed catalog,
+and `query_evidence` as a hashed-file reference relative to that receipt.
+That query JSON must contain the same `database`, `guest_boot_id`,
+`partial:false` and `points:[{"measurement":"...","time":"RFC3339"}]`.
+Every required measurement must have a point no older than twice the source
+interval plus10s, and the receipt must be equally fresh. Wrong boot, changed
+hash, future timestamps, empty/partial/stale data or missing measurement blocks
+or stops execution. Each successful query read-back is preserved in
+`native-health.ndjson`; failures and the failed receipt are retained separately.
+The deployed Telegraf/Influx query producer is **not yet integrated**: until it
+exists and its actual catalog/identity mapping is verified, this gate stays
+blocked. Freshness alone never proves full-window completeness.
+
+### Terminal output and analysis
+
+Each directory preserves `window.json`, `receipt.json`, inventories, topology,
+snapshot and identity evidence, monitor/native JSONL, every component raw/stderr,
+`receipts-index.json` and SHA256 `manifest.json`. Terminal outcomes are
+COMPLETED, INVALID_MEASUREMENT or SAFETY_STOP; resource/NGFW limit attribution is
+left to evidence analysis. `valid:false`, `window_validated:false` and
+`regime:"unclassified"` remain until actual full-window native completeness and
+workload evidence are reconciled. Controller sample counts explicitly use
+`scope:"controller_monitor_not_native"`; they cannot stand in for native data.
+
+The index has `{"receipts":["receipt.json"]}` relative to its directory and is
+accepted by `python3 -m native_analysis.normalize --plan plan.json --receipts
+receipts-index.json --output normalized.json`. Normalization does not invent
+validity for incomplete receipts or turn process times into measurement times.

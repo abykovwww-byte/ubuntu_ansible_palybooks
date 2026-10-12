@@ -71,9 +71,14 @@ def discover():
         result['configs'].append(row)
     result['telegraf_version'] = command(['telegraf', '--version'])
     help_result = command(['telegraf', '--help'])
+    result['telegraf_help'] = help_result
     result['disk_buffer_help_mention'] = bool(re.search(r'disk.?buffer|buffer.?strategy',
                                                         help_result.get('stdout', ''), re.I))
     result['disk_buffer_guarantee'] = 'NOT_ESTABLISHED: help absence is not proof; version and outage test required'
+    result['bundled_dashboard_candidates'] = command([
+        'find', '/opt/pt-ngfw', '/usr/share', '-maxdepth', '5', '-type', 'f',
+        '(', '-name', 'Linux.json', '-o', '-iname', '*ngfw*.json', '-o',
+        '-iname', '*grafana*.json', ')'])
     result['packages'] = command(['dpkg-query', '-W', '-f=${binary:Package}\t${Version}\t${db:Status-Status}\n',
                                   'telegraf', 'vxagent', 'auditd', 'pt-ngfw*'])
     result['services'] = {name: command(['systemctl', 'is-active', name])

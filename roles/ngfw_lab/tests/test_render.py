@@ -34,6 +34,7 @@ class Rendering(unittest.TestCase):
             self.assertEqual(service["restart"], "no")
             self.assertTrue(service["read_only"])
             self.assertNotIn("ports", service)
+            self.assertIn('./extreme:/opt/extreme:ro', service['volumes'])
 
     def test_default_config_and_compose(self):
         values = yaml.safe_load((ROOT / "defaults/main.yml").read_text())
