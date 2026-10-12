@@ -4,9 +4,12 @@ on:
     paths:
       - 'roles/ngfw_metrics/**'
       - 'roles/ngfw_native_source/**'
+      - 'roles/ngfw_native_route/**'
       - 'roles/ngfw_lab/**'
       - 'playbooks/ngfw-metrics.yml'
       - 'playbooks/ngfw-native-discovery.yml'
+      - 'playbooks/ngfw-native-route.yml'
+      - 'docs/ngfw-native-metrics-operations.md'
       - '.github/workflows/ngfw-native-metrics.yml'
       - 'scripts/check-ngfw-native-metrics.py'
   workflow_dispatch:
@@ -22,6 +25,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s roles/ngfw_metrics/tests -v
+      - run: python -m unittest discover -s roles/ngfw_native_route/tests -p 'test_native_route.py' -v
       - run: python -m unittest discover -s roles/ngfw_lab/tests -p 'test_native*.py' -v
       - run: python -m unittest discover -s roles/ngfw_lab/tests -p 'test_extreme*.py' -v
       - run: python -m pip install -r requirements-ansible.txt
@@ -29,3 +33,4 @@ jobs:
       - run: ansible-galaxy collection install -r collections/requirements.yml
       - run: ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-metrics.yml --syntax-check
       - run: ansible-playbook -i inventories/ngfw-audit-source/hosts.yml playbooks/ngfw-native-discovery.yml --syntax-check
+      - run: ansible-playbook -i inventories/ngfw-audit-source/hosts.yml playbooks/ngfw-native-route.yml --syntax-check

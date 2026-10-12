@@ -1,0 +1,42 @@
+---
+- name: Explain disabled native source routing
+  ansible.builtin.debug:
+    msg: Native source routing is disabled; no source or service changes.
+  when: not (ngfw_native_route_enabled | bool)
+
+- name: Validate opt-in routing contract
+  ansible.builtin.assert:
+    that:
+      - ngfw_native_route_action in ['plan', 'apply', 'readback', 'restore']
+      - ngfw_native_route_expected_sha256 is match('^[a-f0-9]{64}$')
+      - ngfw_native_route_destination == 'http://10.77.0.1:18086'
+      - inventory_hostname in groups.get('ngfw_audit_source', [])
+    fail_msg: Explicit action, exact current source SHA256 and isolated lab destination are required.
+  when: ngfw_native_route_enabled | bool
+
+- name: Execute bounded Telegraf routing transaction without private diff
+  ansible.builtin.script:
+    cmd: >-
+      route.py
+      --action {{ 'plan' if ansible_check_mode and ngfw_native_route_action == 'apply' else ngfw_native_route_action }}
+      --expected-sha256 {{ ngfw_native_route_expected_sha256 }}
+      --destination {{ ngfw_native_route_destination }}
+    executable: /usr/bin/python3
+  register: ngfw_native_route_result
+  changed_when: (ngfw_native_route_result.stdout | from_json).changed | bool
+  no_log: true
+  diff: false
+  check_mode: false
+  when:
+    - ngfw_native_route_enabled | bool
+    - not ansible_check_mode or ngfw_native_route_action != 'restore'
+
+- name: Show safe transaction summary
+  ansible.builtin.debug:
+    msg: >-
+      Native route {{ (ngfw_native_route_result.stdout | from_json).status }};
+      source bytes, credentials and private backup paths remain on the guest.
+  when:
+    - ngfw_native_route_enabled | bool
+    - ngfw_native_route_result is not skipped
+    - ngfw_native_route_result.rc == 0

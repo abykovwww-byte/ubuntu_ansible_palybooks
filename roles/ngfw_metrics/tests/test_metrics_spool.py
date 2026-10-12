@@ -1,8 +1,11 @@
+import gzip
 import json
+import http.client
 import http.server
 from pathlib import Path
 import sys
 import subprocess
+import socket
 import tempfile
 import time
 import threading
@@ -224,6 +227,174 @@ class LocalHttpReplayTests(unittest.TestCase):
                 receiver.shutdown()
                 receiver.server_close()
                 thread.join(2)
+
+
+class GzipIngestTests(unittest.TestCase):
+    """Synthetic LP over real loopback HTTP; no appliance/live acceptance claim."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.spool = Spool(Path(self.temp.name) / "spool.sqlite")
+        self.limit = len(PAYLOAD) * 8
+        self.receiver = BoundedHTTPServer(("127.0.0.1", 0), make_handler(self.spool, self.limit))
+        self.thread = threading.Thread(target=self.receiver.serve_forever, daemon=True)
+        self.thread.start()
+        self.url = "http://127.0.0.1:%s/write?db=telegraf&precision=ns" % self.receiver.server_port
+
+    def tearDown(self):
+        self.receiver.shutdown()
+        self.receiver.server_close()
+        self.thread.join(2)
+        self.temp.cleanup()
+
+    def post(self, body, encoding="gzip"):
+        request = urllib.request.Request(self.url, data=body, method="POST",
+                                         headers={"Content-Encoding": encoding})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status
+
+    def assert_rejected_without_growth(self, body, encoding="gzip"):
+        before = self.spool.status()
+        with self.spool.connect() as db:
+            batches_before = db.execute("SELECT COUNT(*) FROM batches").fetchone()[0]
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.post(body, encoding)
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+        after = self.spool.status()
+        for name in ("accepted_bytes", "accepted_points", "retained_bytes"):
+            self.assertEqual(after[name], before[name], name)
+        with self.spool.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM batches").fetchone()[0], batches_before)
+
+    def test_gzip_preserves_decoded_bytes_hash_and_replay_at_limit(self):
+        payload = PAYLOAD * 8
+        self.assertEqual(self.post(gzip.compress(payload)), 204)
+        with self.spool.connect() as db:
+            row = db.execute("SELECT payload,sha256,points FROM batches").fetchone()
+        import hashlib
+        self.assertEqual(bytes(row["payload"]), payload)
+        self.assertEqual(row["sha256"], hashlib.sha256(payload).hexdigest())
+        self.assertEqual(row["points"], 8)
+        self.spool.register("local", "http://synthetic/write?precision=ns")
+        delivered = []
+        self.assertEqual(self.spool.deliver_one("local", delivered.append), len(payload))
+        self.assertEqual(delivered, [payload])
+
+    def test_identity_still_preserves_exact_payload(self):
+        self.assertEqual(self.post(PAYLOAD, "identity"), 204)
+        with self.spool.connect() as db:
+            self.assertEqual(bytes(db.execute("SELECT payload FROM batches").fetchone()[0]), PAYLOAD)
+
+    def test_invalid_truncated_crc_and_trailing_junk_are_not_acknowledged(self):
+        # Existing valid data must survive each rejection without queue growth.
+        self.assertEqual(self.post(PAYLOAD, "identity"), 204)
+        valid = gzip.compress(PAYLOAD)
+        corrupted = valid[:-8] + bytes([valid[-8] ^ 1]) + valid[-7:]
+        for body in (b"not gzip", valid[:-1], valid[:-8], corrupted, valid + b"junk"):
+            with self.subTest(body=body):
+                self.assert_rejected_without_growth(body)
+
+    def test_expansion_bomb_and_wire_oversize_are_rejected(self):
+        bomb = gzip.compress(PAYLOAD * 1000)
+        self.assertLess(len(bomb), self.limit)
+        self.assert_rejected_without_growth(bomb)
+        self.assert_rejected_without_growth(gzip.compress(PAYLOAD * 8 + b"\n"))
+        self.assert_rejected_without_growth(b"x" * (self.limit + 1), "identity")
+
+    def test_concatenated_members_share_one_decoded_limit(self):
+        self.assertEqual(self.post(gzip.compress(PAYLOAD) + gzip.compress(PAYLOAD)), 204)
+        with self.spool.connect() as db:
+            self.assertEqual(bytes(db.execute("SELECT payload FROM batches").fetchone()[0]), PAYLOAD * 2)
+        self.assert_rejected_without_growth(gzip.compress(PAYLOAD * 8) + gzip.compress(PAYLOAD))
+        self.assert_rejected_without_growth(gzip.compress(PAYLOAD) + gzip.compress(PAYLOAD)[:-2])
+
+    def test_unsupported_encoding_rejected_without_growth(self):
+        self.assert_rejected_without_growth(PAYLOAD, "deflate")
+
+    def raw_post(self, headers, body, path="/write?db=telegraf"):
+        request = ("POST " + path + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
+                   + headers + "\r\n").encode("ascii") + body
+        with socket.create_connection(("127.0.0.1", self.receiver.server_port), timeout=5) as connection:
+            connection.sendall(request)
+            connection.shutdown(socket.SHUT_WR)
+            response = http.client.HTTPResponse(connection)
+            response.begin()
+            status = response.status
+            response.read()
+            return status
+
+    def assert_raw_rejected(self, headers, body, path="/write?db=telegraf", status=400):
+        before = self.spool.status()
+        with self.spool.connect() as db:
+            count = db.execute("SELECT COUNT(*) FROM batches").fetchone()[0]
+        self.assertEqual(self.raw_post(headers, body, path), status)
+        after = self.spool.status()
+        for name in ("accepted_bytes", "accepted_points", "retained_bytes"):
+            self.assertEqual(before[name], after[name], name)
+        with self.spool.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM batches").fetchone()[0], count)
+
+    def test_native_chunked_gzip_without_precision_preserves_lp(self):
+        payload = PAYLOAD * 8
+        encoded = gzip.compress(payload)
+        connection = http.client.HTTPConnection("127.0.0.1", self.receiver.server_port, timeout=5)
+        try:
+            # Iterable body causes standard HTTP/1.1 chunked framing, no CL.
+            connection.request("POST", "/write?db=telegraf", body=iter([encoded[:5], encoded[5:]]),
+                               headers={"Content-Encoding": "gzip"}, encode_chunked=True)
+            response = connection.getresponse()
+            self.assertEqual(response.status, 204)
+            response.read()
+        finally:
+            connection.close()
+        with self.spool.connect() as db:
+            self.assertEqual(bytes(db.execute("SELECT payload FROM batches").fetchone()[0]), payload)
+
+    def test_ambiguous_and_unsupported_framing_rejected(self):
+        headers = ["Content-Length: 10\r\nTransfer-Encoding: chunked\r\n",
+                   "Content-Length: 10\r\nContent-Length: 10\r\n",
+                   "Content-Length: 10, 10\r\n", "Content-Length: +10\r\n",
+                   "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n",
+                   "Transfer-Encoding: gzip, chunked\r\n", "Transfer-Encoding: identity\r\n",
+                   "Content-Length: 10\r\nContent-Encoding: gzip\r\nContent-Encoding: identity\r\n", ""]
+        for header in headers:
+            with self.subTest(header=header):
+                self.assert_raw_rejected(header, b"0\r\n\r\n")
+
+    def test_malformed_truncated_chunks_and_trailers_never_grow_spool(self):
+        good_chunk = ("%x\r\n" % len(PAYLOAD)).encode() + PAYLOAD + b"\r\n"
+        bodies = [b"z\r\n", b"-1\r\n", b"1\na\r\n0\r\n\r\n", b"4\r\nx", b"1\r\na!!",
+                  b"ffffffffffffffff\r\n", b"1;unsupported=extension\r\na\r\n0\r\n\r\n",
+                  good_chunk, good_chunk + b"0\r\n", good_chunk + b"0\r\nContent-Length: 0\r\n\r\n",
+                  good_chunk + b"0\r\n invalid-fold\r\n\r\n", good_chunk + b"0\r\ninvalid\r\n\r\n",
+                  good_chunk + b"0\r\n" + b"X: y\r\n" * 66 + b"\r\n"]
+        self.assertEqual(self.post(PAYLOAD, "identity"), 204)
+        for body in bodies:
+            with self.subTest(body=body[:40]):
+                self.assert_raw_rejected("Transfer-Encoding: chunked\r\n", body)
+
+    def test_chunk_wire_budget_includes_framing_and_gzip_limit_still_applies(self):
+        encoded = gzip.compress(PAYLOAD * 2, compresslevel=0)
+        tiny_chunks = b"".join(b"1\r\n" + bytes([byte]) + b"\r\n" for byte in encoded) + b"0\r\n\r\n"
+        # Valid gzip and valid decoded LP both fit; framing alone exceeds budget.
+        self.assertLess(len(encoded), self.limit)
+        self.assertLess(len(PAYLOAD) * 2, self.limit)
+        self.assertGreater(len(tiny_chunks), self.limit)
+        self.assert_raw_rejected("Transfer-Encoding: chunked\r\nContent-Encoding: gzip\r\n", tiny_chunks)
+        bomb = gzip.compress(PAYLOAD * 1000)
+        body = ("%x\r\n" % len(bomb)).encode() + bomb + b"\r\n0\r\n\r\n"
+        self.assertLess(len(body), self.limit)
+        self.assert_raw_rejected("Transfer-Encoding: chunked\r\nContent-Encoding: gzip\r\n", body)
+
+    def test_bounded_valid_trailer_and_explicit_precision_validation(self):
+        body = ("%x\r\n" % len(PAYLOAD)).encode() + PAYLOAD + b"\r\n0\r\nX-Receipt: synthetic\r\n\r\n"
+        self.assertEqual(self.raw_post("Transfer-Encoding: chunked\r\n", body), 204)
+        for query in ("precision=ms", "precision=", "precision=ns&precision=ns", "precision=n&precision=ms"):
+            self.assert_raw_rejected("Transfer-Encoding: chunked\r\n", body, "/write?" + query)
+
+    def test_request_header_line_and_aggregate_budgets(self):
+        for extra in ("X-Large: " + "x" * 4096 + "\r\n", ("X-Many: " + "x" * 3000 + "\r\n") * 6):
+            self.assert_raw_rejected(extra + "Content-Length: %d\r\n" % len(PAYLOAD), PAYLOAD, status=431)
 
 
 if __name__ == "__main__":

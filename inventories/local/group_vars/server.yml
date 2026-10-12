@@ -47,6 +47,29 @@ ngfw_lab_policy_listener_ranges: [[10000, 10991], [20000, 20099]]
 ngfw_logs_enabled: true
 ngfw_logs_start: true
 
+# Host-local native metrics receiver for the existing isolated lab.
+# Installed Telegraf1.33 output serializer and pinned InfluxDB passed bounded
+# 157 native LP row /126 point type/value/tag/ns readback and outage/replay tests.
+# This fixture is not continuous source collection or performance acceptance.
+# No guest source routing or traffic is enabled by this host storage profile.
+ngfw_metrics_enabled: true
+ngfw_metrics_pt_compatibility_confirmed: true
+ngfw_metrics_influx_image: influxdb:1.8.10@sha256:03ba655e0c8b4d60dc8c74d437c4f441c5e7934bfaa8ea4545edf1274c8eb223
+ngfw_metrics_bind_address: "10.77.0.1"
+ngfw_metrics_ingest_interface: br-ngfw-mgmt
+ngfw_metrics_ingest_port: 18086
+ngfw_metrics_allowed_sources:
+  - "10.77.0.20/32"
+  - "10.77.0.1/32"
+ngfw_metrics_influx_bind_address: "127.0.0.1"
+ngfw_metrics_influx_port: 18087
+# Bootstrap only: bounded sample113203B/10s projects about88.0GB/90d,
+# or114.4GB including30 percent headroom. This is not observed peak evidence.
+# 128GiB payload cap +32GiB free reserve; SQL/WAL/Influx overhead remains measured work.
+ngfw_metrics_storage_budget_basis: bootstrap
+ngfw_metrics_spool_payload_budget_bytes: 137438953472
+ngfw_metrics_disk_reserve_bytes: 34359738368
+
 obsidian_enabled: true
 
 tailscale_enabled: true
