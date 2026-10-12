@@ -1,0 +1,16 @@
+{
+  "spool": {{ (ngfw_metrics_data ~ '/spool/metrics.sqlite') | to_json }},
+  "listen": {{ ngfw_metrics_bind_address | to_json }},
+  "port": {{ ngfw_metrics_ingest_port | int }},
+  "max_spool_payload_bytes": {{ ngfw_metrics_spool_payload_budget_bytes | int }},
+  "disk_reserve_bytes": {{ ngfw_metrics_disk_reserve_bytes | int }},
+  "archive_days": {{ ngfw_metrics_archive_days | int }},
+  "ingest_token": {{ ngfw_metrics_ingest_token | to_json }},
+  "allowed_sources": {{ ngfw_metrics_allowed_sources | to_json }},
+  "sinks": [
+    {"name": "local", "write_url": "http://127.0.0.1:{{ ngfw_metrics_influx_port }}/write?db={{ ngfw_metrics_db }}&precision=ns", "max_bytes_per_second": {{ ngfw_metrics_drain_bytes_per_second | int }}}
+{% if ngfw_metrics_external_write_url | length > 0 %}
+    ,{"name": "external", "write_url": {{ ngfw_metrics_external_write_url | to_json }}, "headers": {{ ngfw_metrics_external_headers | to_json }}, "max_bytes_per_second": {{ ngfw_metrics_drain_bytes_per_second | int }}}
+{% endif %}
+  ]
+}

@@ -1,0 +1,7 @@
+---
+- name: Discover isolated NGFW native monitoring without changing its configuration
+  hosts: ngfw_audit_source
+  gather_facts: false
+  become: true
+  roles:
+    - role: ngfw_native_source

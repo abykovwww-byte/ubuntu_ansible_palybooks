@@ -1,0 +1,7 @@
+---
+- name: Configure opt-in local NGFW metric storage outside appliance
+  hosts: server
+  become: true
+  roles:
+    - role: ngfw_metrics
+      when: ngfw_metrics_enabled | default(false) | bool

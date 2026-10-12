@@ -1,0 +1,39 @@
+{
+  "campaign_id": "native-metrics-extreme-pending",
+  "status": "PREPARATION_ONLY_NOT_AUTHORIZATION_TO_RUN",
+  "target": "10.77.20.10",
+  "source_ips": ["10.77.10.10"],
+  "address_provenance": "Historical isolated lab addresses from the approved specification; current ownership, reachability and isolation must be verified. No extra source address is assumed.",
+  "stabilization_seconds": 30,
+  "recovery_seconds": 120,
+  "invariants": {
+    "build": "", "policy": "", "security_features": "", "vm_resources": "",
+    "topology": "", "generator": "", "receiver": "", "observation": "", "log_forwarding": ""
+  },
+  "receipts": {
+    "isolation": "", "snapshot_A": "", "snapshot_B": "", "rollback": "",
+    "profile_A": "", "profile_B": "", "native_collection": "", "observer_impact": "", "resource_reservations": ""
+  },
+  "profiles": {
+    "A": {"edr_installed": null, "audit_profile": null, "required": "EDR package absent; stock administrative audit"},
+    "B": {"edr_installed": null, "audit_profile": null, "audit_rule_count": null, "required": "EDR installed; full116-rule AuditD with actual rules hash/read-back"}
+  },
+  "workloads": [
+    {"id": "tcp-bandwidth", "offered": {"kind": "tcp", "bps": 900000000, "parallel": 4}, "control_capacity": {}, "target_basis": "Project initial target900Mbps, not measured capacity or PT rating; increase if path proves more."},
+    {"id": "udp-small", "offered": null, "control_capacity": {}, "selection_required": {"kind": "udp", "payload_bytes": 64, "pps": null, "bps": null, "reason": "Choose maximum confirmed direct-path PPS; bps = PPS *64*8. Payload is not Ethernet frame size."}},
+    {"id": "udp-large", "offered": null, "control_capacity": {}, "selection_required": {"kind": "udp", "payload_bytes": 1200, "bps": null, "reason": "Choose confirmed direct-path bandwidth, retain received loss and actual packets."}},
+    {"id": "short-tcp", "offered": {"kind": "short-tcp", "rate": 5000, "concurrency": 512}, "control_capacity": {}, "target_basis": "Project initial target5000CPS; direct control must run full duration and exclude ephemeral-port/TIME_WAIT limits."},
+    {"id": "held-20000", "offered": {"kind": "held", "sessions": 20000, "open_rate": 5000, "heartbeat_seconds": 5}, "control_capacity": {}, "target_basis": "Project initial session target; opening rate is a candidate, requires control evidence. Buildup separate from300s measurement."},
+    {"id": "held-60000", "offered": {"kind": "held", "sessions": 60000, "open_rate": 5000, "heartbeat_seconds": 5}, "control_capacity": {}, "selection_required": "Provision and read back sufficient source tuple space, endpointFD/cgroup/memory, receiver capacity. Existing single source IP is not proof60000 is feasible."},
+    {"id": "http-capacity", "offered": null, "control_capacity": {}, "selection_required": {"kind": "http", "rate": null, "concurrency": null, "reason": "Maximum reproducible direct-control RPS is unknown. Do not invent an achieved HTTP intensity."}},
+    {"id": "dns-5000", "offered": {"kind": "dns", "rate": 5000, "concurrency": 512}, "control_capacity": {}, "target_basis": "Project initial5000QPS, increase to prepared generator maximum; lab.invalid static answer only."},
+    {"id": "mixed-high", "offered": null, "control_capacity": {}, "selection_required": {"kind": "mixed", "components": [{"kind": "tcp", "bps": null}, {"kind": "short-tcp", "rate": null}, {"kind": "dns", "rate": null}], "reason": "After joint direct capacity, freeze numeric bandwidth/CPS/QPS shares for all paired windows. One iperf3 server cannot run TCP and UDP simultaneously."}}
+  ],
+  "endurance_selection": {},
+  "external_dependencies": [
+    "Current authenticated guest access and exact profile/snapshot evidence",
+    "Prepared isolated direct-control path with identical endpoint resource configuration",
+    "Actual official native metric collection and observer-impact evidence",
+    "Controller with exclusive lock, health guards, mixed synchronization, durable window capture and restore"
+  ]
+}

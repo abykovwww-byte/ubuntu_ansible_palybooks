@@ -1,0 +1,2 @@
+---
+ngfw_native_evidence_dir: /srv/app-data/ngfw-lab/reports/native-metrics-discovery

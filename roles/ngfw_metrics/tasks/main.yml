@@ -1,0 +1,118 @@
+---
+- name: Configure native NGFW metrics storage only after compatibility approval
+  when: ngfw_metrics_enabled | bool
+  block:
+    - name: Assert explicit storage version and capacity gates
+      ansible.builtin.assert:
+        that:
+          - ngfw_metrics_pt_compatibility_confirmed | bool
+          - ngfw_metrics_influx_image is match('^influxdb:1\.[0-9]+\.[0-9]+@sha256:[a-f0-9]{64}$')
+          - ngfw_metrics_influx_bind_address == '127.0.0.1'
+          - ngfw_metrics_retention_days | int >= 30
+          - ngfw_metrics_archive_days | int >= 90
+          - ngfw_metrics_spool_payload_budget_bytes | int > 0
+          - ngfw_metrics_db is match('^[A-Za-z][A-Za-z0-9_]*$')
+          - ngfw_metrics_bind_address == '127.0.0.1' or ngfw_metrics_isolated_ingest_confirmed | bool
+        fail_msg: "Requires verified PT-compatible Influx v1 API image digest, observed storage budget, retention, and isolated ingress. No version or external endpoint is inferred."
+
+    - name: Create metrics service account
+      ansible.builtin.user:
+        name: ngfw-metrics
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+
+    - name: Create metrics application directory
+      ansible.builtin.file:
+        path: "{{ ngfw_metrics_root }}"
+        state: directory
+        owner: root
+        group: ngfw-metrics
+        mode: "0750"
+
+    - name: Create durable spool directory
+      ansible.builtin.file:
+        path: "{{ ngfw_metrics_data }}/spool"
+        state: directory
+        owner: ngfw-metrics
+        group: ngfw-metrics
+        mode: "0700"
+
+    - name: Install stdlib metrics components
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ ngfw_metrics_root }}/{{ item }}"
+        owner: root
+        group: ngfw-metrics
+        mode: "0750"
+      loop:
+        - metrics_spool.py
+        - influx_readback.py
+      notify: Restart NGFW metrics spool
+
+    - name: Render private spool configuration
+      ansible.builtin.template:
+        src: spool.json.j2
+        dest: "{{ ngfw_metrics_root }}/spool.json"
+        owner: root
+        group: ngfw-metrics
+        mode: "0640"
+      no_log: true
+      notify: Restart NGFW metrics spool
+
+    - name: Render pinned InfluxDB compose definition
+      ansible.builtin.template:
+        src: compose.yml.j2
+        dest: "{{ ngfw_metrics_root }}/compose.yml"
+        owner: root
+        group: ngfw-metrics
+        mode: "0640"
+
+    - name: Apply pinned local database
+      community.docker.docker_compose_v2:
+        project_src: "{{ ngfw_metrics_root }}"
+        state: present
+        pull: missing
+
+    - name: Wait for local database
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ ngfw_metrics_influx_port }}/ping"
+        status_code: 204
+      register: ngfw_metrics_ping
+      retries: 12
+      delay: 5
+      until: ngfw_metrics_ping.status == 204
+
+    - name: Inspect default database retention
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ ngfw_metrics_influx_port }}/query?q={{ ('SHOW RETENTION POLICIES ON ' ~ ngfw_metrics_db) | urlencode }}"
+        return_content: true
+      register: ngfw_metrics_existing_retention
+
+    - name: Set explicit default raw retention
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ ngfw_metrics_influx_port }}/query"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          q: 'ALTER RETENTION POLICY "autogen" ON "{{ ngfw_metrics_db }}" DURATION {{ ngfw_metrics_retention_days }}d REPLICATION 1 DEFAULT'
+        return_content: true
+      register: ngfw_metrics_retention_write
+      failed_when: ngfw_metrics_retention_write.status != 200 or 'error' in (ngfw_metrics_retention_write.json | to_json)
+      changed_when: true
+
+    - name: Render spool systemd service
+      ansible.builtin.template:
+        src: ngfw-metrics-spool.service.j2
+        dest: /etc/systemd/system/ngfw-metrics-spool.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart NGFW metrics spool
+
+    - name: Enable metrics spool
+      ansible.builtin.systemd:
+        name: ngfw-metrics-spool.service
+        enabled: true
+        state: started
+        daemon_reload: true

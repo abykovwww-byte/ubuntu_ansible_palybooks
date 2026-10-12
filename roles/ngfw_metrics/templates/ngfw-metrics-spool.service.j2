@@ -1,0 +1,24 @@
+[Unit]
+Description=Durable NGFW native metric spool
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ngfw-metrics
+Group=ngfw-metrics
+ExecStart=/usr/bin/python3 {{ ngfw_metrics_root }}/metrics_spool.py serve --config {{ ngfw_metrics_root }}/spool.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ ngfw_metrics_data }}/spool
+MemoryMax={{ ngfw_metrics_memory_max }}
+CPUQuota={{ ngfw_metrics_cpu_quota }}
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

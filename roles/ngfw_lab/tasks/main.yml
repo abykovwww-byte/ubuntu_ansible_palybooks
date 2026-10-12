@@ -448,6 +448,8 @@
     directory_mode: "0750"
   loop:
     - {src: "traffic/", dest: "traffic/"}
+    - {src: "extreme/", dest: "extreme/"}
+    - {src: "native_analysis/", dest: "native_analysis/"}
     - {src: runner.py, dest: runner.py}
     - {src: measure_probe.py, dest: measure_probe.py}
     - {src: measurement.py, dest: measurement.py}

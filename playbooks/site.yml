@@ -26,6 +26,9 @@
     - role: ngfw_logs
       tags: [ngfw-logs]
       when: ngfw_logs_enabled | default(false) | bool
+    - role: ngfw_metrics
+      tags: [ngfw-metrics]
+      when: ngfw_metrics_enabled | default(false) | bool
     - role: nginx
       tags: [nginx]
     - role: application_portal
