@@ -11,9 +11,93 @@
           - ngfw_metrics_retention_days | int >= 30
           - ngfw_metrics_archive_days | int >= 90
           - ngfw_metrics_spool_payload_budget_bytes | int > 0
+          - ngfw_metrics_disk_reserve_bytes | int > 0
+          - ngfw_metrics_storage_budget_basis in ['bootstrap', 'measured_peak']
           - ngfw_metrics_db is match('^[A-Za-z][A-Za-z0-9_]*$')
-          - ngfw_metrics_bind_address == '127.0.0.1' or ngfw_metrics_isolated_ingest_confirmed | bool
-        fail_msg: "Requires verified PT-compatible Influx v1 API image digest, observed storage budget, retention, and isolated ingress. No version or external endpoint is inferred."
+          - ngfw_metrics_bind_address in ['127.0.0.1', '10.77.0.1']
+          - ngfw_metrics_ingest_port | int == 18086
+          - ngfw_metrics_influx_port | int == 18087
+          - >-
+            (ngfw_metrics_bind_address == '127.0.0.1' and
+             ngfw_metrics_allowed_sources == ['127.0.0.1/32']) or
+            (ngfw_metrics_bind_address == '10.77.0.1' and
+             ngfw_metrics_ingest_interface == 'br-ngfw-mgmt' and
+             ngfw_metrics_allowed_sources | sort == ['10.77.0.1/32', '10.77.0.20/32'])
+        fail_msg: "Requires verified PT-compatible Influx v1 API image digest, explicit storage budget, exact lab ingress/source ACL and retention settings. A bootstrap budget is not peak buffering or retention acceptance."
+
+    - name: Require the actual isolated management interface
+      ansible.builtin.assert:
+        that:
+          - ngfw_metrics_ingest_interface in ansible_facts.interfaces
+          - ngfw_metrics_bind_address in ansible_all_ipv4_addresses
+        fail_msg: The fixed lab management interface and address must exist before exposing ingress.
+      when: ngfw_metrics_bind_address != '127.0.0.1'
+
+    - name: Read actual IPv4 addresses on the management interface
+      ansible.builtin.command:
+        argv: [ip, -json, -4, address, show, dev, "{{ ngfw_metrics_ingest_interface }}"]
+      register: ngfw_metrics_interface_readback
+      changed_when: false
+      check_mode: false
+      when: ngfw_metrics_bind_address != '127.0.0.1'
+
+    - name: Require the listener address on that exact interface
+      ansible.builtin.assert:
+        that:
+          - >-
+            ngfw_metrics_bind_address in
+            (ngfw_metrics_interface_readback.stdout | from_json |
+             map(attribute='addr_info') | flatten | map(attribute='local') | list)
+        fail_msg: The metrics listener address must be assigned to br-ngfw-mgmt itself.
+      when: ngfw_metrics_bind_address != '127.0.0.1'
+
+    - name: Inspect available spool filesystem before allocating storage
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import json, os, sys
+            from pathlib import Path
+            target = Path(sys.argv[1])
+            if not target.is_absolute():
+                raise SystemExit('absolute metrics data path required')
+            while not target.exists():
+                target = target.parent
+            data = os.statvfs(target.resolve(strict=True))
+            print(json.dumps({'available_bytes': data.f_bavail * data.f_frsize}))
+          - "{{ ngfw_metrics_data }}/spool"
+      register: ngfw_metrics_disk_preflight
+      changed_when: false
+      check_mode: false
+
+    - name: Require free capacity for the full payload budget plus disk reserve
+      ansible.builtin.assert:
+        that:
+          - >-
+            (ngfw_metrics_disk_preflight.stdout | from_json).available_bytes | int >=
+            (ngfw_metrics_spool_payload_budget_bytes | int + ngfw_metrics_disk_reserve_bytes | int)
+        fail_msg: Available spool filesystem bytes are below payload capacity plus reserve; storage was not provisioned.
+
+    - name: Mark bootstrap provisioning separately from retention acceptance
+      ansible.builtin.debug:
+        msg: >-
+          Storage budget basis={{ ngfw_metrics_storage_budget_basis }}.
+          Payload capacity and disk reserve are provisioning limits.
+          Actual peak-rate 24h buffering with 30 percent headroom and 30d/90d
+          retention still require measured acceptance evidence.
+
+    - name: Allow only the NGFW guest to reach native metrics ingress
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ ngfw_metrics_ingest_interface }}"
+        proto: tcp
+        from_ip: 10.77.0.20/32
+        to_ip: "{{ ngfw_metrics_bind_address }}"
+        port: "{{ ngfw_metrics_ingest_port }}"
+        comment: NGFW lab native metrics receiver
+      when: ngfw_metrics_bind_address == '10.77.0.1'
 
     - name: Create metrics service account
       ansible.builtin.user:

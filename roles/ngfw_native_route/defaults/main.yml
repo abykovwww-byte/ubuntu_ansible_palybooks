@@ -1,0 +1,6 @@
+---
+ngfw_native_route_enabled: false
+ngfw_native_route_action: plan
+# Mandatory current full-file SHA256. Intentionally no historical default.
+ngfw_native_route_expected_sha256: ""
+ngfw_native_route_destination: http://10.77.0.1:18086

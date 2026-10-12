@@ -6,12 +6,16 @@ Only explicit nanosecond timestamps are accepted so retries retain point identit
 """
 import argparse
 from contextlib import contextmanager, closing
+import gzip
 import hashlib
+import http.client
 import http.server
+import io
 import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import threading
@@ -19,6 +23,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 
 def file_digest(path):
@@ -46,6 +51,113 @@ def validate_payload(body):
     if not points:
         raise ValueError("No points")
     return points
+
+
+def decode_body(payload, encoding, max_body_bytes):
+    """Bound both wire and decoded bytes; validate gzip trailers before ACK."""
+    if len(payload) > max_body_bytes:
+        raise ValueError("Request body exceeds limit")
+    encoding = encoding.strip().lower()
+    if encoding == "identity":
+        return payload
+    if encoding != "gzip":
+        raise ValueError("Unsupported content encoding")
+    try:
+        # read() without a size would allow a tiny request to exhaust memory.
+        # The extra byte distinguishes exactly-at-limit from oversized bodies.
+        # GzipFile also validates CRC/length, EOF and any concatenated members.
+        with gzip.GzipFile(fileobj=io.BytesIO(payload), mode="rb") as source:
+            decoded = source.read(max_body_bytes + 1)
+    except (OSError, EOFError, zlib.error) as exc:
+        raise ValueError("Invalid or incomplete gzip body") from exc
+    if len(decoded) > max_body_bytes:
+        raise ValueError("Decoded body exceeds limit")
+    return decoded
+
+
+HEADER_LINE_LIMIT = 4096
+HEADER_TOTAL_LIMIT = 16384
+FIELD_LINE = re.compile(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+:[\t\x20-\x7e\x80-\xff]*\r\n")
+
+
+class BoundedHeaders:
+    """Apply a small aggregate budget while stdlib parses request headers."""
+    def __init__(self, source):
+        self.source = source
+        self.remaining = HEADER_TOTAL_LIMIT
+
+    def readline(self, size=-1):
+        line = self.source.readline(min(HEADER_LINE_LIMIT, self.remaining) + 1)
+        self.remaining -= len(line)
+        if (self.remaining < 0 or len(line) > HEADER_LINE_LIMIT
+                or (line != b"\r\n" and not FIELD_LINE.fullmatch(line))):
+            raise http.client.LineTooLong("bounded request headers")
+        return line
+
+
+def read_request_body(source, headers, max_body_bytes):
+    """Accept one unambiguous framing mode, bounded before gzip decoding.
+
+    Chunk framing and trailers count toward the wire budget. Chunk extensions
+    are deliberately unsupported; Telegraf's Go HTTP transport does not use them.
+    """
+    lengths = headers.get_all("Content-Length", [])
+    transfers = headers.get_all("Transfer-Encoding", [])
+    if len(lengths) > 1 or len(transfers) > 1 or (lengths and transfers):
+        raise ValueError("Ambiguous request framing")
+    if not transfers:
+        if len(lengths) != 1 or not re.fullmatch(r"[0-9]+", lengths[0]):
+            raise ValueError("One content length or chunked encoding required")
+        length = int(lengths[0])
+        if not 0 < length <= max_body_bytes:
+            raise ValueError("Invalid content length")
+        payload = source.read(length)
+        if len(payload) != length:
+            raise ValueError("Incomplete body")
+        return payload
+    if transfers[0].strip().lower() != "chunked":
+        raise ValueError("Unsupported transfer encoding")
+
+    wire_bytes = 0
+    framing_bytes = 0
+    payload = bytearray()
+
+    def line():
+        nonlocal wire_bytes, framing_bytes
+        value = source.readline(min(HEADER_LINE_LIMIT, max_body_bytes - wire_bytes) + 1)
+        wire_bytes += len(value)
+        framing_bytes += len(value)
+        if (wire_bytes > max_body_bytes or framing_bytes > HEADER_TOTAL_LIMIT
+                or len(value) > HEADER_LINE_LIMIT or not value.endswith(b"\r\n")):
+            raise ValueError("Invalid or oversized chunk framing")
+        return value
+
+    while True:
+        size_line = line()[:-2]
+        if not re.fullmatch(rb"[0-9A-Fa-f]{1,16}", size_line):
+            raise ValueError("Invalid chunk size")
+        size = int(size_line, 16)
+        if size == 0:
+            for _ in range(65):
+                trailer = line()
+                if trailer == b"\r\n":
+                    return bytes(payload)
+                if not FIELD_LINE.fullmatch(trailer):
+                    raise ValueError("Invalid trailer")
+                name = trailer.split(b":", 1)[0].lower()
+                if name in (b"content-length", b"transfer-encoding", b"content-encoding", b"authorization",
+                            b"host", b"content-type", b"trailer", b"connection"):
+                    raise ValueError("Forbidden trailer")
+            raise ValueError("Too many trailers")
+        if size + 2 > max_body_bytes - wire_bytes:
+            raise ValueError("Chunked body exceeds wire limit")
+        chunk = source.read(size)
+        ending = source.read(2)
+        if len(chunk) != size or ending != b"\r\n":
+            raise ValueError("Incomplete chunk")
+        payload.extend(chunk)
+        wire_bytes += size + 2
+        framing_bytes += 2
 
 
 class Spool:
@@ -282,6 +394,14 @@ def make_handler(spool, max_body_bytes, token=None, allowed_sources=None):
         def log_message(self, *_args):
             pass
 
+        def parse_request(self):
+            original = self.rfile
+            self.rfile = BoundedHeaders(original)
+            try:
+                return super().parse_request()
+            finally:
+                self.rfile = original
+
         def do_GET(self):
             if not any(ipaddress.ip_address(self.client_address[0]) in network for network in networks):
                 self.send_error(403)
@@ -308,20 +428,17 @@ def make_handler(spool, max_body_bytes, token=None, allowed_sources=None):
                 self.send_error(401)
                 return
             parsed = urllib.parse.urlsplit(self.path)
-            if parsed.path != "/write" or urllib.parse.parse_qs(parsed.query).get("precision") not in (["ns"], ["n"]):
-                self.send_error(400, "Expected /write?precision=ns")
+            precision = urllib.parse.parse_qs(parsed.query, keep_blank_values=True).get("precision")
+            # Influx v1 defaults to ns; native Telegraf1.33 omits this parameter.
+            if parsed.path != "/write" or precision not in (None, ["ns"], ["n"]):
+                self.send_error(400, "Expected /write with nanosecond precision")
                 return
             try:
-                length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= max_body_bytes:
-                    raise ValueError("Invalid content length")
                 self.connection.settimeout(15)
-                payload = self.rfile.read(length)
-                if len(payload) != length:
-                    raise ValueError("Incomplete body")
-                encoding = self.headers.get("Content-Encoding", "identity")
-                if encoding != "identity":
-                    raise ValueError("Configure uncompressed Telegraf HTTP output")
+                if len(self.headers.get_all("Content-Encoding", [])) > 1:
+                    raise ValueError("Ambiguous content encoding")
+                payload = read_request_body(self.rfile, self.headers, max_body_bytes)
+                payload = decode_body(payload, self.headers.get("Content-Encoding", "identity"), max_body_bytes)
                 spool.accept(payload)
             except BufferError:
                 self.send_error(507, "Queue full; retry required")

@@ -1,10 +1,14 @@
-# NGFW native metrics: collection and delivery scaffold
+# NGFW native metrics: collection and delivery
 
-Status: local code and failure tests only. No PT-compatible InfluxDB version is
-asserted, no external server has been selected, and this role does not modify
-the NGFW Telegraf configuration. The role is disabled by default. It requires
+The server profile pins InfluxDB1.8.10 after a bounded compatibility fixture
+using actual guest Telegraf1.33 output serialization:157 native LP rows,
+126 points, exact field types/values/tags/ns timestamps, repeat and offline
+spool backup/restore/replay passed. This is not confirmation of PT's bundled
+image, continuous collection, external delivery or performance acceptance.
+No external server has been selected. This role does not modify the guest
+Telegraf configuration. Generic defaults remain disabled. It requires
 an explicit, verified `influxdb:1.x.x@sha256:...` image plus the compatibility flag;
-this is a constraint of this deployment scaffold, not a discovered PT version.
+this is a deployment constraint, not a discovered PT-recommended version.
 If PT requires another API/image family, adapt and validate the role first.
 
 ## Flow and guarantee boundary
@@ -12,7 +16,8 @@ If PT requires another API/image family, adapt and validate the role first.
 NGFW Telegraf -> isolated host HTTP ingest -> SQLite WAL/FULL commit -> 204.
 Independent ordered workers then write identical raw line-protocol bytes to
 the local InfluxDB and, when configured, the external endpoint. Only explicit
-integer nanosecond timestamps (`precision=ns` or `n`) are accepted. Native
+integer nanosecond timestamps are accepted. The request may omit precision
+(Influx v1 defaults to ns) or specify `precision=ns` or `n`. Native
 measurements, tags, fields and timestamps are not rewritten. There is no run_id
 tag injection. Run windows are an independent manifest.
 
@@ -42,14 +47,17 @@ source internal counters, expected timestamps and the analyzer completeness chec
   installed configuration; retain its hash and original output configuration.
 - Verify `outputs.influxdb` supports `skip_database_creation = true` and use it.
   The proxy supports `/ping` and `/write`; it does not execute `/query` database
-  creation requests. Use `content_encoding = "identity"` if that setting exists
-  in the installed version. Compressed and chunked request bodies are rejected.
-- Keep explicit ns timestamps. `precision=ns` and `precision=n` are accepted;
-  other precisions are rejected rather than converted.
+  creation requests. Bounded gzip and HTTP chunked framing support the installed
+  output without changing its source configuration. Both wire size and decoded
+  size are limited; invalid framing and damaged gzip are rejected before ACK.
+- Keep explicit ns timestamps. Omitted precision, `precision=ns` and
+  `precision=n` are accepted; other or duplicate precisions are rejected.
 - Bind to the verified management bridge address only; set the NGFW management
   source `/32` in `ngfw_metrics_allowed_sources`. The default is loopback only.
-  Non-loopback deployment requires `ngfw_metrics_isolated_ingest_confirmed` and
-  a verified host firewall ACL; this role does not infer or open firewall rules.
+  Non-loopback deployment checks the actual `br-ngfw-mgmt` interface/address,
+  restricts the application ACL to the guest and host management `/32` addresses,
+  and installs only the guest-to-host TCP18086 firewall rule. Verify negative
+  access tests after apply; an assertion variable alone is not isolation proof.
 - Optional ingest auth is the exact `Authorization: Token ...` header; confirm
   the installed output supports custom headers before using it. The allowlist
   always applies. Secret headers live only in server-local overrides and the
@@ -76,6 +84,14 @@ pending delivery; its payload quota must cover the larger combined requirement,
 not just 24h export. An unresolved target or unmeasured peak cannot pass the
 24h guarantee. Existing resource caps are conservative starting parameters,
 not observer-impact proof; tune only from matched A/B observations.
+
+The server profile provisions a bounded bootstrap allocation: 128GiB retained
+payload and 32GiB free-disk reserve, with free-space admission before apply.
+The observed one-shot 113203-byte sample at the configured 10-second interval
+projects about 88GB for 90 days before headroom. This is an allocation basis,
+not a peak-rate measurement, a physical reservation, or retention acceptance.
+`ngfw_metrics_storage_budget_basis` distinguishes bootstrap from measured-peak
+provisioning; neither label replaces actual capacity and recovery evidence.
 
 ## Operator commands (on the deployed host)
 

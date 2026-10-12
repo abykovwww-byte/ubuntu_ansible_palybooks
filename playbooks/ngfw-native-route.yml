@@ -1,0 +1,9 @@
+---
+- name: Opt-in routing of existing Telegraf output in isolated NGFW guest
+  hosts: ngfw_audit_source
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: ngfw_native_route
