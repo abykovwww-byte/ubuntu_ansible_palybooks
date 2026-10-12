@@ -7,6 +7,9 @@
       - ngfw_metrics_evidence_request_id is match('^[a-z0-9][a-z0-9-]{0,63}$')
       - ngfw_metrics_evidence_operator is match('^[a-z_][a-z0-9_-]{0,31}$')
       - ngfw_metrics_evidence_operator not in ['root', 'ngfw-metrics']
+      - ngfw_metrics_evidence_export_root is match('^/srv/app-data/[a-z0-9][a-z0-9-]{0,63}$')
+      - ngfw_metrics_evidence_export_root != ngfw_metrics_data.rstrip('/')
+      - not ngfw_metrics_evidence_export_root.startswith(ngfw_metrics_data.rstrip('/') + '/')
       - ngfw_metrics_evidence_start_epoch | float > 0
       - ngfw_metrics_evidence_end_epoch | float > ngfw_metrics_evidence_start_epoch | float
       - ngfw_metrics_evidence_end_epoch | float - ngfw_metrics_evidence_start_epoch | float <= 604800
@@ -95,8 +98,8 @@
     path: "{{ item }}"
     follow: false
   loop:
-    - "{{ ngfw_metrics_data }}/evidence-export"
-    - "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}"
+    - "{{ ngfw_metrics_evidence_export_root }}"
+    - "{{ ngfw_metrics_evidence_export_root }}/{{ ngfw_metrics_evidence_request_id }}"
   register: ngfw_metrics_export_paths
 
 - name: Refuse export directory symlinks or other file types
@@ -109,7 +112,7 @@
 
 - name: Create a root-controlled export parent
   ansible.builtin.file:
-    path: "{{ ngfw_metrics_data }}/evidence-export"
+    path: "{{ ngfw_metrics_evidence_export_root }}"
     state: directory
     owner: root
     group: root
@@ -117,7 +120,7 @@
 
 - name: Keep the export private to Ansible until all copies verify
   ansible.builtin.file:
-    path: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}"
+    path: "{{ ngfw_metrics_evidence_export_root }}/{{ ngfw_metrics_evidence_request_id }}"
     state: directory
     owner: root
     group: root
@@ -125,7 +128,7 @@
 
 - name: Inspect any existing export files without following symlinks
   ansible.builtin.stat:
-    path: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
+    path: "{{ ngfw_metrics_evidence_export_root }}/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
     follow: false
   loop: &ngfw_metrics_evidence_files
     - backup.sqlite
@@ -147,7 +150,7 @@
 - name: Export only completed hashed artifacts through privileged Ansible
   ansible.builtin.copy:
     src: "{{ ngfw_metrics_data }}/evidence/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
-    dest: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
+    dest: "{{ ngfw_metrics_evidence_export_root }}/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
     remote_src: true
     owner: "{{ ngfw_metrics_evidence_operator }}"
     mode: "0600"
@@ -156,10 +159,10 @@
 
 - name: Hash owner originals and copied artifacts
   ansible.builtin.stat:
-    path: "{{ ngfw_metrics_data }}/{{ item.0 }}/{{ ngfw_metrics_evidence_request_id }}/{{ item.1 }}"
+    path: "{{ item.0 }}/{{ ngfw_metrics_evidence_request_id }}/{{ item.1 }}"
     checksum_algorithm: sha256
     follow: false
-  loop: "{{ ['evidence', 'evidence-export'] | product(ngfw_metrics_evidence_files_list) | list }}"
+  loop: "{{ [ngfw_metrics_data + '/evidence', ngfw_metrics_evidence_export_root] | product(ngfw_metrics_evidence_files_list) | list }}"
   vars:
     ngfw_metrics_evidence_files_list: *ngfw_metrics_evidence_files
   register: ngfw_metrics_export_hashes
@@ -173,14 +176,33 @@
 
 - name: Hand over only the verified private artifact directory
   ansible.builtin.file:
-    path: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}"
+    path: "{{ ngfw_metrics_evidence_export_root }}/{{ ngfw_metrics_evidence_request_id }}"
     state: directory
     owner: "{{ ngfw_metrics_evidence_operator }}"
     mode: "0700"
 
+- name: Read every exported artifact as the recipient through its real ancestors
+  become: true
+  become_user: "{{ ngfw_metrics_evidence_operator }}"
+  ansible.builtin.stat:
+    path: "{{ ngfw_metrics_evidence_export_root }}/{{ ngfw_metrics_evidence_request_id }}/{{ item }}"
+    checksum_algorithm: sha256
+    follow: false
+  loop: *ngfw_metrics_evidence_files
+  register: ngfw_metrics_export_recipient
+
+- name: Require recipient-readable exact bytes before reporting success
+  ansible.builtin.assert:
+    that:
+      - ngfw_metrics_export_recipient.results[item].stat.exists
+      - ngfw_metrics_export_recipient.results[item].stat.isreg
+      - ngfw_metrics_export_recipient.results[item].stat.checksum == ngfw_metrics_export_hashes.results[item].stat.checksum
+      - ngfw_metrics_export_recipient.results[item].stat.size == ngfw_metrics_export_hashes.results[item].stat.size
+  loop: "{{ range(0, 6) | list }}"
+
 - name: Report the private evidence directory and exact scope
   ansible.builtin.debug:
     msg:
-      directory: "{{ ngfw_metrics_data }}/evidence-export/{{ ngfw_metrics_evidence_request_id }}"
+      directory: "{{ ngfw_metrics_evidence_export_root }}/{{ ngfw_metrics_evidence_request_id }}"
       collection: "{{ ngfw_metrics_evidence_result.stdout | from_json }}"
       scope: Online snapshot and bounded ingest observations; not storage or external delivery acceptance.

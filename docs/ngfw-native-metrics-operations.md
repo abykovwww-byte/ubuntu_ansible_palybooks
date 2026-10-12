@@ -220,6 +220,12 @@ after active windows close. It runs existing backup/restore/status/sizing as the
 spool owner and exports verified private artifacts through Ansible, without
 changing the source ACL or restarting collection. Its collection status is not
 24h buffering,30d/90d retention or external-delivery acceptance.
+The default recipient export is `/srv/app-data/ngfw-metrics-evidence-export/REQUEST_ID`,
+outside the protected live data tree. Ansible verifies all six files as the
+recipient after handover. If a completed request previously exported below the
+protected data parent, rerun the same request with the corrected checkout:
+the owner snapshot is reused after hash validation; do not recollect it or open
+the live data directory's permissions.
 
 The deployment skill requires the operator to run host apply interactively:
 

@@ -31,6 +31,9 @@ ngfw_metrics_allowed_sources:
 ngfw_metrics_evidence_enabled: false
 ngfw_metrics_evidence_request_id: ""
 ngfw_metrics_evidence_operator: ""
+# A sibling of the protected live data tree: operator traversal must not need
+# access to ngfw_metrics_data (0700, owned by ngfw-metrics).
+ngfw_metrics_evidence_export_root: /srv/app-data/ngfw-metrics-evidence-export
 ngfw_metrics_evidence_start_epoch: 0
 ngfw_metrics_evidence_end_epoch: 0
 ngfw_metrics_evidence_timeout_seconds: 180

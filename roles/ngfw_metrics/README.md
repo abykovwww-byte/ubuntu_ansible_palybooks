@@ -144,12 +144,23 @@ queue/retention estimates. The retained `sizing.json` is the existing CLI's
 all-history observation, not the workload-specific peak proof.
 
 Completed artifacts are copied by privileged Ansible into
-`{{ ngfw_metrics_data }}/evidence-export/REQUEST_ID`: files0600, recipient
+`{{ ngfw_metrics_evidence_export_root }}/REQUEST_ID` (default
+`/srv/app-data/ngfw-metrics-evidence-export/REQUEST_ID`): files0600, recipient
 directory0700. Their hashes and sizes are compared to the owner originals before
-handover. The root-controlled parent permits traversal but not listing or
-replacement. The live spool remains0700 and no supplemental group, HTTP endpoint,
+handover. The root-controlled parent0711 is outside the protected live data
+tree and permits traversal but not listing or replacement. A recipient-owned
+leaf inside `ngfw_metrics_data` would remain inaccessible through its0700
+ancestor. After handover Ansible reads and hashes all six files as the actual
+recipient; success requires equality to the owner originals. The live data
+parent and spool remain0700 and no supplemental group, HTTP endpoint,
 Docker bind or sudo allowlist is added. An identical completed request can be
-verified/exported again; changed inputs or hashes are refused. Backups, working
+verified/exported again; changed inputs or hashes are refused. To recover an
+already completed snapshot whose earlier export was below the protected data
+parent, rerun this focused playbook with the same request ID and parameters
+from the corrected checkout. It validates the original snapshot and copies it
+to the new destination without taking a second snapshot. Do not chmod the live
+parent or change its ACL. The earlier inaccessible export is left untouched.
+Backups, working
 copies and exported copies are not automatically deleted: retain or remove them
 under the operator's evidence/archive policy after verified transfer.
 
