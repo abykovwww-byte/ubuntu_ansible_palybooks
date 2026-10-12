@@ -51,12 +51,20 @@ script; no persistent helper or credentials need to be installed.
 The source must already have active Telegraf. Before apply, the helper verifies
 the mandatory expected SHA256, calls the installed binary against the original
 and staged candidate, and requires direct HTTP204 from the allowlisted `/ping`
-(no proxy and no redirects). The validation uses the observed Telegraf1.33
-`--test --test-wait 1 --quiet` behavior: it gathers configured inputs once and
-does not run outputs. This is a temporary observation workload, so do not run a
-route transaction during a measured experiment. Every stdout/stderr byte from
-Telegraf validation is discarded; configuration or plugin errors cannot leak
-credentials through the role.
+(no proxy and no redirects). The validation uses Telegraf1.33
+`--test --input-filter system --quiet` with a 45-second process timeout. It requires
+`inputs.system` in the main file or a loaded `.conf` include, and at least one
+emitted `> system` metric row; an empty probe cannot pass. This is a limited
+configuration/input smoke test, not validation of every native input. It avoids
+rerunning vendor `inputs.exec` alongside the active service. Repeated full tests
+produced exec timeouts during diagnosis while the real service showed no exec
+errors; this does not establish that `--test-wait 1` caused those timeouts.
+Test mode does not run outputs. Schedule route transactions outside measured
+windows. Captured stdout is checked only in memory and never returned or saved;
+stderr is discarded and failures expose only fixed diagnostic codes.
+After apply, independently verify fresh local DB points for every expected native
+measurement family and check the real service journal. Neither this filtered
+preflight nor `/ping` establishes complete collection or successful metric writes.
 
 The helper rechecks bytes and metadata after validation and again immediately
 before atomic apply. It keeps a durable guest-private0700 backup directory with
