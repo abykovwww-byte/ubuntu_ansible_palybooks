@@ -2,6 +2,7 @@ import copy
 import csv
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -157,10 +158,31 @@ class Qualification(unittest.TestCase):
         value = config() | plans['edr-calibration'] | {'campaign_id': 'test'}
         r.validate(value)
         self.assertEqual([s['mbps'] for s in value['scenarios'] if s['kind'] == 'tcp'], [100,300,600,900])
-        tasks = (ROOT/'tasks/main.yml').read_text()
-        self.assertNotIn('audit_profile_ctl.py\n      - apply', tasks)
-        self.assertIn('runner.py"\n      - plan', tasks)
-        self.assertNotIn('runner.py"\n      - run', tasks)
+        # Inspect executable task bodies, not descriptive names or copied sources.
+        tasks = '\n'.join(path.read_text() for path in (ROOT/'tasks').glob('*.yml'))
+        commands = [body for body in re.split(r'(?m)^\s*- name:', tasks)
+                    if 'ansible.builtin.command:' in body or 'ansible.builtin.shell:' in body]
+        installers = [body for body in commands if '/extreme/control_capacity.py' in body]
+        self.assertTrue(installers, 'Ansible must use the guarded endpoint installation entrypoint')
+        for body in commands:
+            self.assertNotRegex(body, r'(?:runner|campaign|qualification|audit_profile_ctl|interactive_probe)\.py')
+        for body in installers:
+            self.assertIn("'install-endpoints'", body)
+            self.assertNotRegex(body, r"['\"](?:run|apply|finalize|capture-dut)['\"]")
+
+    def test_endpoint_installer_rejects_invalid_runner_config_before_runtime_changes(self):
+        from extreme import control_capacity as installer
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / 'compose.yml').write_text('existing runtime')
+            backend = Mock(config=config() | {'project_dir': str(project)})
+            before = {p.name: p.read_bytes() for p in project.iterdir()}
+            with patch.object(installer.runner, 'validate', side_effect=r.Abort('invalid runner config')) as validate:
+                with self.assertRaisesRegex(r.Abort, 'invalid runner config'):
+                    installer.install_endpoints(backend, project / 'candidate.yml', project / 'staged')
+            validate.assert_called_once_with(backend.config)
+            backend.call.assert_not_called()
+            self.assertEqual({p.name: p.read_bytes() for p in project.iterdir()}, before)
 
 
 class Comparisons(unittest.TestCase):
