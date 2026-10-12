@@ -278,14 +278,29 @@ receipt includes `collected_at`, `source_interval_seconds` (actual PT interval),
 and `query_evidence` as a hashed-file reference relative to that receipt.
 That query JSON must contain the same `database`, `guest_boot_id`,
 `partial:false` and `points:[{"measurement":"...","time":"RFC3339"}]`.
-Every required measurement must have a point no older than twice the source
-interval plus10s, and the receipt must be equally fresh. Wrong boot, changed
-hash, future timestamps, empty/partial/stale data or missing measurement blocks
-or stops execution. Each successful query read-back is preserved in
-`native-health.ndjson`; failures and the failed receipt are retained separately.
-The deployed Telegraf/Influx query producer is **not yet integrated**: until it
-exists and its actual catalog/identity mapping is verified, this gate stays
-blocked. Freshness alone never proves full-window completeness.
+The producer implementation is `roles/ngfw_metrics/files/native_health.py`.
+Its hashed query and clock evidence must support every selected catalog field.
+Each required point's clock-adjusted upper age must be no greater than the
+smaller of 30 seconds and twice the source interval plus 10 seconds; receipt
+freshness is checked separately. Deployment and live verification belong in
+the evidence reports. Freshness alone never proves full-window completeness.
+
+The controller reads each atomic receipt once and hashes those exact bytes.
+Only an otherwise fully validated HEALTHY generation whose source ages have
+expired since its own evaluation may wait for a replacement: at most one second,
+polling every 50 milliseconds. The replacement must advance query chronology,
+retain boot, database, selected catalog and source identities, and pass the
+unchanged age limit at actual acceptance. Missing points, future timestamps,
+BLOCKED receipts, corrupt evidence or invalid replacements stop immediately.
+No producer query or cadence change is made by this consumer wait. Synchronous
+filesystem stalls cannot be preempted; a late result is rejected on return.
+
+`native-health-refresh.ndjson` preserves exact receipt bytes and hashes with
+PENDING, provisional CANDIDATE_VALIDATED and failure events. Only the accepted
+entry in `native-health.ndjson` carries `refresh_wait.status:RESOLVED`, after
+evidence recording and final age/deadline checks. Unchanged stale data or a
+failed replacement remains a failure; failed receipt bytes are retained
+separately. Pure offline `validate_native` never waits or replaces a snapshot.
 
 ### Terminal output and analysis
 
