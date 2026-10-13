@@ -284,3 +284,30 @@ def test_bad_map_evidence_reference_refused_before_native_job(control, monkeypat
             await ComposeRunService(control, runtime).start(case_id)
     asyncio.run(run())
     assert runtime.calls == [] and control.get_case(case_id)['jobs'] == []
+
+
+@pytest.mark.parametrize('spent,expected_seconds', [(0.0, 300), (.25, 299), (240.01, None)])
+def test_sqlite_real_spent_yields_integer_conservatively_floored_runtime_budget(control, spent, expected_seconds):
+    case_id = activated(control, budget={'seconds': 300})
+    with control.transaction() as db:
+        db.execute('UPDATE cases SET spent=? WHERE id=?', (spent, case_id))
+    assert type(control.checks_context(case_id)[0]['spent']) is float
+    runtime = Runtime()
+    async def run():
+        service = ComposeRunService(control, runtime, poll_seconds=.01)
+        if expected_seconds is None:
+            with pytest.raises(Denied, match='at least 60 seconds'):
+                await service.start(case_id)
+        else:
+            await service.start(case_id)
+            while service.tasks:
+                await asyncio.sleep(.01)
+    asyncio.run(run())
+    if expected_seconds is None:
+        assert runtime.calls == [] and control.get_case(case_id)['jobs'] == []
+    else:
+        call = next(values for kind, values in runtime.calls if kind == 'start')
+        assert type(call['scope']['budget']['seconds']) is int
+        assert call['scope']['budget']['seconds'] == expected_seconds
+        assert expected_seconds <= 300 - spent
+        Scope.model_validate(call['scope'], strict=True)

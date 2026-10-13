@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import socket
 
 from .contracts import Denied, Scope
@@ -204,9 +205,11 @@ class ComposeRunService:
                 raise Denied('Native PentestGPT cannot enforce a reduced HTTP path scope; no provider started')
             if getattr(scope, 'network_targets', []):
                 raise Denied('Native runtime network scope is not enforced by the existing proxy')
-            seconds = min(self.runtime.config.max_runtime_seconds,
-                          int(min(scope.expires_at, scope.authorization.valid_until) - c.clock()),
-                          scope.budget.seconds - snapshot['spent'])
+            # SQLite spent is REAL even when zero. Preserve the strict integer
+            # Budget contract and never round fractional remaining time upward.
+            seconds = math.floor(min(self.runtime.config.max_runtime_seconds,
+                          min(scope.expires_at, scope.authorization.valid_until) - c.clock(),
+                          scope.budget.seconds - snapshot['spent']))
             if seconds < 60:
                 raise Denied('Existing runtime needs at least 60 seconds within the approved budget')
             body = json.loads(manifest['body'])
