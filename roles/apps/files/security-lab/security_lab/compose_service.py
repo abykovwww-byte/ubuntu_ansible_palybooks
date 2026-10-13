@@ -12,7 +12,7 @@ import math
 import socket
 
 from .contracts import Denied, Scope
-from .compose_runtime import _request_goal
+from .compose_runtime import _request_goal, prepare_handoff_context
 from .controller import Controller
 from .dispatcher import redact_worker_output
 from .handoff import build_handoff
@@ -24,37 +24,6 @@ async def resolve_addresses(host: str) -> list[str]:
     rows = await asyncio.wait_for(asyncio.to_thread(socket.getaddrinfo, host, None,
         type=socket.SOCK_STREAM), timeout=5)
     return sorted({row[4][0] for row in rows})
-
-
-def _compact_handoff(snapshot: dict, manifest: dict, *, now: float) -> dict:
-    """Complete graph projection, not a count, excerpt or execution grant.
-
-    The existing builder validates snapshot references and the immutable scope.
-    Histories/raw responses are omitted; every node, relation and evidence index
-    entry is retained. Catalog-only gaps use compact status records; recorded
-    receipt failures retain their reason. The goal cap rejects oversized maps.
-    """
-    packet = build_handoff(snapshot, manifest, [], now=now)
-    data = packet['untrusted_osint_data']
-    def project(row, fields):
-        return {key: row[key] for key in fields if key in row}
-    return {
-        'format': 'compact_handoff_projection', 'case_id': packet['case_id'],
-        'generation': packet['generation'], 'context_hash': packet['context_hash'],
-        'binding': project(packet['binding'], ('id', 'version', 'hash')),
-        'trust': data['trust'], 'ownership_proven': False,
-        'scope_expansion_allowed': False, 'poc_allowed': False,
-        'surface_nodes': [project(row, ('id', 'kind', 'value', 'attribution', 'evidence_ids'))
-                          for row in data['surface_nodes']],
-        'relations': [project(row, ('id', 'source_id', 'target_id', 'relation', 'evidence_ids'))
-                      for row in data['relations']],
-        'evidence_index': [project(row, ('id', 'source', 'status', 'hash', 'synthetic', 'purged'))
-                           for row in data['evidence_index']],
-        'coverage': data['coverage'],
-        'gaps': [project(row, ('id', 'source', 'status', 'reason', 'truncated', 'synthetic'))
-                 if 'id' in row else project(row, ('source', 'status', 'implemented'))
-                 for row in data['gaps']],
-    }
 
 
 class ComposeRunService:
@@ -218,19 +187,24 @@ class ComposeRunService:
                        'generation': snapshot['generation']}
             # Use the original immutable manifest for handoff validation. Only
             # the launcher receives the reduced remaining runtime budget.
-            context = _compact_handoff(snapshot, manifest, now=c.clock())
+            context = build_handoff(snapshot, manifest, [], now=c.clock())
             # Refuse a map that cannot reach the model intact before reserving
             # a job, starting a provider or touching a container.
-            _request_goal(Scope.model_validate(body), context)
+            # Reserve the longest allowed host-generated run path in the goal
+            # preflight; the eventual chat-UUID path must fit before any job.
+            descriptor = prepare_handoff_context(scope, context, run_id='preflight-' + '0' * 54)
+            target_url, _ = _request_goal(Scope.model_validate(body), descriptor)
             job, token = c.prepare_job(case_id, 'existing-pentestgpt-compose', 'target_http', seconds,
                                        expected_binding=binding)
             run_id = 'chat-' + job['id']
+            descriptor = prepare_handoff_context(scope, context, run_id=run_id)
             plan = {**binding, 'tool': 'pentestgpt-agent', 'run_id': run_id,
                     'execution_mode': 'existing_compose_runtime', 'synthetic': False,
                     'phase_enforcement': 'prompt_only', 'native_full_access': True,
                     'scope_enforcement': 'launcher_allowlist_and_existing_proxy',
                     'reduced_scope_enforced': False, 'network_ack': False,
-                    'handoff_context_hash': context['context_hash']}
+                    'handoff_context_hash': context['context_hash'], 'handoff': descriptor,
+                    'target': target_url}
             c.start_native_job(job['id'], token, 'existing-pentestgpt-compose', 'target_http', plan)
             started = await self.runtime.start(run_id=run_id, scope=body, osint_context=context)
             c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', 'target_http')
@@ -289,8 +263,10 @@ class ComposeRunService:
                 except Exception:
                     break
             try:
-                closed = closure_task.result().get('access_closed') is True
+                closure = closure_task.result()
+                closed = closure.get('access_closed') is True
             except Exception:
+                closure = {}
                 closed = False
             if not closed:
                 outcome = 'interrupted'
@@ -300,6 +276,8 @@ class ComposeRunService:
             receipt = redact_worker_output(json.dumps(latest, ensure_ascii=False))[:18000]
             c.finish_job(case_id, job['id'], outcome=outcome, synthetic=False,
                 result={**plan, 'receipt': receipt, 'access_closed': closed,
+                        'handoff_removed': closure.get('handoff_removed'),
+                        'handoff_cleanup_error': closure.get('handoff_cleanup_error'),
                         'verified_vulnerabilities': [], 'finding_status': 'untrusted_model_assessment'})
 
     async def stop_case(self, case_id: str):

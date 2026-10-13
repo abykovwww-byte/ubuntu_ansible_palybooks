@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--pentestgpt-identity", type=Path, help="Host-private SSH identity path; never read into model context")
     parser.add_argument("--pentestgpt-directory", default="/srv/apps/pentestgpt")
     parser.add_argument("--pentestgpt-runs-directory", default="/srv/app-data/pentestgpt/runs")
+    parser.add_argument("--pentestgpt-workspace-directory", default="/srv/app-data/pentestgpt/workspace")
     args = parser.parse_args()
     runtime = None
     if args.pentestgpt_host:
@@ -22,7 +23,7 @@ def main():
         from security_lab.compose_runtime import ComposeRuntimeConfig, ComposePentestRuntime
         runtime = ComposePentestRuntime(ComposeRuntimeConfig(mode='ssh', ssh_host=args.pentestgpt_host,
             ssh_identity=str(args.pentestgpt_identity), compose_directory=args.pentestgpt_directory,
-            runs_directory=args.pentestgpt_runs_directory))
+            runs_directory=args.pentestgpt_runs_directory, workspace_directory=args.pentestgpt_workspace_directory))
     elif args.pentestgpt_identity:
         parser.error("--pentestgpt-host is required with --pentestgpt-identity")
     build_server(args.data_dir, args.principal, pentest_runtime=runtime).run(transport="stdio")
