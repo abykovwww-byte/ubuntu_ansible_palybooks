@@ -269,16 +269,59 @@ outputs contain `security-lab-native-tools-20261007/native-nmap.json` and cleanu
 This verifies the native tool path, not deployment of the new four-tool bundle.
 
 `start_pentestgpt_run(case_id)` starts the real existing agent and model provider
-for one approved HTTP target. Its fixed checks goal includes scope and bounded
-untrusted discovery context. Native command/output/tool receipts come from
+for one approved HTTP target. Its fixed checks goal includes scope and a file
+descriptor for the complete untrusted discovery packet. Native command/output/tool receipts come from
 upstream episode traces, not only the final summary. Existing roles retain
 FULL_ACCESS; phase control is prompt-only and independent HTTP restrictions
 are not enforced. Reduced paths/exclusions and network scopes are therefore
 refused by this adapter. PoC is never automatically activated. This provider
-path needs a separate real model trial before claiming operational readiness.
+path completed a bounded owned-lab trial on 2026-10-13: actual model responses,
+captured native curl GET/exit 0/HTTP 200, independent receiving-side confirmation,
+and exact-owner cleanup. This does not qualify every scanner or general
+FULL_ACCESS isolation.
+
+The native adapter transfers the canonical `build_handoff` packet through SSH
+stdin as engagement data, never as a source-code deployment or shell argument.
+It retains every surface node, relation, attribution/freshness history,
+observation, source receipt, evidence index, hypothesis, coverage record and gap.
+The Controller's immutable snapshot remains authoritative. Original
+`context_hash` identifies that snapshot; `content_sha256` identifies the exact
+UTF-8 file after external-data credential redaction. These hashes have distinct
+meanings.
+
+Before reserving a job, preflight validates the scope binding and the complete
+file's 1 MiB byte limit. No map is truncated. The host writes a checked owned
+artifact at `/workspace/handoffs/<run-id>/osint-context.json`, mounted from the
+managed workspace directory. The goal stays within upstream's 4000-character
+limit and contains only authoritative scope plus path/hash/size instructions.
+The model must verify the file hash and read/query bounded parts when tool output
+truncates. Context and catalog metadata grant no scope expansion or PoC.
+
+Creation refuses collisions, invalid bindings, traversal and linked paths.
+Only the exact run's known files may be removed on stop/failure; foreign ownership
+or a changed artifact is not silently deleted. Read-only delivery is not
+immutability against a FULL_ACCESS worker. Final receipts distinguish native
+process closure from artifact cleanup. Configure the host mount with
+`--pentestgpt-workspace-directory` (default
+`/srv/app-data/pentestgpt/workspace`), matching the managed Compose mount.
+
+The file path completed a fresh STDIO/native lab trial on 2026-10-13. A synthetic
+103-node/100-relation packet reached the worker as a 146,020-byte file, with
+independent host SHA/size/count readback. Native command receipts verified that
+SHA and read a late candidate with its evidence ID before a successful exact
+endpoint GET. The target independently logged GET/200; final case evidence
+confirmed process closure and handoff removal separately. The fixture is
+generated lab data, not public OSINT or a vulnerability finding.
 
 The PentestGPT Dockerfile now includes locked official Subfinder 2.16.0,
 ProjectDiscovery httpx 1.12.0, Nuclei 3.11.1 and Katana 1.8.0 release binaries.
+Applied-image checks on the owned fixture completed on 2026-10-13: httpx
+returned HTTP 200; Katana followed a benign same-host link at depth one; Nuclei
+validated local info-only GET templates with one positive and zero negative
+matches; unprivileged Nmap TCP connect reported the sole authorized port 8080
+open. HTTP checks have receiving-side request receipts. The Nmap result has
+CLI/XML proof, without an independent TCP accept log. No exploit templates,
+PoC, authentication attempts or public template downloads were used.
 One `pentestgpt/tool-lock.json` owns versions and archive digests for amd64/arm64;
 the installer verifies before extracting, retains licenses and writes installed
 version receipts. Launchers disable update checks and reject explicit updates.
@@ -291,8 +334,9 @@ and evidence store without granting test scope. Nonzero exit, truncated output,
 malformed records and unknown provider coverage remain visible. The tools-only
 service is required: the auth-mounted model service cannot run this collector.
 Stops join the owned process; late results after case stop are refused.
-The parser/runtime/MCP path is implemented locally; a real passive collection
-on the applied bundle is still pending. Public HTTPS collection remains separate.
+The parser/runtime/MCP path completed a real passive collection on 2026-10-13.
+Provider completeness and related-asset ownership remain unproven; recorded
+partial/error receipts are collection gaps. Public HTTPS collection remains separate.
 
 Windows OpenSSH silently exits 255 when launched in the MCP SDK's minimal
 environment without ProgramData. The adapter restores only that nonsecret
@@ -367,10 +411,11 @@ substitute for kernel and network observations.
 The production launcher is still incomplete: a production-qualified direct image/runtime,
 host-managed network isolation, private DNS and multi-client orchestration need
 integration. Dispatcher lifecycle, conservative budget accounting, schema v2 migration
-and a context packet exist locally; a production backend, retention/purge worker,
-and a qualified real-model PentestGPT tool consumer remain absent. Native Nmap
+and a context packet exist locally; a production backend and retention/purge worker
+remain absent. The opt-in native real-model path has the bounded lab qualification
+described above, with prompt-only phase/effect restrictions. Native Nmap
 network scope and the Compose CLI adapter are implemented as described above;
-the new tools-only service still requires IaC delivery and runtime verification.
+the tools-only service and its pinned binaries have applied-image runtime receipts.
 The action contract exists, but checks execution must be implemented
 before the action stage runs normally. Full A01–A36 acceptance is not claimed.
 
