@@ -208,6 +208,9 @@ jobs:
           test "$(docker network inspect pentestgpt_control --format '{{.Internal}}')" = "true"
           test "$(docker network inspect pentestgpt_target --format '{{.Internal}}')" = "true"
 
+      - name: Qualify IPv6 connections and isolation on owned endpoints
+        run: python scripts/test-pentestgpt-ipv6.py /tmp/PentestGPT/compose.yml
+
   gateway:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
