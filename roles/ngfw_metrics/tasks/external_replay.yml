@@ -1,0 +1,103 @@
+---
+- name: Require an explicit bounded replay request
+  ansible.builtin.assert:
+    that:
+      - ngfw_metrics_replay_enabled | bool
+      - not ansible_check_mode
+      - ngfw_metrics_replay_action in ['prepare', 'replay']
+      - ngfw_metrics_replay_id is match('^[a-z0-9][a-z0-9-]{0,63}$')
+      - ngfw_metrics_replay_timeout_seconds | int >= 1
+      - ngfw_metrics_replay_timeout_seconds | int <= 3600
+      - ngfw_metrics_replay_action != 'replay' or ngfw_metrics_external_write_url | length > 0
+    fail_msg: Explicit operation and request ID required; replay is disabled until the endpoint is configured.
+
+- name: Install the tools without changing source collection
+  ansible.builtin.import_tasks: external_tools.yml
+
+- name: Create the protected replay parent outside the live spool
+  ansible.builtin.file:
+    path: "{{ ngfw_metrics_data }}/external-replay"
+    state: directory
+    owner: ngfw-metrics
+    group: ngfw-metrics
+    mode: "0700"
+
+- name: Prepare only selected original LP into a new independent spool
+  when: ngfw_metrics_replay_action == 'prepare'
+  block:
+    - name: Require the immutable owner snapshot and explicit source windows
+      ansible.builtin.assert:
+        that:
+          - ngfw_metrics_replay_snapshot is match('^/srv/app-data/.+/backup[.]sqlite$')
+          - ngfw_metrics_replay_windows | length > 0
+          - ngfw_metrics_replay_windows | length <= 16
+
+    - name: Inspect any existing selection before writing its scope
+      ansible.builtin.stat:
+        path: "{{ ngfw_metrics_data }}/external-replay/{{ ngfw_metrics_replay_id }}"
+        follow: false
+      register: ngfw_metrics_replay_existing
+
+    - name: Refuse overwriting completed or partial selections
+      ansible.builtin.assert:
+        that:
+          - not ngfw_metrics_replay_existing.stat.exists
+        fail_msg: Use a new request ID; existing selection and its scope are preserved.
+
+    - name: Write the public selection specification only for this new selection
+      ansible.builtin.copy:
+        content: "{{ ngfw_metrics_replay_windows | to_json }}"
+        dest: "{{ ngfw_metrics_data }}/external-replay/{{ ngfw_metrics_replay_id }}-windows.json"
+        owner: ngfw-metrics
+        group: ngfw-metrics
+        mode: "0600"
+
+    - name: Prepare from the snapshot as its owner, excluding measurement overlap
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/flock
+          - --nonblock
+          - /srv/app-data/ngfw-lab/reports/.runner.lock
+          - /usr/bin/timeout
+          - "{{ ngfw_metrics_replay_timeout_seconds | int + 10 }}"
+          - /usr/sbin/runuser
+          - --user
+          - ngfw-metrics
+          - --
+          - /usr/bin/python3
+          - "{{ ngfw_metrics_root }}/scoped_replay.py"
+          - prepare
+          - --snapshot
+          - "{{ ngfw_metrics_replay_snapshot }}"
+          - --windows-file
+          - "{{ ngfw_metrics_data }}/external-replay/{{ ngfw_metrics_replay_id }}-windows.json"
+          - --directory
+          - "{{ ngfw_metrics_data }}/external-replay/{{ ngfw_metrics_replay_id }}"
+          - --timeout-seconds
+          - "{{ ngfw_metrics_replay_timeout_seconds }}"
+          - --reserve-bytes
+          - "{{ ngfw_metrics_disk_reserve_bytes }}"
+
+- name: Replay only the independent selected spool with its persistent cursor
+  when: ngfw_metrics_replay_action == 'replay'
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/flock
+      - --nonblock
+      - /srv/app-data/ngfw-lab/reports/.runner.lock
+      - /usr/bin/timeout
+      - "{{ ngfw_metrics_replay_timeout_seconds | int + 10 }}"
+      - /usr/sbin/runuser
+      - --user
+      - ngfw-metrics
+      - --
+      - /usr/bin/python3
+      - "{{ ngfw_metrics_root }}/scoped_replay.py"
+      - replay
+      - --directory
+      - "{{ ngfw_metrics_data }}/external-replay/{{ ngfw_metrics_replay_id }}"
+      - --config
+      - "{{ ngfw_metrics_root }}/spool.json"
+      - --timeout-seconds
+      - "{{ ngfw_metrics_replay_timeout_seconds }}"
+  no_log: true

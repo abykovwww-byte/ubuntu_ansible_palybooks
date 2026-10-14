@@ -1,0 +1,26 @@
+---
+- name: Inspect the already provisioned application directory
+  ansible.builtin.stat:
+    path: "{{ ngfw_metrics_root }}"
+    follow: false
+  register: ngfw_metrics_tools_directory
+
+- name: Require an existing protected metrics installation
+  ansible.builtin.assert:
+    that:
+      - ngfw_metrics_tools_directory.stat.exists
+      - ngfw_metrics_tools_directory.stat.isdir
+      - not ngfw_metrics_tools_directory.stat.islnk
+    fail_msg: Install tools only after the existing metrics stack is provisioned.
+
+- name: Install existing spool and one-shot scoped replay tools only
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ ngfw_metrics_root }}/{{ item }}"
+    owner: root
+    group: ngfw-metrics
+    mode: "0750"
+  loop:
+    - metrics_spool.py
+    - scoped_replay.py
+# Deliberately no notify: the running collector and private config remain intact.

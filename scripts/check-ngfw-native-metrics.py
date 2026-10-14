@@ -9,7 +9,7 @@ role = root / 'roles/ngfw_metrics'
 for folder in (role, root / 'roles/ngfw_native_source', root / 'roles/ngfw_native_route'):
     for path in folder.rglob('*.yml'):
         yaml.safe_load(path.read_text(encoding='utf-8'))
-for name in ('site', 'ngfw-metrics', 'ngfw-native-discovery', 'ngfw-native-route', 'ngfw-extreme-endpoints'):
+for name in ('site', 'ngfw-metrics', 'ngfw-metrics-external-tools', 'ngfw-metrics-replay', 'ngfw-native-discovery', 'ngfw-native-route', 'ngfw-extreme-endpoints'):
     yaml.safe_load((root / f'playbooks/{name}.yml').read_text(encoding='utf-8'))
 values = yaml.safe_load((role / 'defaults/main.yml').read_text(encoding='utf-8'))
 values['ngfw_metrics_influx_image'] = 'influxdb:1.0.0@sha256:' + '0' * 64
@@ -22,6 +22,9 @@ for external in ('', 'https://temporary.invalid/write?db=synthetic&precision=ns'
         if path.name.endswith('.json.j2'):
             data = json.loads(rendered)
             assert len(data['sinks']) == (2 if external else 1)
+            assert data['sinks'][0]['name'] == 'local' and 'initial_cursor' not in data['sinks'][0]
+            if external:
+                assert data['sinks'][1]['initial_cursor'] == 'tail'
             assert data['archive_days'] >= 90
         elif path.name.endswith('.yml.j2'):
             data = yaml.safe_load(rendered)
