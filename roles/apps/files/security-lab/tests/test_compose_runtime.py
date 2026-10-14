@@ -106,6 +106,10 @@ def test_goal_preserves_constraints_and_uses_only_full_file_descriptor():
     assert "UNTRUSTED DATA" in goal and descriptor['worker_path'] in goal
     assert descriptor['content_sha256'] in goal and 'x'*100 not in goal
     assert len(goal) <= MAX_GOAL_CHARS
+    assert "one local preflight command" in goal
+    assert "one exact contiguous evidence_excerpt of at most 1500 characters" in goal
+    assert "do not repeat file verification" in goal
+    assert "proceed to GET or HEAD" in goal
     many = scope(targets=[{"host":"fixture.example.test", "paths":["/one", "/two"]}])
     with pytest.raises(Denied, match="one exact target"):
         _request_goal(Scope.model_validate(many), {})
@@ -128,6 +132,11 @@ def test_whole_file_context_preserves_late_graph_history_and_coverage():
     import hashlib
     assert hashlib.sha256(text.encode()).hexdigest() == descriptor['content_sha256']
     assert descriptor['context_hash'] == decoded['context_hash']
+    _, goal = _request_goal(Scope.model_validate(scope()), descriptor)
+    assert len(goal) <= MAX_GOAL_CHARS
+    assert "compact JSON result of at most 1500 characters" in goal
+    assert "Do not print full graph" in goal
+    assert "late-discovered.example.test" not in goal
 
 
 def test_oversized_context_refused_before_runtime_handle_or_container(tmp_path):
