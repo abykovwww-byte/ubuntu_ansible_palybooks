@@ -24,14 +24,12 @@ connection parameters; country flags are provider labels, not verified geolocati
 
 ## Enable through Ansible
 
-Keep the real subscription URL and credentials only in
+Keep the real subscription URL only in
 `/etc/ansible/local-overrides.yml`. Do not paste them into Git or PRs.
 
 ```yaml
 vpn_egress_enabled: true
 vpn_egress_subscription_url: "<private HTTPS subscription URL>"
-vpn_egress_proxy_user: "vpn-client"
-vpn_egress_proxy_password: "<random password of at least 24 characters>"
 # Optional: local LAN status page. Proxy listeners remain on host loopback.
 vpn_egress_status_bind: "192.168.1.88"
 ```
@@ -49,8 +47,9 @@ credentials, child output, and exceptions are not emitted to status or logs.
 ## Consumer contract
 
 On Docker network `vpn_clients`, use `http://vpn-egress:8080` or
-`socks5h://vpn-egress:1080`, with the private proxy username/password. This shared
-network is internal. Attach a consumer only to it and other internal networks;
+`socks5h://vpn-egress:1080`, without proxy authentication. Access is controlled by
+the internal Docker network and host loopback/SSH tunnel. Attach a consumer only
+to this shared internal network and other internal networks;
 an additional ordinary bridge, host network, elevated network capabilities, or a
 direct Internet route removes the consumer's network enforcement. Wire consumer
 membership and explicit library proxy configuration in its own IaC deployment.
@@ -63,7 +62,7 @@ access. For example, with the actual configured SSH identity:
 ssh -N -L 18080:127.0.0.1:18080 -L 18081:127.0.0.1:18081 abykov@192.168.1.88
 ```
 
-Use the resulting local authenticated HTTP proxy in the bot's HTTP client. The
+Use the resulting local HTTP proxy in the bot's HTTP client. The
 SSH tunnel encrypts the LAN connection; no proxy port is published to LAN/WAN.
 Restart/reconnect handling belongs to the consumer deployment. A Windows proxy
 setting alone does not enforce all Windows process traffic through this gateway.
@@ -93,7 +92,7 @@ claim a complete notification history.
 ## Acceptance and rollback
 
 CI validates generated configs with the pinned Xray core and a local synthetic
-VLESS fixture, verifies HTTP proxy credentials and failure without direct fallback,
+VLESS fixture, verifies proxy access without a password and failure without direct fallback,
 and checks subscription rejection, country order and durable event deduplication.
 After apply, separately verify gateway `docker compose ps`, `/status.json`, actual
 Bot API access through the consumer's proxy, and its message receipt. A green
