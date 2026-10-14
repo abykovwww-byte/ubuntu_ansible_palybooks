@@ -10,7 +10,7 @@
   "sinks": [
     {"name": "local", "write_url": "http://127.0.0.1:{{ ngfw_metrics_influx_port }}/write?db={{ ngfw_metrics_db }}&precision=ns", "max_bytes_per_second": {{ ngfw_metrics_drain_bytes_per_second | int }}}
 {% if ngfw_metrics_external_write_url | length > 0 %}
-    ,{"name": "external", "write_url": {{ ngfw_metrics_external_write_url | to_json }}, "headers": {{ ngfw_metrics_external_headers | to_json }}, "max_bytes_per_second": {{ ngfw_metrics_drain_bytes_per_second | int }}}
+    ,{"name": "external", "initial_cursor": {{ ngfw_metrics_external_initial_cursor | to_json }}, "write_url": {{ ngfw_metrics_external_write_url | to_json }}, "headers": {{ ngfw_metrics_external_headers | to_json }}, "max_bytes_per_second": {{ ngfw_metrics_drain_bytes_per_second | int }}}
 {% endif %}
   ]
 }

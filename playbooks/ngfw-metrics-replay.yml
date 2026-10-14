@@ -1,0 +1,12 @@
+---
+- name: Explicit one-shot selected metrics preparation or replay
+  hosts: server
+  connection: local
+  gather_facts: false
+  become: true
+  serial: 1
+  tasks:
+    - name: Run only the explicitly selected operation
+      ansible.builtin.import_role:
+        name: ngfw_metrics
+        tasks_from: external_replay

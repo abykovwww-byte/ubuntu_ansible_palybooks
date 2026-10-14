@@ -11,6 +11,83 @@ an explicit, verified `influxdb:1.x.x@sha256:...` image plus the compatibility f
 this is a deployment constraint, not a discovered PT-recommended version.
 If PT requires another API/image family, adapt and validate the role first.
 
+## Scoped historical replay and future external delivery
+
+`ngfw_metrics_external_initial_cursor: tail` is the default for a **new** external
+sink. Its boundary is the atomic MAX(batch ID) at registration, serialized with
+ingest commits. Previously retained history is skipped by this live sink; later
+accepted batches retain their original source timestamps, including late points.
+Existing cursors are never reset on restart or a changed initial-cursor policy.
+The local cursor keeps its original beginning policy. Explicit `beginning` is
+available only when replay of all retained history is actually intended.
+The public `sink_registered` journal event records a new boundary and destination
+hash, never the URL/headers. Preserve that event as cutover evidence.
+
+For selected historical windows, `scoped_replay.py prepare` reads only the
+owner-generated immutable `backup.sqlite` and checksum from the existing evidence
+playbook. It writes a **new** independent selected SQLite and private manifest.
+Selection uses a union of explicit half-open integer-ns source windows. Selected
+LP line bytes/endings, tags, fields/types and timestamps remain unchanged; no
+run tag is injected. Batch receipt times are not a selection predicate. Gap
+history and other lines in a mixed batch are excluded. Original backup and live
+spool/cursors are not opened for updates. Empty/tampered/partial selections fail;
+partial outputs are retained and require a new request ID, never overwritten.
+
+The new `playbooks/ngfw-metrics-external-tools.yml` installs only `metrics_spool.py`
+and `scoped_replay.py` into an already provisioned stack: no private config render,
+service restart, sink registration, data/cursor mutation or network delivery.
+It can be applied before an endpoint exists using the existing Git/Ansible path:
+
+```sh
+sudo ./scripts/apply-local.sh playbooks/ngfw-metrics-external-tools.yml
+```
+
+The dedicated `playbooks/ngfw-metrics-replay.yml` is opt-in, never called by normal
+provisioning. Supply an operator-private vars file (not Git) with these fields:
+
+```yaml
+ngfw_metrics_replay_enabled: true
+ngfw_metrics_replay_action: prepare
+ngfw_metrics_replay_id: chosen-history-v1
+ngfw_metrics_replay_snapshot: /srv/app-data/ngfw-metrics/evidence/SNAPSHOT_ID/backup.sqlite
+ngfw_metrics_replay_windows:
+  - source_start_ns: 100
+    source_end_ns_exclusive: 101
+  - source_start_ns: 300
+    source_end_ns_exclusive: 301
+```
+
+These are synthetic example times: use the real saved native-query envelopes,
+including explicitly declared edge margins, for actual experiments. The selected
+directory is `{{ ngfw_metrics_data }}/external-replay/REQUEST_ID`. The root-held
+runner lock excludes active measurements and the command then runs as the
+existing spool owner; permissions of the live data tree do not change. Selection
+uses the existing disk reserve and a bounded timeout. Preparation cannot send.
+
+Run the focused playbook from the Git checkout with normal local overrides and
+that request file, using the installed Ansible environment:
+
+```sh
+sudo .venv/bin/ansible-playbook -i inventories/local/hosts.yml playbooks/ngfw-metrics-replay.yml -e @/etc/ansible/local-overrides.yml -e @/approved/private/replay-request.json
+```
+
+Only after a compatible endpoint is known, set the existing external URL/secret
+headers through private local overrides and apply `ngfw-metrics.yml`. The new live
+external sink starts at tail; selected history is delivered separately by changing
+the explicit replay action to `replay`. Replay loads the already rendered private
+external sink, verifies selected payload hashes before writes, and uses its own
+`scoped_external` persistent cursor, byte-preserving sender, retry and drain rate.
+Without an endpoint it refuses before registration/sending. Failed writes keep
+their cursor; the same selected bytes resume after restart. Destination changes
+remain rejected. No new daemon/export format is introduced.
+
+Exit0 with `WRITE_ACKNOWLEDGED_READBACK_REQUIRED` means only that selected writes
+were acknowledged; it is **not** remote-data acceptance. Verify remote raw queries
+at epoch ns against saved metrics, tags/values and field-type metadata, retaining
+query coverage/partial/empty distinctions. Then confirm selected queue0 and a
+falling/empty live external queue while local delivery stays healthy. LP-line
+counts are not unique point counts when writes overlap or retry.
+
 ## Flow and guarantee boundary
 
 NGFW Telegraf -> isolated host HTTP ingest -> SQLite WAL/FULL commit -> 204.

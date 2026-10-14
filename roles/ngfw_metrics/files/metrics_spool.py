@@ -213,13 +213,23 @@ class Spool:
             db.execute("UPDATE totals SET value=value+? WHERE name='accepted_points'", (points,))
             return row.lastrowid
 
-    def register(self, name, destination):
+    def register(self, name, destination, initial_cursor="beginning"):
+        if initial_cursor not in ("beginning", "tail") or (name == "local" and initial_cursor != "beginning"):
+            raise ValueError("Local starts at beginning; new sinks require an explicit beginning/tail policy")
         identity = hashlib.sha256(destination.encode()).hexdigest()
         with self.connect() as db:
-            db.execute("INSERT OR IGNORE INTO cursors(name,destination_hash) VALUES (?,?)", (name, identity))
-            saved = db.execute("SELECT destination_hash FROM cursors WHERE name=?", (name,)).fetchone()[0]
-            if saved != identity:
-                raise ValueError("Destination changed for an existing cursor; use a new named sink for explicit replay")
+            # Serialize cutover with accept(): no accepted batch can fall between
+            # reading MAX(id) and registering this new destination.
+            db.execute("BEGIN IMMEDIATE")
+            saved = db.execute("SELECT batch_id,destination_hash FROM cursors WHERE name=?", (name,)).fetchone()
+            if saved:
+                if saved["destination_hash"] != identity:
+                    raise ValueError("Destination changed for an existing cursor; use a new named sink for explicit replay")
+                return {"name": name, "created": False, "batch_id": saved["batch_id"]}
+            start = db.execute("SELECT COALESCE(MAX(id),0) FROM batches").fetchone()[0] if initial_cursor == "tail" else 0
+            db.execute("INSERT INTO cursors(name,batch_id,destination_hash) VALUES (?,?,?)", (name, start, identity))
+            return {"name": name, "created": True, "batch_id": start, "initial_cursor": initial_cursor,
+                    "destination_hash": identity}
 
     def deliver_one(self, name, send):
         with self.connect() as db:
@@ -463,7 +473,9 @@ def serve(config):
         raise ValueError("Require unique sink names and local sink")
     threads = []
     for sink in sinks:
-        spool.register(sink["name"], sink["write_url"])
+        registration = spool.register(sink["name"], sink["write_url"], sink.get("initial_cursor", "beginning"))
+        if registration["created"]:
+            print(json.dumps({"event": "sink_registered", **registration}), flush=True)
         http_sender(sink)  # Fail on invalid configuration before starting receiver.
         if sink.get("max_bytes_per_second", 1048576) <= 0:
             raise ValueError("Drain rate must be positive")

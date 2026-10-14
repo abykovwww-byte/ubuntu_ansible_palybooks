@@ -1,0 +1,11 @@
+---
+- name: Install scoped replay tools without changing collection or cursors
+  hosts: server
+  connection: local
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Install tools only, with no service restart or configuration rendering
+      ansible.builtin.import_role:
+        name: ngfw_metrics
+        tasks_from: external_tools

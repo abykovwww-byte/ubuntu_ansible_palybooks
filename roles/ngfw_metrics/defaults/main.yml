@@ -24,6 +24,8 @@ ngfw_metrics_influx_memory: 1g
 ngfw_metrics_drain_bytes_per_second: 1048576
 ngfw_metrics_external_write_url: ""
 ngfw_metrics_external_headers: {}
+# Applies only when a new external cursor is born; never resets an existing one.
+ngfw_metrics_external_initial_cursor: tail
 ngfw_metrics_ingest_token: ""
 ngfw_metrics_allowed_sources:
   - "127.0.0.1/32"
@@ -39,5 +41,11 @@ ngfw_metrics_evidence_end_epoch: 0
 ngfw_metrics_evidence_timeout_seconds: 180
 ngfw_metrics_evidence_max_snapshot_bytes: 1073741824
 ngfw_metrics_evidence_reserve_bytes: "{{ ngfw_metrics_disk_reserve_bytes }}"
+ngfw_metrics_replay_enabled: false
+ngfw_metrics_replay_action: prepare
+ngfw_metrics_replay_id: ""
+ngfw_metrics_replay_snapshot: ""
+ngfw_metrics_replay_windows: []
+ngfw_metrics_replay_timeout_seconds: 600
 # A non-loopback bind is restricted by actual interface/address checks, exact
 # application source CIDRs and a managed source-specific firewall rule.

@@ -13,6 +13,7 @@
           - ngfw_metrics_spool_payload_budget_bytes | int > 0
           - ngfw_metrics_disk_reserve_bytes | int > 0
           - ngfw_metrics_storage_budget_basis in ['bootstrap', 'measured_peak']
+          - ngfw_metrics_external_initial_cursor in ['beginning', 'tail']
           - ngfw_metrics_db is match('^[A-Za-z][A-Za-z0-9_]*$')
           - ngfw_metrics_bind_address in ['127.0.0.1', '10.77.0.1']
           - ngfw_metrics_ingest_port | int == 18086
@@ -132,6 +133,7 @@
       loop:
         - metrics_spool.py
         - influx_readback.py
+        - scoped_replay.py
       notify: Restart NGFW metrics spool
 
     - name: Render private spool configuration
