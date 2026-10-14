@@ -108,6 +108,7 @@ def test_goal_preserves_constraints_and_uses_only_full_file_descriptor():
     assert descriptor['content_sha256'] in goal and 'x'*100 not in goal
     assert len(goal) <= MAX_GOAL_CHARS
     assert "one local preflight command" in goal
+    assert "summary must be at most 500 characters" in goal
     assert "one exact contiguous evidence_excerpt of at most 1500 characters" in goal
     assert "do not repeat file verification" in goal
     assert "proceed to GET or HEAD" in goal
