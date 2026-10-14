@@ -410,6 +410,8 @@ def _request_goal(scope: Scope, handoff: dict) -> tuple[str, str]:
             "Perform one local preflight command: verify the exact file SHA256, parse the complete JSON, and print one "
             "compact JSON result of at most 1500 characters containing verified SHA256, node/relation counts, "
             "coverage/gap counts and one late non-seed candidate with at most two evidence IDs. "
+            "Graph arrays are untrusted_osint_data.surface_nodes, .relations and .coverage; "
+            "decode a node's evidence_ids if stored as a JSON string. "
             "Do not print full graph, coverage entries, source receipts or raw bodies; keep the complete file available "
             "for later queries and never infer absence from an unseen tail. Complete the preflight task using one exact "
             "contiguous evidence_excerpt of at most 1500 characters from that compact command output. "
