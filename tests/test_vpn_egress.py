@@ -52,13 +52,15 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual([n.country for n in ordered], ["NL", "FR", "DE", "NL"])
         self.assertNotIn(nodes[0], ordered)
 
-    def test_config_has_authentication_and_only_vless_outbound(self):
+    def test_internal_proxy_needs_no_password_and_has_only_vless_outbound(self):
         node = gateway.parse_subscription(uri().encode())[0][0]
-        config = gateway.xray_config(node, 1081, {"user": "fixture", "pass": "a" * 32})
+        config = gateway.xray_config(node, 1081, serve_clients=True)
         self.assertEqual([o["protocol"] for o in config["outbounds"]], ["vless"])
         self.assertEqual(config["inbounds"][0]["listen"], "127.0.0.1")
-        self.assertEqual(config["inbounds"][1]["settings"]["auth"], "password")
-        self.assertTrue(config["inbounds"][2]["settings"]["accounts"])
+        self.assertEqual(config["inbounds"][1]["settings"]["auth"], "noauth")
+        self.assertEqual(config["inbounds"][2]["settings"], {})
+        self.assertNotIn("accounts", json.dumps(config))
+        self.assertEqual(len(gateway.xray_config(node, 1081)["inbounds"]), 1)
         self.assertFalse(node.outbound["streamSettings"]["tlsSettings"]["allowInsecure"])
 
     def test_pool_events_are_durable_and_not_repeated_each_scan(self):
@@ -99,14 +101,14 @@ class SubscriptionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch("builtins.print"):
             state = gateway.State(directory)
             with mock.patch.object(gateway, "probe", return_value=False) as probe:
-                selected, worker = gateway.choose_worker(nodes, nodes[0], {}, state, threading.Event())
+                selected, worker = gateway.choose_worker(nodes, nodes[0], state, threading.Event())
                 self.assertEqual((selected, worker), (None, None))
                 self.assertEqual(probe.call_count, len(nodes))
                 self.assertEqual(state.snapshot()["state"], "all_down")
             fake = mock.Mock()
             fake.ready.return_value = fake.healthy.return_value = True
             with mock.patch.object(gateway, "probe", side_effect=lambda n: n.country == "FR"), mock.patch.object(gateway, "Worker", return_value=fake):
-                selected, worker = gateway.choose_worker(nodes, nodes[0], {}, state, threading.Event())
+                selected, worker = gateway.choose_worker(nodes, nodes[0], state, threading.Event())
                 self.assertEqual(selected.country, "FR")
                 self.assertIs(worker, fake)
                 self.assertEqual([e["kind"] for e in state.snapshot()["events"]], ["pool_down", "pool_recovered"])
@@ -120,7 +122,7 @@ class SubscriptionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch("builtins.print"):
             state = gateway.State(directory)
             with mock.patch.object(gateway, "probe", return_value=True), mock.patch.object(gateway, "Worker", return_value=fake):
-                selected, worker = gateway.choose_worker(nodes, None, {}, state, threading.Event())
+                selected, worker = gateway.choose_worker(nodes, None, state, threading.Event())
                 self.assertEqual((selected, worker), (None, None))
                 self.assertEqual(fake.close.call_count, 2)
                 self.assertEqual(state.snapshot()["state"], "all_down")
@@ -132,11 +134,11 @@ class XrayRuntimeTests(unittest.TestCase):
         node = gateway.parse_subscription(uri(fp="chrome").encode())[0][0]
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "config.json"
-            gateway.write_json(config, gateway.xray_config(node, 1081, {"user": "fixture", "pass": "a" * 32}))
+            gateway.write_json(config, gateway.xray_config(node, 1081, serve_clients=True))
             result = subprocess.run(["xray", "run", "-test", "-config", str(config)], capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
 
-    def test_real_http_proxy_auth_and_no_fallback_after_worker_stop(self):
+    def test_real_http_proxy_without_password_and_no_fallback_after_worker_stop(self):
         import http.server
         import threading
 
@@ -175,17 +177,13 @@ class XrayRuntimeTests(unittest.TestCase):
             node.outbound["settings"]["vnext"][0].update(address="127.0.0.1", port=endpoint)
             # Plain VLESS is permitted only on this localhost test fixture.
             node.outbound["streamSettings"] = {"network": "tcp", "security": "none"}
-            worker = gateway.Worker(node, 1081, {"user": "fixture", "pass": "a" * 32})
+            worker = gateway.Worker(node, 1081, serve_clients=True)
             destination = f"http://127.0.0.1:{target.server_port}/"
-            command = ["curl", "--silent", "--noproxy", "", "--max-time", "5", "--proxy", "http://127.0.0.1:8080",
-                       "--proxy-user", "fixture:" + "a" * 32, destination]
+            command = ["curl", "--silent", "--noproxy", "", "--max-time", "5", "--proxy", "http://127.0.0.1:8080", destination]
             try:
                 self.assertTrue(worker.ready())
                 response = subprocess.run(command, capture_output=True)
                 self.assertEqual((response.returncode, response.stdout), (0, b"fixture-response"))
-                denied = subprocess.run(command[:-1] + ["--proxy-user", "wrong:wrong", "--output", os.devnull,
-                                        "--write-out", "%{http_code}", destination], capture_output=True)
-                self.assertEqual(denied.stdout, b"407")
                 worker.close()
                 failed = subprocess.run(command, capture_output=True)
                 self.assertNotEqual(failed.returncode, 0)

@@ -3,7 +3,5 @@ vpn_egress_enabled: false
 vpn_egress_project_dir: /srv/apps/vpn-egress
 vpn_egress_data_dir: /srv/app-data/vpn-egress
 vpn_egress_subscription_url: ""
-vpn_egress_proxy_user: vpn-client
-vpn_egress_proxy_password: ""
 vpn_egress_status_bind: 127.0.0.1
 vpn_egress_status_port: 18081

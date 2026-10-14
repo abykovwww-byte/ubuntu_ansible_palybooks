@@ -1,11 +1,9 @@
 ---
-- name: Validate private gateway settings
+- name: Validate private subscription URL
   ansible.builtin.assert:
     that:
       - vpn_egress_subscription_url is match('^https://')
-      - vpn_egress_proxy_user | length > 0
-      - vpn_egress_proxy_password | length >= 24
-    fail_msg: Set VPN subscription and proxy credentials in server-local overrides.
+    fail_msg: Set vpn_egress_subscription_url to the private HTTPS subscription URL in server-local overrides.
   no_log: true
 
 - name: Validate gateway paths and status listener

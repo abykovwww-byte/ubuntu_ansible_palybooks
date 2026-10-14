@@ -108,15 +108,15 @@ def candidate_order(nodes, previous=None):
     return ordered
 
 
-def xray_config(node, probe_port, credentials=None):
+def xray_config(node, probe_port, serve_clients=False):
     inbounds = [{"tag": "probe", "listen": "127.0.0.1", "port": probe_port, "protocol": "socks",
                  "settings": {"auth": "noauth", "udp": False}}]
-    if credentials:
+    if serve_clients:
         inbounds.extend([
             {"tag": "socks", "listen": "0.0.0.0", "port": 1080, "protocol": "socks",
-             "settings": {"auth": "password", "accounts": [credentials], "udp": False}},
+             "settings": {"auth": "noauth", "udp": False}},
             {"tag": "http", "listen": "0.0.0.0", "port": 8080, "protocol": "http",
-             "settings": {"accounts": [credentials]}},
+             "settings": {}},
         ])
     return {"log": {"loglevel": "none", "access": "none", "dnsLog": False},
             "inbounds": inbounds, "outbounds": [node.outbound]}
@@ -133,10 +133,10 @@ def write_json(path, value):
 
 
 class Worker:
-    def __init__(self, node, port, credentials=None):
+    def __init__(self, node, port, serve_clients=False):
         self.directory = tempfile.TemporaryDirectory(prefix="node-", dir="/run/vpn-egress")
         config = Path(self.directory.name) / "config.json"
-        write_json(config, xray_config(node, port, credentials))
+        write_json(config, xray_config(node, port, serve_clients))
         try:
             self.process = subprocess.Popen(["xray", "run", "-config", str(config)],
                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -272,7 +272,7 @@ def fetch_nodes(url):
     return parse_subscription(body)
 
 
-def choose_worker(nodes, active, credentials, state, stop):
+def choose_worker(nodes, active, state, stop):
     state.update(state="all_down" if state.snapshot()["state"] == "all_down" else "checking",
                  phase="scanning", country=None, tested_nodes=0, supported_nodes=len(nodes))
     candidates = candidate_order(nodes, active)
@@ -292,7 +292,7 @@ def choose_worker(nodes, active, credentials, state, stop):
                 continue
             trial = None
             try:
-                trial = Worker(candidate, 1081, credentials)
+                trial = Worker(candidate, 1081, serve_clients=True)
                 if trial.ready() and trial.healthy():
                     state.update(state="healthy", phase="monitoring", country=candidate.country)
                     return candidate, trial
@@ -309,9 +309,6 @@ def choose_worker(nodes, active, credentials, state, stop):
 def run():
     os.umask(0o077)
     settings = json.loads(Path("/run/secrets/gateway.json").read_text())
-    credentials = {"user": settings["proxy_user"], "pass": settings["proxy_password"]}
-    if not credentials["user"] or len(credentials["pass"]) < 24:
-        raise ValueError("private_proxy_credentials_required")
     state = State("/data")
     StatusHandler.state = state
     server = http.server.ThreadingHTTPServer(("0.0.0.0", 8099), StatusHandler)
@@ -362,7 +359,7 @@ def run():
                 stop.wait(30)
                 last_refresh = 0
                 continue
-            selected, worker = choose_worker(nodes, active, credentials, state, stop)
+            selected, worker = choose_worker(nodes, active, state, stop)
             if selected:
                 active, failures = selected, 0
             stop.wait(30)
