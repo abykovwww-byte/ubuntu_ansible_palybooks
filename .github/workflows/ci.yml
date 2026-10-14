@@ -17,6 +17,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  vpn-egress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test subscription, failover ordering and durable events
+        run: python -m unittest discover -s tests -p test_vpn_egress.py -v
+      - name: Build pinned Xray gateway
+        run: docker build -t vpn-egress-ci roles/vpn_egress/files
+      - name: Validate pinned core and real synthetic proxy boundary
+        run: |
+          docker run --rm --tmpfs /run/vpn-egress:uid=10001,gid=10001,mode=0700 \
+            -v "$PWD:/repo:ro" -w /repo --entrypoint python vpn-egress-ci \
+            -m unittest discover -s tests -p test_vpn_egress.py -v
   telegram-archive:
     runs-on: ubuntu-latest
     steps:
@@ -242,6 +258,7 @@ jobs:
       - name: Check playbook syntax
         run: |
           ansible-playbook -i inventories/local/hosts.yml playbooks/site.yml --syntax-check
+          ansible-playbook -i inventories/local/hosts.yml playbooks/vpn-egress.yml --syntax-check
           ansible-playbook -i inventories/local/hosts.yml playbooks/telegram-archive.yml --syntax-check
           ansible-playbook -i inventories/local/hosts.yml playbooks/obsidian.yml --syntax-check
           ansible-playbook -i inventories/local/hosts.yml playbooks/application-portal.yml --syntax-check

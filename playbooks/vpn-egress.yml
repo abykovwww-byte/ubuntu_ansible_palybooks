@@ -1,0 +1,7 @@
+---
+- name: Configure selective VPN egress
+  hosts: server
+  become: true
+  roles:
+    - role: vpn_egress
+      when: vpn_egress_enabled | default(false) | bool

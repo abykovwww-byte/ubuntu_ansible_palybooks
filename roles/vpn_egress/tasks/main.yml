@@ -1,0 +1,80 @@
+---
+- name: Validate private gateway settings
+  ansible.builtin.assert:
+    that:
+      - vpn_egress_subscription_url is match('^https://')
+      - vpn_egress_proxy_user | length > 0
+      - vpn_egress_proxy_password | length >= 24
+    fail_msg: Set VPN subscription and proxy credentials in server-local overrides.
+  no_log: true
+
+- name: Validate gateway paths and status listener
+  ansible.builtin.assert:
+    that:
+      - vpn_egress_project_dir == '/srv/apps/vpn-egress'
+      - vpn_egress_data_dir == '/srv/app-data/vpn-egress'
+      - vpn_egress_status_bind != '0.0.0.0'
+      - vpn_egress_status_bind in (ansible_all_ipv4_addresses + ['127.0.0.1'])
+      - vpn_egress_status_port | int > 1024
+      - vpn_egress_status_port | int <= 65535
+
+- name: Create gateway project directory
+  ansible.builtin.file:
+    path: "{{ vpn_egress_project_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create private gateway state and secret directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "10001"
+    group: "10001"
+    mode: "0700"
+  loop:
+    - "{{ vpn_egress_data_dir }}"
+    - "{{ vpn_egress_data_dir }}/secrets"
+    - "{{ vpn_egress_data_dir }}/state"
+
+- name: Copy gateway runtime sources
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ vpn_egress_project_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [gateway.py, status.html, Dockerfile]
+  register: vpn_egress_sources
+
+- name: Render private gateway settings
+  ansible.builtin.template:
+    src: settings.json.j2
+    dest: "{{ vpn_egress_data_dir }}/secrets/gateway.json"
+    owner: "10001"
+    group: "10001"
+    mode: "0400"
+  no_log: true
+  register: vpn_egress_settings
+
+- name: Render gateway Compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ vpn_egress_project_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Validate gateway Compose
+  ansible.builtin.command:
+    cmd: docker compose config --quiet
+    chdir: "{{ vpn_egress_project_dir }}"
+  changed_when: false
+
+- name: Converge selective VPN gateway
+  ansible.builtin.command:
+    cmd: "docker compose up -d --build{{ ' --force-recreate' if vpn_egress_sources.changed or vpn_egress_settings.changed else '' }}"
+    chdir: "{{ vpn_egress_project_dir }}"
+  register: vpn_egress_up
+  changed_when: "'Started' in vpn_egress_up.stderr or 'Created' in vpn_egress_up.stderr or 'Recreated' in vpn_egress_up.stderr"
