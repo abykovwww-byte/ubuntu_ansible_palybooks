@@ -12,6 +12,7 @@ from security_lab.compose_runtime import (ComposePentestRuntime, ComposeRuntimeC
                                          _HOST_SCRIPT, _request_goal, _process_environment, MAX_GOAL_CHARS, MAX_CONTEXT_BYTES,
                                          prepare_handoff_context, _serialize_handoff)
 from security_lab.contracts import Denied, Scope, digest
+from security_lab.handoff_files import HANDOFF_FILE_PROGRAM
 
 
 def config(tmp_path, **values):
@@ -106,6 +107,11 @@ def test_goal_preserves_constraints_and_uses_only_full_file_descriptor():
     assert "UNTRUSTED DATA" in goal and descriptor['worker_path'] in goal
     assert descriptor['content_sha256'] in goal and 'x'*100 not in goal
     assert len(goal) <= MAX_GOAL_CHARS
+    assert "one local preflight command" in goal
+    assert "summary must be at most 500 characters" in goal
+    assert "one exact contiguous evidence_excerpt of at most 1500 characters" in goal
+    assert "do not repeat file verification" in goal
+    assert "proceed to GET or HEAD" in goal
     many = scope(targets=[{"host":"fixture.example.test", "paths":["/one", "/two"]}])
     with pytest.raises(Denied, match="one exact target"):
         _request_goal(Scope.model_validate(many), {})
@@ -128,6 +134,11 @@ def test_whole_file_context_preserves_late_graph_history_and_coverage():
     import hashlib
     assert hashlib.sha256(text.encode()).hexdigest() == descriptor['content_sha256']
     assert descriptor['context_hash'] == decoded['context_hash']
+    _, goal = _request_goal(Scope.model_validate(scope()), descriptor)
+    assert len(goal) <= MAX_GOAL_CHARS
+    assert "compact JSON result of at most 1500 characters" in goal
+    assert "Do not print full graph" in goal
+    assert "late-discovered.example.test" not in goal
 
 
 def test_oversized_context_refused_before_runtime_handle_or_container(tmp_path):
@@ -230,13 +241,20 @@ def payload(tmp_path, operation):
     return result
 
 
-def execute_host(monkeypatch, request, docker):
+def execute_host(monkeypatch, request, docker, *, handoff_store=None):
     output = io.StringIO()
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
     monkeypatch.setattr(sys, "stdout", output)
     monkeypatch.setattr(subprocess, "run", docker.run)
     try:
-        exec(compile(_HOST_SCRIPT, "trusted-host-program", "exec"), {})
+        script, namespace = _HOST_SCRIPT, {}
+        if handoff_store is not None:
+            # This isolates the Docker ownership race on Windows as well as
+            # Linux; native filesystem guards have separate POSIX tests.
+            assert script.startswith(HANDOFF_FILE_PROGRAM + '\n')
+            script = script[len(HANDOFF_FILE_PROGRAM) + 1:]
+            namespace['HandoffStore'] = handoff_store
+        exec(compile(script, "trusted-host-program", "exec"), namespace)
     except SystemExit:
         pass
     return json.loads(output.getvalue())
@@ -263,6 +281,79 @@ def test_host_stop_foreign_ownership_denies_without_mutation(monkeypatch, tmp_pa
     result = execute_host(monkeypatch, request, docker)
     assert result["ok"] is False
     assert not any(command[1] in {"stop", "rm", "kill"} for command,_ in docker.calls)
+
+
+class InspectRaceDocker(Docker):
+    def __init__(self, request, outcome):
+        super().__init__(request)
+        self.exists = True
+        self.outcome = outcome
+        self.ps_calls = 0
+
+    def run(self, command, **kwargs):
+        result = super().run(command, **kwargs)
+        if command[1] == 'ps':
+            self.ps_calls += 1
+            if self.ps_calls == 2 and self.outcome == 'query_failed':
+                return SimpleNamespace(returncode=1, stdout='', stderr='private Docker diagnostics')
+            if self.ps_calls == 2 and self.outcome == 'ambiguous':
+                return SimpleNamespace(returncode=0, stdout='abc123\ndef456\n', stderr='')
+        if command[1] == 'inspect':
+            if self.outcome in {'removed', 'removed_after_timeout'}:
+                self.exists = False
+            if self.outcome == 'removed_after_timeout':
+                raise subprocess.TimeoutExpired(command, 20)
+            return SimpleNamespace(returncode=1, stdout='', stderr='private Docker diagnostics')
+        return result
+
+
+def tracked_store(request):
+    class Store:
+        cleanup_calls = 0
+        released = False
+
+        def __init__(self, workspace, run_id, owner, descriptor):
+            assert (workspace, run_id, owner, descriptor) == (request['workspace_directory'],
+                request['run_id'], request['owner'], request['handoff'])
+
+        def cleanup(self, identity):
+            assert identity == request['artifact_identity']
+            Store.cleanup_calls += 1
+            return True
+
+        def release(self):
+            Store.released = True
+    return Store
+
+
+@pytest.mark.parametrize('outcome', ['removed', 'removed_after_timeout'])
+def test_ps_inspect_disappearance_confirms_absence_then_artifact_cleanup(monkeypatch, tmp_path, outcome):
+    request = payload(tmp_path, 'start')
+    request.update(operation='stop', artifact_identity={'device':1,'inode':2})
+    store = tracked_store(request)
+    docker = InspectRaceDocker(request, outcome)
+    reply = execute_host(monkeypatch, request, docker, handoff_store=store)
+    assert reply['ok'] is True
+    assert reply['result']['access_closed'] is True and reply['result']['handoff_removed'] is True
+    assert store.cleanup_calls == 1 and store.released is True
+    queries = [command for command,_ in docker.calls if command[1] == 'ps']
+    assert len(queries) == 2 and queries[0] == queries[1]
+    assert 'name=^/' + request['container_name'] + '$' in queries[1]
+    assert not any(command[1] in {'stop','rm','kill'} for command,_ in docker.calls)
+
+
+@pytest.mark.parametrize('outcome', ['still_present', 'query_failed', 'ambiguous'])
+def test_failed_inspect_without_confirmed_absence_preserves_artifact(monkeypatch, tmp_path, outcome):
+    request = payload(tmp_path, 'start')
+    request.update(operation='stop', artifact_identity={'device':1,'inode':2})
+    store = tracked_store(request)
+    docker = InspectRaceDocker(request, outcome)
+    reply = execute_host(monkeypatch, request, docker, handoff_store=store)
+    assert reply['ok'] is False and 'access_closed' not in reply
+    assert store.cleanup_calls == 0 and store.released is True
+    assert docker.ps_calls == 2
+    assert 'private Docker diagnostics' not in str(reply)
+    assert not any(command[1] in {'stop','rm','kill'} for command,_ in docker.calls)
 
 
 def test_host_poll_reads_native_receipts_not_assistant_claims(monkeypatch, tmp_path):
