@@ -1,0 +1,39 @@
+services:
+  vpn-egress:
+    build: .
+    image: abykovserv-vpn-egress:1
+    container_name: vpn-egress
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 25s
+    ports:
+      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:11080:1080"
+      - "{{ vpn_egress_status_bind }}:{{ vpn_egress_status_port }}:8099"
+    volumes:
+      - "{{ vpn_egress_data_dir }}/secrets/gateway.json:/run/secrets/gateway.json:ro"
+      - "{{ vpn_egress_data_dir }}/state:/data"
+    tmpfs:
+      - /run/vpn-egress:uid=10001,gid=10001,mode=0700
+      - /tmp:uid=10001,gid=10001,mode=0700
+    networks: [clients, transport]
+    healthcheck:
+      test: [CMD, curl, --silent, --fail, --noproxy, "*", http://127.0.0.1:8099/healthz]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: 2m, max-file: "3"}
+networks:
+  clients:
+    name: vpn_clients
+    internal: true
+  transport: {}
