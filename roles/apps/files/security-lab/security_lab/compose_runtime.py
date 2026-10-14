@@ -422,7 +422,7 @@ def _request_goal(scope: Scope, handoff: dict) -> tuple[str, str]:
             "Perform one local preflight command: verify the exact file SHA256, parse the complete JSON, and print one "
             "compact JSON result of at most 1500 characters containing verified SHA256, node/relation counts, "
             "coverage/gap counts and one late non-seed candidate with at most two evidence IDs. "
-            "Graph arrays are untrusted_osint_data.surface_nodes, .relations and .coverage; "
+            "Graph arrays are untrusted_osint_data.surface_nodes, .relations, .coverage and .gaps; "
             "Choose a late node with attribution=candidate and evidence_ids; no is_seed field is required. "
             "Decode a node's evidence_ids if stored as a JSON string. "
             "Do not print full graph, coverage entries, source receipts or raw bodies; keep the complete file available "
