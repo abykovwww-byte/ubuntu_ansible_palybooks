@@ -156,6 +156,9 @@ def evaluate_action_response(receipt: dict, expected: dict | None) -> dict:
     result['http_status'] = int(status.group(1))
     if not expected:
         return {**result, 'poc_observation': 'response_recorded'}
+    if row.get('response_body', {}).get('representation') == 'binary_summary' and expected.get('contains') is not None:
+        # A binary summary is evidence of bytes, never a substitute body marker.
+        return result
     response = row['stdout'][:status.start()].replace('\r\n', '\n')
     body = ''
     while response.startswith('HTTP/1.') and '\n\n' in response:
