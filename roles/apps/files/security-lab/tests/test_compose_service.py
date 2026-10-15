@@ -392,10 +392,10 @@ def test_goal_preflight_reserves_maximum_run_path_before_job_and_actual_path_can
     runtime = Runtime()
     preflights = []
     real_goal = _request_goal
-    def capture_goal(scope, descriptor):
+    def capture_goal(scope, descriptor, **options):
         assert control.get_case(case_id)['jobs'] == [] and runtime.calls == []
         assert len(descriptor['run_id']) == 64
-        target, goal = real_goal(scope, descriptor)
+        target, goal = real_goal(scope, descriptor, **options)
         preflights.append((descriptor, goal))
         return target, goal
     monkeypatch.setattr('security_lab.compose_service._request_goal', capture_goal)

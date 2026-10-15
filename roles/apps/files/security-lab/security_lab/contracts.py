@@ -7,6 +7,7 @@ import ipaddress
 import json
 import re
 from urllib.parse import unquote, urlsplit
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
@@ -228,6 +229,70 @@ class Scope(Contract):
             raise Denied("Scope or authorization not currently valid")
 
 
+class HTTPRequest(Contract):
+    """One explicit request; payload/parameters are data, never CLI options."""
+    tool: Literal['http'] = 'http'
+    url: str = Field(min_length=1, max_length=2000)
+    method: Literal['GET', 'HEAD', 'OPTIONS', 'POST'] = 'GET'
+    query: dict[str, str] = Field(default_factory=dict, max_length=20)
+    headers: dict[str, str] = Field(default_factory=dict, max_length=8)
+    body: str | None = Field(default=None, max_length=8192)
+    seconds: int = Field(default=15, ge=1, le=60)
+
+    @field_validator('url')
+    @classmethod
+    def canonical_http_url(cls, value):
+        if any(ord(c) <= 32 or ord(c) >= 127 for c in value) or any(c in value for c in '\\%?#'):
+            raise ValueError('Use an unambiguous HTTP URL; pass query separately')
+        parsed = urlsplit(value)
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError('HTTP URL without credentials required')
+        host = hostname(parsed.hostname)
+        port = parsed.port if parsed.port is not None else (443 if parsed.scheme == 'https' else 80)
+        if not 1 <= port <= 65535:
+            raise ValueError('Invalid HTTP port')
+        return f'{parsed.scheme}://{host}:{port}{safe_path(parsed.path or "/")}'
+
+    @field_validator('headers')
+    @classmethod
+    def public_headers(cls, value):
+        allowed = {'accept', 'content-type', 'origin', 'x-requested-with', 'accept-language'}
+        result = {}
+        for key, item in value.items():
+            key = key.lower()
+            if key not in allowed or key in result or len(item) > 1000 or any(ord(c) < 32 or ord(c) == 127 for c in item):
+                raise ValueError('Unsupported, duplicate or invalid public HTTP header')
+            result[key] = item
+        return dict(sorted(result.items()))
+
+    @field_validator('query')
+    @classmethod
+    def bounded_parameters(cls, value):
+        if any(not key or len(key) > 100 or len(item) > 1000 or
+               any(ord(c) < 32 or ord(c) == 127 for c in key + item) for key, item in value.items()):
+            raise ValueError('Invalid or oversized query parameter')
+        return dict(sorted(value.items()))
+
+    @model_validator(mode='after')
+    def body_method(self):
+        if self.body is not None and self.method != 'POST':
+            raise ValueError('A request body requires POST')
+        if self.body is not None and '\x00' in self.body:
+            raise ValueError('NUL in HTTP body is unsupported')
+        return self
+
+
+class ResponseExpectation(Contract):
+    status: int | None = Field(default=None, ge=100, le=599)
+    contains: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode='after')
+    def nonempty(self):
+        if self.status is None and self.contains is None:
+            raise ValueError('An observable response predicate is required')
+        return self
+
+
 class Action(Contract):
     finding_id: str = Field(min_length=1, max_length=100)
     host: str
@@ -235,8 +300,27 @@ class Action(Contract):
     expected_effect: str = Field(min_length=1, max_length=2000)
     stop_condition: str = Field(min_length=1, max_length=1000)
     seconds: int = Field(default=300, ge=1, le=1800)
+    request: HTTPRequest | None = None
+    verification: ResponseExpectation | None = None
 
     _host = field_validator("host")(hostname)
+
+    @model_serializer(mode='wrap')
+    def preserve_historical_hash(self, handler):
+        data = handler(self)
+        for key in ('request', 'verification'):
+            if data[key] is None:
+                data.pop(key)
+        return data
+
+    @model_validator(mode='after')
+    def request_matches_action(self):
+        if self.request is not None:
+            if urlsplit(self.request.url).hostname != self.host or self.request.seconds > self.seconds:
+                raise ValueError('Action request exceeds its host or time budget')
+        if self.verification is not None and self.request is None:
+            raise ValueError('Verification needs an executable action request')
+        return self
 
 
 class ActionPlan(Contract):

@@ -1,5 +1,9 @@
 # RP Stack Wiki
 
+Другие operator-интеграции репозитория: [общий Security Lab MCP для Codex и
+OpenCode](../../roles/apps/files/security-lab/SHARED-SERVICE.md) — кейсы OSINT и
+PentestGPT, отдельные от состояния RP Stack.
+
 RP Stack — это управляемая через Infrastructure as Code платформа для ролевых игр и детерминированных учебных симуляций. Пользователь видит чат и игровые инструменты, но состояние мира, правила, история, память, модели и права доступа принадлежат Gateway.
 
 Эта Wiki проверена 31 августа 2026 года и отделяет source revision от фактического

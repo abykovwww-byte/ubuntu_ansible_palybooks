@@ -1,4 +1,4 @@
-"""Codex-facing MCP using the operator's delegated chat instructions."""
+"""Chat-facing MCP using the operator's delegated instructions."""
 
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ from .dispatcher import Dispatcher, FixtureBackend, model_tool_catalog
 from .handoff import build_handoff
 from .compose_service import ComposeRunService
 from .subfinder_runtime import SubfinderDiscovery
+from .client_identity import delegate_client
+from .native_checks import native_check_catalog
 
 
 class ControllerSlot:
@@ -51,38 +53,56 @@ class ControllerSlot:
                 self._controller = None
 
 
-def build_server(directory: Path, principal: str, *, pentest_runtime=None, pentest_resolver=None) -> FastMCP:
-    tasks: dict[str, asyncio.Task] = {}
-    dispatchers: dict[str, Dispatcher] = {}
-    native_services: dict[str, ComposeRunService] = {}
-    subfinder_services: dict[str, SubfinderDiscovery] = {}
+class ServerState:
+    """One process-owned engagement state, independent of client sessions."""
+
+    def __init__(self, directory: Path, principal: str):
+        self.slot = ControllerSlot(directory, principal)
+        self.tasks: dict[str, asyncio.Task] = {}
+        self.dispatchers: dict[str, Dispatcher] = {}
+        self.native_services: dict[str, ComposeRunService] = {}
+        self.subfinder_services: dict[str, SubfinderDiscovery] = {}
+
+    async def shutdown(self):
+        for service in self.subfinder_services.values():
+            await service.shutdown()
+        for service in self.native_services.values():
+            await service.shutdown()
+        for dispatcher in self.dispatchers.values():
+            await dispatcher.shutdown()
+        for task in tuple(self.tasks.values()):
+            task.cancel()
+        if self.tasks:
+            await asyncio.gather(*tuple(self.tasks.values()), return_exceptions=True)
+        self.slot.close()
+
+
+def build_server(directory: Path, principal: str, *, pentest_runtime=None, pentest_resolver=None,
+                 shared_state: ServerState | None = None) -> FastMCP:
+    state = shared_state or ServerState(directory, principal)
+    tasks, dispatchers = state.tasks, state.dispatchers
+    native_services, subfinder_services = state.native_services, state.subfinder_services
 
     @asynccontextmanager
     async def lifespan(server):
-        slot = ControllerSlot(directory, principal)
         try:
-            yield slot
+            yield state.slot
         finally:
-            for service in subfinder_services.values():
-                await service.shutdown()
-            for service in native_services.values():
-                await service.shutdown()
-            for dispatcher in dispatchers.values():
-                await dispatcher.shutdown()
-            for task in tuple(tasks.values()):
-                task.cancel()
-            if tasks:
-                await asyncio.gather(*tuple(tasks.values()), return_exceptions=True)
-            slot.close()
+            if shared_state is None:
+                await state.shutdown()
 
     server = FastMCP(
         "security-lab",
-        instructions=("Manage one evidence-backed engagement in the current Codex chat. "
+        instructions=("Manage evidence-backed engagements in the current operator chat (Codex or OpenCode). "
                       "Public-source OSINT is available. Typed HTTP workers remain disabled; an opt-in existing PentestGPT Compose adapter is separate. Never present synthetic fixture data "
                       "as OSINT. The operator delegates authorization to explicit tasks in this chat. "
                       "Use no elicitation or extra approval cards. Discovery is not a checks command; "
                       "PoC requires a separate explicit task. Activate only the saved manifest matching "
-                      "that task, never silently widen scope. Read integration_status before claiming readiness."),
+                      "that task, never silently widen scope. Read integration_status before claiming readiness. "
+                      "In shared mode read get_case and supply its revision as expected_revision for proposals, "
+                       "native checks launches and resume; on conflict reread, never automatically retry a mutation. "
+                       "Before continuing an existing case read get_case_history, prior evidence and checkpoints; "
+                       "pursue open hypotheses and justify repeats. Record a checkpoint before handoff."),
         lifespan=lifespan,
     )
     read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
@@ -91,6 +111,12 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
 
     def controller(ctx: Context) -> Controller:
         return ctx.request_context.lifespan_context.get()
+
+    def revision_guard(ctx: Context, case_id: str, expected_revision: int | None):
+        c = controller(ctx)
+        if shared_state is not None or expected_revision is not None:
+            c.check_revision(case_id, expected_revision)
+        return c
 
     def dispatcher(ctx: Context, *, fixture: bool = False) -> Dispatcher:
         key = 'fixture' if fixture else 'production'
@@ -124,7 +150,8 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
 
     @server.tool(annotations=external)
     async def start_nmap_scan(case_id: str, host: str, ports: list[int], ctx: Context,
-                              seconds: int = 30, ipv6: bool = False) -> dict[str, Any]:
+                              seconds: int = 30, ipv6: bool = False,
+                              expected_revision: int | None = None) -> dict[str, Any]:
         """Run stock nmap TCP connect scan on exact approved network_targets.
 
         Host DNS supplies address pins. No model-provided IPs, command flags,
@@ -133,25 +160,76 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         No HTTP proxy or interception is used by nmap; new service needs IaC apply.
         Poll get_job_status and get_report for actual CLI output. No provider call.
         """
+        revision_guard(ctx, case_id, expected_revision)
         return await native_service(ctx).start_nmap(case_id, host, ports, seconds=seconds, ipv6=ipv6)
 
     @server.tool(annotations=external)
-    async def start_pentestgpt_run(case_id: str, ctx: Context) -> dict[str, Any]:
+    async def start_service_check(case_id: str, specification: dict[str, Any], ctx: Context,
+                                   ipv6: bool = False, expected_revision: int | None = None) -> dict[str, Any]:
+        """Run one scoped HTTP/API, curl, nmap version-light or TLS/PostgreSQL handshake.
+
+        Read get_tool_catalog for strict specification schemas. Uses the clean
+        PentestGPT tools service, host-selected DNS pins, fixed arguments and
+        case budgets; no provider, shell, credentials or arbitrary payloads.
+        No caller-selected NSE; Nmap's automatic version scripts may run.
+        HTTP requires exact URL/method scope; tool=http accepts query/public
+        headers and GET/HEAD/OPTIONS. POST/body requires start_poc_action and the
+        exact separately activated request. Service/TLS requires network scope.
+        One selected address is checked. Version probes have a wall deadline,
+        not independently enforced RPS. Poll job status and read real receipts.
+        """
+        revision_guard(ctx, case_id, expected_revision)
+        return await native_service(ctx).start_check(case_id, specification, ipv6=ipv6)
+
+    @server.tool(annotations=external)
+    async def start_poc_action(case_id: str, manifest_id: str, finding_id: str, ctx: Context,
+                               ipv6: bool = False, expected_revision: int | None = None) -> dict[str, Any]:
+        """Execute one EXACT saved HTTP request from a separately activated action plan.
+
+        Requires the operator's explicit current-chat PoC task, completed checks
+        review and matching activated manifest/finding. No new request/payload
+        arguments: immutable action.request is authoritative. HTTP scope still
+        checks host/service/path/method. No auth, redirect or arbitrary shell.
+        Does not replay an attempted action. Poll status and read the receipt;
+        a matching response predicate is not proof of vulnerability or impact.
+        """
+        revision_guard(ctx, case_id, expected_revision)
+        return await native_service(ctx).start_action(case_id, manifest_id, finding_id, ipv6=ipv6)
+
+    @server.tool(annotations=external)
+    async def start_pentestgpt_run(case_id: str, ctx: Context,
+                                   targets: list[str] | None = None,
+                                   expected_revision: int | None = None) -> dict[str, Any]:
         """Launch the EXISTING PentestGPT agent for this chat-approved scope.
 
         Starts the real model provider and native CLI tools, never a synthetic
         backend. Host configuration supplies SSH/Compose, not model arguments.
         The existing agent has full native shell access: checks-only behavior
         is instructed by its fixed goal, not independently enforced. Reduced
-        path/exclusion scopes are rejected. This is not permission for PoC.
+        path/exclusion scopes are rejected (use typed HTTP instead). Select up to
+        16 exact HTTP/TCP services using targets; omitted means all saved services
+        if they fit. Selection never changes the saved scope. Multi-target/TCP
+        requires the updated image; TCP uses the IaC native direct-egress service
+        with prompt-only scope restrictions. This is not permission for PoC.
         Poll get_job_status; final native trace receipts are in the case report.
         """
-        return await native_service(ctx).start(case_id)
+        revision_guard(ctx, case_id, expected_revision)
+        return await native_service(ctx).start(case_id, targets=targets)
 
     @server.tool(annotations=read)
     def get_tool_catalog(ctx: Context) -> list[dict]:
         """Read implemented planners and production qualification gaps; no tools are installed by this call."""
-        return model_tool_catalog()
+        return model_tool_catalog() + native_check_catalog(pentest_runtime is not None)
+
+    @server.tool(annotations=external)
+    async def get_runtime_inventory(ctx: Context) -> dict[str, Any]:
+        """Inspect actual clean tools image versions and multi-target/TCP launcher capability.
+
+        Starts a short owned diagnostic container; zero target requests and no
+        model/provider/credential access. Reports whether native Compose service
+        is applied. Version inventory alone does not qualify target execution.
+        """
+        return await native_service(ctx).runtime.inventory()
 
     @server.tool(annotations=read)
     def get_pentest_context(case_id: str, ctx: Context) -> dict[str, Any]:
@@ -192,11 +270,22 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
     def integration_status(ctx: Context) -> dict[str, Any]:
         """Report actual integration gaps and whether live jobs are enabled."""
         return {**Controller.integration_status(), 'live_execution': pentest_runtime is not None,
+                'case_continuity_revision': 1, 'native_service_checks_revision': 2,
+                'native_targets_revision': 2, 'runtime_inventory_tool': 'get_runtime_inventory',
+                'poc_execution': pentest_runtime is not None,
+                'poc_execution_profiles': ['saved_http_request'],
+                'poc_execution_tool': 'start_poc_action',
+                'shared_controller': shared_state is not None,
+                'client': delegate_client.get(),
+                'chat_authorization': delegate_client.get() + '_operator_delegation',
                 'live_execution_modes': ['existing_compose_runtime'] if pentest_runtime is not None else [],
                 'typed_http_worker_execution': False, 'existing_pentestgpt_adapter': {
             'configured': pentest_runtime is not None,
             'nmap_tool': 'start_nmap_scan', 'provider_tool': 'start_pentestgpt_run',
             'subfinder_tool': 'start_subfinder_discovery',
+            'service_check_tool': 'start_service_check',
+            'service_check_profiles': ['curl', 'http', 'nmap_service', 'tls'],
+            'case_history_tools': ['get_case_history', 'record_case_checkpoint', 'get_manifest'],
             'nmap_service': getattr(getattr(pentest_runtime, 'config', None), 'tool_service', None),
             'tool_service_requires_applied_compose': True,
             'execution_mode': 'existing_compose_runtime', 'phase_enforcement': 'prompt_only',
@@ -212,6 +301,41 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
     def get_case(case_id: str, ctx: Context) -> dict[str, Any]:
         """Read stage, surface, manifest versions and job status without capability secrets."""
         return controller(ctx).get_case(case_id)
+
+    @server.tool(annotations=read)
+    def list_cases(ctx: Context, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        """Find this operator's shared cases; bounded pagination, no evidence bodies."""
+        return controller(ctx).list_cases(offset=offset, limit=limit)
+
+    @server.tool(annotations=read)
+    def get_case_history(case_id: str, ctx: Context, after_sequence: int = 0, limit: int = 50) -> dict[str, Any]:
+        """Read paginated case audit plus latest analyst checkpoint before continuing work.
+
+        Follow next_after_sequence. Checkpoint conclusions are analyst context,
+        not verified evidence or authorization. Read linked receipts separately.
+        """
+        return controller(ctx).get_case_history(case_id, after_sequence=after_sequence, limit=limit)
+
+    @server.tool(annotations=write)
+    def record_case_checkpoint(case_id: str, checkpoint: dict[str, Any], expected_revision: int,
+                               ctx: Context) -> dict[str, Any]:
+        """Append objective, findings/hypotheses, receipt/artifact references and next steps.
+
+        Read get_case first. Does not change scope, findings evidence or job state.
+        Schema: objective, summary, items[{id,subject,status,conclusion,evidence_ids,
+        artifact_refs,next_step,retest_reason}], next_steps. Item status is observed,
+        hypothesis, verified, refuted, inconclusive, blocked or closed. This is a
+        full continuity snapshot; keep prior item IDs and unresolved items.
+        """
+        return controller(ctx).record_checkpoint(case_id, checkpoint, expected_revision=expected_revision)
+
+    @server.tool(annotations=read)
+    def get_manifest(case_id: str, manifest_id: str, ctx: Context) -> dict[str, Any]:
+        """Read an exact saved scope/action manifest body and provenance without database access.
+
+        Historical/expired approval does not authorize a new job or PoC.
+        """
+        return controller(ctx).get_manifest(case_id, manifest_id)
 
     @server.tool(annotations=write)
     def collect_lab_fixture(case_id: str, ctx: Context) -> dict[str, Any]:
@@ -258,9 +382,13 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         return c.get_case(case_id)
 
     @server.tool(annotations=write)
-    def propose_scope(case_id: str, manifest: dict[str, Any], ctx: Context) -> dict[str, Any]:
+    def propose_scope(case_id: str, manifest: dict[str, Any], ctx: Context,
+                      expected_revision: int | None = None) -> dict[str, Any]:
         """Save a strict pending checks-only scope including authorization. Never approves it."""
-        return controller(ctx).propose(case_id, "scope", manifest)
+        c = controller(ctx)
+        with c.lock:
+            revision_guard(ctx, case_id, expected_revision)
+            return c.propose(case_id, "scope", manifest, expected_revision=expected_revision)
 
     @server.tool(annotations=write)
     def activate_scope_from_task(case_id: str, manifest_id: str, ctx: Context) -> dict[str, Any]:
@@ -268,14 +396,24 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
 
         No popup. Discovery/find-information requests alone do not authorize
         checks. Do not expand the operator's targets or effects. Audit records
-        delegated Codex authority, not an independently verified human click.
+        authenticated client delegation, not an independently verified human click.
         """
         return controller(ctx).activate_from_task(case_id, manifest_id, "scope")
 
     @server.tool(annotations=write)
-    def propose_actions(case_id: str, manifest: dict[str, Any], ctx: Context) -> dict[str, Any]:
-        """Propose specific actions after checks; requires matching scope and ROE."""
-        return controller(ctx).propose(case_id, "actions", manifest)
+    def propose_actions(case_id: str, manifest: dict[str, Any], ctx: Context,
+                        expected_revision: int | None = None) -> dict[str, Any]:
+        """Propose specific actions after checks; requires matching scope and ROE.
+
+        Read get_tool_catalog manifest_schema for executable saved_http_action.
+        An action may include request {tool:http,url,method,query,headers,body,
+        seconds} and verification {status,contains}. Descriptions alone remain
+        non-executable. No credentials. Every request must match HTTP scope.
+        """
+        c = controller(ctx)
+        with c.lock:
+            revision_guard(ctx, case_id, expected_revision)
+            return c.propose(case_id, "actions", manifest, expected_revision=expected_revision)
 
     @server.tool(annotations=write)
     def activate_actions_from_task(case_id: str, manifest_id: str, ctx: Context) -> dict[str, Any]:
@@ -306,9 +444,12 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         return await (active or next(iter(dispatchers.values()))).stop(case_id)
 
     @server.tool(annotations=write)
-    def resume_case(case_id: str, ctx: Context) -> dict[str, Any]:
+    def resume_case(case_id: str, ctx: Context, expected_revision: int | None = None) -> dict[str, Any]:
         """Resume a paused case with a still-valid scope; never automatically resumes PoC."""
-        return controller(ctx).resume(case_id)
+        c = controller(ctx)
+        with c.lock:
+            revision_guard(ctx, case_id, expected_revision)
+            return c.resume(case_id)
 
     @server.tool(annotations=read)
     def get_report(case_id: str, ctx: Context) -> dict[str, Any]:

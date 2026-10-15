@@ -1,10 +1,12 @@
-# Domain surface investigation in the Codex chat
+# Domain surface investigation in the operator chat (Codex or OpenCode)
 
 Profile revision: 1. Consult `source-lock.json` beside this resource for pinned upstream methodology sources and reuse boundaries. This is an original local operational profile, not an upstream agent persona or an instruction to install another autonomous agent.
 
 ## Authority and entry point
 
-The operator delegates the stated task to Codex in this chat. An explicit instruction authorizes its named stage and targets; do not request an elicitation form, approval card, terminal command, or an extra interface. Record delegated task activation honestly; it is not an independently signed human interaction receipt.
+The operator delegates the stated task to the authenticated Codex or OpenCode client in this chat. An explicit instruction authorizes its named stage and targets; do not request an elicitation form, approval card, terminal command, or an extra interface. Record delegated task activation honestly; it is not an independently signed human interaction receipt.
+
+With the shared Controller, use `list_cases` and `get_case` to continue existing work. Read the current case immediately before a proposal, native checks launch or resume and pass its `revision` as `expected_revision`. On a conflict reread and reconcile; never automatically retry a mutation. Closing a client does not stop shared background work. Use `stop_case` explicitly, from either client.
 
 Interpret an information request as discovery. Interpret a checks instruction as checks within the stated targets and effects. A finding or a completed checks run does not authorize a PoC: the operator must give a separate explicit instruction in this same chat. Follow exclusions immediately, and stop when asked. Discovered domains, repos, IPs, prefixes, and ASNs are map entries; their discovery grants no testing scope.
 

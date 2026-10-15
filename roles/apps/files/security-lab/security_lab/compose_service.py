@@ -10,13 +10,16 @@ import asyncio
 import json
 import math
 import socket
+from urllib.parse import urlsplit
 
-from .contracts import Denied, Scope
+from .contracts import Denied, Scope, digest
 from .compose_runtime import _request_goal, prepare_handoff_context
 from .controller import Controller
 from .dispatcher import redact_worker_output
 from .handoff import build_handoff
 from .tool_catalog import NmapCheck, build_check
+from .native_checks import parse_native_check, check_subject, compile_native_check
+from .native_targets import select_native_targets
 
 
 async def resolve_addresses(host: str) -> list[str]:
@@ -36,14 +39,36 @@ class ComposeRunService:
 
     async def start_nmap(self, case_id: str, host: str, ports: list[int], *, seconds: int = 30,
                          ipv6: bool = False) -> dict:
+        return await self._start_cli(case_id, host, ports, seconds=seconds, ipv6=ipv6)
+
+    async def start_check(self, case_id: str, specification: dict, *, ipv6: bool = False) -> dict:
+        spec = parse_native_check(specification)
+        return await self._start_cli(case_id, None, [], seconds=spec.seconds, ipv6=ipv6,
+                                     specification=spec.model_dump(mode='json'))
+
+    async def start_action(self, case_id: str, manifest_id: str, finding_id: str, *, ipv6: bool = False) -> dict:
+        return await self._start_cli(case_id, None, [], seconds=0, ipv6=ipv6,
+                                     action_identity=(manifest_id, finding_id))
+
+    async def _start_cli(self, case_id, host, ports, *, seconds, ipv6, specification=None, action_identity=None):
         if self.preparing or self.tasks:
             raise Denied('A native run is already preparing or active')
         self.preparing = True
         c, job, task = self.controller, None, None
         try:
-            snapshot, manifest = c.checks_context(case_id)
+            action_binding, action = None, None
+            if action_identity is not None:
+                snapshot, manifest, action_manifest, action = c.action_context(case_id, *action_identity)
+                specification = action.request.model_dump(mode='json')
+                seconds = action.request.seconds
+                action_binding = {'task_stage': 'poc', 'action_manifest_id': action_manifest['id'],
+                                  'action_hash': action_manifest['hash'], 'finding_id': action.finding_id}
+            else:
+                snapshot, manifest = c.checks_context(case_id)
             scope = Scope.model_validate_json(manifest['body'])
-            if not any(target.host == host and set(ports) <= set(target.tcp_ports)
+            if specification is not None:
+                host = check_subject(parse_native_check(specification), scope)
+            elif not any(target.host == host and set(ports) <= set(target.tcp_ports)
                        for target in scope.network_targets):
                 raise Denied('Nmap host/ports are outside the explicit approved network scope')
             addresses = await self.resolver(host)
@@ -52,27 +77,38 @@ class ComposeRunService:
                         if ipaddress.ip_address(a).version == (6 if ipv6 else 4)]
             if not selected:
                 raise Denied('Host DNS returned no address for the selected family')
-            plan = build_check(NmapCheck(host=host, addresses=selected, ports=ports, seconds=seconds),
-                scope, stage=snapshot['state'], now=c.clock(), pinned_addresses={host: addresses})
+            if specification is not None:
+                selected = sorted(set(selected))[:1]
+                plan = compile_native_check(specification, scope, selected, stage=snapshot['state'], now=c.clock(),
+                                            task_stage='poc' if action_binding else 'checks')
+            else:
+                plan = build_check(NmapCheck(host=host, addresses=selected, ports=ports, seconds=seconds),
+                    scope, stage=snapshot['state'], now=c.clock(), pinned_addresses={host: addresses})
             binding = {'scope_id': manifest['id'], 'scope_hash': manifest['hash'],
                        'generation': snapshot['generation']}
-            job, token = c.prepare_job(case_id, 'existing-pentestgpt-compose', 'target_network', seconds,
-                                       expected_binding=binding)
-            run_id = 'nmap-' + job['id']
-            receipt_plan = {**binding, 'run_id': run_id, 'tool': 'nmap',
+            job, token = c.prepare_job(case_id, 'existing-pentestgpt-compose', plan.profile, seconds,
+                                       expected_binding=binding, action_binding=action_binding)
+            run_id = plan.tool + '-' + job['id']
+            receipt_plan = {**binding, 'run_id': run_id, 'tool': plan.tool,
                 'execution_mode': 'existing_compose_runtime', 'native_full_access': False,
-                'phase_enforcement': 'fixed_nmap_entrypoint', 'provider_called': False,
+                'phase_enforcement': 'fixed_' + plan.tool + '_entrypoint', 'provider_called': False,
                 'reduced_scope_enforced': False, 'network_ack': False,
                 'scope_enforcement': 'fixed_cli_arguments_and_host_dns_pins',
-                'target_host': host, 'target_addresses': selected, 'target_ports': ports,
+                'target_host': host, 'target_addresses': selected,
+                'target_ports': ([specification['port']] if specification and 'port' in specification else ports),
+                'specification': specification,
+                'coverage_limits': 'Single selected DNS address; no independent version-probe RPS enforcement' if specification else '',
                 'synthetic': False}
-            c.start_native_job(job['id'], token, 'existing-pentestgpt-compose', 'target_network', receipt_plan)
+            if action_binding:
+                receipt_plan.update(action_binding)
+                receipt_plan['verification'] = action.verification.model_dump(mode='json') if action.verification else None
+            c.start_native_job(job['id'], token, 'existing-pentestgpt-compose', plan.profile, receipt_plan)
             task = asyncio.create_task(self._monitor_tool(case_id, job, token, plan, run_id, receipt_plan))
             self.tasks[job['id']] = (case_id, task)
             task.add_done_callback(lambda t: self._finished(job['id'], t))
             await asyncio.sleep(0)
             return {**c.get_job_status(case_id, job['id']), 'run_id': run_id,
-                    'tool': 'nmap', 'provider_called': False}
+                    'tool': plan.tool, 'provider_called': False}
         except BaseException:
             if job is not None:
                 if task is not None:
@@ -108,11 +144,11 @@ class ComposeRunService:
                         if not closed:
                             c.stop(case_id)
                         c.finish_job(case_id, job['id'], outcome='interrupted', synthetic=False,
-                            result={'tool':'nmap', 'reason':'CLI admission interrupted after task ownership',
+                            result={'tool':plan.tool, 'reason':'CLI admission interrupted after task ownership',
                                     'access_closed':closed})
                 else:
                     c.finish_job(case_id, job['id'], outcome='failed', synthetic=False,
-                        result={'tool':'nmap', 'reason':'CLI admission failed before task ownership',
+                        result={'tool':plan.tool, 'reason':'CLI admission failed before task ownership',
                                 'access_closed':True})
             raise
         finally:
@@ -120,18 +156,21 @@ class ComposeRunService:
 
     async def _monitor_tool(self, case_id, job, token, plan, run_id, receipt_plan):
         c = self.controller
-        run = asyncio.create_task(self.runtime.run_tool(run_id=run_id, argv=plan.argv, seconds=plan.seconds))
+        if receipt_plan.get('specification') is not None:
+            run = asyncio.create_task(self.runtime.run_check(run_id=run_id, plan=plan))
+        else:
+            run = asyncio.create_task(self.runtime.run_tool(run_id=run_id, argv=plan.argv, seconds=plan.seconds))
         outcome, latest = 'failed', {}
         try:
             while not run.done():
-                c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', 'target_network')
+                c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', plan.profile)
                 remaining = job['deadline'] - c.clock()
                 if remaining <= 0:
-                    raise Denied('Approved Nmap deadline elapsed')
+                    raise Denied('Approved tool deadline elapsed')
                 await asyncio.wait({run}, timeout=min(5, remaining))
-                c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', 'target_network')
+                c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', plan.profile)
                 if not run.done():
-                    c.renew_native_job(job['id'], token, 'existing-pentestgpt-compose', 'target_network')
+                    c.renew_native_job(job['id'], token, 'existing-pentestgpt-compose', plan.profile)
             latest = await run
             outcome = 'completed' if latest.get('status') == 'completed' else 'failed'
         except asyncio.CancelledError:
@@ -151,12 +190,16 @@ class ComposeRunService:
             if not closed:
                 outcome = 'interrupted'
                 c.stop(case_id)
+            evaluation = {}
+            if receipt_plan.get('task_stage') == 'poc':
+                from .native_checks import evaluate_action_response
+                evaluation = evaluate_action_response(latest, receipt_plan.get('verification'))
             c.finish_job(case_id, job['id'], outcome=outcome, synthetic=False,
-                result={**receipt_plan, 'access_closed': closed,
+                result={**receipt_plan, **evaluation, 'access_closed': closed,
                         'receipt': redact_worker_output(json.dumps(latest, ensure_ascii=False))[:18000],
                         'verified_vulnerabilities': [], 'finding_status': 'untrusted_tool_observation'})
 
-    async def start(self, case_id: str) -> dict:
+    async def start(self, case_id: str, *, targets: list[str] | None = None) -> dict:
         if self.preparing or self.tasks:
             raise Denied('A native PentestGPT run is already preparing or active')
         self.preparing = True
@@ -165,15 +208,14 @@ class ComposeRunService:
         try:
             snapshot, manifest = c.checks_context(case_id)
             scope = Scope.model_validate_json(manifest['body'])
-            # The legacy runner accepts one target. Do not silently truncate
-            # a surface, bypass excluded paths, or promise prompt-only limits.
-            if len(scope.targets) != 1:
-                raise Denied('Existing PentestGPT runner accepts one target per run')
-            target = scope.targets[0]
-            if target.paths != ['/'] or target.excluded_paths:
-                raise Denied('Native PentestGPT cannot enforce a reduced HTTP path scope; no provider started')
-            if getattr(scope, 'network_targets', []):
-                raise Denied('Native runtime network scope is not enforced by the existing proxy')
+            execution_targets = select_native_targets(scope, targets)
+            for value in execution_targets:
+                parsed = urlsplit(value)
+                if parsed.scheme in {'http', 'https'}:
+                    service = next(t for t in scope.targets if t.host == parsed.hostname and t.scheme == parsed.scheme
+                                   and t.port == (parsed.port or (443 if parsed.scheme == 'https' else 80)))
+                    if service.paths != ['/'] or service.excluded_paths:
+                        raise Denied('Native PentestGPT cannot enforce a reduced HTTP path scope; use typed HTTP checks instead')
             # SQLite spent is REAL even when zero. Preserve the strict integer
             # Budget contract and never round fractional remaining time upward.
             seconds = math.floor(min(self.runtime.config.max_runtime_seconds,
@@ -188,13 +230,17 @@ class ComposeRunService:
             # Use the original immutable manifest for handoff validation. Only
             # the launcher receives the reduced remaining runtime budget.
             context = build_handoff(snapshot, manifest, [], now=c.clock())
+            if targets is not None or len(execution_targets) != 1 or scope.network_targets:
+                context['execution_targets'] = execution_targets
+                context['context_hash'] = digest({key: value for key, value in context.items() if key != 'context_hash'})
             # Refuse a map that cannot reach the model intact before reserving
             # a job, starting a provider or touching a container.
             # Reserve the longest allowed host-generated run path in the goal
             # preflight; the eventual chat-UUID path must fit before any job.
             descriptor = prepare_handoff_context(scope, context, run_id='preflight-' + '0' * 54)
-            target_url, _ = _request_goal(Scope.model_validate(body), descriptor)
-            job, token = c.prepare_job(case_id, 'existing-pentestgpt-compose', 'target_http', seconds,
+            target_url, _ = _request_goal(Scope.model_validate(body), descriptor, targets=execution_targets)
+            profile = 'target_network' if any(t.startswith('tcp://') for t in execution_targets) else 'target_http'
+            job, token = c.prepare_job(case_id, 'existing-pentestgpt-compose', profile, seconds,
                                        expected_binding=binding)
             run_id = 'chat-' + job['id']
             descriptor = prepare_handoff_context(scope, context, run_id=run_id)
@@ -204,10 +250,11 @@ class ComposeRunService:
                     'scope_enforcement': 'launcher_allowlist_and_existing_proxy',
                     'reduced_scope_enforced': False, 'network_ack': False,
                     'handoff_context_hash': context['context_hash'], 'handoff': descriptor,
-                    'target': target_url}
-            c.start_native_job(job['id'], token, 'existing-pentestgpt-compose', 'target_http', plan)
+                    'target': target_url, 'execution_targets': execution_targets, 'profile': profile,
+                    'network_scope_enforcement': 'prompt_only'}
+            c.start_native_job(job['id'], token, 'existing-pentestgpt-compose', profile, plan)
             started = await self.runtime.start(run_id=run_id, scope=body, osint_context=context)
-            c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', 'target_http')
+            c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', profile)
             task = asyncio.create_task(self._monitor(case_id, job, token, run_id, plan, started))
             self.tasks[job['id']] = (case_id, task)
             task.add_done_callback(lambda t: self._finished(job['id'], t))
@@ -241,13 +288,13 @@ class ComposeRunService:
         outcome, latest = 'failed', {'launch': started}
         try:
             while True:
-                c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', 'target_http')
+                c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', plan.get('profile', 'target_http'))
                 latest = await self.runtime.poll(run_id)
-                c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', 'target_http')
+                c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', plan.get('profile', 'target_http'))
                 if latest.get('status') in {'completed', 'failed', 'stopped', 'missing_or_interrupted'}:
                     outcome = 'completed' if latest['status'] == 'completed' else 'failed'
                     break
-                c.renew_native_job(job['id'], token, 'existing-pentestgpt-compose', 'target_http')
+                c.renew_native_job(job['id'], token, 'existing-pentestgpt-compose', plan.get('profile', 'target_http'))
                 await asyncio.sleep(self.poll_seconds)
         except asyncio.CancelledError:
             outcome = 'interrupted'

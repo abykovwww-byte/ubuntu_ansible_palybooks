@@ -7,6 +7,21 @@ metadata:
 
 # Abykovserv IaC Deploy
 
+## Current agent and checkout
+
+This skill is shared by Codex and OpenCode. Resolve the repository from the
+active workspace rather than assuming the historical workstation path below.
+For the Pentest GPT checkout on the `albykov` Windows host, the repository is
+`%USERPROFILE%\Documents\Pentest GPT\ubuntu_ansible_palybooks` and the
+existing Security Lab SSH identity is `~/.ssh/id_ed25519`. Use that explicitly
+for this checkout; `id_ed25519_codex_abykovserv` below describes the older Tavern
+workstation and is not present on this host. Never read private-key contents.
+
+Codex sandbox escalation fields below apply only when its shell tool supports
+them. OpenCode must use its own tool permission mechanism; never pass
+`sandbox_permissions` or `prefix_rule` to an unsupported tool. These adaptations
+do not change IaC authority, the sudo boundary or deployment verification.
+
 Use this skill for deployment, operations, and configuration changes for the
 user's home server:
 

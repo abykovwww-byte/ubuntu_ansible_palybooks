@@ -1,6 +1,28 @@
 # Security Lab control plane — integration prototype
 
-The operator uses the existing Codex Desktop chat throughout OSINT → surface
+## Shared operator clients
+
+Codex and OpenCode can now share the same cases concurrently through one
+process-owned local MCP service. See [SHARED-SERVICE.md](SHARED-SERVICE.md) for
+installation, lifecycle, audit identity, revision conflicts and recovery. The
+canonical `codex-skills/security-lab-operator` skill covers both clients. The
+historical implementation/qualification notes below retain their original dates
+and do not imply new runtime qualification from this client integration.
+
+Continuation now uses `get_case_history`, `get_manifest` and append-only
+`record_case_checkpoint` snapshots before choosing further checks. The native
+handoff includes prior job history and the latest checkpoint. The managed
+`start_service_check` entrypoint adds pinned curl GET/HEAD, single-port Nmap
+version-light, typed public HTTP/API and TLS/PostgreSQL SSLRequest profiles. See
+[case continuity and native service checks](SHARED-SERVICE.md#case-continuity-and-native-service-checks)
+for contracts and qualification limits. `start_poc_action` executes one exact
+saved HTTP action after separate action activation. Native PentestGPT now accepts
+an explicit slice of up to 16 HTTP/TCP services from the existing scope; the
+updated image and native TCP Compose service must be applied first. Use
+`get_runtime_inventory` to distinguish implemented adapters from deployed runtime
+capabilities. Response predicates do not independently verify vulnerability impact.
+
+The operator uses the Codex or OpenCode chat throughout OSINT → surface
 review → checks → separately requested PoC. On 2026-10-06 the operator explicitly
 delegated authorization to tasks in that chat. No extra confirmation form,
 elicitation callback, operator CLI or approval website is used.
