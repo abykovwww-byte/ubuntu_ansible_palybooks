@@ -224,7 +224,8 @@ class Docker:
             self.exists = False
         elif args[0] == "rm":
             self.exists = False
-        return SimpleNamespace(returncode=code, stdout=output, stderr="")
+        return SimpleNamespace(returncode=code, stdout=output if kwargs.get('text') else output.encode(),
+                               stderr="" if kwargs.get('text') else b"")
 
 
 def payload(tmp_path, operation):
@@ -391,6 +392,50 @@ def test_fixed_nmap_receipt_and_no_provider_invocation(tmp_path):
     assert len(runner.calls) == 1
 
 
+def test_host_post_preserves_multipart_and_records_binary_response(monkeypatch, tmp_path):
+    import hashlib
+    from security_lab.native_checks import evaluate_action_response
+    request = payload(tmp_path, 'tool')
+    body = '------fixture\r\nContent-Disposition: form-data; name="file"; filename="test.rtf"\r\n\r\n{\\rtf1 safe}\r\n------fixture--\r\n'
+    request.update(kind='http', seconds=10, argv=['/usr/bin/curl', '--request', 'POST',
+        '--header', 'content-type: multipart/form-data; boundary=----fixture', '--data-raw', body,
+        '--url', 'https://fixture.example.test/convert'])
+    binary = b'PK\x03\x04\xff\xfe\x00\x80' * 4000
+    response = (b'HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\n'
+        b'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n'
+        + binary + b'\nSECURITY_LAB_HTTP_STATUS:200\n')
+    real_run = subprocess.run
+
+    class BinaryDocker(Docker):
+        def run(self, command, **kwargs):
+            if '--entrypoint' not in command:
+                return super().run(command, **kwargs)
+            self.calls.append((command, kwargs))
+            assert command[command.index('--data-raw') + 1] == body
+            # Exercise Python's actual pipe decoding, not a pre-decoded mock.
+            if kwargs.get('text'):
+                kwargs['encoding'] = 'utf-8'  # Server locale, independent of the Windows test host.
+            program = ('import sys; sys.stdout.buffer.write('
+                + repr(response[:response.index(binary)]) + ' + ' + repr(binary[:8]) + ' * 4000 + '
+                + repr(b'\nSECURITY_LAB_HTTP_STATUS:200\n')
+                + '); sys.stderr.buffer.write(b"diagnostic \\xff")')
+            return real_run([sys.executable, '-c', program], **kwargs)
+
+    docker = BinaryDocker(request)
+    reply = execute_host(monkeypatch, request, docker)
+    assert reply['ok'] is True
+    receipt = reply['result']
+    assert receipt['access_closed'] is True and not receipt['receipts_truncated']
+    row = receipt['receipts'][0]
+    assert 'Content-Type: application/vnd.openxmlformats' in row['stdout']
+    assert row['response_body'] == {'representation': 'binary_summary', 'size_bytes': len(binary),
+        'sha256': hashlib.sha256(binary).hexdigest(), 'prefix_hex': binary[:16].hex()}
+    assert len(row['stdout']) < 1000
+    assert evaluate_action_response(receipt, {'status': 200})['poc_observation'] == 'expected_observation_matched'
+    assert evaluate_action_response(receipt, {'contains': 'binary response'})['poc_observation'] == 'inconclusive'
+    assert len([command for command, _ in docker.calls if '--entrypoint' in command]) == 1
+
+
 def test_stop_terminal_and_secret_receipts_redacted(tmp_path):
     class SensitiveRunner(Runner):
         async def __call__(self, command, *, payload, timeout):
@@ -470,9 +515,9 @@ def test_host_version_real_stderr_and_passive_capture(monkeypatch, tmp_path):
         def run(self, command, **kwargs):
             result = super().run(command, **kwargs)
             if '-version' in command:
-                return SimpleNamespace(returncode=0, stdout='', stderr='[INF] Current Version: v2.16.0\n')
+                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'[INF] Current Version: v2.16.0\n')
             if '/usr/local/bin/subfinder' in command:
-                return SimpleNamespace(returncode=2, stdout='{"host":"api.example.test","input":"example.test"}\n', stderr='source unavailable')
+                return SimpleNamespace(returncode=2, stdout=b'{"host":"api.example.test","input":"example.test"}\n', stderr=b'source unavailable')
             return result
     request = {**payload(tmp_path, 'version'), 'kind':'subfinder', 'argv':[], 'seconds':90}
     docker = PassiveDocker(request)

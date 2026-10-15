@@ -155,6 +155,15 @@ binding and closure are evidence. An expected response match is not an
 independent vulnerability/impact verdict; truncated or failed output remains
 inconclusive. No database migration or historical evidence rewrite is needed.
 
+The SSH host adapter captures tool pipes as bytes. For a non-UTF-8 HTTP body it
+retains the response headers/status and a bounded binary summary (byte count,
+SHA-256 and 16-byte hex prefix), rather than decoding a DOCX/ZIP as text. Status
+predicates can match that response; body-marker predicates remain inconclusive
+when the body is summarized. These are response observations, not validation of
+the returned document or vulnerability impact. Refresh the idle shared daemon
+after updating this adapter; its trusted host program is sent over SSH per job,
+so this fix does not require rebuilding the tools image or an Ansible apply.
+
 ## Multi-target and TCP native agent
 
 `start_pentestgpt_run(..., targets=[...])` selects 1..16 exact HTTP/TCP services

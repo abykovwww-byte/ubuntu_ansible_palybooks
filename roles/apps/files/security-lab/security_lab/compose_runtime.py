@@ -78,7 +78,7 @@ class ComposeRuntimeConfig:
 # Fixed trusted program. Payload arrives separately on stdin, never embedded in
 # shell text. Neither model input nor a provider artifact selects a command/path.
 _HOST_SCRIPT = r'''
-import json, os, pathlib, re, stat, subprocess, sys, time
+import hashlib, json, os, pathlib, re, stat, subprocess, sys, time
 p = json.load(sys.stdin)
 store = HandoffStore(p["workspace_directory"], p["run_id"], p["owner"], p["handoff"]) if p.get("handoff") is not None else None
 def docker(args, timeout=None):
@@ -87,6 +87,30 @@ def docker(args, timeout=None):
     if r.returncode:
         raise RuntimeError("Docker operation failed")
     return r.stdout
+def tool_output(raw, kind):
+    # curl --include can return a DOCX/ZIP or another non-text body. Decode only
+    # after pipe capture, so a successful POST cannot become a transport failure.
+    metadata = {}
+    if kind == 'http':
+        status = re.search(rb'\nSECURITY_LAB_HTTP_STATUS:(\d{3})\n?$', raw)
+        if status is not None:
+            response, headers = raw[:status.start()], b''
+            while response.startswith(b'HTTP/1.'):
+                separator = re.search(rb'\r?\n\r?\n', response)
+                if separator is None:
+                    break
+                block, response = response[:separator.end()], response[separator.end():]
+                headers += block
+                if not re.match(rb'HTTP/1\.[01] 1\d\d\b', block):
+                    try:
+                        response.decode('utf-8')
+                    except UnicodeDecodeError:
+                        metadata['response_body'] = {'representation':'binary_summary',
+                            'size_bytes':len(response), 'sha256':hashlib.sha256(response).hexdigest(),
+                            'prefix_hex':response[:16].hex()}
+                        raw = headers + b'[binary response body omitted]\n' + raw[status.start():]
+                    break
+    return raw.decode('utf-8', errors='replace'), metadata
 def owned():
     query = ["ps", "--all", "--filter", "name=^/"+p["container_name"]+"$", "--format", "{{.ID}}"]
     ids = docker(query).split()
@@ -276,7 +300,7 @@ try:
         started = time.time()
         try:
             execution = subprocess.run(command, cwd=p["compose_directory"], capture_output=True,
-                text=True, timeout=seconds+25)
+                timeout=seconds+25)
         except BaseException:
             close()
             raise
@@ -284,15 +308,17 @@ try:
         close()
         finished = time.time()
         maximum = p["max_receipt_chars"]
+        stdout, output_metadata = tool_output(execution.stdout, p['kind'])
+        stderr = execution.stderr.decode('utf-8', errors='replace')
         result = {"status":"completed" if execution.returncode == 0 else "failed", "access_closed":True,
             "receipts":[{"type":"command_run", "command":argv, "exit_code":execution.returncode,
                 "started_at":started, "finished_at":finished,
-                "stdout":execution.stdout[:maximum], "stderr":execution.stderr[:maximum]}],
+                "stdout":stdout[:maximum], "stderr":stderr[:maximum], **output_metadata}],
             "started_at":started, "finished_at":finished,
-            "receipts_truncated":len(execution.stdout)>maximum or len(execution.stderr)>maximum,
+            "receipts_truncated":len(stdout)>maximum or len(stderr)>maximum,
             "receipt_kind":"real_compose_"+p["kind"], "verified_vulnerabilities":[]}
         if p["operation"] == "version":
-            reported = re.findall(r"(?<![A-Za-z0-9])v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]{1,50})?", execution.stdout+"\n"+execution.stderr)
+            reported = re.findall(r"(?<![A-Za-z0-9])v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]{1,50})?", stdout+"\n"+stderr)
             versions = {version.lstrip("v") for version in reported}
             if execution.returncode != 0 or len(versions) != 1:
                 raise RuntimeError("Actual Subfinder version unavailable or ambiguous")
