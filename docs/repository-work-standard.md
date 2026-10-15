@@ -71,6 +71,14 @@ detail.
 
 ## Skill source of truth
 
+Security Lab also supports OpenCode as an operator client. Its canonical
+`codex-skills/security-lab-operator` skill is installed for Codex and discovered
+directly from source by OpenCode. Both clients use local STDIO bridges to one
+loopback service, preserving the existing cases, operator principal and native
+runtime configuration. Lifecycle, setup and concurrency rules are documented in
+`roles/apps/files/security-lab/SHARED-SERVICE.md`. This does not change RP Stack
+plugin registration or server deployment authority.
+
 - `codex-skills/` is canonical. `%USERPROFILE%\.codex\skills\` contains
   generated installed copies, never independently edited sources.
 - The retired duplicate under the parent `Tavern/codex-skills/` was consolidated

@@ -40,7 +40,7 @@ class WorkerResult:
 def redact_worker_output(value: str) -> str:
     # curl includes response headers. Hide complete unquoted cookie/auth lines
     # before shared public-text sanitization and before taking any preview/hash.
-    value = re.sub(r'(?im)^(authorization|proxy-authorization|cookie|set-cookie)[ \t]*:[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*',
+    value = re.sub(r'(?im)^(?:[<>] )?(authorization|proxy-authorization|cookie|set-cookie)[ \t]*:[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*',
                    r'\1: [REDACTED_CREDENTIAL]', value)
     return redact_public_text(value)
 

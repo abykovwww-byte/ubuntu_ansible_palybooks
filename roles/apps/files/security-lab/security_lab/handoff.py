@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from .contracts import Denied, Scope, canonical, digest
 from .osint_sources import source_catalog
+from .case_history import continuation
 
 
 CHECKS_STATES = {"scope_approved", "checking", "checks_review"}
@@ -201,6 +202,7 @@ def build_handoff(case_export: dict, scope_manifest: dict, available_tools: list
             "rules_of_engagement": scope.authorization.model_dump(mode="json"),
             "policy": dict(POLICY),
             "available_tools": _tools(available_tools),
+            "case_continuation": continuation(case_export),
             "untrusted_osint_data": {
                 "trust": "untrusted_external_data", "semantic_independent_verification_completed": False,
                 "surface_nodes": nodes, "relations": links,

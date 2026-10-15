@@ -113,7 +113,7 @@ def test_goal_preserves_constraints_and_uses_only_full_file_descriptor():
     assert "do not repeat file verification" in goal
     assert "proceed to GET or HEAD" in goal
     many = scope(targets=[{"host":"fixture.example.test", "paths":["/one", "/two"]}])
-    with pytest.raises(Denied, match="one exact target"):
+    with pytest.raises(Denied, match="descriptor"):
         _request_goal(Scope.model_validate(many), {})
 
 
@@ -270,7 +270,7 @@ def test_host_launch_exact_allowlist_and_existing_topology(monkeypatch, tmp_path
     assert "PENTESTGPT_ALLOWED_TARGET_DOMAINS=" in launch
     assert "PENTESTGPT_ALLOWED_TARGETS="+request["target"] in launch
     assert "--privileged" not in launch and "--network" not in launch and "--volume" not in launch
-    assert launch[-7:] == ["pentestgpt-run", "--run-id", "owned", "--target", request["target"], "--goal", request["goal"]]
+    assert launch[-7:] == ["pentestgpt-run", "--run-id", "owned", "--goal", request["goal"], "--target", request["target"]]
     assert result["result"]["status"] == "running"
 
 

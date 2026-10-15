@@ -1,0 +1,214 @@
+# Shared Security Lab MCP: Codex and OpenCode
+
+## Ownership and transport
+
+`shared_server.py` runs one process-owned `ServerState`: Controller, SQLite
+writer, discovery tasks, native run service and dispatchers. MCP request/session
+lifetimes borrow that state and never close it. One authenticated loopback HTTP
+endpoint serves both operator clients; it is not a new public API or Web UI.
+
+Each client starts `client_proxy.py --settings <private-service.json> --client
+codex|opencode` as its local STDIO MCP server. This bridge forwards JSON-RPC,
+preserving request IDs, resources and structured results. It starts the daemon
+on demand under a startup lock, then reconnects to the same daemon on subsequent
+agent starts. No scheduler, administrator service installation or open terminal
+is required. STDIO EOF does not stop engagements. A failed tool call is never
+automatically replayed.
+
+On Windows the user-owned daemon is launched through `Win32_Process.Create`
+rather than as a bridge child: MCP SDK hosts terminate bridge descendant trees
+on disconnect, even for detached children. The real-process test verifies the
+daemon survives both clients closing.
+
+The HTTP listener binds only `127.0.0.1`. Separate private client credentials
+select the request-local client identity, never an MCP argument. Exact Host,
+route and absence of browser Origin/query credentials are checked. The daemon
+does not trust forwarded headers or environment proxies. Credentials live in a
+user-private directory outside Git and are not included in either agent config.
+
+The existing operator principal and data directory remain authoritative. No
+SQLite schema migration is required. Historical approved_by/source fields remain
+unchanged; new approvals use `delegated:codex:<principal>` or
+`delegated:opencode:<principal>`. New audit details include the client identity.
+Agent delegation is still not independently authenticated human-click evidence.
+
+## Install and switch
+
+Use the existing `security-lab/.venv/Scripts/python.exe` on Windows. From this
+directory, `configure_shared.py` performs a dry-run by default. `--apply` changes
+only the Security Lab registration in the current Codex/OpenCode configs,
+preserves legacy store/principal/SSH options, installs the operator skill for
+Codex and registers canonical skill paths for OpenCode. It refuses the switch
+while durable jobs or discovery runs are active. Private host settings default
+to `%USERPROFILE%/.local/share/security-lab/service.json`.
+
+The global OpenCode JSONC file currently uses plain JSON. The installer requires
+that parseable format and refuses an unsupported/commented format rather than
+silently stripping comments. Both config updates are parsed and checked for
+unrelated structural changes before writing.
+
+Before starting the shared daemon, refresh/disconnect the old Codex STDIO server
+so that it releases its Controller lock. Existing idle legacy processes may be
+closed during the one-time switch only after checking there is no active work.
+On Windows, `configure_shared.py --apply --retire-idle-legacy` performs that
+explicit one-time cleanup for the exact registered script and case directory.
+Do not kill an active worker or delete the lock file to bypass ownership.
+Restart OpenCode and refresh/restart Codex so their new MCP configuration loads.
+
+## Lifecycle
+
+Host maintenance commands use the same bridge, adding `--service start`,
+`--service status`, or `--service stop`. These commands are not required for an
+engagement and are not MCP tools. `stop` is graceful and refuses while any
+durable work is active; use the case stop tool first. The private
+`service.service.log` contains daemon startup diagnostics, with HTTP access
+logging disabled. Never print its whole contents without checking for sensitive
+diagnostics. The service starts again on the next bridge connection after a
+host reboot or an explicit shutdown.
+
+A process restart retains existing conservative recovery: interrupted jobs are
+revoked/paused and discovery is marked interrupted. No scanner, provider or PoC
+automatically resumes. Do not equate HTTP readiness with server runtime or
+provider qualification; use `integration_status` and actual job receipts.
+
+## Concurrent operations
+
+`list_cases(offset, limit)` discovers the common operator history. `get_case`
+includes an audit-cursor `revision`. Shared-mode proposals, native checks
+launches and resume require that value as `expected_revision`. Proposal checks
+and writes are serialized; exact pending-manifest IDs protect activation from
+replay or supersession. Existing generation, scope-hash, lease and service
+admission checks remain authoritative during asynchronous native preparation.
+Emergency case stop intentionally requires no revision.
+
+Parallel client connections do not increase native runtime concurrency. The
+same job pool rejects a duplicate native launch. A disconnect only closes a
+bridge/session; an explicit case stop from either agent revokes the case and
+joins its owned workers. A stale command returns a conflict and requires a new
+read/reconciliation, never an automatic mutation retry.
+
+## Case continuity and native service checks
+
+Before continuing an engagement, read `get_case`, `get_case_history` (follow
+`next_after_sequence`), the relevant report receipts and exact `get_manifest`
+bodies. Legacy direct-run reports may also live in the workstation's `outputs/`
+and `work/`; a missing checkpoint is not proof that testing did not happen.
+
+`record_case_checkpoint` appends an analyst snapshot to the existing audit log,
+requiring the current `expected_revision`. It preserves finding IDs, uncertainty,
+evidence/artifact references, next steps and reasons for retests. Evidence IDs
+must belong to the same case. Checkpoints do not alter immutable evidence,
+manifests, stage or authorization. There is no schema migration. The native
+PentestGPT handoff now includes `case_continuation` with the latest checkpoint
+and projected job history; checkpoint text remains untrusted analyst context.
+
+`start_service_check` extends the managed `pentest-tools` toolbox with fixed
+single-service profiles selected by `specification.tool`:
+
+- `curl`: exact approved GET/HEAD URL, standard TLS verification, host DNS pin,
+  no redirects, query, credentials, custom headers or payloads;
+- `http`: pinned GET/HEAD/OPTIONS with separately encoded query parameters and
+  public Accept/Content-Type/Origin/X-Requested-With/Accept-Language headers;
+  custom Host, credentials and redirects are unsupported;
+- `nmap_service`: one explicit network-scoped TCP port, version-light, no
+  caller-selected NSE; Nmap's built-in version-category scripts may run;
+  a wall deadline bounds the operation, not a separate version-probe RPS limit;
+- `tls`: one explicit network-scoped TLS handshake with hostname/chain
+  verification, optionally `starttls=postgres` for PostgreSQL SSLRequest.
+
+Each launch requires the current case revision and consumes existing case
+budgets. DNS is consulted only after target authorization, one selected address
+is pinned, and special/private addresses require the existing address-grant
+policy. These jobs share native admission, leases, cancellation and evidence
+closure with Nmap. They do not invoke a model. POST/body execution belongs to
+the separately activated action worker described below.
+The runtime recompiles the typed plan before sending argv to the trusted host
+program; model-supplied flags, executable, image, environment and mounts are
+unsupported. The tools image explicitly installs OpenSSL for the TLS profile.
+
+`get_tool_catalog` distinguishes `compose:*` profiles from unqualified typed
+worker planners. Configuration/availability does not claim live qualification;
+retain real CLI receipts after applying the tools image. Refresh the shared
+daemon and restart clients after source/skill updates so schemas are rediscovered.
+
+## Executable saved actions
+
+`Action.request` optionally holds an exact typed HTTP request. `Action.verification`
+optionally holds an expected status/body marker. Absent fields are omitted when
+serializing, preserving historical action hashes. Descriptive legacy actions
+remain readable but non-executable. Every saved request must match the current
+HTTP service, path and method permissions as well as the action host/time bounds.
+
+The operator's separate PoC task activates an exact action manifest. Thereafter
+`start_poc_action(case_id, manifest_id, finding_id, expected_revision)` loads that
+saved request; it accepts no replacement payload. The Controller seals action
+ID/hash/finding alongside current scope/hash/generation, checks authorization and
+expiry throughout the job, and charges the same case budget. State transitions
+are `actions_approved -> poc_running -> checks_review`. Other unattempted actions
+in the same still-valid activated plan can be selected individually from review.
+An attempted action is not replayed; stop/restart/resume never resumes PoC.
+
+Execution uses the clean tools container, not the full-access model. GET/HEAD/
+OPTIONS and explicitly saved POST bodies are supported. POST cannot run through
+the checks entrypoint. Actual CLI output, response predicate, finding/manifest
+binding and closure are evidence. An expected response match is not an
+independent vulnerability/impact verdict; truncated or failed output remains
+inconclusive. No database migration or historical evidence rewrite is needed.
+
+## Multi-target and TCP native agent
+
+`start_pentestgpt_run(..., targets=[...])` selects 1..16 exact HTTP/TCP services
+from the existing immutable scope. The upstream limit is per run, not per case.
+Larger cases select a focused slice without reauthorizing a different scope;
+the complete original scope and history stay in the hash-bound file handoff.
+The `execution_targets` array is the narrower run selection. Reduced HTTP path/
+exclusion scopes remain unsupported by the full-access agent and use typed HTTP.
+
+The managed launcher now forwards repeated `--target` arguments and accepts
+exact `tcp://hostname:port` targets; TCP does not inherit domain wildcard grants.
+`--capabilities` reports revision 2 without provider/auth access. Before any
+multi-target/TCP provider launch, the host verifies that deployed capability,
+preventing old single-target launchers silently keeping only the last argument.
+
+The IaC `pentestgpt-native` service extends the existing agent with direct egress
+and empty HTTP/HTTPS/ALL proxy variables for TCP tasks. It retains the existing
+provider configuration, workspace, runs, FULL_ACCESS and container resource
+bounds. Network/phase restrictions are prompt-only, not a receiving-side firewall.
+HTTP-only runs keep the existing proxy service. Missing image/service updates
+return `native_image_update_required` or `native_service_not_applied` before
+provider launch, rather than an ambiguous network failure.
+
+`get_runtime_inventory` performs only clean-container version/capability checks;
+it reports actual curl/Nmap/OpenSSL availability, launcher revision and native
+Compose service presence, with zero target requests/provider calls. It does not
+qualify arbitrary target actions. `lab/qualify_stack_runtime.py` verifies this
+through the installed STDIO bridge while checking existing case revisions remain
+unchanged. Apply image/Compose changes through the repository IaC workflow.
+
+## Recovery and rollback
+
+1. Read current case/job states and stop active work explicitly if needed.
+2. Stop the shared service gracefully with the host command.
+3. Restore the saved nonsecret legacy Security Lab registration from
+   `legacy-registration.json` to the one managed Codex section; remove only the
+   OpenCode Security Lab registration if returning to Codex-only operation.
+4. Restart clients. Continue using the same principal and case directory.
+
+Do not copy a live database, rewrite historical audit, delete evidence or remove
+credentials as part of a normal rollback. Source fixes remain in the IaC repo;
+permanent server changes follow its normal deployment workflow.
+
+## Verification
+
+`tests/test_shared_service.py` exercises two independent real MCP SDK clients
+against the common ASGI app: shared history, audit attribution, revision races,
+disconnect survival, duplicate launch rejection and cross-client native stop.
+`tests/test_shared_proxy.py` runs actual STDIO subprocesses and a loopback daemon,
+including simultaneous automatic startup, durable cases after both bridges exit
+and graceful daemon shutdown. These tests use synthetic runtimes, not providers
+or external targets.
+
+`lab/qualify_shared_clients.py` uses the actual installed registrations for a
+read-only simultaneous-client check. Add `--check-migration` immediately after
+cutover to compare history with the saved migration fingerprint; omit that flag
+after legitimate engagement changes have advanced the history.

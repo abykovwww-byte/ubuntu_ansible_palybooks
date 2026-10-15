@@ -147,6 +147,7 @@ jobs:
           docker run --rm --entrypoint codex pentestgpt-abykovserv:ci login --help
           docker run --rm --network none --read-only --user 1000:1000 --tmpfs /tmp:rw,nosuid,nodev,size=32m,uid=1000,gid=1000 --entrypoint python pentestgpt-abykovserv:ci /usr/local/libexec/pentestgpt-test-codex-host.py
           docker run --rm --entrypoint pentestgpt-agent pentestgpt-abykovserv:ci --help
+          docker run --rm --network none --entrypoint pentestgpt-run pentestgpt-abykovserv:ci --capabilities
           docker run --rm --entrypoint /opt/pentestgpt-agent/.venv/bin/python pentestgpt-abykovserv:ci -c "import pentestgpt_agent, unified_agent; assert unified_agent.__version__ == '0.3.0'"
           docker run --rm --entrypoint squid pentestgpt-egress-proxy:ci -k parse -f /etc/squid/squid.conf
       - name: Verify Compose runtime, mounts, health, and network isolation
@@ -154,7 +155,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          trap 'docker compose --file compose.yml --profile manual --profile fixture --profile tools down --remove-orphans' EXIT
+          trap 'docker compose --file compose.yml --profile manual --profile native --profile fixture --profile tools down --remove-orphans' EXIT
           sudo install -d -o 1000 -g 1000 /tmp/pentestgpt/runs /tmp/pentestgpt/workspace /tmp/pentestgpt/reports
           docker compose --file compose.yml up -d --wait --wait-timeout 60 egress-proxy target-dns
           test "$(docker inspect pentestgpt-egress-proxy-1 --format '{{.State.Health.Status}}')" = "healthy"
@@ -207,6 +208,19 @@ jobs:
           done
           test "$(docker network inspect pentestgpt_control --format '{{.Internal}}')" = "true"
           test "$(docker network inspect pentestgpt_target --format '{{.Internal}}')" = "true"
+
+          # Native TCP mode is a separate explicit service. Exercise its actual
+          # image and owned fixture without login, provider or Internet targets.
+          docker compose --file compose.yml --profile fixture up -d --wait --wait-timeout 60 pentest-fixture
+          docker compose --file compose.yml --profile native run --rm -T --no-deps --entrypoint python pentestgpt-native -c '
+          import json, os, subprocess
+          assert not any(os.environ.get(key) for key in ("HTTP_PROXY","HTTPS_PROXY","ALL_PROXY"))
+          assert os.getuid() != 0
+          capabilities = json.loads(subprocess.check_output(["pentestgpt-run","--capabilities"]))
+          assert capabilities["native_targets_revision"] == 2 and capabilities["max_targets"] == 16
+          response = subprocess.run(["curl","--fail","--noproxy","*","--max-time","10","http://pentest-fixture:8080/"], capture_output=True)
+          assert response.returncode == 0 and response.stdout
+          '
 
       - name: Qualify IPv6 connections and isolation on owned endpoints
         run: python scripts/test-pentestgpt-ipv6.py /tmp/PentestGPT/compose.yml

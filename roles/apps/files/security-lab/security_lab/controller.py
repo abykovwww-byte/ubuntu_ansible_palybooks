@@ -16,6 +16,7 @@ from typing import Iterator
 
 from .contracts import ActionPlan, Denied, Scope, canonical, digest, hostname
 from .discovery_contracts import SourceResult
+from .client_identity import delegate_client
 
 
 class Controller:
@@ -174,6 +175,10 @@ class Controller:
                 raise
 
     def audit(self, db: sqlite3.Connection, case_id: str, event: str, details: object) -> None:
+        # Keep the historical actor/owner contract; add authenticated client
+        # provenance without rewriting old audit or immutable manifests.
+        if isinstance(details, dict):
+            details = {**details, "client": delegate_client.get()}
         db.execute("INSERT INTO audit(case_id,at,event,actor,details) VALUES(?,?,?,?,?)",
                    (case_id, self.clock(), event, self.principal, canonical(details)))
 
@@ -182,6 +187,89 @@ class Controller:
         if row is None:
             raise Denied("Case not found or not owned by this principal")
         return row
+
+    def list_cases(self, *, offset: int = 0, limit: int = 50) -> dict:
+        if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 100:
+            raise Denied("Case pagination requires offset >= 0 and limit between 1 and 100")
+        with self.lock:
+            total = self.db.execute("SELECT COUNT(*) FROM cases WHERE owner=?", (self.principal,)).fetchone()[0]
+            rows = self.db.execute(
+                "SELECT id,seed,state,generation,created,spent FROM cases WHERE owner=? "
+                "ORDER BY created DESC,id LIMIT ? OFFSET ?", (self.principal, limit, offset)).fetchall()
+            return {"cases": [dict(row) for row in rows], "total": total,
+                    "next_offset": offset + len(rows) if offset + len(rows) < total else None}
+
+    def check_revision(self, case_id: str, expected_revision: int | None) -> None:
+        """Compare the audit cursor under the caller's transaction/lock."""
+        with self.lock:
+            self.case(self.db, case_id)
+            actual = self.db.execute("SELECT COALESCE(MAX(sequence),0) FROM audit WHERE case_id=?", (case_id,)).fetchone()[0]
+            if type(expected_revision) is not int or expected_revision != actual:
+                raise Denied("Case revision conflict; read get_case again before issuing a new command")
+
+    def record_checkpoint(self, case_id: str, checkpoint: dict, *, expected_revision: int) -> dict:
+        from .case_history import CaseCheckpoint
+        value = CaseCheckpoint.model_validate(checkpoint).model_dump(mode='json')
+        if len(canonical(value).encode('utf-8')) > 48000:
+            raise Denied('Case checkpoint exceeds 48000 bytes')
+        if len({item['id'] for item in value['items']}) != len(value['items']):
+            raise Denied('Checkpoint item IDs must be distinct')
+        with self.transaction() as db:
+            self.check_revision(case_id, expected_revision)
+            for item in value['items']:
+                if any(len(ref) > 1000 for ref in item['artifact_refs']):
+                    raise Denied('Artifact reference too long')
+                for ref in item['evidence_ids']:
+                    if not db.execute('SELECT 1 FROM evidence WHERE id=? AND case_id=?', (ref, case_id)).fetchone():
+                        raise Denied('Checkpoint evidence not found in this case')
+            # Text can include tool output: sanitize before durable storage.
+            from .dispatcher import redact_worker_output
+            def sanitize(item):
+                if isinstance(item, str):
+                    return redact_worker_output(item)
+                if isinstance(item, list):
+                    return [sanitize(v) for v in item]
+                if isinstance(item, dict):
+                    return {key: sanitize(v) for key, v in item.items()}
+                return item
+            value = sanitize(value)
+            self.audit(db, case_id, 'case_checkpoint', {'checkpoint': value})
+            return self.get_case_history(case_id, limit=1, after_sequence=self.get_case(case_id)['revision'] - 1)
+
+    def get_case_history(self, case_id: str, *, after_sequence: int = 0, limit: int = 50) -> dict:
+        from .case_history import continuation
+        if type(after_sequence) is not int or after_sequence < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            raise Denied('History requires a nonnegative cursor and limit between 1 and 100')
+        with self.lock:
+            self.case(self.db, case_id)
+            revision = self.db.execute('SELECT COALESCE(MAX(sequence),0) FROM audit WHERE case_id=?', (case_id,)).fetchone()[0]
+            candidates = self.db.execute(
+                'SELECT sequence,at,event,actor,details FROM audit WHERE case_id=? AND sequence>? '
+                'ORDER BY sequence LIMIT ?', (case_id, after_sequence, limit + 1))
+            rows, size, more = [], 0, False
+            for row in candidates:
+                item = dict(row)
+                length = len(canonical(item).encode('utf-8'))
+                if rows and (len(rows) == limit or size + length > 64000):
+                    more = True
+                    break
+                rows.append(item)
+                size += length
+            checkpoint = self.db.execute("SELECT sequence,at,event,details FROM audit WHERE case_id=? "
+                "AND event='case_checkpoint' ORDER BY sequence DESC LIMIT 1", (case_id,)).fetchone()
+            return {'case_id': case_id, 'revision': revision, 'events': rows,
+                    'next_after_sequence': rows[-1]['sequence'] if more else None,
+                    'continuation': continuation({'audit': [dict(checkpoint)] if checkpoint else []})}
+
+    def get_manifest(self, case_id: str, manifest_id: str) -> dict:
+        with self.lock:
+            self.case(self.db, case_id)
+            row = self.db.execute('SELECT * FROM manifests WHERE case_id=? AND id=?', (case_id, manifest_id)).fetchone()
+            if row is None:
+                raise Denied('Manifest not found in this case')
+            result = dict(row)
+            result['body'] = json.loads(result['body'])
+            return result
 
     def create_case(self, seed: str) -> dict:
         seed, case_id = hostname(seed), uuid.uuid4().hex
@@ -194,6 +282,7 @@ class Controller:
     def get_case(self, case_id: str) -> dict:
         with self.lock:
             row = dict(self.case(self.db, case_id))
+            row["revision"] = self.db.execute("SELECT COALESCE(MAX(sequence),0) FROM audit WHERE case_id=?", (case_id,)).fetchone()[0]
             row["surface"] = [dict(v) for v in self.db.execute("SELECT * FROM surface WHERE case_id=?", (case_id,))]
             row["manifests"] = [dict(v) for v in self.db.execute(
                 "SELECT id,kind,version,hash,status,approved_by,approved_at FROM manifests WHERE case_id=?", (case_id,))]
@@ -356,12 +445,14 @@ class Controller:
             self.audit(db, case_id, "fixture_collected", {"synthetic": True, "network_requests": 0})
         return self.get_case(case_id)
 
-    def propose(self, case_id: str, kind: str, body: dict) -> dict:
+    def propose(self, case_id: str, kind: str, body: dict, *, expected_revision: int | None = None) -> dict:
         if kind not in {"scope", "actions"}:
             raise Denied("Unknown manifest kind")
         model = Scope.model_validate(body) if kind == "scope" else ActionPlan.model_validate(body)
         data = model.model_dump(mode="json")
         with self.transaction() as db:
+            if expected_revision is not None:
+                self.check_revision(case_id, expected_revision)
             c = self.case(db, case_id)
             if c["state"] in {"cancelled", "completed", "paused", "discovering"}:
                 raise Denied("Case is not accepting proposals")
@@ -373,8 +464,11 @@ class Controller:
                     raise Denied("Actions not covered by the approved scope/authorization")
                 if model.expires_at > scope.expires_at or model.expires_at <= self.clock():
                     raise Denied("Invalid action expiration")
-                if any(a.host not in {t.host for t in scope.targets} for a in model.actions):
+                if any(a.host not in {t.host for t in [*scope.targets, *scope.network_targets]} for a in model.actions):
                     raise Denied("Action target outside scope")
+                if any(a.request is not None and not any(t.permits(a.request.url, a.request.method)
+                       for t in scope.targets) for a in model.actions):
+                    raise Denied('Action request outside approved service, path or method')
                 if c["state"] != "checks_review":
                     raise Denied("Actions can only be proposed after checks review")
             version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM manifests WHERE case_id=? AND kind=?",
@@ -392,7 +486,7 @@ class Controller:
                 "hash": manifest_hash, "manifest": data, "status": "pending"}
 
     def activate_from_task(self, case_id: str, manifest_id: str, kind: str) -> dict:
-        """The configured Codex delegate activates a saved plan from the operator's task.
+        """The authenticated chat delegate activates a saved plan from the operator's task.
 
         This is delegated agent authority, not a claim of an independently
         authenticated UI click. The agent must have an explicit operator
@@ -416,20 +510,22 @@ class Controller:
                 actions = ActionPlan.model_validate_json(m["body"])
                 if (c["state"] != "checks_review" or actions.scope_version != scope_row["version"]
                     or actions.expires_at <= self.clock() or "poc" not in scope.authorization.actions
-                    or any(a.host not in {t.host for t in scope.targets} for a in actions.actions)):
+                    or any(a.host not in {t.host for t in [*scope.targets, *scope.network_targets]} for a in actions.actions)):
                     raise Denied("Actions no longer authorized by this scope/stage")
-            actor = "delegated:codex:" + self.principal
+            client = delegate_client.get()
+            actor = "delegated:" + client + ":" + self.principal
+            source = client + "_operator_delegation"
             db.execute("UPDATE manifests SET status='approved',approved_by=?,approved_at=? WHERE id=?",
                        (actor, self.clock(), manifest_id))
             state = "scope_approved" if kind == "scope" else "actions_approved"
             db.execute("UPDATE cases SET state=? WHERE id=?", (state, case_id))
             self.audit(db, case_id, "activated_from_operator_task",
                        {"manifest_id": manifest_id, "hash": m["hash"], "kind": kind,
-                        "source": "codex_operator_delegation", "delegate": actor,
+                        "source": source, "delegate": actor,
                         "authorization_ref": scope.authorization.reference,
                         "independent_human_receipt": False})
         return {"manifest_id": manifest_id, "status": "approved", "approved_by": actor,
-                "authorization_source": "codex_operator_delegation"}
+                "authorization_source": source}
 
     def approved_scope(self, db: sqlite3.Connection, case_id: str) -> tuple[sqlite3.Row, Scope]:
         row = db.execute("SELECT * FROM manifests WHERE case_id=? AND kind='scope' ORDER BY version DESC LIMIT 1", (case_id,)).fetchone()
@@ -440,6 +536,34 @@ class Controller:
         scope = Scope.model_validate_json(row["body"])
         scope.check_window(self.clock())
         return row, scope
+
+    def approved_action(self, db, case_id: str, manifest_id: str, finding_id: str):
+        scope_row, scope = self.approved_scope(db, case_id)
+        row = db.execute("SELECT * FROM manifests WHERE case_id=? AND kind='actions' ORDER BY version DESC LIMIT 1",
+                         (case_id,)).fetchone()
+        if not row or row['id'] != manifest_id or row['status'] != 'approved' or digest(json.loads(row['body'])) != row['hash']:
+            raise Denied('No matching current approved action plan')
+        plan = ActionPlan.model_validate_json(row['body'])
+        if (plan.scope_version != scope_row['version'] or plan.expires_at <= self.clock()
+                or 'poc' not in scope.authorization.actions):
+            raise Denied('Action plan expired or bound to a different scope')
+        action = next((a for a in plan.actions if a.finding_id == finding_id), None)
+        if action is None or action.request is None:
+            raise Denied('No executable request saved for this finding; propose an exact action request')
+        if not any(t.permits(action.request.url, action.request.method) for t in scope.targets):
+            raise Denied('Action request outside approved HTTP scope')
+        if self.clock() + action.request.seconds > plan.expires_at:
+            raise Denied('Action request exceeds action expiration')
+        return row, action
+
+    def action_context(self, case_id: str, manifest_id: str, finding_id: str):
+        with self.lock:
+            case = self.case(self.db, case_id)
+            if case['state'] not in {'actions_approved', 'checks_review'}:
+                raise Denied('Case is not in the separately activated actions stage')
+            row, scope = self.approved_scope(self.db, case_id)
+            action_row, action = self.approved_action(self.db, case_id, manifest_id, finding_id)
+            return self.export(case_id), dict(row), dict(action_row), action
 
     def revoke_in(self, db: sqlite3.Connection, case_id: str, reason: str) -> None:
         db.execute("UPDATE cases SET generation=generation+1 WHERE id=?", (case_id,))
@@ -474,7 +598,8 @@ class Controller:
             self.audit(db, case_id, "resumed", {"scope_version": row["version"], "spent": c["spent"]})
         return self.get_case(case_id)
 
-    def prepare_job(self, case_id: str, worker: str, profile: str, seconds: int, *, expected_binding: dict | None = None) -> tuple[dict, str]:
+    def prepare_job(self, case_id: str, worker: str, profile: str, seconds: int, *, expected_binding: dict | None = None,
+                    action_binding: dict | None = None) -> tuple[dict, str]:
         """Internal dispatcher API; token is not included in model-facing job status."""
         if profile not in {"target_http", "target_network"} or not 1 <= seconds <= 1800:
             raise Denied("Invalid job profile or duration")
@@ -484,7 +609,18 @@ class Controller:
             binding = {'scope_id': row['id'], 'scope_hash': row['hash'], 'generation': c['generation']}
             if expected_binding is not None and expected_binding != binding:
                 raise Denied('Pentest session scope/generation binding is stale')
-            if c["state"] not in {"scope_approved", "checking", "checks_review"}:
+            if action_binding is not None:
+                action_row, action = self.approved_action(db, case_id, action_binding['action_manifest_id'], action_binding['finding_id'])
+                exact = {'task_stage': 'poc', 'action_manifest_id': action_row['id'], 'action_hash': action_row['hash'],
+                         'finding_id': action.finding_id}
+                if action_binding != exact or c['state'] not in {'actions_approved', 'checks_review'} or seconds != action.request.seconds:
+                    raise Denied('Action execution binding/stage/duration mismatch')
+                # A new activation is required for a repeated demonstration.
+                for previous in db.execute('SELECT plan FROM job_runtime r JOIN jobs j ON j.id=r.job_id WHERE j.case_id=?', (case_id,)):
+                    prior = json.loads(previous['plan']) if previous['plan'] else {}
+                    if all(prior.get(key) == value for key, value in exact.items()):
+                        raise Denied('This exact action was already attempted; do not automatically replay it')
+            elif c["state"] not in {"scope_approved", "checking", "checks_review"}:
                 raise Denied("Case not ready for checks")
             jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE case_id=?", (case_id,)).fetchone()[0]
             if seconds + c["spent"] > scope.budget.seconds or jobs >= scope.budget.jobs:
@@ -496,8 +632,8 @@ class Controller:
             db.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                        (job_id, case_id, c["generation"], row["id"], profile, worker, "prepared",
                         hashlib.sha256(token.encode()).hexdigest(), min(self.clock()+30, deadline), deadline, seconds))
-            db.execute("INSERT INTO job_runtime(job_id) VALUES(?)", (job_id,))
-            db.execute("UPDATE cases SET spent=spent+?,state='checking' WHERE id=?", (seconds, case_id))
+            db.execute("INSERT INTO job_runtime(job_id,plan) VALUES(?,?)", (job_id, canonical(action_binding or {})))
+            db.execute("UPDATE cases SET spent=spent+?,state=? WHERE id=?", (seconds, 'poc_running' if action_binding else 'checking', case_id))
             self.audit(db, case_id, "job_prepared", {"job_id": job_id, "generation": c["generation"]})
             return {"id": job_id, "generation": c["generation"], "scope_hash": row["hash"], "deadline": deadline}, token
 
@@ -510,8 +646,16 @@ class Controller:
                 raise Denied("Invalid capability")
             c = self.case(self.db, job["case_id"])
             row, _ = self.approved_scope(self.db, c["id"])
+            runtime = self.db.execute('SELECT plan FROM job_runtime WHERE job_id=?', (job_id,)).fetchone()
+            plan = json.loads(runtime['plan']) if runtime and runtime['plan'] else {}
+            states = {'checking', 'scope_approved'}
+            if plan.get('task_stage') == 'poc':
+                action_row, _ = self.approved_action(self.db, c['id'], plan['action_manifest_id'], plan['finding_id'])
+                if plan.get('action_hash') != action_row['hash']:
+                    raise Denied('Action capability hash mismatch')
+                states = {'poc_running'}
             if (job["generation"] != c["generation"] or row["id"] != job["scope_id"]
-                or c["state"] not in {"checking", "scope_approved"}
+                or c["state"] not in states
                 or digest(json.loads(row["body"])) != row["hash"]
                 or job["status"] not in {"prepared", "running"} or self.clock() >= min(job["lease_until"], job["deadline"])):
                 raise Denied("Expired/revoked capability")
@@ -585,6 +729,9 @@ class Controller:
             runtime = db.execute('SELECT * FROM job_runtime WHERE job_id=?', (job_id,)).fetchone()
             if job['status'] != 'prepared' or runtime['policy_hash'] is not None:
                 raise Denied('Native job already bound or started')
+            prior = json.loads(runtime['plan']) if runtime['plan'] else {}
+            if prior.get('task_stage') == 'poc' and any(plan.get(key) != value for key, value in prior.items()):
+                raise Denied('Native plan changed the activated action binding')
             db.execute('UPDATE job_runtime SET policy_hash=?,plan=?,started=? WHERE job_id=?',
                        (digest(plan), canonical(plan), self.clock(), job_id))
             db.execute("UPDATE jobs SET status='running' WHERE id=?", (job_id,))
@@ -636,7 +783,7 @@ class Controller:
                        (evidence_id, case_id, 'worker:' + job['profile'], self.clock(), outcome, body, digest(result), int(synthetic)))
             db.execute('UPDATE job_runtime SET finished=?,outcome=?,evidence_id=? WHERE job_id=?', (self.clock(), outcome, evidence_id, job_id))
             db.execute('UPDATE jobs SET status=? WHERE id=?', (outcome, job_id))
-            if (c['state'] == 'checking' and job['generation'] == c['generation']
+            if (c['state'] in {'checking', 'poc_running'} and job['generation'] == c['generation']
                 and not db.execute("SELECT 1 FROM jobs WHERE case_id=? AND id<>? AND status IN ('prepared','running')", (case_id, job_id)).fetchone()):
                 db.execute("UPDATE cases SET state='checks_review' WHERE id=?", (case_id,))
             self.audit(db, case_id, 'job_finished', {'job_id': job_id, 'outcome': outcome, 'evidence_id': evidence_id, 'synthetic': synthetic})
@@ -674,7 +821,7 @@ class Controller:
                 "fixture_dispatch": "synthetic_zero_network_only",
                 "task_authorization_revision": 1,
                 "mcp_lifecycle_revision": 2,
-                "chat_authorization": "codex_operator_delegation",
+                "chat_authorization": delegate_client.get() + "_operator_delegation",
                 "linux_network_enforcement": "direct_worker_candidate_unqualified",
                 "tls_interception": False,
                 "reason": "Public-source discovery, typed checks dispatch, bound role facade and laboratory scripted PentestGPT adapter available locally; real-model tool isolation, production worker qualification and network scope remain incomplete"}
