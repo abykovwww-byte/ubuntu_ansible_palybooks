@@ -2,7 +2,26 @@
 import pytest
 
 from client_proxy import ssh_tunnel_command
-from shared_server import runtime_for_settings
+from shared_server import open_service_log, runtime_for_settings
+
+
+def test_service_log_prefers_configured_writable_file(tmp_path):
+    settings_path = tmp_path / "service.json"
+    settings_path.write_text("{}", encoding="utf-8")
+    target = tmp_path / "data" / "service.log"
+    target.parent.mkdir()
+    handle = open_service_log(settings_path, {"log_file": str(target)})
+    assert handle is not None and handle.name == str(target)
+    handle.close()
+
+
+def test_service_log_falls_back_to_settings_dir_then_none(tmp_path):
+    settings_path = tmp_path / "service.json"
+    settings_path.write_text("{}", encoding="utf-8")
+    # Unwritable/nonexistent configured path falls back to the settings-adjacent file.
+    handle = open_service_log(settings_path, {"log_file": "/no/such/dir/service.log"})
+    assert handle is not None and handle.name == str(settings_path.with_suffix(".service.log"))
+    handle.close()
 
 
 def test_local_runtime_selects_host_compose_without_starting_anything():
