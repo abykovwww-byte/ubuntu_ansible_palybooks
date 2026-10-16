@@ -99,8 +99,8 @@ transport network. Exercise a bounded synthetic connection from the actual
 collector network with the proxy absent and require refusal; restore the
 normal configuration afterwards without changing other gateway consumers.
 
-Observe at least two consecutive timer-triggered runs without Windows collection running and,
-for independence acceptance, with Windows powered off. An active timer, image
+Observe at least two consecutive timer-triggered runs without Windows collection
+running and, for independence acceptance, with Windows powered off. An active timer, image
 build, reachable Bot API or merged PR alone does not prove MTProto collection.
 Do not create test messages in work chats. Natural cursor/media changes or
 synthetic isolated fixtures supply the data-path evidence.
@@ -148,12 +148,19 @@ Windows uptime or its VPN state no longer controls server-side collection.
 
 ## Rollback
 
-Stop/disable `telegram-collector.timer`, stop its service and verify its
+Before final acceptance and Windows cleanup, stop/disable
+`telegram-collector.timer`, stop its service and verify its
 container has exited **before** re-enabling Windows collection with the same
-authorization. Keep the database and media. Set the collector flag false through
+authorization. Restore the current canonical server selection/snapshot to the
+Windows rollback copy before re-enabling its collector. Keep the database and media.
+Set the collector flag false through
 local overrides and reapply the focused archive playbook if retiring the server
 collector. Removing the local writer socket/HBA rule does not remove data.
 Never restart both collectors as a rollback test.
+
+After successful acceptance and removal of Windows collector secrets, rollback
+uses the reviewed previous server revision and the preserved server configuration
+and data. It does not assume the deleted Windows authorization is still present.
 
 ## Validation boundary
 

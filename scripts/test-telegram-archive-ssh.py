@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+import yaml
+from jinja2 import Environment
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,6 +26,12 @@ def main():
                                  .replace('{{ telegram_archive_client_ip }}', '100.64.0.42'), encoding='utf-8')
         config.write_text(f'Include {scope_snippet}\nInclude {snippet}\nUsePAM yes\nPasswordAuthentication yes\n', encoding='utf-8')
         subprocess.run([daemon, '-t', '-f', str(config), '-h', str(key)], check=True,
+                       capture_output=True, text=True)
+        tasks = yaml.safe_load((ROOT / 'roles/telegram_collector/tasks/main.yml').read_text(encoding='utf-8'))
+        sudo_task = next(task for task in tasks if task['name'] == 'Grant only the fixed forced-command launcher')
+        sudo_config = base / 'scope-sudoers'
+        sudo_config.write_text(Environment().from_string(sudo_task['ansible.builtin.copy']['content']).render(), encoding='utf-8')
+        subprocess.run(['/usr/sbin/visudo', '-cf', str(sudo_config)], check=True,
                        capture_output=True, text=True)
         for user, command in [('tgmedia-rw', 'internal-sftp -d /media -u 0027'),
                               ('tgmedia-ro', 'internal-sftp -R -d /media'),

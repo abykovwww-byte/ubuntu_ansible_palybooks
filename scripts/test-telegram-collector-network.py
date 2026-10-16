@@ -40,11 +40,24 @@ from types import SimpleNamespace
 from tg_archive.telegram import make_client
 client = make_client(SimpleNamespace(require_credentials=lambda:None, api_id=1,api_hash='0'*32),'')
 assert client._proxy == p
+import asyncio
+from python_socks import ProxyError
+async def verify_no_proxy():
+    try:
+        await asyncio.wait_for(client.connect(),3)
+    except (OSError,TimeoutError,ProxyError):
+        pass
+    else:
+        raise AssertionError('MTProto unexpectedly connected without its proxy')
+    finally:
+        await client.disconnect()
+asyncio.run(verify_no_proxy())
 '''.replace('TARGET', repr(host))
         run('run', '--rm', '--network', internal, '--read-only', '--cap-drop', 'ALL',
             '--entrypoint', 'python', 'telegram-collector-ci', '-c', negative)
         print(json.dumps({'fixture': 'actual-collector-internal-network', 'status': 'ok',
                           'target_positive_control': True, 'direct_egress_denied': True,
+                          'mtproto_without_proxy_denied': True,
                           'actual_telethon_proxy': 'vpn-egress:1080'}))
     finally:
         run('rm', '-f', target, check=False)
