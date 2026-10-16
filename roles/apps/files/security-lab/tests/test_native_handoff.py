@@ -131,8 +131,8 @@ def test_native_goal_has_one_admission_path_for_http_and_tcp(control):
     scope = Scope.model_validate_json(manifest['body'])
     descriptor = prepare_handoff_context(scope,native,run_id=run)
     _, goal = _request_goal(scope,descriptor,targets=TARGETS)
-    assert 'native_execution.admission=controller_reserved' in goal
-    assert 'case_allowance' in goal and 'native_execution.deadline' in goal
-    assert 'not another execution-gate task' in goal
+    assert 'BEFORE starting the provider' in goal and 'ready_for_scoped_checks' in goal
+    assert 'Zero unallocated' in goal and 'native_execution.deadline' in goal
+    assert 'NOT a new' in goal
     assert 'prompt-only' in goal and 'typed' in goal
     assert descriptor['content_sha256'] in goal and run in goal

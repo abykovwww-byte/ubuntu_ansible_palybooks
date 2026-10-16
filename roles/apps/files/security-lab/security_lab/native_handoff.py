@@ -14,6 +14,7 @@ from pydantic import Field, model_validator
 
 from .contracts import Contract, Denied, Scope, canonical, digest
 from .native_targets import select_native_targets
+from .native_preflight import validate_native_bindings
 
 
 class CaseAllowance(Contract):
@@ -136,19 +137,8 @@ def validate_native_handoff(packet: dict, *, run_id: str, allow_preview: bool = 
                 or digest({k:v for k,v in packet.items() if k != 'context_hash'}) != packet['context_hash']):
             raise ValueError('Invalid native envelope')
         record = NativeExecution.model_validate(packet['native_execution'])
-        if record.admission != 'controller_reserved' and not allow_preview:
-            raise ValueError('Preview is not native execution admission')
+        validate_native_bindings(packet, run_id, allow_preview=allow_preview, now=now)
         scope = Scope.model_validate(packet['scope_manifest'])
-        if (digest(packet['scope_manifest']) != packet['binding']['hash']
-                or scope.model_dump(mode='json') != packet['effective_scope']
-                or scope.authorization.model_dump(mode='json') != packet['rules_of_engagement']
-                or record.case_id != packet['case_id'] or record.generation != packet['generation']
-                or record.run_id != run_id
-                or (record.scope_id, record.scope_hash, record.scope_version) != (
-                    packet['binding']['id'], packet['binding']['hash'], packet['binding']['version'])
-                or record.execution_targets != packet['execution_targets']
-                or select_native_targets(scope, record.execution_targets) != record.execution_targets):
-            raise ValueError('Native admission differs from scope, run or selection')
         network = any(t.startswith('tcp://') for t in record.execution_targets)
         if (record.profile != ('target_network' if network else 'target_http')
                 or record.transport != ('direct_native' if network else 'configured_http_proxy')
@@ -158,10 +148,6 @@ def validate_native_handoff(packet: dict, *, run_id: str, allow_preview: bool = 
                 or record.case_allowance.jobs_limit != scope.budget.jobs
                 or record.case_allowance.rps != scope.budget.rps):
             raise ValueError('Native budget/transport differs from immutable scope')
-        if now is not None:
-            scope.check_window(now)
-            if not record.snapshot_at <= now < record.deadline:
-                raise ValueError('Native admission is expired or from the future')
         return record
     except (KeyError, TypeError, ValueError) as exc:
         raise Denied('Invalid native execution handoff: ' + str(exc)[:180]) from exc

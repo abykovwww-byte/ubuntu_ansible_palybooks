@@ -268,7 +268,8 @@ class ComposeRunService:
             await asyncio.sleep(0)
             return {**c.get_job_status(case_id, job['id']), 'run_id': run_id,
                     'execution': 'existing_pentestgpt', 'phase_enforcement': 'prompt_only',
-                    'native_full_access': True, 'reduced_scope_enforced': False}
+                    'native_full_access': True, 'reduced_scope_enforced': False,
+                    'native_preflight':started.get('handoff',{}).get('native_preflight')}
         except BaseException:
             if job is not None:
                 try:
@@ -330,6 +331,7 @@ class ComposeRunService:
             receipt = redact_worker_output(json.dumps(latest, ensure_ascii=False))[:18000]
             c.finish_job(case_id, job['id'], outcome=outcome, synthetic=False,
                 result={**plan, 'receipt': receipt, 'access_closed': closed,
+                        'native_preflight':started.get('handoff',{}).get('native_preflight'),
                         'handoff_removed': closure.get('handoff_removed'),
                         'handoff_cleanup_error': closure.get('handoff_cleanup_error'),
                         'verified_vulnerabilities': [], 'finding_status': 'untrusted_model_assessment'})

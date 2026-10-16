@@ -186,11 +186,28 @@ guess current allowance. Native toolbox admission does not mark typed workers
 qualified or claim independent FULL_ACCESS network enforcement.
 
 The fixed native goal uses this admission contract for single-HTTP, TCP and mixed
-runs alike. It distinguishes the native shell from typed-dispatcher qualification
-and performs one compact preflight before progressing to the scoped hypothesis.
+runs alike. A deterministic stdlib verifier is staged read-only beside the JSON,
+with its hash pinned in the transport descriptor. It shares the caller's canonical
+binding/selection implementation; scope payloads are not required to repeat case
+identity or self-referential context hashes. The descriptor includes the native
+scope version and exact execution selection explicitly.
+
+The host runs that verifier before starting any provider. A failed/expired
+preflight prevents provider launch and uses owned cleanup. A compact verified
+`ready_for_scoped_checks` receipt is appended to the goal and returned by
+`start_pentestgpt_run`, and retained in final evidence separately from model
+observations. The LLM starts with the smallest justified target check, not a
+new gate/recovery task. An exact code-hash-pinned command is supplied for genuine
+local integrity rechecks; the LLM must not invent a validator or wait for an
+unimplemented Controller correction-file response channel. The code artifact
+is verified and cleaned under the same ownership/no-follow rules as the JSON.
+
+This distinguishes the native shell from typed-dispatcher qualification.
 The typed facade remains non-executable until its own qualification requirements
 are met. `native_execution_handoff_revision` in integration status identifies the
 updated host-side adapter; no image rebuild is needed for this context-only fix.
+`native_preflight_revision` identifies the deterministic verifier. Readiness is
+local admission/file evidence, not proof of target coverage or vulnerability.
 
 `start_pentestgpt_run(..., targets=[...])` selects 1..16 exact HTTP/TCP services
 from the existing immutable scope. The upstream limit is per run, not per case.

@@ -126,7 +126,14 @@ the provider or falling back to a duplicate broad scan.
 
 Native launch attaches a job-bound `native_execution` record with actual
 Controller admission, deadline and case allowance after reservation. The
-non-executable `get_pentest_context` packet belongs to the separate typed facade;
+host executes a deterministic hash-pinned preflight before provider launch;
+the start result includes its `ready_for_scoped_checks` receipt. Treat that as
+local readiness, not a completed target check. Do not ask the LLM to create
+another validator or search for Controller correction files. Scope payloads do
+not contain case/run identity fields; use the supplied canonical checker for
+genuine file integrity concerns. `native_preflight_revision` identifies this
+path. The preflight program, context and descriptor share owned cleanup.
+The non-executable `get_pentest_context` packet belongs to the separate typed facade;
 its qualification gates are not native execution gates. Zero unallocated future
 case jobs/time does not cancel an already reserved native run. If a native run
 reports the old `execution_authorized=false`/empty-tools/missing-budget blocker,
