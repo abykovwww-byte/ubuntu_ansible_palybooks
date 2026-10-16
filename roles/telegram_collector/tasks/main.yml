@@ -46,7 +46,16 @@
     owner: tgmedia-rw
     group: tgmedia
     mode: '0700'
-  loop: ['', scope, scope/state, reports, secrets]
+  loop: ['', scope, scope/state, scope/reports, reports, secrets]
+
+- name: Create an empty mount target without exposing credentials to the scope helper
+  ansible.builtin.copy:
+    content: ''
+    dest: "{{ telegram_collector_data_dir }}/scope/sync.env"
+    owner: root
+    group: root
+    mode: '0400'
+    force: false
 
 - name: Read owner-approved migration settings and API credentials
   ansible.builtin.slurp:
@@ -125,7 +134,8 @@
 
 - name: Install the exact-client scope public key
   ansible.builtin.copy:
-    content: 'from="{{ telegram_archive_client_ip }}",restrict {{ telegram_archive_ro_public_key }}{{ "\n" }}'
+    content: |
+      from="{{ telegram_archive_client_ip }}",restrict {{ telegram_archive_ro_public_key }}
     dest: /etc/ssh/tg-archive-keys/tgarchive-scope
     owner: root
     group: root
@@ -141,7 +151,8 @@
 
 - name: Grant only the fixed forced-command launcher
   ansible.builtin.copy:
-    content: 'tgarchive-scope ALL=(root) NOPASSWD: /usr/local/libexec/tg-archive-scope ""{{ "\n" }}'
+    content: |
+      tgarchive-scope ALL=(root) NOPASSWD: /usr/local/libexec/tg-archive-scope ""
     dest: /etc/sudoers.d/tg-archive-scope
     owner: root
     group: root
