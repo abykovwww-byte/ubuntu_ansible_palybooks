@@ -87,6 +87,27 @@ bridge/session; an explicit case stop from either agent revokes the case and
 joins its owned workers. A stale command returns a conflict and requires a new
 read/reconciliation, never an automatic mutation retry.
 
+## Explicit time-budget renewal
+
+`propose_budget_extension(case_id, additional_seconds, authorization, expires_at,
+expected_revision)` handles an operator's explicit current-chat extension task.
+It copies the latest approved scope into a new **pending** immutable scope,
+increasing only its cumulative time limit and refreshing checks authorization
+and expiry. Exact services, address grants, paths, methods, job count, RPS and
+concurrency are retained. Even an expired scope can be renewed; active work,
+pending scope replacements and stale revisions are refused.
+
+Read the previous authorization with `get_manifest`. Supply its same owner and
+hosts, checks-only actions, and a fresh task reference/basis/window. The
+`budget_extension_proposed` audit event links old/new manifest IDs and hashes,
+old limit, exact delta, new limit and unchanged spent. This is a proposal, not
+execution authority: activate its exact returned ID with
+`activate_scope_from_task`, then reread the case before launching. Existing
+reservations stay fully charged; evidence and previous manifests are unchanged.
+No job, provider call or PoC starts automatically. Ordinary `propose_scope`
+cannot inflate time beyond the initial allowance or a previously activated
+extension. The running status advertises `case_budget_extension_revision`.
+
 ## Case continuity and native service checks
 
 Before continuing an engagement, read `get_case`, `get_case_history` (follow

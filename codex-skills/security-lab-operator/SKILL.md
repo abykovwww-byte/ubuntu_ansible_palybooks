@@ -151,6 +151,16 @@ access or a replacement Controller.
 
 ## Execution and continuity
 
+For an exhausted case, do not reset spent or create a replacement case. Only an
+explicit current-chat budget instruction authorizes `propose_budget_extension`.
+Read the latest scope and case revision; pass the exact additional seconds,
+fresh checks-only `authorization` (same owner/hosts), expiry and revision. This
+saves a pending immutable scope copying all targets and other limits. Activate
+only that returned scope ID using `activate_scope_from_task`, then reread the
+case before the authorized launch. Prior reserved time remains charged. This
+operation neither starts a job nor resumes historical PoC actions; it refuses
+active work and pending replacement scopes. On conflict, reread without retry.
+
 1. For a new explicit checks task, reuse matching valid scope or save the exact
    `propose_scope` manifest with the current `expected_revision`. Activate only
    the returned matching `manifest_id` with `activate_scope_from_task`.

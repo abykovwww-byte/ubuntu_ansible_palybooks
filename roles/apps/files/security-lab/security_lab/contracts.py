@@ -158,8 +158,13 @@ class NetworkTarget(Contract):
         return sorted(set(values))
 
 
+INITIAL_CASE_SECONDS = 7200
+MAX_CASE_SECONDS = 86400
+
+
 class Budget(Contract):
-    seconds: int = Field(default=7200, ge=1, le=7200)
+    # Higher cumulative limits require the Controller's explicit extension path.
+    seconds: int = Field(default=INITIAL_CASE_SECONDS, ge=1, le=MAX_CASE_SECONDS)
     rps: int = Field(default=2, ge=1, le=10)
     concurrency: int = Field(default=2, ge=1, le=4)
     jobs: int = Field(default=100, ge=1, le=200)

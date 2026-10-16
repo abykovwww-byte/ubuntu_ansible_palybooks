@@ -14,7 +14,8 @@ import time
 import uuid
 from typing import Iterator
 
-from .contracts import ActionPlan, Denied, Scope, canonical, digest, hostname
+from .contracts import (ActionPlan, Authorization, Denied, Scope, INITIAL_CASE_SECONDS,
+                        MAX_CASE_SECONDS, canonical, digest, hostname)
 from .discovery_contracts import SourceResult
 from .client_identity import delegate_client
 
@@ -458,6 +459,15 @@ class Controller:
                 raise Denied("Case is not accepting proposals")
             if kind == "scope":
                 model.check_window(self.clock())
+                approved = db.execute("SELECT body,hash FROM manifests WHERE case_id=? AND kind='scope' "
+                    "AND approved_at IS NOT NULL ORDER BY version DESC LIMIT 1", (case_id,)).fetchone()
+                ceiling = INITIAL_CASE_SECONDS
+                if approved:
+                    if digest(json.loads(approved['body'])) != approved['hash']:
+                        raise Denied('Approved scope integrity failure')
+                    ceiling = max(ceiling, Scope.model_validate_json(approved['body']).budget.seconds)
+                if model.budget.seconds > ceiling:
+                    raise Denied('Time budget increase requires propose_budget_extension and explicit task activation')
             else:
                 scope_row, scope = self.approved_scope(db, case_id)
                 if model.scope_version != scope_row["version"] or "poc" not in scope.authorization.actions:
@@ -471,19 +481,70 @@ class Controller:
                     raise Denied('Action request outside approved service, path or method')
                 if c["state"] != "checks_review":
                     raise Denied("Actions can only be proposed after checks review")
-            version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM manifests WHERE case_id=? AND kind=?",
-                                 (case_id, kind)).fetchone()[0]
-            manifest_id, manifest_hash = uuid.uuid4().hex, digest(data)
-            db.execute("UPDATE manifests SET status='superseded' WHERE case_id=? AND kind=? AND status='pending'", (case_id, kind))
-            db.execute("INSERT INTO manifests(id,case_id,kind,version,body,hash,status) VALUES(?,?,?,?,?,?,?)",
-                       (manifest_id, case_id, kind, version, canonical(data), manifest_hash, "pending"))
-            if kind == "scope":
-                # A change never leaves an older worker running while a new approval is pending.
-                self.revoke_in(db, case_id, "scope_changed")
-                db.execute("UPDATE cases SET state='discovery_review' WHERE id=?", (case_id,))
-            self.audit(db, case_id, "manifest_proposed", {"kind": kind, "version": version, "hash": manifest_hash})
+            return self._save_proposal(db, case_id, kind, data)
+
+    def _save_proposal(self, db: sqlite3.Connection, case_id: str, kind: str, data: dict) -> dict:
+        """Caller owns validation and the transaction; all proposals share one writer."""
+        version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM manifests WHERE case_id=? AND kind=?",
+                             (case_id, kind)).fetchone()[0]
+        manifest_id, manifest_hash = uuid.uuid4().hex, digest(data)
+        db.execute("UPDATE manifests SET status='superseded' WHERE case_id=? AND kind=? AND status='pending'", (case_id, kind))
+        db.execute("INSERT INTO manifests(id,case_id,kind,version,body,hash,status) VALUES(?,?,?,?,?,?,?)",
+                   (manifest_id, case_id, kind, version, canonical(data), manifest_hash, "pending"))
+        if kind == "scope":
+            # A change never leaves an older worker running while a new approval is pending.
+            self.revoke_in(db, case_id, "scope_changed")
+            db.execute("UPDATE cases SET state='discovery_review' WHERE id=?", (case_id,))
+        self.audit(db, case_id, "manifest_proposed", {"kind": kind, "version": version, "hash": manifest_hash})
         return {"id": manifest_id, "case_id": case_id, "kind": kind, "version": version,
                 "hash": manifest_hash, "manifest": data, "status": "pending"}
+
+    def propose_budget_extension(self, case_id: str, additional_seconds: int, authorization: dict,
+                                 expires_at: int, *, expected_revision: int) -> dict:
+        """Save a new checks scope, never refund spending or activate execution.
+
+        An expired approved scope may be renewed using current task authorization.
+        Its services, address grants, paths, rates and job count are copied exactly.
+        """
+        if type(additional_seconds) is not int or not 1 <= additional_seconds <= INITIAL_CASE_SECONDS:
+            raise Denied('Extension requires 1 to 7200 additional seconds')
+        if type(expires_at) is not int:
+            raise Denied('Extension expiration must be integer Unix seconds')
+        auth = Authorization.model_validate(authorization)
+        with self.transaction() as db:
+            self.check_revision(case_id, expected_revision)
+            case = self.case(db, case_id)
+            if case['state'] not in {'scope_approved', 'checks_review', 'discovery_review'}:
+                raise Denied('Budget extension requires an idle checks case')
+            if db.execute("SELECT 1 FROM jobs WHERE case_id=? AND status IN ('prepared','running')", (case_id,)).fetchone():
+                raise Denied('Budget extension cannot overlap an active job')
+            previous = db.execute("SELECT * FROM manifests WHERE case_id=? AND kind='scope' "
+                "ORDER BY version DESC LIMIT 1", (case_id,)).fetchone()
+            if not previous or previous['status'] != 'approved':
+                raise Denied('Budget extension requires the latest approved scope, not a pending replacement')
+            if digest(json.loads(previous['body'])) != previous['hash']:
+                raise Denied('Approved scope integrity failure')
+            scope = Scope.model_validate_json(previous['body'])
+            if (auth.actions != ['checks'] or auth.hosts != scope.authorization.hosts
+                    or auth.owner != scope.authorization.owner):
+                raise Denied('Extension authorization must retain hosts/owner and authorize checks only')
+            new_limit = scope.budget.seconds + additional_seconds
+            if new_limit > MAX_CASE_SECONDS:
+                raise Denied('Cumulative time budget exceeds the supported case limit')
+            body = scope.model_dump(mode='json')
+            body['budget']['seconds'] = new_limit
+            body['authorization'] = auth.model_dump(mode='json')
+            body['expires_at'] = expires_at
+            renewed = Scope.model_validate(body)
+            renewed.check_window(self.clock())
+            saved = self._save_proposal(db, case_id, 'scope', renewed.model_dump(mode='json'))
+            self.audit(db, case_id, 'budget_extension_proposed', {
+                'manifest_id': saved['id'], 'hash': saved['hash'],
+                'previous_manifest_id': previous['id'], 'previous_hash': previous['hash'],
+                'previous_seconds': scope.budget.seconds, 'additional_seconds': additional_seconds,
+                'new_seconds': new_limit, 'spent_or_reserved_seconds': case['spent'],
+                'authorization_ref': auth.reference, 'execution_activated': False})
+            return saved
 
     def activate_from_task(self, case_id: str, manifest_id: str, kind: str) -> dict:
         """The authenticated chat delegate activates a saved plan from the operator's task.
