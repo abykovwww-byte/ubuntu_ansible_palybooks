@@ -91,6 +91,9 @@ class ComposeRunService:
 
     async def start_check(self, case_id: str, specification: dict, *, ipv6: bool = False) -> dict:
         spec = parse_native_check(specification)
+        from .interactive_checks import INTERACTIVE
+        if isinstance(spec, INTERACTIVE):
+            raise Denied('Interactive profiles require an activated exact action plan')
         return await self._start_cli(case_id, None, [], seconds=spec.seconds, ipv6=ipv6,
                                      specification=spec.model_dump(mode='json'))
 
@@ -127,7 +130,7 @@ class ComposeRunService:
             if specification is not None:
                 selected = sorted(set(selected))[:1]
                 plan = compile_native_check(specification, scope, selected, stage=snapshot['state'], now=c.clock(),
-                                            task_stage='poc' if action_binding else 'checks')
+                                            task_stage='poc' if action_binding else 'checks', case_id=case_id)
             else:
                 plan = build_check(NmapCheck(host=host, addresses=selected, ports=ports, seconds=seconds),
                     scope, stage=snapshot['state'], now=c.clock(), pinned_addresses={host: addresses})

@@ -202,7 +202,7 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
     @server.tool(annotations=external)
     async def start_poc_action(case_id: str, manifest_id: str, finding_id: str, ctx: Context,
                                ipv6: bool = False, expected_revision: int | None = None) -> dict[str, Any]:
-        """Execute one EXACT saved HTTP request from a separately activated action plan.
+        """Execute one exact saved HTTP, WebSocket, Socket.IO or writes action.
 
         Requires the operator's explicit current-chat PoC task, completed checks
         review and matching activated manifest/finding. No new request/payload
@@ -210,6 +210,9 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         checks host/service/path/method. No auth, redirect or arbitrary shell.
         Does not replay an attempted action. Poll status and read the receipt;
         a matching response predicate is not proof of vulnerability or impact.
+        Interactive actions require the applied interactive worker image. They
+        keep redacted transcripts, bounded frames/steps, and declared cleanup.
+        session_ref selects a case/origin-bound server grant, never raw secrets.
         """
         revision_guard(ctx, case_id, expected_revision)
         return await native_service(ctx).start_action(case_id, manifest_id, finding_id, ipv6=ipv6)
@@ -351,11 +354,12 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         return {**Controller.integration_status(), 'live_execution': pentest_runtime is not None,
                 'case_continuity_revision': 1, 'native_service_checks_revision': 3,
                 'native_web_checks_revision': 1,
+                'native_interactive_actions_revision': 1,
                 'case_budget_extension_revision': 1, 'research_campaign_revision': 1,
                 'native_targets_revision': 2, 'native_execution_handoff_revision': 2, 'native_preflight_revision':1,
                 'runtime_inventory_tool': 'get_runtime_inventory',
                 'poc_execution': pentest_runtime is not None,
-                'poc_execution_profiles': ['saved_http_request'],
+                'poc_execution_profiles': ['saved_http_request','websocket','socketio','writes'],
                 'poc_execution_tool': 'start_poc_action',
                 'shared_controller': shared_state is not None,
                 'client': delegate_client.get(),
@@ -506,7 +510,10 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         Read get_tool_catalog manifest_schema for executable saved_http_action.
         An action may include request {tool:http,url,method,query,headers,body,
         seconds} and verification {status,contains}. Descriptions alone remain
-        non-executable. No credentials. Every request must match HTTP scope.
+        non-executable. Every request must match HTTP scope.
+        Interactive request tools websocket/socketio/writes use the same saved
+        action plan; get_tool_catalog supplies their strict message/step schema.
+        Use only session_ref for host-owned test credentials, never raw values.
         """
         c = controller(ctx)
         with c.lock:

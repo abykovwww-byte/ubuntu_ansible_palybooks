@@ -72,6 +72,16 @@
   when: item.0.enabled | default(true) | bool
   tags: [apps, directories]
 
+- name: Create private PentestGPT web session grant directory
+  ansible.builtin.file:
+    path: "{{ pentestgpt_runs_dir | dirname }}/web-sessions"
+    state: directory
+    owner: "{{ pentestgpt_puid }}"
+    group: "{{ pentestgpt_pgid }}"
+    mode: "0700"
+  when: pentestgpt_enabled | default(false) | bool
+  tags: [apps, directories, pentestgpt]
+
 - name: Check USE Framework private inventory source
   ansible.builtin.stat:
     path: "{{ use_framework_inventory_source_host_path }}"

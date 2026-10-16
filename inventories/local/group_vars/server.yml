@@ -477,8 +477,16 @@ docker_apps:
         path: "{{ pentestgpt_project_dir }}/web_check.py"
         mode: "0644"
         force: true
+      - src: pentestgpt/interactive_web.py
+        path: "{{ pentestgpt_project_dir }}/interactive_web.py"
+        mode: "0644"
+        force: true
       - src: pentestgpt/test_web_tools_runtime.py
         path: "{{ pentestgpt_project_dir }}/test_web_tools_runtime.py"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/test_interactive_web_runtime.py
+        path: "{{ pentestgpt_project_dir }}/test_interactive_web_runtime.py"
         mode: "0644"
         force: true
       - src: pentestgpt/Dockerfile.proxy

@@ -7,9 +7,9 @@ import ipaddress
 import json
 import re
 from urllib.parse import unquote, urlsplit
-from typing import Literal
+from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_serializer, model_validator
 
 
 class Denied(ValueError):
@@ -287,6 +287,143 @@ class HTTPRequest(Contract):
         return self
 
 
+class InteractiveAction(Contract):
+    """A saved action, never a checks command or an arbitrary browser script."""
+    url: str = Field(min_length=1, max_length=2000)
+    seconds: int = Field(default=60, ge=15, le=180)
+    session_ref: str | None = Field(default=None, pattern=r'^[a-z][a-z0-9_-]{0,63}$')
+    _url = field_validator('url')(HTTPRequest.canonical_http_url.__func__)
+
+
+class SocketMessage(Contract):
+    text: str = Field(max_length=8192)
+    expect_contains: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class WebSocketAction(InteractiveAction):
+    tool: Literal['websocket'] = 'websocket'
+    messages: list[SocketMessage] = Field(default_factory=list, max_length=16)
+    max_frames: int = Field(default=64, ge=1, le=128)
+    max_bytes: int = Field(default=65536, ge=1, le=262144)
+    message_seconds: int = Field(default=5, ge=1, le=15)
+    listen_seconds: int = Field(default=1, ge=0, le=10)
+
+    @field_validator('url',mode='before')
+    @classmethod
+    def websocket_url(cls, value):
+        if isinstance(value,str):
+            if value.lower().startswith('wss://'): return 'https://'+value[6:]
+            if value.lower().startswith('ws://'): return 'http://'+value[5:]
+        return value
+
+
+class SocketEvent(Contract):
+    name: str = Field(min_length=1, max_length=100, pattern=r'^[A-Za-z0-9_.:-]+$')
+    data: JsonValue = Field(default_factory=dict)
+    expect_ack: bool = True
+    ack_contains: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode='after')
+    def bounded(self):
+        if self.name in {'connect', 'disconnect', 'connect_error', '*'}:
+            raise ValueError('Reserved Socket.IO event')
+        if len(canonical(self.data).encode()) > 8192 or (self.ack_contains and not self.expect_ack):
+            raise ValueError('Oversized event or ack predicate without acknowledgement')
+        return self
+
+
+class SocketIOAction(InteractiveAction):
+    tool: Literal['socketio'] = 'socketio'
+    namespace: str = Field(default='/', pattern=r'^/(?:[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*)?$')
+    transport: Literal['websocket', 'polling', 'polling_upgrade'] = 'websocket'
+    events: list[SocketEvent] = Field(default_factory=list, max_length=16)
+    max_frames: int = Field(default=64, ge=8, le=128)
+    max_bytes: int = Field(default=65536, ge=1, le=262144)
+    max_requests: int = Field(default=32, ge=1, le=64)
+    message_seconds: int = Field(default=5, ge=1, le=15)
+    listen_seconds: int = Field(default=1, ge=0, le=10)
+
+
+class UploadPart(Contract):
+    field: str = Field(pattern=r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
+    filename: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$')
+    content_base64: str = Field(max_length=32768)
+    content_type: str = Field(default='application/octet-stream', pattern=r'^[a-z0-9.+-]+/[a-z0-9.+-]+$')
+
+    @field_validator('content_base64')
+    @classmethod
+    def inline_bytes(cls, value):
+        import base64
+        base64.b64decode(value, validate=True)
+        return value
+
+
+class WriteStep(Contract):
+    name: str = Field(pattern=r'^[a-z][a-z0-9_-]{0,39}$')
+    method: Literal['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
+    path: str = Field(min_length=1, max_length=1000)
+    query: dict[str, str] = Field(default_factory=dict, max_length=20)
+    headers: dict[str, str] = Field(default_factory=dict, max_length=8)
+    json_body: JsonValue | None = None
+    form: dict[str, str] = Field(default_factory=dict, max_length=20)
+    files: list[UploadPart] = Field(default_factory=list, max_length=2)
+    capture: dict[str, str] = Field(default_factory=dict, max_length=8)
+    expect_status: int | None = Field(default=None, ge=100, le=599)
+
+    @field_validator('path')
+    @classmethod
+    def literal_or_bound_path(cls, value):
+        safe_path(value)
+        for part in value.split('/'):
+            if ('{' in part or '}' in part) and not re.fullmatch(r'\{[a-z][a-z0-9_]{0,39}\}', part):
+                raise ValueError('A binding must occupy one complete path segment')
+        return value
+
+    @field_validator('headers')
+    @classmethod
+    def public_and_csrf_headers(cls, values):
+        if len({k.lower() for k in values}) != len(values):
+            raise ValueError('Duplicate case-insensitive header')
+        csrf = {k.lower(): v for k, v in values.items() if k.lower() in {'x-csrf-token', 'x-xsrf-token'}}
+        public = HTTPRequest.public_headers.__func__(cls, {k:v for k,v in values.items() if k.lower() not in csrf})
+        if any(len(v)>1000 or any(ord(c)<32 or ord(c)==127 for c in v) for v in csrf.values()):
+            raise ValueError('Invalid CSRF header')
+        return {**public, **csrf}
+
+    _query = field_validator('query', 'form')(HTTPRequest.bounded_parameters.__func__)
+
+    @model_validator(mode='after')
+    def bounded_step(self):
+        if self.json_body is not None and (self.form or self.files):
+            raise ValueError('Choose JSON or form/multipart')
+        if self.method in {'GET', 'HEAD', 'OPTIONS', 'DELETE'} and (self.json_body is not None or self.form or self.files):
+            raise ValueError('Bodies require POST, PUT or PATCH')
+        if len(canonical(self.model_dump(mode='json')).encode()) > 65536:
+            raise ValueError('Request exceeds the body budget')
+        if any(not re.fullmatch(r'[a-z][a-z0-9_]{0,39}', key) or not value.startswith('/')
+               or len(value)>200 for key,value in self.capture.items()):
+            raise ValueError('Capture requires a variable name and JSON pointer')
+        return self
+
+
+class WritesAction(InteractiveAction):
+    tool: Literal['writes'] = 'writes'
+    steps: list[WriteStep] = Field(min_length=1, max_length=12)
+    cleanup: list[WriteStep] = Field(default_factory=list, max_length=8)
+    cleanup_required: bool = True
+    cleanup_seconds: int = Field(default=5, ge=1, le=8)
+
+    @model_validator(mode='after')
+    def workflow(self):
+        if urlsplit(self.url).path != '/':
+            raise ValueError('Workflow url is the origin root; steps declare exact paths')
+        if self.cleanup_required and not self.cleanup:
+            raise ValueError('Declare cleanup or explicitly set cleanup_required=false')
+        if len({s.name for s in [*self.steps,*self.cleanup]}) != len(self.steps)+len(self.cleanup):
+            raise ValueError('Step names must be unique')
+        return self
+
+
 class ResponseExpectation(Contract):
     status: int | None = Field(default=None, ge=100, le=599)
     contains: str | None = Field(default=None, min_length=1, max_length=200)
@@ -305,7 +442,7 @@ class Action(Contract):
     expected_effect: str = Field(min_length=1, max_length=2000)
     stop_condition: str = Field(min_length=1, max_length=1000)
     seconds: int = Field(default=300, ge=1, le=1800)
-    request: HTTPRequest | None = None
+    request: Annotated[Union[HTTPRequest, WebSocketAction, SocketIOAction, WritesAction], Field(discriminator='tool')] | None = None
     verification: ResponseExpectation | None = None
 
     _host = field_validator("host")(hostname)
@@ -325,6 +462,8 @@ class Action(Contract):
                 raise ValueError('Action request exceeds its host or time budget')
         if self.verification is not None and self.request is None:
             raise ValueError('Verification needs an executable action request')
+        if self.verification is not None and not isinstance(self.request, HTTPRequest):
+            raise ValueError('Interactive actions declare their own message/step predicates')
         return self
 
 

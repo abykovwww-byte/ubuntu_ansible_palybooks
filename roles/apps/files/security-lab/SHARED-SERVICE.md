@@ -261,6 +261,10 @@ is the operator's analyst claim, not server verification, and grants no PoC.
 
 ### First-wave web toolbox
 
+Saved interactive profiles (`websocket`, `socketio`, `writes`) extend the same
+action/job lifecycle. See [INTERACTIVE-WEB.md](INTERACTIVE-WEB.md) for executable
+examples, session grants, cleanup semantics and the IaC delivery boundary.
+
 The IaC image includes hash-locked Playwright Python dependencies and its
 Chromium revision, ffuf 2.3.0 and ZAP 2.17.0 from SHA256-pinned official releases.
 `pentest-web-tools` is a one-shot clean service without provider credentials,
