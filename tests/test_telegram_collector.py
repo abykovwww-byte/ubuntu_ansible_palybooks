@@ -89,6 +89,16 @@ class ServerCollectorTests(unittest.TestCase):
         scope_seed = next(t for t in tasks if t['name'] == 'Install the selected chats without exposing their identities')
         self.assertFalse(scope_seed['ansible.builtin.copy']['force'])
 
+    def test_archive_key_defaults_resolve_from_owner_and_collector_role_contexts(self):
+        defaults = yaml.safe_load((ROOT / 'roles/telegram_archive/defaults/main.yml').read_text(encoding='utf-8'))
+        environment = Environment(undefined=StrictUndefined)
+        environment.globals['lookup'] = lambda plugin, path: Path(path).read_text(encoding='ascii').strip()
+        for consumer in ('telegram_archive', 'telegram_collector'):
+            for kind in ('ro', 'rw'):
+                expected = (ROOT / f'roles/telegram_archive/files/tgmedia-{kind}.pub').read_text(encoding='ascii').strip()
+                actual = environment.from_string(defaults[f'telegram_archive_{kind}_public_key']).render(role_path=str(ROOT / 'roles' / consumer))
+                self.assertEqual(actual, expected)
+
     def test_writer_password_is_encoded_as_a_single_dsn_value(self):
         from psycopg.conninfo import conninfo_to_dict
 
