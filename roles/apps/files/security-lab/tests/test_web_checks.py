@@ -63,8 +63,11 @@ def test_host_mounts_only_fresh_job_artifacts_and_pins_hosts(monkeypatch, tmp_pa
     result = execute_host(monkeypatch, request, docker)
     assert result['ok'] and result['result']['access_closed']
     command = next(c for c, _ in docker.calls if '--entrypoint' in c)
-    assert command[command.index('--add-host')+1] == 'example.com:[2001:4860:4860::8888]'
+    assert '--add-host' not in command
     assert command[command.index('--volume')+1] == str(Path(request['runs_directory']) / 'owned') + ':/web-artifacts:rw'
+    hosts = Path(request['runs_directory']) / 'owned' / '.dns-hosts'
+    assert hosts.read_text('ascii') == '127.0.0.1 localhost\n::1 localhost\n2001:4860:4860::8888 example.com\n'
+    assert str(hosts)+':/etc/hosts:ro' in command
     assert 'pentest-web-tools' in command
     assert result['result']['artifact_directory'] == str(Path(request['runs_directory']) / 'owned')
     assert execute_host(monkeypatch, request, docker)['ok'] is False  # never overwrite/replay artifacts

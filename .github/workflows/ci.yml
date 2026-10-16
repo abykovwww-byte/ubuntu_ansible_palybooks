@@ -172,6 +172,23 @@ jobs:
           --add-host fixture.example.test:127.0.0.1 --env HOME=/tmp
           --entrypoint /opt/web-tools-venv/bin/python pentestgpt-abykovserv:ci
           /usr/local/libexec/pentestgpt-test-web-tools.py
+      - name: Verify Compose web hosts mount and ZAP inventory temporary space
+        working-directory: /tmp/PentestGPT
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '127.0.0.1 localhost fixture.example.test\n::1 localhost\n' > /tmp/pentestgpt-web-hosts
+          docker compose --file compose.yml --profile tools run --rm -T --no-deps \
+            --volume /tmp/pentestgpt-web-hosts:/etc/hosts:ro \
+            --entrypoint /opt/web-tools-venv/bin/python pentest-web-tools -c '
+          import socket, subprocess
+          assert socket.gethostbyname("fixture.example.test") == "127.0.0.1"
+          result = subprocess.run(["/opt/zap/zap.sh","-Xmx256m","-cmd","-dir","/tmp/zap-inventory","-version"], capture_output=True, text=True, timeout=20)
+          assert result.returncode == 0, result.stderr
+          assert "2.17.0" in result.stdout, result.stdout
+          assert "No space left" not in result.stderr, result.stderr
+          print("Compose hosts pin and writable ZAP inventory: passed")
+          '
       - name: Verify Compose runtime, mounts, health, and network isolation
         working-directory: /tmp/PentestGPT
         shell: bash
