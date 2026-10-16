@@ -11,6 +11,8 @@ from pydantic import Field, TypeAdapter, field_validator
 
 from .contracts import Contract, Denied, Scope, HTTPRequest, ActionPlan, hostname, is_private_network_address, network_address
 from .tool_catalog import CurlCheck, NmapCheck, _check_stage, build_check
+from .web_checks import BrowserCheck, FFUFCheck, ZAPCheck, WEB_CHECKS, web_policy
+from .contracts import canonical
 
 
 class ServiceCheck(Contract):
@@ -30,7 +32,7 @@ class TLSCheck(Contract):
     _host = field_validator('host')(hostname)
 
 
-NativeCheck = Annotated[Union[CurlCheck, HTTPRequest, ServiceCheck, TLSCheck], Field(discriminator='tool')]
+NativeCheck = Annotated[Union[CurlCheck, HTTPRequest, ServiceCheck, TLSCheck, BrowserCheck, FFUFCheck, ZAPCheck], Field(discriminator='tool')]
 _ADAPTER = TypeAdapter(NativeCheck)
 
 
@@ -40,6 +42,9 @@ def parse_native_check(value: dict):
 
 def check_subject(spec, scope: Scope) -> str:
     """Authorization is checked before DNS or any runtime operation."""
+    if isinstance(spec, WEB_CHECKS):
+        web_policy(spec, scope)
+        return urlsplit(spec.url).hostname
     if isinstance(spec, (CurlCheck, HTTPRequest)):
         if not any(target.permits(spec.url, spec.method) for target in scope.targets):
             raise Denied('HTTP check outside approved service, path or method')
@@ -89,7 +94,12 @@ def compile_native_check(specification: dict, scope: Scope, addresses: list[str]
     if is_private_network_address(address) and (grant is None or address not in grant.addresses):
         raise Denied('Private service checks require an explicit address grant')
     bracketed = '[' + address + ']' if ipaddress.ip_address(address).version == 6 else address
-    if isinstance(spec, HTTPRequest):
+    if isinstance(spec, WEB_CHECKS):
+        policy = web_policy(spec, scope)
+        argv = ('/opt/web-tools-venv/bin/python', '/usr/local/libexec/pentestgpt-web-check.py',
+                '--policy', canonical(policy))
+        profile = 'target_http'
+    elif isinstance(spec, HTTPRequest):
         parsed = urlsplit(spec.url)
         url = spec.url + ('?' + urlencode(spec.query) if spec.query else '')
         argv = ('/usr/bin/curl', '--disable', '--globoff', '--silent', '--show-error', '--http1.1',
@@ -136,7 +146,10 @@ def native_check_catalog(configured: bool) -> list[dict]:
                 ('curl', 'One pinned GET/HEAD; TLS verification; no query, redirects, auth or custom payloads'),
                 ('http', 'Pinned GET/HEAD/OPTIONS with query and public headers; POST/body only from an activated exact action plan'),
                 ('nmap_service', 'One scoped TCP port, version-light; no caller-selected NSE; built-in version scripts may run; version probes are not RPS-enforced'),
-                ('tls', 'One TLS handshake, optionally PostgreSQL SSLRequest; no authentication or application data'))]
+                ('tls', 'One TLS handshake, optionally PostgreSQL SSLRequest; no authentication or application data'),
+                ('playwright', 'Fresh Chromium context; scoped GET/HEAD, request/rate/time bounds; no redirects, credentials, writes or WebSockets; host artifacts'),
+                ('ffuf', 'At most 32 admitted relative paths plus control; one thread, scope RPS; no redirects/recursion/calibration; host artifacts'),
+                ('zap', 'One TLS-verified curl GET; ZAP offline HAR import and passive scan with bundled add-ons; no spider, active scan, login or runtime updates; host artifacts'))]
     return checks + [{'name':'compose:saved_http_action', 'available':configured, 'qualified':False,
         'allowed_actions':['poc'], 'mcp_tool':'start_poc_action', 'manifest_schema':ActionPlan.model_json_schema(),
         'limitations':'Executes one exact saved action.request after separate action activation; POST/body allowed only within HTTP scope. '
