@@ -18,9 +18,10 @@ from .contracts import (ActionPlan, Authorization, Denied, Scope, INITIAL_CASE_S
                         MAX_CASE_SECONDS, canonical, digest, hostname)
 from .discovery_contracts import SourceResult
 from .client_identity import delegate_client
+from .research import ResearchStore, SCHEMA as RESEARCH_SCHEMA
 
 
-class Controller:
+class Controller(ResearchStore):
     def __init__(self, directory: Path, principal: str, clock=time.time):
         if not principal or len(principal) > 200:
             raise ValueError("Configured operator identity required")
@@ -136,9 +137,13 @@ class Controller:
           outcome TEXT, evidence_id TEXT REFERENCES evidence(id), charged INTEGER NOT NULL DEFAULT 1
         );
         """)
+        self.db.executescript(RESEARCH_SCHEMA)
         # Additive schema v1 preserves existing immutable manifests and audit.
         # A process restart never silently replays unfinished Internet requests.
         with self.transaction() as db:
+            for campaign in db.execute("SELECT id,case_id FROM research_campaigns WHERE status='active'").fetchall():
+                db.execute("UPDATE research_campaigns SET status='paused',reason='Controller restarted; no automatic resume' WHERE id=?", (campaign['id'],))
+                self.audit(db,campaign['case_id'],'research_campaign_paused',{'campaign_id':campaign['id'],'reason':'controller_restarted'})
             # Existing v1 jobs had no accounting. Charge their entire reserved
             # window once, including uncertain outcomes; never refund on restart.
             for job in db.execute("SELECT j.* FROM jobs j LEFT JOIN job_runtime r ON r.job_id=j.id WHERE r.job_id IS NULL").fetchall():
@@ -315,6 +320,8 @@ class Controller:
             row["link_observations"] = [dict(v) for v in self.db.execute(
                 "SELECT o.* FROM link_observations o JOIN surface_links l ON l.id=o.link_id WHERE l.case_id=? ORDER BY o.rowid", (case_id,))]
             row["schema_version"] = 2
+            row['research_campaign_active'] = bool(self.db.execute(
+                "SELECT 1 FROM research_campaigns WHERE case_id=? AND status='active'",(case_id,)).fetchone())
             return row
 
     def begin_discovery(self, case_id: str) -> dict:
@@ -660,7 +667,8 @@ class Controller:
         return self.get_case(case_id)
 
     def prepare_job(self, case_id: str, worker: str, profile: str, seconds: int, *, expected_binding: dict | None = None,
-                    action_binding: dict | None = None) -> tuple[dict, str]:
+                    action_binding: dict | None = None, lane: str = 'exclusive', resource_hosts: list[str] | None = None,
+                    campaign_id: str | None = None, research_task_id: str | None = None) -> tuple[dict, str]:
         """Internal dispatcher API; token is not included in model-facing job status."""
         if profile not in {"target_http", "target_network"} or not 1 <= seconds <= 1800:
             raise Denied("Invalid job profile or duration")
@@ -686,14 +694,20 @@ class Controller:
             jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE case_id=?", (case_id,)).fetchone()[0]
             if seconds + c["spent"] > scope.budget.seconds or jobs >= scope.budget.jobs:
                 raise Denied("Case budget exhausted")
-            if db.execute("SELECT 1 FROM jobs WHERE case_id=? AND status IN ('prepared','running')", (case_id,)).fetchone():
+            if lane == 'exclusive' and db.execute("SELECT 1 FROM jobs WHERE case_id=? AND status IN ('prepared','running')", (case_id,)).fetchone():
                 raise Denied("Initial heavy-job concurrency is one")
+            self.research_admit(db,c,scope,lane,resource_hosts or [],campaign_id,research_task_id,seconds)
             job_id, token = uuid.uuid4().hex, secrets.token_urlsafe(32)
             deadline = self.clock() + min(seconds, scope.expires_at - self.clock())
             db.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                        (job_id, case_id, c["generation"], row["id"], profile, worker, "prepared",
                         hashlib.sha256(token.encode()).hexdigest(), min(self.clock()+30, deadline), deadline, seconds))
             db.execute("INSERT INTO job_runtime(job_id,plan) VALUES(?,?)", (job_id, canonical(action_binding or {})))
+            db.execute('INSERT INTO research_admissions(job_id,lane,hosts,campaign_id,task_id) VALUES(?,?,?,?,?)',
+                (job_id,lane,canonical(sorted(set(resource_hosts or []))),campaign_id,research_task_id))
+            if lane == 'research':
+                db.execute('UPDATE research_campaigns SET spent=spent+? WHERE id=?',(seconds,campaign_id))
+                db.execute("UPDATE research_tasks SET status='running',job_id=? WHERE id=?",(job_id,research_task_id))
             db.execute("UPDATE cases SET spent=spent+?,state=? WHERE id=?", (seconds, 'poc_running' if action_binding else 'checking', case_id))
             self.audit(db, case_id, "job_prepared", {"job_id": job_id, "generation": c["generation"]})
             return {"id": job_id, "generation": c["generation"], "scope_hash": row["hash"], "deadline": deadline}, token

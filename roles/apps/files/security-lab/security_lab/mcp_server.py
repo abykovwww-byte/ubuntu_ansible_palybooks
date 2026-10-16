@@ -21,6 +21,7 @@ from .reports import html_report
 from .dispatcher import Dispatcher, FixtureBackend, model_tool_catalog
 from .handoff import build_handoff
 from .compose_service import ComposeRunService
+from .research import CampaignService
 from .subfinder_runtime import SubfinderDiscovery
 from .client_identity import delegate_client
 from .native_checks import native_check_catalog
@@ -61,9 +62,12 @@ class ServerState:
         self.tasks: dict[str, asyncio.Task] = {}
         self.dispatchers: dict[str, Dispatcher] = {}
         self.native_services: dict[str, ComposeRunService] = {}
+        self.campaign_services: dict[str, CampaignService] = {}
         self.subfinder_services: dict[str, SubfinderDiscovery] = {}
 
     async def shutdown(self):
+        for service in self.campaign_services.values():
+            await service.shutdown()
         for service in self.subfinder_services.values():
             await service.shutdown()
         for service in self.native_services.values():
@@ -82,6 +86,7 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
     state = shared_state or ServerState(directory, principal)
     tasks, dispatchers = state.tasks, state.dispatchers
     native_services, subfinder_services = state.native_services, state.subfinder_services
+    campaign_services = state.campaign_services
 
     @asynccontextmanager
     async def lifespan(server):
@@ -131,6 +136,11 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
             options = {'resolver': pentest_resolver} if pentest_resolver is not None else {}
             native_services['compose'] = ComposeRunService(controller(ctx), pentest_runtime, **options)
         return native_services['compose']
+
+    def campaign_service(ctx: Context) -> CampaignService:
+        if 'compose' not in campaign_services:
+            campaign_services['compose'] = CampaignService(controller(ctx), native_service(ctx))
+        return campaign_services['compose']
 
     @server.tool(annotations=external)
     async def start_subfinder_discovery(case_id: str, ctx: Context) -> dict[str, Any]:
@@ -220,6 +230,67 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         revision_guard(ctx, case_id, expected_revision)
         return await native_service(ctx).start(case_id, targets=targets)
 
+    @server.tool(annotations=external)
+    async def start_research_campaign(case_id: str, config: dict[str, Any], ctx: Context,
+                                      expected_revision: int | None = None) -> dict[str, Any]:
+        """Run a wide autonomous ChatGPT research campaign for this case's approved scope.
+
+        The real provider runs the existing PentestGPT Supervisor/Executor roles
+        against the operator-selected scope services in sequential bounded
+        segments; it explores, forms hypotheses and records each as untrusted
+        `research_journal` data. It is a checks-only bound: no operator approval
+        form, no automatic scope/budget widening, no PoC. Requires an idle
+        checks case with approved concurrency >= 2 so the operator lane can run
+        concurrently. Select up to 256 exact scope services in config.targets;
+        the host partitions them into <=16-service jobs. The campaign stops at
+        config.max_seconds/max_jobs and never renews itself. Read the ledger with
+        get_research_ledger; any operator investigation is a separate explicit task.
+        """
+        if pentest_runtime is None:
+            raise Denied('Existing PentestGPT Compose runtime is not configured by the host')
+        revision_guard(ctx, case_id, expected_revision)
+        return await campaign_service(ctx).start(case_id, config, expected_revision)
+
+    @server.tool(annotations=write)
+    async def stop_research_campaign(case_id: str, ctx: Context) -> dict[str, Any]:
+        """Pause the case's active research campaign; records a status, starts nothing.
+
+        Operator verification and prior evidence are unaffected. This is the
+        emergency pause path and never resumes automatically.
+        """
+        return await campaign_service(ctx).pause(case_id)
+
+    @server.tool(annotations=read)
+    def get_research_ledger(case_id: str, ctx: Context) -> dict[str, Any]:
+        """Read campaigns, per-task queue status and the evidence-linked hypothesis ledger.
+
+        Hypothesis rows are untrusted analyst/model claims, never independently
+        verified findings and never execution authority.
+        """
+        return controller(ctx).research_view(case_id)
+
+    @server.tool(annotations=write)
+    def claim_hypothesis(case_id: str, hypothesis_id: str, expected_version: int, ctx: Context) -> dict[str, Any]:
+        """Lease one hypothesis for the operator lane; returns a private claim token.
+
+        Rejects a stale version or an already-held lease. The token is used only
+        in this process's review call; never print or persist it.
+        """
+        return controller(ctx).claim_hypothesis(case_id, hypothesis_id, expected_version)
+
+    @server.tool(annotations=write)
+    def review_hypothesis(case_id: str, hypothesis_id: str, claim_token: str, expected_version: int,
+                          status: str, conclusion: str, evidence_ids: list[str], ctx: Context) -> dict[str, Any]:
+        """Record the operator's verdict for a claimed hypothesis with cited case evidence.
+
+        status is observed, verified, refuted, inconclusive or hypothesis.
+        verified/refuted require at least one real evidence ID from this case;
+        model agreement or a source hash is not evidence. The verdict is the
+        operator's analyst claim, not server verification, and grants no PoC.
+        """
+        return controller(ctx).review_hypothesis(case_id, hypothesis_id, claim_token,
+            expected_version, status, conclusion, evidence_ids)
+
     @server.tool(annotations=read)
     def get_tool_catalog(ctx: Context) -> list[dict]:
         """Read implemented planners and production qualification gaps; no tools are installed by this call."""
@@ -276,7 +347,7 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         return {**Controller.integration_status(), 'live_execution': pentest_runtime is not None,
                 'case_continuity_revision': 1, 'native_service_checks_revision': 2,
                 'native_web_checks_revision': 1,
-                'case_budget_extension_revision': 1,
+                'case_budget_extension_revision': 1, 'research_campaign_revision': 1,
                 'native_targets_revision': 2, 'native_execution_handoff_revision': 2, 'native_preflight_revision':1,
                 'runtime_inventory_tool': 'get_runtime_inventory',
                 'poc_execution': pentest_runtime is not None,
@@ -450,6 +521,9 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
     @server.tool(annotations=write)
     async def stop_case(case_id: str, ctx: Context) -> dict[str, Any]:
         """Stop jobs, revoke their generation and pause this case."""
+        campaign = campaign_services.get('compose')
+        if campaign is not None:
+            await campaign.pause(case_id)
         subfinder = subfinder_services.get('compose')
         if subfinder is not None and case_id in subfinder.tasks:
             controller(ctx).stop(case_id)

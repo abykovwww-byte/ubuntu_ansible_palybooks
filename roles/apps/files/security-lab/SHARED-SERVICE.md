@@ -108,6 +108,50 @@ No job, provider call or PoC starts automatically. Ordinary `propose_scope`
 cannot inflate time beyond the initial allowance or a previously activated
 extension. The running status advertises `case_budget_extension_revision`.
 
+## Research campaign and operator verification lanes
+
+`start_research_campaign(case_id, config, expected_revision)` runs a wide
+autonomous ChatGPT (existing Codex) campaign inside one approved scope. It uses
+the same PentestGPT Supervisor/Executor adapter and the same native launch path;
+there is no second provider for the operator's own model. Configure
+`config.targets` (<=256 exact scope services), `objective`, `max_seconds`,
+`max_jobs` and `segment_seconds`. The host partitions the selection into
+`<=16`-service jobs and runs them **sequentially**. The campaign stops at its own
+`max_seconds`/`max_jobs`, when the queue drains, or on the first failed segment;
+it never renews itself and never widens scope or budget.
+
+Because the goal already sits near the upstream 4000-character cap, the campaign
+brief is delivered in the context file, not the goal: `research_task` (the
+instruction plus `SECURITY_LAB_RESEARCH_RESULT` marker), `policy.research_rule`,
+and `untrusted_osint_data.research_journal` with prior hypotheses. The model
+prints one `SECURITY_LAB_RESEARCH_RESULT {json}` line; the host parses only that
+bounded marker from the run receipts, before the prose receipt is truncated. Each
+imported hypothesis keeps the exact job evidence ID and is stored as an
+**untrusted model proposal**, never a verified finding.
+
+The operator (this OpenCode/DeepSeek chat) reads the ledger with
+`get_research_ledger` and works a chosen hypothesis with ordinary checks. While a
+campaign is active the case gains a second execution lane:
+
+- `research` lane: the campaign's native agent job, owning its selected hosts.
+- `operator` lane: typed checks and operator agent runs, admitted only outside the
+  research hosts.
+- `exclusive` lane: all legacy work; still globally single.
+
+Lane admission requires the approved scope `budget.concurrency >= 2`. Two jobs
+never overlap the same host, even across lanes or cases, and an exclusive job
+cannot start while any lane is active. Stop the campaign with
+`stop_research_campaign` (or `stop_case`); it records `paused`, cancels only its
+own owned worker and never resumes automatically. `get_case` reports
+`research_campaign_active`; `integration_status` advertises
+`research_campaign_revision`.
+
+`claim_hypothesis(case_id, hypothesis_id, expected_version)` leases one
+hypothesis to the operator lane and returns a private token (never print or
+store it). `review_hypothesis(...)` records the operator's verdict; `verified` or
+`refuted` require at least one real evidence ID from the same case. The verdict
+is the operator's analyst claim, not server verification, and grants no PoC.
+
 ## Case continuity and native service checks
 
 ### First-wave web toolbox

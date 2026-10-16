@@ -3,6 +3,11 @@
 This adapter launches the existing agent; it does not implement HTTP, a scanner,
 or independent phase/network enforcement. The existing agent has native shell
 access. A reduced HTTP scope is therefore refused before any provider starts.
+
+Two execution lanes may coexist only inside an active, explicitly concurrent
+research campaign: the server ChatGPT `research` lane and the operator
+`operator` lane. Legacy work stays `exclusive`. Lane admission never widens the
+saved scope and never starts a second provider for the operator's own model.
 """
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ from .compose_runtime import _request_goal, prepare_handoff_context
 from .controller import Controller
 from .dispatcher import redact_worker_output
 from .handoff import build_handoff
+from .research import research_brief, RESEARCH_POLICY_RULE, result_candidates
 from .tool_catalog import NmapCheck, build_check
 from .native_checks import parse_native_check, check_subject, compile_native_check
 from .native_targets import select_native_targets
@@ -30,13 +36,54 @@ async def resolve_addresses(host: str) -> list[str]:
     return sorted({row[4][0] for row in rows})
 
 
+def target_hosts(values: list[str]) -> frozenset[str]:
+    return frozenset(urlsplit(value).hostname for value in values)
+
+
 class ComposeRunService:
     def __init__(self, controller: Controller, runtime, *, poll_seconds: float = 2, resolver=resolve_addresses):
         self.controller, self.runtime = controller, runtime
         self.poll_seconds = poll_seconds
         self.resolver = resolver
         self.tasks: dict[str, tuple[str, asyncio.Task]] = {}
+        self.lanes: dict[str, tuple[str, frozenset[str]]] = {}
+        self.reservations: list[tuple[str, frozenset[str]]] = []
         self.preparing = False
+
+    def active_campaign(self, case_id: str) -> dict | None:
+        with self.controller.lock:
+            row = self.controller.db.execute("SELECT id,scope_id,scope_hash,generation,config "
+                "FROM research_campaigns WHERE case_id=? AND status='active'", (case_id,)).fetchone()
+        return dict(row) if row else None
+
+    def _enter_lane(self, lane: str, hosts: list[str]) -> tuple[str, frozenset[str]] | None:
+        held = frozenset(hosts)
+        if lane == 'exclusive':
+            if self.preparing or self.lanes or self.reservations:
+                raise Denied('A native PentestGPT run is already preparing or active')
+            self.preparing = True
+            return None
+        for other_lane, other_hosts in [*self.reservations, *self.lanes.values()]:
+            if other_lane == 'exclusive' or other_lane == lane or (held & other_hosts):
+                raise Denied('Native lane or target host is already occupied')
+        entry = (lane, held)
+        self.reservations.append(entry)
+        return entry
+
+    def _bind_lane(self, job_id: str, entry):
+        if entry is not None:
+            if entry in self.reservations:
+                self.reservations.remove(entry)
+            self.lanes[job_id] = entry
+
+    def _abort_lane(self, entry):
+        if entry is not None and entry in self.reservations:
+            self.reservations.remove(entry)
+
+    def _release_lane(self, job_id: str):
+        entry = self.lanes.pop(job_id, None)
+        if entry is not None and entry[0] == 'exclusive':
+            self.preparing = False
 
     async def start_nmap(self, case_id: str, host: str, ports: list[int], *, seconds: int = 30,
                          ipv6: bool = False) -> dict:
@@ -52,10 +99,7 @@ class ComposeRunService:
                                      action_identity=(manifest_id, finding_id))
 
     async def _start_cli(self, case_id, host, ports, *, seconds, ipv6, specification=None, action_identity=None):
-        if self.preparing or self.tasks:
-            raise Denied('A native run is already preparing or active')
-        self.preparing = True
-        c, job, task = self.controller, None, None
+        c, job, task, entry = self.controller, None, None, None
         try:
             action_binding, action = None, None
             if action_identity is not None:
@@ -72,6 +116,8 @@ class ComposeRunService:
             elif not any(target.host == host and set(ports) <= set(target.tcp_ports)
                        for target in scope.network_targets):
                 raise Denied('Nmap host/ports are outside the explicit approved network scope')
+            lane = 'operator' if action_binding is None and self.active_campaign(case_id) else 'exclusive'
+            entry = self._enter_lane(lane, [host])
             addresses = await self.resolver(host)
             import ipaddress
             selected = [str(ipaddress.ip_address(a)) for a in addresses
@@ -88,9 +134,11 @@ class ComposeRunService:
             binding = {'scope_id': manifest['id'], 'scope_hash': manifest['hash'],
                        'generation': snapshot['generation']}
             job, token = c.prepare_job(case_id, 'existing-pentestgpt-compose', plan.profile, seconds,
-                                       expected_binding=binding, action_binding=action_binding)
+                                       expected_binding=binding, action_binding=action_binding,
+                                       lane=lane, resource_hosts=[host])
+            self._bind_lane(job['id'], entry)
             run_id = plan.tool + '-' + job['id']
-            receipt_plan = {**binding, 'run_id': run_id, 'tool': plan.tool,
+            receipt_plan = {**binding, 'run_id': run_id, 'tool': plan.tool, 'lane': lane,
                 'execution_mode': 'existing_compose_runtime', 'native_full_access': False,
                 'phase_enforcement': 'fixed_' + plan.tool + '_entrypoint', 'provider_called': False,
                 'reduced_scope_enforced': False, 'network_ack': False,
@@ -111,7 +159,10 @@ class ComposeRunService:
             return {**c.get_job_status(case_id, job['id']), 'run_id': run_id,
                     'tool': plan.tool, 'provider_called': False}
         except BaseException:
+            self._abort_lane(entry)
             if job is not None:
+                # The exact name derives from this job ID; release the lane before
+                # any new admission can start.
                 if task is not None:
                     # The first yield can already start the native runtime.
                     # Its monitor owns closure/evidence; join it before the
@@ -153,7 +204,8 @@ class ComposeRunService:
                                 'access_closed':True})
             raise
         finally:
-            self.preparing = False
+            if entry is None:
+                self.preparing = False
 
     async def _monitor_tool(self, case_id, job, token, plan, run_id, receipt_plan):
         c = self.controller
@@ -200,12 +252,9 @@ class ComposeRunService:
                         'receipt': redact_worker_output(json.dumps(latest, ensure_ascii=False))[:18000],
                         'verified_vulnerabilities': [], 'finding_status': 'untrusted_tool_observation'})
 
-    async def start(self, case_id: str, *, targets: list[str] | None = None) -> dict:
-        if self.preparing or self.tasks:
-            raise Denied('A native PentestGPT run is already preparing or active')
-        self.preparing = True
+    async def start(self, case_id: str, *, targets: list[str] | None = None, research: dict | None = None) -> dict:
         c = self.controller
-        job = None
+        job, entry = None, None
         try:
             snapshot, manifest = c.checks_context(case_id)
             scope = Scope.model_validate_json(manifest['body'])
@@ -224,6 +273,10 @@ class ComposeRunService:
                           scope.budget.seconds - snapshot['spent']))
             if seconds < 60:
                 raise Denied('Existing runtime needs at least 60 seconds within the approved budget')
+            lane = 'research' if research else ('operator' if self.active_campaign(case_id) else 'exclusive')
+            if research:
+                seconds = min(seconds, research['seconds'])
+            entry = self._enter_lane(lane, list(target_hosts(execution_targets)))
             body = json.loads(manifest['body'])
             body['budget'] = {**body['budget'], 'seconds': seconds}
             binding = {'scope_id': manifest['id'], 'scope_hash': manifest['hash'],
@@ -231,6 +284,13 @@ class ComposeRunService:
             # Use the original immutable manifest for handoff validation. Only
             # the launcher receives the reduced remaining runtime budget.
             context = build_handoff(snapshot, manifest, [], now=c.clock())
+            if research:
+                context['research_task'] = research_brief(research['task_id'])
+                context['policy']['research_rule'] = RESEARCH_POLICY_RULE
+                context['untrusted_osint_data']['research_journal'] = research['journal']
+                context['untrusted_osint_data']['research_trust'] = 'model_proposals_not_verified_findings'
+                from .contracts import digest as _digest
+                context['context_hash'] = _digest({k: v for k, v in context.items() if k != 'context_hash'})
             # Refuse a map that cannot reach the model intact before reserving
             # a job, starting a provider or touching a container.
             # Reserve the longest allowed host-generated run path in the goal
@@ -244,13 +304,17 @@ class ComposeRunService:
             target_url, _ = _request_goal(Scope.model_validate(body), descriptor, targets=execution_targets)
             profile = 'target_network' if any(t.startswith('tcp://') for t in execution_targets) else 'target_http'
             job, token = c.prepare_job(case_id, 'existing-pentestgpt-compose', profile, seconds,
-                                       expected_binding=binding)
+                                       expected_binding=binding, lane=lane,
+                                       resource_hosts=sorted(target_hosts(execution_targets)),
+                                       campaign_id=(research or {}).get('campaign_id'),
+                                       research_task_id=(research or {}).get('task_id'))
+            self._bind_lane(job['id'], entry)
             run_id = 'chat-' + job['id']
             execution = c.native_execution_record(case_id, job['id'], token, 'existing-pentestgpt-compose',
                                                    profile, run_id, execution_targets)
             context = build_native_handoff(context, execution)
             descriptor = prepare_handoff_context(scope, context, run_id=run_id)
-            plan = {**binding, 'tool': 'pentestgpt-agent', 'run_id': run_id,
+            plan = {**binding, 'tool': 'pentestgpt-agent', 'run_id': run_id, 'lane': lane,
                     'execution_mode': 'existing_compose_runtime', 'synthetic': False,
                     'phase_enforcement': 'prompt_only', 'native_full_access': True,
                     'scope_enforcement': 'launcher_allowlist_and_prompt_only_network_scope' if profile == 'target_network'
@@ -259,6 +323,8 @@ class ComposeRunService:
                     'handoff_context_hash': context['context_hash'], 'handoff': descriptor,
                     'target': target_url, 'execution_targets': execution_targets, 'profile': profile,
                     'network_scope_enforcement': 'prompt_only', 'native_execution': execution}
+            if research:
+                plan['research'] = {'campaign_id': research['campaign_id'], 'task_id': research['task_id']}
             c.start_native_job(job['id'], token, 'existing-pentestgpt-compose', profile, plan)
             started = await self.runtime.start(run_id=run_id, scope=body, osint_context=context)
             c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', profile)
@@ -268,9 +334,10 @@ class ComposeRunService:
             await asyncio.sleep(0)
             return {**c.get_job_status(case_id, job['id']), 'run_id': run_id,
                     'execution': 'existing_pentestgpt', 'phase_enforcement': 'prompt_only',
-                    'native_full_access': True, 'reduced_scope_enforced': False,
+                    'native_full_access': True, 'reduced_scope_enforced': False, 'lane': lane,
                     'native_preflight':started.get('handoff',{}).get('native_preflight')}
         except BaseException:
+            self._abort_lane(entry)
             if job is not None:
                 try:
                     closure = await asyncio.shield(self.runtime.stop('chat-' + job['id']))
@@ -284,10 +351,12 @@ class ComposeRunService:
                             'reason': 'Existing runtime preparation did not complete'})
             raise
         finally:
-            self.preparing = False
+            if entry is None:
+                self.preparing = False
 
     def _finished(self, job_id, task):
         self.tasks.pop(job_id, None)
+        self._release_lane(job_id)
         if not task.cancelled():
             task.exception()
 
@@ -329,8 +398,10 @@ class ComposeRunService:
             # Bound before recording; no raw auth/env or arbitrary filesystem
             # reads enter the operator's evidence store.
             receipt = redact_worker_output(json.dumps(latest, ensure_ascii=False))[:18000]
+            results = result_candidates(latest) if plan.get('research') else []
             c.finish_job(case_id, job['id'], outcome=outcome, synthetic=False,
                 result={**plan, 'receipt': receipt, 'access_closed': closed,
+                        'research_results': results,
                         'native_preflight':started.get('handoff',{}).get('native_preflight'),
                         'handoff_removed': closure.get('handoff_removed'),
                         'handoff_cleanup_error': closure.get('handoff_cleanup_error'),
