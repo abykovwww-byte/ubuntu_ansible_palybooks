@@ -436,7 +436,8 @@ def _serialize_handoff(scope: Scope, packet: dict, *, run_id: str) -> tuple[str,
         data = serialized.encode('utf-8')
         if len(data) > MAX_CONTEXT_BYTES:
             raise Denied('Complete redacted OSINT context exceeds 1 MiB; no map was truncated')
-        descriptor = {'schema_version':1, 'case_id':packet['case_id'], 'generation':packet['generation'],
+        descriptor = {'schema_version':1, 'packet_schema_version':packet['schema_version'],
+            'case_id':packet['case_id'], 'generation':packet['generation'],
             'scope_id':packet['binding']['id'], 'scope_hash':packet['binding']['hash'],
             'context_hash':packet['context_hash'], 'content_sha256':hashlib.sha256(data).hexdigest(),
             'size_bytes':len(data), 'worker_path':f'/workspace/handoffs/{run_id}/osint-context.json',

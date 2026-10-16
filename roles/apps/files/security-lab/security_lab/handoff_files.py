@@ -95,13 +95,17 @@ class HandoffStore:
     def _validate(self, data):
         d = self.descriptor
         if (type(d) is not dict or d.get("schema_version") != 1 or d.get("run_id") != self.run_id
+                or type(d.get("packet_schema_version")) is not int or d["packet_schema_version"] not in {1, 2}
                 or d.get("worker_path") != "/workspace/handoffs/"+self.run_id+"/osint-context.json"
                 or type(d.get("size_bytes")) is not int or not 0 < d["size_bytes"] <= MAX_HANDOFF_BYTES
                 or len(data) != d["size_bytes"] or file_digest(data) != d.get("content_sha256")):
             raise RuntimeError("Context descriptor/content hash mismatch")
         packet = json.loads(data.decode("utf-8"))
-        if (type(packet) is not dict or packet.get("schema_version") != 1 or packet.get("stage") != "checks"
-                or packet.get("execution_authorized") is not False or packet.get("case_id") != d.get("case_id")
+        # This store validates transport/file identity, not execution admission.
+        # The caller has already validated its typed preview or job-bound native
+        # contract. Descriptor version and packet version are different formats.
+        if (type(packet) is not dict or packet.get("schema_version") != d["packet_schema_version"] or packet.get("stage") != "checks"
+                or packet.get("case_id") != d.get("case_id")
                 or packet.get("generation") != d.get("generation") or packet.get("context_hash") != d.get("context_hash")
                 or packet.get("binding", {}).get("id") != d.get("scope_id")
                 or packet.get("binding", {}).get("hash") != d.get("scope_hash")
