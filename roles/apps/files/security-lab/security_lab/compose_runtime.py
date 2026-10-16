@@ -8,6 +8,7 @@ not enforce HTTP methods, paths or effects of arbitrary native commands.
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 import hashlib
 import ipaddress
@@ -19,6 +20,7 @@ import re
 import secrets
 import shlex
 import time
+import zlib
 
 from .contracts import Denied, Scope, canonical, digest
 from .dispatcher import redact_worker_output
@@ -335,12 +337,24 @@ try:
             import ipaddress
             if not re.fullmatch(r'[a-z0-9.-]+',host) or str(ipaddress.ip_address(address)) != address:
                 raise RuntimeError('Invalid web address pin')
-            pin = '['+address+']' if ':' in address else address
-            options = ['--add-host',host+':'+pin,'--volume',str(artifact_root)+':/web-artifacts:rw']
+            # Compose run does not implement Docker run's --add-host. Bind an
+            # exact host-owned hosts file instead; no Compose override or DNS
+            # mutation is needed, and the worker cannot change the mapping.
+            hosts_file = artifact_root / '.dns-hosts'
+            with hosts_file.open('x', encoding='ascii') as file:
+                file.write('127.0.0.1 localhost\n::1 localhost\n'+address+' '+host+'\n')
+            hosts_file.chmod(0o400)
+            options = ['--volume',str(artifact_root)+':/web-artifacts:rw',
+                       '--volume',str(hosts_file)+':/etc/hosts:ro']
+        service = 'pentest-web-tools' if web else p['tool_service']
+        if p['kind'] == 'inventory':
+            configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','--profile','tools','config','--format','json']))
+            if 'pentest-web-tools' in configuration.get('services', {}):
+                service = 'pentest-web-tools'
         command = ["docker", "compose", "--file", "compose.yml", "--profile", "tools", "--profile", "manual", "run", "--rm", "-T",
             "--name", p["container_name"], "--label", "security-lab.compose-owner="+p["owner"],
             "--label", "security-lab.run-id="+p["run_id"], "--entrypoint", "/usr/bin/timeout",
-            *options, 'pentest-web-tools' if web else p["tool_service"], "--signal=TERM", "--kill-after=10s", str(seconds), *argv]
+            *options, service, "--signal=TERM", "--kill-after=10s", str(seconds), *argv]
         started = time.time()
         try:
             execution = subprocess.run(command, cwd=p["compose_directory"], capture_output=True,
@@ -380,7 +394,6 @@ try:
         elif p["kind"] == "subfinder":
             result["actual_version"] = p["actual_version"]
         elif p['kind'] == 'inventory':
-            configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','--profile','tools','config','--format','json']))
             result['native_service_applied'] = 'pentestgpt-native' in configuration.get('services', {})
             result['web_service_applied'] = 'pentest-web-tools' in configuration.get('services', {})
     elif p["operation"] == "poll":
@@ -398,6 +411,11 @@ finally:
     if store is not None: store.release()
 '''
 _HOST_SCRIPT = HANDOFF_FILE_PROGRAM + "\n" + _HOST_SCRIPT
+# Keep the exact trusted program out of Windows' 32767-character argv ceiling.
+# Only this fixed source is compressed, never request data, scope or credentials.
+_SSH_HOST_PROGRAM = ("import base64,zlib;exec(compile(zlib.decompress(base64.b64decode("
+                     + repr(base64.b64encode(zlib.compress(_HOST_SCRIPT.encode('utf-8'))).decode('ascii'))
+                     + ")), 'security-lab-host', 'exec'))")
 
 
 def _process_environment():
@@ -572,7 +590,7 @@ class ComposePentestRuntime:
             return ["python3", "-c", _HOST_SCRIPT]
         return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
                 "-o", "StrictHostKeyChecking=yes", "-i", self.config.ssh_identity,
-                self.config.ssh_host, "python3 -c " + shlex.quote(_HOST_SCRIPT)]
+                self.config.ssh_host, "python3 -c " + shlex.quote(_SSH_HOST_PROGRAM)]
 
     async def _call(self, operation: str, handle: dict) -> dict:
         config = self.config
