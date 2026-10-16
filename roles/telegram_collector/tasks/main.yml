@@ -8,6 +8,9 @@
       - telegram_collector_data_dir == '/srv/app-data/telegram-collector'
       - telegram_collector_private_dir == '/etc/ansible/telegram-collector-private'
 
+- name: Validate scope key before changing the collector deployment
+  ansible.builtin.import_tasks: scope-key-preflight.yml
+
 - name: Verify that the consumer network has no direct external route
   ansible.builtin.command:
     argv: [docker, network, inspect, vpn_clients]

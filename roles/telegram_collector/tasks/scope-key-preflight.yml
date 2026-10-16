@@ -1,0 +1,5 @@
+---
+- name: Validate the archive public key from the collector role context
+  ansible.builtin.assert:
+    that:
+      - "telegram_archive_ro_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')"

@@ -28,9 +28,14 @@ def main():
         variables = Path(directory) / 'vars.json'
         playbook.write_text(json.dumps([{
             'hosts': 'localhost', 'connection': 'local', 'gather_facts': False, 'become': False,
-            'tasks': [{'ansible.builtin.include_role': {
-                'name': 'telegram_archive', 'tasks_from': 'preflight',
-            }}],
+            'tasks': [
+                {'ansible.builtin.include_role': {
+                    'name': 'telegram_archive', 'tasks_from': 'preflight', 'public': True,
+                }},
+                {'ansible.builtin.include_role': {
+                    'name': 'telegram_collector', 'tasks_from': 'scope-key-preflight',
+                }},
+            ],
         }]), encoding='utf-8')
         env = dict(os.environ, ANSIBLE_ROLES_PATH=str(ROOT / 'roles'))
         for label, overrides, expected_success in cases:
@@ -43,7 +48,8 @@ def main():
                 # Fixtures contain no real credentials; output can diagnose parser errors.
                 raise RuntimeError(label + '\n' + result.stdout + result.stderr)
         print(json.dumps({'fixture': 'real-ansible-preflight', 'cases': len(cases),
-                          'status': 'ok', 'become': False, 'configuration_changed': False}))
+                          'status': 'ok', 'become': False, 'configuration_changed': False,
+                          'cross_role_key_lookup': True}))
 
 
 if __name__ == '__main__':
