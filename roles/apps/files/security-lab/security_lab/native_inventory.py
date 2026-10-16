@@ -9,6 +9,8 @@ for name, argv in {'curl':['/usr/bin/curl','--version'], 'nmap':['/usr/bin/nmap'
                    'tcpdump':['/usr/bin/tcpdump','--version'],
                    'nft':['/usr/sbin/nft','--version'],
                    'ffuf':['/usr/local/bin/ffuf','-V'],
+                   'interactive_web':['/opt/web-tools-venv/bin/python','-c',
+                       'import importlib.metadata as m; from pathlib import Path; assert Path("/usr/local/libexec/pentestgpt-interactive.py").is_file(); import aiohttp,socketio; print("aiohttp="+m.version("aiohttp")+" python-socketio="+m.version("python-socketio"))'],
                    'playwright':['/opt/web-tools-venv/bin/python','-m','playwright','--version'],
                    'chromium':['/opt/web-tools-venv/bin/python','-c',
                        'from playwright.sync_api import sync_playwright; import subprocess; p=sync_playwright().start(); subprocess.run([p.chromium.executable_path,"--version"],check=True); p.stop()'],

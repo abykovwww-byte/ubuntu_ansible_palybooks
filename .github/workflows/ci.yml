@@ -172,6 +172,14 @@ jobs:
           --add-host fixture.example.test:127.0.0.1 --env HOME=/tmp
           --entrypoint /opt/web-tools-venv/bin/python pentestgpt-abykovserv:ci
           /usr/local/libexec/pentestgpt-test-web-tools.py
+      - name: Qualify interactive protocols and cleanup on owned loopback fixture
+        run: >-
+          docker run --rm --network none --read-only --user 1000:1000
+          --cap-drop ALL --security-opt no-new-privileges --pids-limit 256
+          --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000
+          --add-host fixture.example.test:127.0.0.1
+          --entrypoint /opt/web-tools-venv/bin/python pentestgpt-abykovserv:ci
+          /usr/local/libexec/pentestgpt-test-interactive.py
       - name: Verify Compose web hosts mount and ZAP inventory temporary space
         working-directory: /tmp/PentestGPT
         shell: bash

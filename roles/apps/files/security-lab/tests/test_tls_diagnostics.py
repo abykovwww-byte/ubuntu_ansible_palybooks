@@ -108,7 +108,7 @@ def test_host_script_fits_windows_ssh_and_decompresses_to_exact_trusted_program(
     tree = ast.parse(_SSH_HOST_PROGRAM)
     encoded = next(node.value for node in ast.walk(tree) if isinstance(node,ast.Constant)
                    and isinstance(node.value,str) and len(node.value)>1000)
-    assert zlib.decompress(base64.b64decode(encoded)).decode('utf-8') == _HOST_SCRIPT
+    assert zlib.decompress(base64.b85decode(encoded)).decode('utf-8') == _HOST_SCRIPT
     assert len(_SSH_HOST_PROGRAM) < 20000
 
 

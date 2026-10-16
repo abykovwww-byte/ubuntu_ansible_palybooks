@@ -29,6 +29,7 @@ from .handoff_files import HANDOFF_FILE_PROGRAM
 from .native_checks import compile_native_check
 from .native_targets import select_native_targets
 from .native_inventory import INVENTORY_PROGRAM
+from .web_sessions import WEB_SESSION_PROGRAM
 from .native_handoff import validate_native_handoff
 from .diagnostic_host import DIAGNOSTIC_HOST_PROGRAM
 from .native_preflight import (NATIVE_PREFLIGHT_PROGRAM, NATIVE_PREFLIGHT_SHA256, PREFLIGHT_FILENAME,
@@ -158,7 +159,9 @@ def close():
     except Exception:
         return {"status":"stopped", "access_closed":True, "handoff_removed":False,
                 "handoff_cleanup_error":"owned_artifact_validation_failed"}
-    return {"status":"stopped", "access_closed":True, "handoff_removed":removed}
+    private_removed = release_web_session(p)
+    return {"status":"stopped", "access_closed":True, "handoff_removed":removed,
+            "private_session_removed":private_removed}
 def workspace_mounts(volumes):
     matches = [v for v in volumes if isinstance(v,dict) and v.get("target") == "/workspace"]
     if (len(matches) != 1 or matches[0].get("type") != "bind"
@@ -312,7 +315,7 @@ try:
     elif p['operation'] == 'tool' and p.get('kind') in {'tls', 'testssl'}:
         result = DiagnosticHost(p).run()
     elif p["operation"] in {"tool", "version"}:
-        if p.get("kind") not in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory", "playwright", "ffuf", "zap"}:
+        if p.get("kind") not in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory", "playwright", "ffuf", "zap", "websocket", "socketio", "writes"}:
             raise RuntimeError("Unsupported fixed tool kind")
         if p["tool_service"] not in {"pentest-tools", "pentestgpt"}:
             raise RuntimeError("Unsupported tools service")
@@ -326,7 +329,7 @@ try:
             raise RuntimeError("Run identity already exists")
         argv = ["/usr/local/bin/subfinder", "-version", "-disable-update-check"] if p["operation"] == "version" else p["argv"]
         seconds = 10 if p["operation"] == "version" else p["seconds"]
-        web = p['kind'] in {'playwright', 'ffuf', 'zap'}
+        web = p['kind'] in {'playwright', 'ffuf', 'zap', 'websocket', 'socketio', 'writes'}
         options, artifact_root = [], None
         if web:
             if p['tool_service'] != 'pentest-tools':
@@ -351,6 +354,8 @@ try:
             hosts_file.chmod(0o400)
             options = ['--volume',str(artifact_root)+':/web-artifacts:rw',
                        '--volume',str(hosts_file)+':/etc/hosts:ro']
+            if p['kind'] in {'websocket','socketio','writes'}:
+                options += prepare_web_session(p)
         service = 'pentest-web-tools' if web else p['tool_service']
         if p['kind'] == 'inventory':
             configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','--profile','tools','--profile','diagnostics','config','--format','json']))
@@ -368,7 +373,7 @@ try:
             close()
             raise
         # A successful CLI exit alone is not a container-closure receipt.
-        close()
+        closure = close()
         finished = time.time()
         maximum = p["max_receipt_chars"]
         stdout, output_metadata = tool_output(execution.stdout, p['kind'])
@@ -379,11 +384,12 @@ try:
                 "stdout":stdout[:maximum], "stderr":stderr[:maximum], **output_metadata}],
             "started_at":started, "finished_at":finished,
             "receipts_truncated":len(stdout)>maximum or len(stderr)>maximum,
-            "receipt_kind":"real_compose_"+p["kind"], "verified_vulnerabilities":[]}
+            "receipt_kind":"real_compose_"+p["kind"], "verified_vulnerabilities":[],
+            "private_session_removed":closure.get('private_session_removed',True)}
         if artifact_root is not None:
             result['artifact_directory'] = str(artifact_root)
             result['artifacts'] = []
-            for name in ('summary.json','browser.json','page.png','ffuf.json','input.har','zap-report.json','zap.log'):
+            for name in ('summary.json','browser.json','page.png','ffuf.json','input.har','zap-report.json','zap.log','transcript.jsonl'):
                 path = artifact_root / name
                 if path.is_symlink():
                     raise RuntimeError('Unsafe web artifact link')
@@ -410,17 +416,20 @@ try:
         raise RuntimeError("Unknown operation")
     print(json.dumps({"ok":True, "result":result}, ensure_ascii=False))
 except BaseException as exc:
-    code = str(exc) if str(exc) in {'native_image_update_required','native_service_not_applied','native_preflight_failed','diagnostic_runtime_update_required'} else 'native_operation_failed'
+    code = str(exc) if str(exc) in {'native_image_update_required','native_service_not_applied','native_preflight_failed','diagnostic_runtime_update_required',
+        'web_session_invalid','web_session_permissions','web_session_not_found','web_session_not_authorized'} else 'native_operation_failed'
     print(json.dumps({"ok":False, "error":"Existing PentestGPT runner operation failed", 'error_code':code}))
     sys.exit(1)
 finally:
     if store is not None: store.release()
+    if p.get('kind') in {'websocket','socketio','writes'}:
+        release_web_session(p)
 '''
-_HOST_SCRIPT = HANDOFF_FILE_PROGRAM + "\n" + DIAGNOSTIC_HOST_PROGRAM + "\n" + _HOST_SCRIPT
+_HOST_SCRIPT = HANDOFF_FILE_PROGRAM + "\n" + DIAGNOSTIC_HOST_PROGRAM + "\n" + WEB_SESSION_PROGRAM + "\n" + _HOST_SCRIPT
 # Windows process command lines are limited to 32767 characters. The trusted
 # program travels compressed; the separate stdin JSON remains data, not code.
-_SSH_HOST_PROGRAM = ('import base64,zlib;exec(compile(zlib.decompress(base64.b64decode('
-                  + repr(base64.b64encode(zlib.compress(_HOST_SCRIPT.encode('utf-8'))).decode('ascii'))
+_SSH_HOST_PROGRAM = ('import base64,zlib;exec(compile(zlib.decompress(base64.b85decode('
+                  + repr(base64.b85encode(zlib.compress(_HOST_SCRIPT.encode('utf-8'),9)).decode('ascii'))
                   + ')),"security-lab-host","exec"))')
 
 
@@ -619,6 +628,8 @@ class ComposePentestRuntime:
             raise Denied("Existing PentestGPT runner operation failed; closure may need verification") from exc
         if code != 0 or not isinstance(reply, dict) or reply.get('ok') is not True:
             reason = reply.get('error_code') if isinstance(reply, dict) else None
+            if reason in {'web_session_invalid','web_session_permissions','web_session_not_found','web_session_not_authorized'}:
+                raise Denied('Private web session rejected: '+reason+'; check its case/origin/expiry and private grant permissions')
             if reason in {'native_image_update_required', 'native_service_not_applied', 'diagnostic_runtime_update_required'}:
                 raise Denied('Native runtime needs IaC image/Compose apply before this launch: ' + reason)
             if reason == 'native_preflight_failed':
@@ -633,7 +644,7 @@ class ComposePentestRuntime:
         limitations = dict(LIMITATIONS)
         if handle.get('agent_service') == 'pentestgpt-native':
             limitations['scope_enforcement'] = 'launcher_allowlist_and_prompt_only_network_scope'
-        if handle.get("kind") in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory", "playwright", "ffuf", "zap"}:
+        if handle.get("kind") in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory", "playwright", "ffuf", "zap", "websocket", "socketio", "writes"}:
             limitations.update(native_full_access=False, phase_enforcement="fixed_"+handle["kind"]+"_entrypoint",
                                 scope_enforcement="host_typed_plan_and_existing_compose_networks", provider_called=False)
         if handle.get('kind') in {'tls', 'testssl'}:
@@ -722,7 +733,7 @@ class ComposePentestRuntime:
             raise Denied('Service checks require the managed tools-only service')
         rebuilt = compile_native_check(plan.specification, Scope.model_validate(plan.scope),
             list(plan.addresses), stage='actions_approved' if plan.task_stage == 'poc' else 'checks',
-            now=time.time(), task_stage=plan.task_stage)
+            now=time.time(), task_stage=plan.task_stage, case_id=plan.case_id)
         if rebuilt != plan or not 1 <= plan.seconds <= self.config.max_runtime_seconds:
             raise Denied('Invalid or altered native service plan')
         if not isinstance(run_id, str) or _ID.fullmatch(run_id) is None:
@@ -744,9 +755,13 @@ class ComposePentestRuntime:
                 handle.update(address=plan.addresses[0], port=plan.specification['port'], deadline=limit,
                     attempts=plan.specification.get('attempts',1),
                     attempt_seconds=plan.specification.get('attempt_seconds',plan.seconds))
-            if plan.tool in {'playwright', 'ffuf', 'zap'}:
+            if plan.tool in {'playwright', 'ffuf', 'zap', 'websocket', 'socketio', 'writes'}:
                 from urllib.parse import urlsplit
                 handle.update(web_host=urlsplit(plan.specification['url']).hostname, web_address=plan.addresses[0])
+                if plan.tool in {'websocket','socketio','writes'}:
+                    parsed = urlsplit(plan.specification['url'])
+                    handle.update(session_ref=plan.specification.get('session_ref'),web_case_id=plan.case_id,
+                                  web_origin=parsed.scheme+'://'+parsed.netloc)
             self._handles[run_id] = handle
         try:
             result = await self._call('tool', handle)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import ipaddress
+import json
 import re
 from typing import Annotated, Literal, Union
 from urllib.parse import urlsplit, urlencode
@@ -13,6 +14,8 @@ from .contracts import Contract, Denied, Scope, HTTPRequest, ActionPlan, hostnam
 from .tool_catalog import CurlCheck, NmapCheck, _check_stage, build_check
 from .web_checks import BrowserCheck, FFUFCheck, ZAPCheck, WEB_CHECKS, web_policy
 from .contracts import canonical
+from .contracts import WebSocketAction, SocketIOAction, WritesAction
+from .interactive_checks import INTERACTIVE, interactive_policy, validate_action_scope
 
 
 class ServiceCheck(Contract):
@@ -68,7 +71,8 @@ class TestSSLCheck(Contract):
     _host = field_validator('host')(hostname)
 
 
-NativeCheck = Annotated[Union[CurlCheck, HTTPRequest, ServiceCheck, TLSCheck, TestSSLCheck, BrowserCheck, FFUFCheck, ZAPCheck], Field(discriminator='tool')]
+NativeCheck = Annotated[Union[CurlCheck, HTTPRequest, ServiceCheck, TLSCheck, TestSSLCheck, BrowserCheck, FFUFCheck, ZAPCheck,
+                             WebSocketAction, SocketIOAction, WritesAction], Field(discriminator='tool')]
 _ADAPTER = TypeAdapter(NativeCheck)
 
 
@@ -78,6 +82,9 @@ def parse_native_check(value: dict):
 
 def check_subject(spec, scope: Scope) -> str:
     """Authorization is checked before DNS or any runtime operation."""
+    if isinstance(spec, INTERACTIVE):
+        validate_action_scope(spec, scope)
+        return urlsplit(spec.url).hostname
     if isinstance(spec, WEB_CHECKS):
         web_policy(spec, scope)
         return urlsplit(spec.url).hostname
@@ -105,22 +112,25 @@ class NativePlan:
     scope: dict
     addresses: tuple[str, ...]
     task_stage: str = 'checks'
+    case_id: str | None = None
 
 
 def compile_native_check(specification: dict, scope: Scope, addresses: list[str], *, stage: str, now: float,
-                         task_stage: str = 'checks') -> NativePlan:
+                          task_stage: str = 'checks', case_id: str | None = None) -> NativePlan:
     spec = parse_native_check(specification)
     scope = Scope.model_validate(scope.model_dump(mode='json'), strict=True)
     if task_stage == 'poc':
         scope.check_window(now)
         if stage not in {'actions_approved', 'poc_running', 'checks_review'} or 'poc' not in scope.authorization.actions:
             raise Denied('PoC requires separate action authorization')
-        if not isinstance(spec, HTTPRequest):
+        if not isinstance(spec, (HTTPRequest, *INTERACTIVE)):
             raise Denied('Only a saved HTTP request is executable as a PoC action')
         if now + spec.seconds > min(scope.expires_at, scope.authorization.valid_until):
             raise Denied('Action request exceeds authorization window')
     elif task_stage == 'checks':
         _check_stage(scope, stage, now, spec.seconds)
+        if isinstance(spec, INTERACTIVE):
+            raise Denied('Interactive profiles require an activated exact action plan')
         if isinstance(spec, HTTPRequest) and spec.method == 'POST':
             raise Denied('POST requires a separately activated exact action request')
     else:
@@ -139,7 +149,12 @@ def compile_native_check(specification: dict, scope: Scope, addresses: list[str]
         if address not in alias.addresses:
             raise Denied('Alternate SNI requires the same explicit address grant')
     bracketed = '[' + address + ']' if ipaddress.ip_address(address).version == 6 else address
-    if isinstance(spec, WEB_CHECKS):
+    if isinstance(spec, INTERACTIVE):
+        policy = interactive_policy(spec, scope, case_id)
+        argv = ('/opt/web-tools-venv/bin/python', '/usr/local/libexec/pentestgpt-interactive.py',
+                '--policy', canonical(policy))
+        profile = 'target_http'
+    elif isinstance(spec, WEB_CHECKS):
         policy = web_policy(spec, scope)
         argv = ('/opt/web-tools-venv/bin/python', '/usr/local/libexec/pentestgpt-web-check.py',
                 '--policy', canonical(policy))
@@ -194,13 +209,15 @@ def compile_native_check(specification: dict, scope: Scope, addresses: list[str]
             argv += ('-starttls', spec.starttls)
         profile = 'target_network'
     return NativePlan(spec.tool, profile, tuple(argv), spec.seconds, spec.model_dump(mode='json'),
-                      scope.model_dump(mode='json'), (address,), task_stage)
+                      scope.model_dump(mode='json'), (address,), task_stage, case_id if isinstance(spec, INTERACTIVE) else None)
 
 
 def native_check_catalog(configured: bool) -> list[dict]:
+    schemas = {kind.model_fields['tool'].default:kind.model_json_schema() for kind in (
+        CurlCheck,HTTPRequest,ServiceCheck,TLSCheck,TestSSLCheck,BrowserCheck,FFUFCheck,ZAPCheck,*INTERACTIVE)}
     checks = [{'name': 'compose:' + name, 'tool': name, 'available': configured, 'qualified': False,
              'allowed_actions': ['checks'], 'execution_mode': 'existing_compose_runtime',
-             'mcp_tool': 'start_service_check', 'schema': _ADAPTER.json_schema(),
+             'mcp_tool': 'start_service_check', 'schema': schemas[name],
              'limitations': limits, 'live_qualification': 'requires actual CLI receipt on the applied tools image'}
             for name, limits in (
                 ('curl', 'One pinned GET/HEAD; TLS verification; no query, redirects, auth or custom payloads'),
@@ -211,7 +228,11 @@ def native_check_catalog(configured: bool) -> list[dict]:
                 ('playwright', 'Fresh Chromium context; scoped GET/HEAD, request/rate/time bounds; no redirects, credentials, writes or WebSockets; host artifacts'),
                 ('ffuf', 'At most 32 admitted relative paths plus control; one thread, scope RPS; no redirects/recursion/calibration; host artifacts'),
                 ('zap', 'One TLS-verified curl GET; ZAP offline HAR import and passive scan with bundled add-ons; no spider, active scan, login or runtime updates; host artifacts'))]
-    return checks + [{'name':'compose:saved_http_action', 'available':configured, 'qualified':False,
+    return checks + [{'name':'compose:'+name, 'tool':name, 'available':configured, 'qualified':False,
+        'allowed_actions':['poc'], 'mcp_tool':'start_poc_action', 'request_schema':schemas[name],
+        'manifest_schema_ref':'compose:saved_http_action.manifest_schema',
+        'limitations':'Exact saved interactive action only; one origin, bounded messages/steps; case-bound host session reference; redacted transcript; no automatic replay'}
+        for name in ('websocket','socketio','writes')] + [{'name':'compose:saved_http_action', 'available':configured, 'qualified':False,
         'allowed_actions':['poc'], 'mcp_tool':'start_poc_action', 'manifest_schema':ActionPlan.model_json_schema(),
         'limitations':'Executes one exact saved action.request after separate action activation; POST/body allowed only within HTTP scope. '
                       'No credentials or redirects; response verification is an observation, not vulnerability proof.'}]
@@ -224,6 +245,15 @@ def evaluate_action_response(receipt: dict, expected: dict | None) -> dict:
     if receipt.get('status') != 'completed' or receipt.get('receipts_truncated') or len(rows) != 1:
         return result
     row = rows[0]
+    if row.get('command', [])[:2] == ['/opt/web-tools-venv/bin/python', '/usr/local/libexec/pentestgpt-interactive.py']:
+        try:
+            observed = json.loads(row.get('stdout',''))
+            if row.get('exit_code') == 0 and observed.get('status') == 'completed':
+                return {**result, 'poc_observation':'interactive_observation_recorded',
+                        'cleanup':observed.get('cleanup'), 'vulnerability_verified':False}
+        except (ValueError,TypeError):
+            pass
+        return result
     status = re.search(r'\nSECURITY_LAB_HTTP_STATUS:(\d{3})\n?$', row.get('stdout', ''))
     if row.get('exit_code') != 0 or status is None:
         return result

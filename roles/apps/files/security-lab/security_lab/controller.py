@@ -483,9 +483,10 @@ class Controller(ResearchStore):
                     raise Denied("Invalid action expiration")
                 if any(a.host not in {t.host for t in [*scope.targets, *scope.network_targets]} for a in model.actions):
                     raise Denied("Action target outside scope")
-                if any(a.request is not None and not any(t.permits(a.request.url, a.request.method)
-                       for t in scope.targets) for a in model.actions):
-                    raise Denied('Action request outside approved service, path or method')
+                from .interactive_checks import validate_action_scope
+                for action in model.actions:
+                    if action.request is not None:
+                        validate_action_scope(action.request, scope)
                 if c["state"] != "checks_review":
                     raise Denied("Actions can only be proposed after checks review")
             return self._save_proposal(db, case_id, kind, data)
@@ -618,8 +619,8 @@ class Controller(ResearchStore):
         action = next((a for a in plan.actions if a.finding_id == finding_id), None)
         if action is None or action.request is None:
             raise Denied('No executable request saved for this finding; propose an exact action request')
-        if not any(t.permits(action.request.url, action.request.method) for t in scope.targets):
-            raise Denied('Action request outside approved HTTP scope')
+        from .interactive_checks import validate_action_scope
+        validate_action_scope(action.request, scope)
         if self.clock() + action.request.seconds > plan.expires_at:
             raise Denied('Action request exceeds action expiration')
         return row, action
