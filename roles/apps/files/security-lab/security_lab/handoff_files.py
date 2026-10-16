@@ -1,11 +1,14 @@
 """Trusted runtime JSON artifact operations, embedded in the existing SSH RPC.
 
-No code or credentials are installed. POSIX dir-fd operations anchor every
+Only a hash-pinned host-selected verifier is staged beside per-run JSON; no
+application installation or credentials. POSIX dir-fd operations anchor every
 component; the native FULL_ACCESS actor can still alter its writable parent
 after launch, so verification receipts never claim immutable worker storage.
 """
 
-HANDOFF_FILE_PROGRAM = r'''
+from .native_preflight import PREFLIGHT_FILENAME
+
+HANDOFF_FILE_PROGRAM = 'PREFLIGHT_FILENAME = ' + repr(PREFLIGHT_FILENAME) + '\n' + r'''
 import hashlib, json, os, re, secrets, stat
 MAX_HANDOFF_BYTES = 1048576
 def canonical_file(value):
@@ -14,7 +17,7 @@ def file_digest(value):
     return hashlib.sha256(value).hexdigest()
 class HandoffStore:
     NAMES = ("osint-context.json", "descriptor.json", ".owner.json")
-    def __init__(self, workspace, run_id, owner, descriptor):
+    def __init__(self, workspace, run_id, owner, descriptor, preflight_program=None):
         if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
             raise RuntimeError("Handoff files require POSIX no-follow directory operations")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", run_id) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", owner):
@@ -22,10 +25,13 @@ class HandoffStore:
         self.workspace, self.run_id = workspace, run_id
         self.owner_hash = file_digest(owner.encode("utf-8"))
         self.descriptor = descriptor
+        self.preflight_bytes = preflight_program.encode('utf-8') if isinstance(preflight_program,str) else None
         self.parents = self.directory = self.lock = None
         self.created = False
         self.identity = None
         self.temporary = set()
+    def names(self):
+        return self.NAMES + ((PREFLIGHT_FILENAME,) if self.descriptor.get('packet_schema_version')==2 else ())
     def _open_root(self):
         if not isinstance(self.workspace, str) or not self.workspace.startswith("/") or ".." in self.workspace.split("/"):
             raise RuntimeError("Fixed absolute workspace required")
@@ -81,6 +87,10 @@ class HandoffStore:
     def write(self, text):
         data = text.encode("utf-8")
         self._validate(data)
+        if self.descriptor['packet_schema_version']==2:
+            if (self.preflight_bytes is None or len(self.preflight_bytes)>65536
+                    or file_digest(self.preflight_bytes)!=self.descriptor['preflight_sha256']):
+                raise RuntimeError('Native preflight program hash mismatch')
         self._open_root()
         os.mkdir(self.run_id, mode=0o755, dir_fd=self.parents)  # atomic collision denial
         self.created = True
@@ -89,6 +99,8 @@ class HandoffStore:
         self._lock_owner()
         self._write_atomic("osint-context.json", data, 0o444)
         self._write_atomic("descriptor.json", canonical_file(self.descriptor).encode("utf-8"), 0o444)
+        if self.descriptor['packet_schema_version']==2:
+            self._write_atomic(PREFLIGHT_FILENAME,self.preflight_bytes,0o444)
         receipt = self.verify()
         self.created = False  # completed artifacts require full validation for deletion
         return receipt
@@ -100,6 +112,9 @@ class HandoffStore:
                 or type(d.get("size_bytes")) is not int or not 0 < d["size_bytes"] <= MAX_HANDOFF_BYTES
                 or len(data) != d["size_bytes"] or file_digest(data) != d.get("content_sha256")):
             raise RuntimeError("Context descriptor/content hash mismatch")
+        if d['packet_schema_version']==2 and (not isinstance(d.get('preflight_sha256'),str)
+                or re.fullmatch('[a-f0-9]{64}',d['preflight_sha256']) is None):
+            raise RuntimeError('Native preflight descriptor hash missing')
         packet = json.loads(data.decode("utf-8"))
         # This store validates transport/file identity, not execution admission.
         # The caller has already validated its typed preview or job-bound native
@@ -120,12 +135,16 @@ class HandoffStore:
             raise RuntimeError("Artifact ownership or directory identity mismatch")
         if self._read("descriptor.json", 16384) != canonical_file(self.descriptor).encode("utf-8"):
             raise RuntimeError("Stored descriptor changed")
-        for name in ("descriptor.json", "osint-context.json"):
+        for name in ("descriptor.json", "osint-context.json") + ((PREFLIGHT_FILENAME,) if self.descriptor['packet_schema_version']==2 else ()):
             if stat.S_IMODE(os.stat(name, dir_fd=self.directory, follow_symlinks=False).st_mode) != 0o444:
                 raise RuntimeError("Read-only context mode changed")
         self._validate(self._read("osint-context.json", MAX_HANDOFF_BYTES))
+        if self.descriptor['packet_schema_version']==2:
+            if file_digest(self._read(PREFLIGHT_FILENAME,65536))!=self.descriptor['preflight_sha256']:
+                raise RuntimeError('Stored native preflight program changed')
         return {"descriptor":self.descriptor, "identity":self.identity,
                 "file_hash_verified":True, "file_read_only_mode":True,
+                "preflight_file_hash_verified":self.descriptor['packet_schema_version']==2,
                 "verification_stage":"before_native_launch_or_host_readback",
                 "immutable_after_model_start":False}
     def cleanup(self, expected_identity=None):
@@ -139,15 +158,15 @@ class HandoffStore:
             # arbitrary entry, symlink or recursive path is ever followed.
             info = os.fstat(self.directory)
             if self.identity != {"device":info.st_dev,"inode":info.st_ino}: raise RuntimeError("Directory changed")
-        for name in self.NAMES + tuple(self.temporary):
+        for name in self.names() + tuple(self.temporary):
             try:
                 info = os.stat(name, dir_fd=self.directory, follow_symlinks=False)
             except FileNotFoundError: continue
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise RuntimeError("Cleanup refuses nonregular or linked artifact")
-        if set(os.listdir(self.directory)) - set(self.NAMES) - self.temporary:
+        if set(os.listdir(self.directory)) - set(self.names()) - self.temporary:
             raise RuntimeError("Cleanup refuses unexpected artifact entries")
-        for name in self.NAMES + tuple(self.temporary):
+        for name in self.names() + tuple(self.temporary):
             try: os.unlink(name, dir_fd=self.directory)
             except FileNotFoundError: pass
         os.fsync(self.directory)

@@ -15,6 +15,8 @@ from security_lab.compose_runtime import (ComposePentestRuntime, ComposeRuntimeC
                                          prepare_handoff_context, _serialize_handoff)
 from security_lab.contracts import Denied, Scope, digest
 from security_lab.handoff_files import HANDOFF_FILE_PROGRAM
+from security_lab.native_preflight import (NATIVE_PREFLIGHT_PROGRAM, MAX_PREFLIGHT_RECEIPT_CHARS,
+                                          PREFLIGHT_GOAL_PREFIX, PREFLIGHT_FILENAME)
 
 
 def config(tmp_path, **values):
@@ -76,8 +78,12 @@ class Runner:
             "status":"stopped", "access_closed":True} if request["operation"] == "stop" else {
             "status":"completed", "receipts":[{"type":"command_run", "stdout":"PENTESTGPT_FIXTURE_OK", "exit_code":0}]}
         if request["operation"] == "start":
+            native = json.loads(request['context_json'])['native_execution']
             result['handoff'] = {'descriptor':request['handoff'], 'identity':{'device':1,'inode':2},
                 'file_hash_verified':True,'file_read_only_mode':True,
+                'preflight_file_hash_verified':True,
+                'native_preflight':{'status':'ready_for_scoped_checks','binding_match':True,
+                                    'run_id':request['run_id'],'job_id':native['job_id']},
                 'workspace_config_verified':True,'workspace_mount_verified':True,
                 'immutable_after_model_start':False}
         return 0, json.dumps({"ok":True, "result":result}).encode(), b"private stderr"
@@ -116,17 +122,17 @@ def test_start_is_explicit_and_payload_never_shell_interpolated(tmp_path):
 
 def test_goal_preserves_constraints_and_uses_only_full_file_descriptor():
     manifest = Scope.model_validate(scope())
-    context = packet(data={"long":"x"*10000})
-    descriptor = prepare_handoff_context(manifest, context)
+    context = native_packet(data={"long":"x"*10000})
+    descriptor = prepare_handoff_context(manifest, context, run_id='owned')
     _, goal = _request_goal(manifest, descriptor)
     assert 'native_execution' in goal and 'scope_manifest/effective_scope' in goal
     assert "UNTRUSTED DATA" in goal and descriptor['worker_path'] in goal
     assert descriptor['content_sha256'] in goal and 'x'*100 not in goal
     assert len(goal) <= MAX_GOAL_CHARS
-    assert "one local preflight command" in goal
-    assert "summary must be at most 500 characters" in goal
+    assert "BEFORE starting the provider" in goal and 'EXACT pinned command' in goal
+    assert "summary must be at most 500 characters" in goal.lower()
     assert "one exact contiguous evidence_excerpt of at most 1500 characters" in goal
-    assert "do not repeat file verification" in goal
+    assert 'do not repeat file verification' in goal
     assert "proceed to GET or HEAD" in goal
     many = scope(targets=[{"host":"fixture.example.test", "paths":["/one", "/two"]}])
     with pytest.raises(Denied, match="descriptor"):
@@ -138,7 +144,7 @@ def test_whole_file_context_preserves_late_graph_history_and_coverage():
             'surface_nodes':[{'id':'late', 'value':'late-discovered.example.test', 'evidence_ids':['e999']}],
             'observations':[{'entity_id':'late', 'attributes':{'historical':True}}],
             'coverage':[{'source':'git', 'status':'not_attempted'}], 'api_key':'private-credential'}
-    text, descriptor = _serialize_handoff(Scope.model_validate(scope()), packet(data=data), run_id='actual-run')
+    text, descriptor = _serialize_handoff(Scope.model_validate(scope()), native_packet(data=data,run_id='actual-run'), run_id='actual-run')
     decoded = json.loads(text)
     assert descriptor['size_bytes'] > 4000
     assert decoded['untrusted_osint_data']['surface_nodes'] == data['surface_nodes']
@@ -152,7 +158,7 @@ def test_whole_file_context_preserves_late_graph_history_and_coverage():
     assert descriptor['context_hash'] == decoded['context_hash']
     _, goal = _request_goal(Scope.model_validate(scope()), descriptor)
     assert len(goal) <= MAX_GOAL_CHARS
-    assert "compact JSON result of at most 1500 characters" in goal
+    assert 'ready_for_scoped_checks' in goal
     assert "Do not print full graph" in goal
     assert "late-discovered.example.test" not in goal
 
@@ -215,6 +221,10 @@ class Docker:
 
     def run(self, command, **kwargs):
         self.calls.append((command, kwargs))
+        if command[0] == 'python3':
+            native = json.loads(self.request['context_json'])['native_execution']
+            return SimpleNamespace(returncode=0, stdout=json.dumps({'status':'ready_for_scoped_checks',
+                'binding_match':True,'run_id':self.request['run_id'],'job_id':native['job_id']}),stderr='')
         args = command[1:]
         output = ""
         code = 0
@@ -251,10 +261,12 @@ def payload(tmp_path, operation):
             "run_id":"owned", "container_name":"security-lab-pentest-fixed", "owner":"nonce-owner",
             "command_timeout_seconds":20, "max_runtime_seconds":1800, "max_receipt_chars":12000,
             "target":"https://fixture.example.test:8443/public", "goal":"fixed checks only",
-            "kind":"nmap", "tool_service":"pentest-tools", "workspace_directory":str(workspace)}
+            "kind":"nmap", "tool_service":"pentest-tools", "workspace_directory":str(workspace),
+            'preflight_receipt_limit':MAX_PREFLIGHT_RECEIPT_CHARS,'preflight_goal_prefix':PREFLIGHT_GOAL_PREFIX}
     if operation == 'start':
         text, descriptor = _serialize_handoff(Scope.model_validate(scope()), native_packet(), run_id='owned')
-        result.update(context_json=text, handoff=descriptor, scope_hash=descriptor['scope_hash'])
+        result.update(context_json=text, handoff=descriptor, scope_hash=descriptor['scope_hash'],
+                      preflight_program=NATIVE_PREFLIGHT_PROGRAM)
     return result
 
 
@@ -271,6 +283,7 @@ def execute_host(monkeypatch, request, docker, *, handoff_store=None):
             assert script.startswith(HANDOFF_FILE_PROGRAM + '\n')
             script = script[len(HANDOFF_FILE_PROGRAM) + 1:]
             namespace['HandoffStore'] = handoff_store
+            namespace['PREFLIGHT_FILENAME'] = PREFLIGHT_FILENAME
         exec(compile(script, "trusted-host-program", "exec"), namespace)
     except SystemExit:
         pass
@@ -287,7 +300,9 @@ def test_host_launch_exact_allowlist_and_existing_topology(monkeypatch, tmp_path
     assert "PENTESTGPT_ALLOWED_TARGET_DOMAINS=" in launch
     assert "PENTESTGPT_ALLOWED_TARGETS="+request["target"] in launch
     assert "--privileged" not in launch and "--network" not in launch and "--volume" not in launch
-    assert launch[-7:] == ["pentestgpt-run", "--run-id", "owned", "--goal", request["goal"], "--target", request["target"]]
+    assert launch[-7:-3] == ["pentestgpt-run", "--run-id", "owned", "--goal"]
+    assert launch[-3].startswith(request['goal']+PREFLIGHT_GOAL_PREFIX)
+    assert launch[-2:] == ['--target',request['target']]
     assert result["result"]["status"] == "running"
 
 
@@ -329,7 +344,7 @@ def tracked_store(request):
         cleanup_calls = 0
         released = False
 
-        def __init__(self, workspace, run_id, owner, descriptor):
+        def __init__(self, workspace, run_id, owner, descriptor, preflight_program=None):
             assert (workspace, run_id, owner, descriptor) == (request['workspace_directory'],
                 request['run_id'], request['owner'], request['handoff'])
 

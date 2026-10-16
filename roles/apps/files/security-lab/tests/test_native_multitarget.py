@@ -74,6 +74,10 @@ def test_host_checks_actual_launcher_before_start_and_forwards_every_target(monk
     request = payload(tmp_path, 'start')
     request['targets'] = ['https://fixture.example.test', 'tcp://fixture.example.test:5432']
     request['agent_service'] = 'pentestgpt-native'
+    from security_lab.compose_runtime import _serialize_handoff
+    body = scope(targets=[{'host':'fixture.example.test'}],network_targets=[{'host':'fixture.example.test','tcp_ports':[5432]}])
+    text, descriptor = _serialize_handoff(Scope.model_validate(body),native_packet(body),run_id='owned')
+    request.update(context_json=text,handoff=descriptor,scope_hash=descriptor['scope_hash'])
     class Store:
         writes = 0
         def __init__(self, *args):
