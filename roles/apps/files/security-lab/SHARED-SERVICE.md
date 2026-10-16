@@ -140,6 +140,53 @@ closed.
 - Closing a client only closes its tunnel; the server continues. Server restart
   still conservatively pauses active campaigns and never auto-resumes them.
 
+### Enablement runbook (workstation and one sudo apply)
+
+All workstation steps are non-sudo and print no secrets. The server service must
+be stopped while its store is replaced, and the workstation service must be
+stopped while a snapshot is taken.
+
+1. Workstation snapshot of the existing engagement store:
+
+   ```text
+   .venv/Scripts/python.exe lab/server_enablement.py snapshot \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json \
+     --out %USERPROFILE%/.local/share/security-lab/server-migration/control.db
+   ```
+
+   This writes a consistent `control.db` and a `control.db.json` case/history
+   digest. Nothing else is printed.
+2. Prepare the workstation client and the private server override fragment:
+
+   ```text
+   .venv/Scripts/python.exe lab/server_enablement.py switch \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json \
+     --ssh abykov@192.168.1.88 --identity %USERPROFILE%/.ssh/id_ed25519 --apply
+   ```
+
+   Writes the remote `service.json`, a shared `credentials.json`, a
+   `service.json.pre-remote` backup, and `local-overrides.security-lab.yml`.
+3. Place the store and overrides on the server (operator, secure channel), then
+   apply with sudo:
+
+   ```text
+   scp control.db abykov@192.168.1.88:/srv/app-data/security-lab/control.db
+   # append local-overrides.security-lab.yml into /etc/ansible/local-overrides.yml
+   sudo systemctl start ansible-local-apply.service
+   ```
+
+4. Prove the copied cases survived before switching clients:
+
+   ```text
+   .venv/Scripts/python.exe lab/server_enablement.py verify \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json \
+     --ssh abykov@192.168.1.88 --identity %USERPROFILE%/.ssh/id_ed25519 \
+     --snapshot %USERPROFILE%/.local/share/security-lab/server-migration/control.db
+   ```
+
+   Exit 0 with `preserved: true` means the server history digest and every case
+   ID match the snapshot. Restart OpenCode/Codex to load the remote bridge.
+
 ## Research campaign and operator verification lanes
 
 `start_research_campaign(case_id, config, expected_revision)` runs a wide

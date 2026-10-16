@@ -84,11 +84,15 @@
 
 - name: Resolve the Security Lab service id
   ansible.builtin.set_fact:
-    security_lab_service_id: >-
+    security_lab_resolved_service_id: >-
       {{
-        (security_lab_service.content | b64decode | from_json).service_id
-        if (security_lab_service.content is defined and security_lab_service.content | length > 0)
-        else lookup('password', '/dev/null length=32 chars=hexdigits')
+        security_lab_service_id
+        if (security_lab_service_id | default('') | length > 0)
+        else (
+          (security_lab_service.content | b64decode | from_json).service_id
+          if (security_lab_service.content is defined and security_lab_service.content | length > 0)
+          else lookup('password', '/dev/null length=32 chars=hexdigits')
+        )
       }}
   tags: [apps, security-lab, config]
 

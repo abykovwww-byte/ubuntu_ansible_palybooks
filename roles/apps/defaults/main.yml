@@ -25,6 +25,9 @@ security_lab_data_dir: "{{ app_data_base_dir | default('/srv/app-data') }}/secur
 security_lab_venv_dir: "{{ security_lab_project_dir }}/.venv"
 security_lab_service_name: security-lab
 security_lab_port: 39207
+# Must match the workstation client's service_id; set from local overrides when a
+# helper generates it. Empty means: reuse an existing server value, else create one.
+security_lab_service_id: ""
 security_lab_principal: "{{ security_lab_owner | default('abykov') }}"
 security_lab_service_user: "{{ security_lab_owner | default('abykov') }}"
 security_lab_service_group: "{{ security_lab_owner | default('abykov') }}"
