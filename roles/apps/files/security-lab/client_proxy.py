@@ -63,6 +63,31 @@ class StartupLock:
         self.file.close()
 
 
+def ssh_executable():
+    windows = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32/OpenSSH/ssh.exe"
+    return str(windows) if os.name == "nt" and windows.exists() else "ssh"
+
+
+def ssh_tunnel_command(settings):
+    """Pure argv for the remote loopback forward; None for a local service.
+
+    The server binds its service to 127.0.0.1, so a local forward keeps both the
+    Host-header check and the loopback-only listener intact. The campaign loop
+    lives in the server process, so closing this bridge never stops research.
+    """
+    host = settings.get("remote_ssh")
+    if not host:
+        return None
+    port = settings["port"]
+    command = [ssh_executable(), "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
+               "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
+               "-L", f"127.0.0.1:{port}:127.0.0.1:{port}"]
+    identity = settings.get("remote_ssh_identity")
+    if identity:
+        command += ["-i", identity]
+    return command + [host]
+
+
 def ensure_service(settings_path, client):
     settings = load_settings(settings_path)
     if health(settings, client):
@@ -70,6 +95,19 @@ def ensure_service(settings_path, client):
     with StartupLock(settings_path.with_suffix(".startup.lock")):
         if health(settings, client):
             return settings
+        tunnel = ssh_tunnel_command(settings)
+        if tunnel is not None:
+            # Remote service is started by the server's own lifecycle (systemd);
+            # the bridge only owns a forwarded loopback port.
+            process = subprocess.Popen(tunnel, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(200):
+                if health(settings, client):
+                    return settings
+                if process.poll() is not None:
+                    break
+                time.sleep(.1)
+            raise RuntimeError("Remote shared service tunnel did not become ready; check the server service and SSH identity")
         # Bind probe prevents accidentally talking to/replacing an unrelated
         # listener. The shared Controller lock independently fences all owners.
         import socket

@@ -163,6 +163,16 @@ these scanners ran because a tool bundle or planner contains their names.
 Never bypass a denied MCP operation with ad-hoc SSH, private DB reads, secret
 access or a replacement Controller.
 
+## Where the service runs
+
+The shared Controller and the research campaign loop may run on the operator
+workstation or, for autonomy with the workstation off, on the PentestGPT host as
+the `security-lab` systemd service. When hosted on the server, workstation
+clients reach it through an SSH loopback forward (`remote_ssh` in the
+workstation `service.json`) and the bridge never starts a local daemon. Exactly
+one host owns a given data directory. Server restart pauses active campaigns and
+never auto-resumes them.
+
 ## Research campaign vs operator verification
 
 `start_research_campaign` runs a wide autonomous ChatGPT (existing Codex) pass

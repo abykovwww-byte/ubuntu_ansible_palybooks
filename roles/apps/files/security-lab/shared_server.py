@@ -1,9 +1,38 @@
-"""Host entry point for the single shared Security Lab service."""
+"""Host entry point for the single shared Security Lab service.
 
+The same service runs either on the operator workstation or on abykovserv. On
+the server it uses the local Compose runtime, so the campaign loop, hypothesis
+ledger and native jobs all keep running with the Windows workstation off.
+"""
 import argparse
 import logging
 from pathlib import Path
 import sys
+
+
+def runtime_for_settings(settings: dict):
+    """Select the Compose runtime from settings; never starts anything at import.
+
+    mode=local  -> the service itself runs on the PentestGPT host (server).
+    mode=ssh    -> the service reaches the host over SSH (workstation).
+    """
+    from security_lab.compose_runtime import ComposePentestRuntime, ComposeRuntimeConfig
+    mode = settings.get("pentestgpt_mode", "ssh")
+    if mode == "local":
+        return ComposePentestRuntime(ComposeRuntimeConfig(mode="local",
+            compose_directory=settings.get("pentestgpt_directory", "/srv/apps/pentestgpt"),
+            runs_directory=settings.get("pentestgpt_runs_directory", "/srv/app-data/pentestgpt/runs"),
+            workspace_directory=settings.get("pentestgpt_workspace_directory", "/srv/app-data/pentestgpt/workspace"),
+            tool_service=settings.get("pentestgpt_tool_service", "pentest-tools")))
+    if mode != "ssh":
+        raise ValueError("Unsupported pentestgpt_mode; use local or ssh")
+    if not settings.get("pentestgpt_host"):
+        return None
+    return ComposePentestRuntime(ComposeRuntimeConfig(mode="ssh",
+        ssh_host=settings["pentestgpt_host"], ssh_identity=settings["pentestgpt_identity"],
+        compose_directory=settings.get("pentestgpt_directory", "/srv/apps/pentestgpt"),
+        runs_directory=settings.get("pentestgpt_runs_directory", "/srv/app-data/pentestgpt/runs"),
+        workspace_directory=settings.get("pentestgpt_workspace_directory", "/srv/app-data/pentestgpt/workspace")))
 
 
 def main():
@@ -15,16 +44,9 @@ def main():
     log = args.settings.with_suffix(".service.log").open("a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stderr = log
     import uvicorn
-    from security_lab.compose_runtime import ComposePentestRuntime, ComposeRuntimeConfig
     from security_lab.shared_service import build_shared_app, load_credentials, load_settings
     settings = load_settings(args.settings)
-    runtime = None
-    if settings.get("pentestgpt_host"):
-        runtime = ComposePentestRuntime(ComposeRuntimeConfig(mode="ssh",
-            ssh_host=settings["pentestgpt_host"], ssh_identity=settings["pentestgpt_identity"],
-            compose_directory=settings.get("pentestgpt_directory", "/srv/apps/pentestgpt"),
-            runs_directory=settings.get("pentestgpt_runs_directory", "/srv/app-data/pentestgpt/runs"),
-            workspace_directory=settings.get("pentestgpt_workspace_directory", "/srv/app-data/pentestgpt/workspace")))
+    runtime = runtime_for_settings(settings)
     server = None
     def shutdown():
         server.should_exit = True

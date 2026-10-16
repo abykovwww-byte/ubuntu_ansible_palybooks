@@ -1,0 +1,24 @@
+[Unit]
+Description=Security Lab shared control plane (Controller, hypothesis ledger, research campaigns)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User={{ security_lab_service_user }}
+Group={{ security_lab_service_group }}
+# Native Compose launches use the host docker socket, so the service user needs
+# the docker group explicitly (systemd clears supplementary groups otherwise).
+SupplementaryGroups=docker
+WorkingDirectory={{ security_lab_project_dir }}
+ExecStart={{ security_lab_venv_dir }}/bin/python {{ security_lab_project_dir }}/shared_server.py --settings {{ security_lab_config_dir }}/service.json
+Restart=always
+RestartSec=5
+# Campaign segments and native launches are bounded; give graceful shutdown room.
+TimeoutStopSec=40
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

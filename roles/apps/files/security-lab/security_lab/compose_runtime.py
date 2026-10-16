@@ -342,12 +342,24 @@ try:
             import ipaddress
             if not re.fullmatch(r'[a-z0-9.-]+',host) or str(ipaddress.ip_address(address)) != address:
                 raise RuntimeError('Invalid web address pin')
-            pin = '['+address+']' if ':' in address else address
-            options = ['--add-host',host+':'+pin,'--volume',str(artifact_root)+':/web-artifacts:rw']
+            # Compose run does not implement Docker run's --add-host. Bind an
+            # exact host-owned hosts file instead; no Compose override or DNS
+            # mutation is needed, and the worker cannot change the mapping.
+            hosts_file = artifact_root / '.dns-hosts'
+            with hosts_file.open('x', encoding='ascii') as file:
+                file.write('127.0.0.1 localhost\n::1 localhost\n'+address+' '+host+'\n')
+            hosts_file.chmod(0o400)
+            options = ['--volume',str(artifact_root)+':/web-artifacts:rw',
+                       '--volume',str(hosts_file)+':/etc/hosts:ro']
+        service = 'pentest-web-tools' if web else p['tool_service']
+        if p['kind'] == 'inventory':
+            configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','--profile','tools','--profile','diagnostics','config','--format','json']))
+            if 'pentest-web-tools' in configuration.get('services', {}):
+                service = 'pentest-web-tools'
         command = ["docker", "compose", "--file", "compose.yml", "--profile", "tools", "--profile", "manual", "run", "--rm", "-T",
             "--name", p["container_name"], "--label", "security-lab.compose-owner="+p["owner"],
             "--label", "security-lab.run-id="+p["run_id"], "--entrypoint", "/usr/bin/timeout",
-            *options, 'pentest-web-tools' if web else p["tool_service"], "--signal=TERM", "--kill-after=10s", str(seconds), *argv]
+            *options, service, "--signal=TERM", "--kill-after=10s", str(seconds), *argv]
         started = time.time()
         try:
             execution = subprocess.run(command, cwd=p["compose_directory"], capture_output=True,
@@ -387,7 +399,6 @@ try:
         elif p["kind"] == "subfinder":
             result["actual_version"] = p["actual_version"]
         elif p['kind'] == 'inventory':
-            configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','--profile','tools','--profile','diagnostics','config','--format','json']))
             result['native_service_applied'] = 'pentestgpt-native' in configuration.get('services', {})
             result['diagnostic_service_applied'] = 'pentest-diagnostics' in configuration.get('services', {})
             result['web_service_applied'] = 'pentest-web-tools' in configuration.get('services', {})
@@ -408,7 +419,7 @@ finally:
 _HOST_SCRIPT = HANDOFF_FILE_PROGRAM + "\n" + DIAGNOSTIC_HOST_PROGRAM + "\n" + _HOST_SCRIPT
 # Windows process command lines are limited to 32767 characters. The trusted
 # program travels compressed; the separate stdin JSON remains data, not code.
-_HOST_LAUNCHER = ('import base64,zlib;exec(compile(zlib.decompress(base64.b64decode('
+_SSH_HOST_PROGRAM = ('import base64,zlib;exec(compile(zlib.decompress(base64.b64decode('
                   + repr(base64.b64encode(zlib.compress(_HOST_SCRIPT.encode('utf-8'))).decode('ascii'))
                   + ')),"security-lab-host","exec"))')
 
@@ -582,10 +593,10 @@ class ComposePentestRuntime:
 
     def _command(self) -> list[str]:
         if self.config.mode == "local":
-            return ["python3", "-c", _HOST_LAUNCHER]
+            return ["python3", "-c", _SSH_HOST_PROGRAM]
         return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
                 "-o", "StrictHostKeyChecking=yes", "-i", self.config.ssh_identity,
-                self.config.ssh_host, "python3 -c " + shlex.quote(_HOST_LAUNCHER)]
+                self.config.ssh_host, "python3 -c " + shlex.quote(_SSH_HOST_PROGRAM)]
 
     async def _call(self, operation: str, handle: dict) -> dict:
         config = self.config

@@ -5,7 +5,7 @@ import time
 import pytest
 from pydantic import ValidationError
 
-from security_lab.compose_runtime import ComposePentestRuntime, _HOST_LAUNCHER, _HOST_SCRIPT
+from security_lab.compose_runtime import ComposePentestRuntime, _SSH_HOST_PROGRAM, _HOST_SCRIPT
 from security_lab.compose_service import ComposeRunService
 from security_lab.contracts import Denied, Scope
 from security_lab.native_checks import compile_native_check, parse_native_check
@@ -105,11 +105,11 @@ def test_host_script_fits_windows_ssh_and_decompresses_to_exact_trusted_program(
     import base64
     import zlib
     # Verify the constant instead of running the host program or reading auth.
-    tree = ast.parse(_HOST_LAUNCHER)
+    tree = ast.parse(_SSH_HOST_PROGRAM)
     encoded = next(node.value for node in ast.walk(tree) if isinstance(node,ast.Constant)
                    and isinstance(node.value,str) and len(node.value)>1000)
     assert zlib.decompress(base64.b64decode(encoded)).decode('utf-8') == _HOST_SCRIPT
-    assert len(_HOST_LAUNCHER) < 20000
+    assert len(_SSH_HOST_PROGRAM) < 20000
 
 
 def test_interrupted_diagnostic_recovers_artifact_refs_from_stop(control):

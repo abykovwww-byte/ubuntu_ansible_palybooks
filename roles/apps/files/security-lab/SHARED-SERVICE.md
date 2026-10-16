@@ -108,6 +108,85 @@ No job, provider call or PoC starts automatically. Ordinary `propose_scope`
 cannot inflate time beyond the initial allowance or a previously activated
 extension. The running status advertises `case_budget_extension_revision`.
 
+## Server-resident deployment (workstation optional)
+
+The same shared service runs on the operator workstation or on the PentestGPT
+host (`abykovserv`). The `apps` role deploys an opt-in systemd service,
+`security-lab`, that owns the Controller, the hypothesis ledger and the research
+campaign loop on the server. The server service uses the local Compose runtime
+(`pentestgpt_mode: local`), so native launches need no SSH hop. An active
+campaign therefore continues while the Windows workstation is off or OpenCode is
+closed.
+
+- Enable with `security_lab_enabled: true` and distinct
+  `security_lab_codex_token` / `security_lab_opencode_token` (>=40 chars) in
+  server-private overrides only. The service binds loopback `security_lab_port`.
+- Files: source `security_lab_project_dir` (e.g. `/srv/apps/security-lab`), venv
+  next to it, private `security_lab_config_dir` (`/etc/security-lab`,
+  `service.json` + `credentials.json`, `0640`), data `security_lab_data_dir`
+  (`/srv/app-data/security-lab`). The unit runs as the operator user with
+  `SupplementaryGroups=docker` and `Restart=always`.
+- The workstation clients reach it through an SSH loopback forward instead of a
+  local daemon: add `remote_ssh` (e.g. `abykov@192.168.1.88`) and
+  `remote_ssh_identity` to the workstation `service.json`. `client_proxy.py`
+  then opens `-L 127.0.0.1:<port>:127.0.0.1:<port>` and never starts a local
+  service. The client tokens in the workstation `credentials.json` must equal
+  the server's two tokens.
+- One store is authoritative. Do not run the workstation service against the
+  server data directory, and do not point two hosts at one data directory. To
+  move an existing engagement, copy `control.db` (and its WAL) into the server
+  data directory while both services are stopped; case IDs, evidence and
+  checkpoints are preserved.
+- Closing a client only closes its tunnel; the server continues. Server restart
+  still conservatively pauses active campaigns and never auto-resumes them.
+
+### Enablement runbook (workstation and one sudo apply)
+
+All workstation steps are non-sudo and print no secrets. The server service must
+be stopped while its store is replaced, and the workstation service must be
+stopped while a snapshot is taken.
+
+1. Workstation snapshot of the existing engagement store:
+
+   ```text
+   .venv/Scripts/python.exe lab/server_enablement.py snapshot \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json \
+     --out %USERPROFILE%/.local/share/security-lab/server-migration/control.db
+   ```
+
+   This writes a consistent `control.db` and a `control.db.json` case/history
+   digest. Nothing else is printed.
+2. Prepare the workstation client and the private server override fragment:
+
+   ```text
+   .venv/Scripts/python.exe lab/server_enablement.py switch \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json \
+     --ssh abykov@192.168.1.88 --identity %USERPROFILE%/.ssh/id_ed25519 --apply
+   ```
+
+   Writes the remote `service.json`, a shared `credentials.json`, a
+   `service.json.pre-remote` backup, and `local-overrides.security-lab.yml`.
+3. Place the store and overrides on the server (operator, secure channel), then
+   apply with sudo:
+
+   ```text
+   scp control.db abykov@192.168.1.88:/srv/app-data/security-lab/control.db
+   # append local-overrides.security-lab.yml into /etc/ansible/local-overrides.yml
+   sudo systemctl start ansible-local-apply.service
+   ```
+
+4. Prove the copied cases survived before switching clients:
+
+   ```text
+   .venv/Scripts/python.exe lab/server_enablement.py verify \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json \
+     --ssh abykov@192.168.1.88 --identity %USERPROFILE%/.ssh/id_ed25519 \
+     --snapshot %USERPROFILE%/.local/share/security-lab/server-migration/control.db
+   ```
+
+   Exit 0 with `preserved: true` means the server history digest and every case
+   ID match the snapshot. Restart OpenCode/Codex to load the remote bridge.
+
 ## Research campaign and operator verification lanes
 
 `start_research_campaign(case_id, config, expected_revision)` runs a wide
