@@ -23,6 +23,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -79,6 +80,8 @@ def command_snapshot(args) -> int:
         src.backup(dst)
     summary = store_summary(out)
     out.with_suffix(out.suffix + ".json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    _harden_local(out)
+    _harden_local(out.with_suffix(out.suffix + ".json"))
     print(json.dumps({"snapshot": str(out), "cases_count": summary["cases_count"],
                       "history_sha256": summary["history_sha256"], "secrets_printed": False}, indent=2))
     return 0
@@ -130,10 +133,20 @@ def command_prepare(args) -> int:
     override_path = settings_path.parent / "local-overrides.security-lab.yml"
     staged.write_text(json.dumps(tokens, indent=2) + "\n", encoding="utf-8")
     override_path.write_text(_override_text(settings, service_id, args.principal, tokens), encoding="utf-8")
+    _harden_local(staged)
+    _harden_local(override_path)
     print(json.dumps({"prepared": True, "service_id": service_id, "port": settings["port"],
                       "private_overrides": str(override_path), "staged_credentials": str(staged),
                       "client_unchanged": True, "secrets_printed": False}, indent=2))
     return 0
+
+
+def _harden_local(path: Path) -> None:
+    """Best-effort owner-only mode for private local artifacts."""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def _scp_upload(source: Path, ssh: str, identity: str | None, destination: str) -> None:
@@ -147,6 +160,11 @@ def _scp_upload(source: Path, ssh: str, identity: str | None, destination: str) 
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)
     if result.returncode:
         raise RuntimeError(f"Upload to {host} failed")
+    # scp preserves no POSIX mode from a Windows source; force owner-only.
+    harden = subprocess.run(ssh_prefix(ssh, identity) + ["chmod 600 " + shlex.quote(destination)],
+                            capture_output=True, text=True, timeout=30)
+    if harden.returncode:
+        raise RuntimeError(f"Could not restrict {destination} to 0600")
 
 
 def command_deploy(args) -> int:
@@ -203,6 +221,8 @@ def command_switch(args) -> int:
     credentials_path.write_text(json.dumps(tokens, indent=2) + "\n", encoding="utf-8")
     override_path.write_text(_override_text(settings, service_id, args.principal, tokens), encoding="utf-8")
     settings_path.write_text(json.dumps(remote, indent=2) + "\n", encoding="utf-8")
+    for path in (credentials_path, override_path, settings_path):
+        _harden_local(path)
     print(json.dumps({"apply": True, "client_settings": str(settings_path),
                       "private_overrides": str(override_path), "secrets_printed": False,
                       "backup": str(backup)}, indent=2))

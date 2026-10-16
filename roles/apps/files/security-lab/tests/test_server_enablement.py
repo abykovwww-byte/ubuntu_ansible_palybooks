@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from lab import server_enablement as se
 from security_lab.controller import Controller
 from test_controller import NOW, approve, scope_body
@@ -50,6 +52,26 @@ def test_remote_program_digest_parity(tmp_path):
     result = subprocess.run([sys.executable, "-c", program, str(database)], capture_output=True, text=True)
     assert result.returncode == 0
     assert json.loads(result.stdout) == expected
+
+
+def test_scp_upload_forces_owner_only_mode(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(se.subprocess, "run", fake_run)
+    se._scp_upload(Path("/tmp/secret.yml"), "abykov@192.168.1.88", "/k", "/home/abykov/security-lab-overrides.yml")
+    assert calls[0][0].endswith("scp") or calls[0][0].endswith("scp.exe")
+    assert calls[1][-1] == "chmod 600 /home/abykov/security-lab-overrides.yml"
+
+    def failing(command, **kwargs):
+        return SimpleNamespace(returncode=1 if "chmod" in command[-1] else 0, stdout="", stderr="")
+
+    monkeypatch.setattr(se.subprocess, "run", failing)
+    with pytest.raises(RuntimeError, match="0600"):
+        se._scp_upload(Path("/tmp/secret.yml"), "abykov@192.168.1.88", "/k", "/home/abykov/x.yml")
 
 
 def test_ssh_prefix_uses_identity():
