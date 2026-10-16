@@ -333,6 +333,20 @@ pentestgpt_pgid: 1000
 pentestgpt_cpu_limit: "4"
 pentestgpt_memory_limit: 8g
 docker_apps:
+  - name: human-range
+    enabled: "{{ human_range_enabled }}"
+    repo_url: https://github.com/abykovwww-byte/human-range.git
+    repo_version: "{{ human_range_repo_version }}"
+    repo_version_is_commit: true
+    repo_token_var: human_range_repo_token
+    repo_token_required: true
+    project_dir: "{{ human_range_project_dir }}"
+    owner: abykov
+    group: abykov
+    directory_mode: "0750"
+    # A dedicated task runs the one-shot migration before starting this API.
+    compose_filename: docker-compose.yml
+    compose_up: false
   - name: beszel
     enabled: "{{ beszel_enabled }}"
     project_dir: "{{ beszel_project_dir }}"

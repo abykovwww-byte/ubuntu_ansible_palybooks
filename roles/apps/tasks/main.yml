@@ -800,6 +800,11 @@
   when: beszel_enabled | default(false) | bool
   tags: [apps, beszel]
 
+- name: Deploy Human Range after its explicit migration
+  ansible.builtin.import_tasks: human-range.yml
+  when: human_range_enabled | bool
+  tags: [apps, human-range]
+
 - name: Deploy the server-resident Security Lab control plane
   ansible.builtin.import_tasks: security-lab.yml
   when: security_lab_enabled | default(false) | bool

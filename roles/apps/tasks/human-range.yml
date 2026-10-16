@@ -1,0 +1,83 @@
+---
+- name: Validate Human Range LAN and model configuration
+  ansible.builtin.assert:
+    that:
+      - human_range_bind_host == '192.168.1.88'
+      - human_range_port | int > 1024
+      - human_range_port | int < 65536
+      - human_range_llm_mode in ['replay', 'record', 'live']
+      - human_range_llm_mode == 'replay' or human_range_llm_network_enabled | bool
+      - human_range_llm_mode == 'replay' or human_range_llm_config_path == '/config/llm.yml'
+      - human_range_llm_mode == 'replay' or human_range_openrouter_api_key | length > 0
+      - human_range_llm_mode == 'replay' or human_range_model_writer | length > 0
+      - human_range_llm_mode == 'replay' or human_range_model_responder | length > 0
+      - human_range_llm_mode == 'replay' or human_range_model_responder_short | length > 0
+      - human_range_llm_mode == 'replay' or human_range_model_decision | length > 0
+      - human_range_llm_mode == 'replay' or human_range_decision_threshold | string | length > 0
+    fail_msg: Human Range requires LAN-only binding and explicit approved network/model settings.
+  no_log: true
+
+- name: Render Human Range private environment
+  ansible.builtin.template:
+    src: human-range.env.j2
+    dest: "{{ human_range_project_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  vars:
+    hr_postgres_password: "{{ lookup('ansible.builtin.password', '/etc/ansible/human-range-postgres-password length=40 chars=ascii_letters,digits') }}"
+    hr_session_secret: "{{ lookup('ansible.builtin.password', '/etc/ansible/human-range-session-secret length=48 chars=ascii_letters,digits') }}"
+    hr_admin_token: "{{ lookup('ansible.builtin.password', '/etc/ansible/human-range-admin-token length=48 chars=ascii_letters,digits') }}"
+  register: human_range_env
+  no_log: true
+  diff: false
+
+- name: Build Human Range images
+  ansible.builtin.command:
+    argv: [docker, compose, --file, docker-compose.yml, --profile, migration, build]
+    chdir: "{{ human_range_project_dir }}"
+  changed_when: true
+  when: human_range_env.changed or 'human-range' in (docker_app_changed_names | default([])) or docker_apps_force_compose_up | bool
+
+- name: Start Human Range database and wait for health
+  ansible.builtin.command:
+    argv: [docker, compose, --file, docker-compose.yml, up, -d, --wait, db]
+    chdir: "{{ human_range_project_dir }}"
+  changed_when: true
+
+- name: Apply additive Human Range migrations before API startup
+  ansible.builtin.command:
+    argv: [docker, compose, --file, docker-compose.yml, --profile, migration, run, --rm, migrate]
+    chdir: "{{ human_range_project_dir }}"
+  changed_when: true
+
+- name: Start Human Range API and web and wait for readiness
+  ansible.builtin.command:
+    argv: [docker, compose, --file, docker-compose.yml, up, -d, --wait, api, web]
+    chdir: "{{ human_range_project_dir }}"
+  changed_when: true
+
+- name: Prepare private Human Range backup directory
+  ansible.builtin.file:
+    path: "{{ human_range_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install Human Range backup and restore-check commands
+  ansible.builtin.template:
+    src: "human-range-{{ item }}.sh.j2"
+    dest: "/usr/local/sbin/human-range-{{ item }}"
+    owner: root
+    group: root
+    mode: "0700"
+  loop: [backup, restore-check]
+
+- name: Schedule daily Human Range backup with fourteen-day retention
+  ansible.builtin.cron:
+    name: Human Range PostgreSQL backup
+    user: root
+    hour: "3"
+    minute: "20"
+    job: /usr/local/sbin/human-range-backup
