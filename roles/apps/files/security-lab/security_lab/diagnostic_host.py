@@ -236,7 +236,8 @@ class DiagnosticHost:
         while time.time() < ready_until:
             value = self.owned('capture')
             if value is None or not value['State'].get('Running'):
-                raise RuntimeError('Diagnostic capture did not start')
+                detail = self.docker(['logs',value['Id']])[:1000] if value is not None else 'container absent'
+                raise RuntimeError('Diagnostic capture did not start: '+detail)
             # tcpdump writes readiness to stderr, not stdout.
             result = subprocess.run(['docker','logs',value['Id']],capture_output=True,text=True,timeout=2)
             if result.returncode:
