@@ -271,7 +271,8 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         """Report actual integration gaps and whether live jobs are enabled."""
         return {**Controller.integration_status(), 'live_execution': pentest_runtime is not None,
                 'case_continuity_revision': 1, 'native_service_checks_revision': 2,
-                'native_targets_revision': 2, 'runtime_inventory_tool': 'get_runtime_inventory',
+                'native_targets_revision': 2, 'native_execution_handoff_revision': 1,
+                'runtime_inventory_tool': 'get_runtime_inventory',
                 'poc_execution': pentest_runtime is not None,
                 'poc_execution_profiles': ['saved_http_request'],
                 'poc_execution_tool': 'start_poc_action',

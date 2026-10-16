@@ -661,6 +661,27 @@ class Controller:
                 raise Denied("Expired/revoked capability")
             return dict(job)
 
+    def native_execution_record(self, case_id: str, job_id: str, token: str, worker: str,
+                                profile: str, run_id: str, targets: list[str]) -> dict:
+        """Internal admission projection; no capability material reaches the model."""
+        from .native_handoff import execution_record
+        with self.lock:
+            job = self.validate_capability(job_id, token, worker, profile)
+            runtime = self.db.execute('SELECT * FROM job_runtime WHERE job_id=?', (job_id,)).fetchone()
+            if (job['case_id'] != case_id or job['status'] != 'prepared' or worker != 'existing-pentestgpt-compose'
+                    or run_id != 'chat-' + job_id
+                    or runtime['policy_hash'] is not None or json.loads(runtime['plan']).get('task_stage') == 'poc'):
+                raise Denied('Native checks handoff requires its own prepared checks reservation')
+            case = dict(self.case(self.db, case_id))
+            manifest, _ = self.approved_scope(self.db, case_id)
+            jobs = self.db.execute('SELECT COUNT(*) FROM jobs WHERE case_id=?', (case_id,)).fetchone()[0]
+            record = execution_record(snapshot=case, manifest=dict(manifest), targets=targets,
+                job_id=job_id, run_id=run_id, seconds=job['duration'], deadline=job['deadline'],
+                now=self.clock(), spent=case['spent'], jobs=jobs)
+            if record['profile'] != profile:
+                raise Denied('Native selection differs from reserved job profile')
+            return record
+
     def checks_context(self, case_id: str) -> tuple[dict, dict]:
         """Internal immutable snapshot; capabilities never enter model context."""
         with self.lock:
@@ -732,6 +753,15 @@ class Controller:
             prior = json.loads(runtime['plan']) if runtime['plan'] else {}
             if prior.get('task_stage') == 'poc' and any(plan.get(key) != value for key, value in prior.items()):
                 raise Denied('Native plan changed the activated action binding')
+            if plan.get('tool') == 'pentestgpt-agent':
+                from .native_handoff import NativeExecution
+                record = NativeExecution.model_validate(plan.get('native_execution'))
+                current = self.native_execution_record(job['case_id'], job_id, token, worker, profile,
+                                                       plan['run_id'], plan['execution_targets'])
+                data = record.model_dump(mode='json')
+                if (record.snapshot_at > current['snapshot_at'] or any(data[key] != value for key, value in current.items()
+                        if key not in {'snapshot_at', 'remaining_seconds_at_snapshot'})):
+                    raise Denied('Native handoff differs from the actual Controller reservation/accounting')
             db.execute('UPDATE job_runtime SET policy_hash=?,plan=?,started=? WHERE job_id=?',
                        (digest(plan), canonical(plan), self.clock(), job_id))
             db.execute("UPDATE jobs SET status='running' WHERE id=?", (job_id,))

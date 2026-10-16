@@ -238,7 +238,11 @@ def test_actual_fixture_nodes_and_synthetic_evidence_reach_runtime_with_original
     assert {row['value'] for row in data['surface_nodes']} == {'example.com', 'www.example.com', 'api.example.com'}
     assert context['binding']['hash'] == manifest['hash']
     assert context['generation'] == before['generation']
-    assert context == build_handoff(before, manifest, [], now=NOW)
+    typed = build_handoff(before, manifest, [], now=NOW)
+    assert context['untrusted_osint_data'] == typed['untrusted_osint_data']
+    assert context['case_continuation'] == typed['case_continuation']
+    assert context['schema_version'] == 2 and 'execution_authorized' not in context
+    assert context['native_execution']['admission'] == 'controller_reserved'
     assert len(data['evidence_index']) == 3
     assert all(row['synthetic'] is True and row['source'] == 'fixture:ct' and len(row['hash']) == 64
                for row in data['evidence_index'])
@@ -335,7 +339,9 @@ def test_large_full_map_retains_late_candidate_evidence_histories_and_gap_before
             await asyncio.sleep(.01)
     asyncio.run(run())
     call = next(values for kind, values in runtime.calls if kind == 'start')
-    assert call['osint_context'] == expected
+    assert call['osint_context']['untrusted_osint_data'] == expected['untrusted_osint_data']
+    assert call['osint_context']['case_continuation'] == expected['case_continuation']
+    assert call['osint_context']['native_execution']['admission'] == 'controller_reserved'
     data = call['osint_context']['untrusted_osint_data']
     late = next(row for row in data['surface_nodes'] if row['id'] == late_id)
     assert late['value'] == late_value and late['evidence_ids'] == [evidence['id']]
@@ -352,7 +358,7 @@ def test_large_full_map_retains_late_candidate_evidence_histories_and_gap_before
     ledger = json.loads(control.export(case_id)['evidence'][-1]['body'])
     assert ledger['target'] == 'https://example.com'
     assert ledger['handoff']['size_bytes'] > 4000 and len(ledger['handoff']['content_sha256']) == 64
-    assert ledger['handoff']['context_hash'] == expected['context_hash']
+    assert ledger['handoff']['context_hash'] == call['osint_context']['context_hash']
     assert ledger['handoff']['scope_id'] == manifest['id'] and ledger['handoff']['scope_hash'] == manifest['hash']
     assert ledger['handoff']['generation'] == snapshot['generation']
 
@@ -413,7 +419,10 @@ def test_goal_preflight_reserves_maximum_run_path_before_job_and_actual_path_can
     assert len(call['run_id']) < 64
     assert len(actual_goal) <= len(preflights[0][1]) <= MAX_GOAL_CHARS
     assert descriptor['worker_path'] in actual_goal
-    assert descriptor['content_sha256'] == preflights[0][0]['content_sha256']
+    # A preview is explicitly non-executable; the final file binds the real
+    # charged job ID/deadline, so its hash must differ from the preview.
+    assert descriptor['content_sha256'] != preflights[0][0]['content_sha256']
+    assert call['osint_context']['native_execution']['admission'] == 'controller_reserved'
 
 
 def test_bad_map_evidence_reference_refused_before_native_job(control, monkeypatch):

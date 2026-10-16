@@ -12,7 +12,7 @@ import math
 import socket
 from urllib.parse import urlsplit
 
-from .contracts import Denied, Scope, digest
+from .contracts import Denied, Scope
 from .compose_runtime import _request_goal, prepare_handoff_context
 from .controller import Controller
 from .dispatcher import redact_worker_output
@@ -20,6 +20,7 @@ from .handoff import build_handoff
 from .tool_catalog import NmapCheck, build_check
 from .native_checks import parse_native_check, check_subject, compile_native_check
 from .native_targets import select_native_targets
+from .native_handoff import execution_record, build_native_handoff
 
 
 async def resolve_addresses(host: str) -> list[str]:
@@ -230,28 +231,34 @@ class ComposeRunService:
             # Use the original immutable manifest for handoff validation. Only
             # the launcher receives the reduced remaining runtime budget.
             context = build_handoff(snapshot, manifest, [], now=c.clock())
-            if targets is not None or len(execution_targets) != 1 or scope.network_targets:
-                context['execution_targets'] = execution_targets
-                context['context_hash'] = digest({key: value for key, value in context.items() if key != 'context_hash'})
             # Refuse a map that cannot reach the model intact before reserving
             # a job, starting a provider or touching a container.
             # Reserve the longest allowed host-generated run path in the goal
             # preflight; the eventual chat-UUID path must fit before any job.
-            descriptor = prepare_handoff_context(scope, context, run_id='preflight-' + '0' * 54)
+            preview_run = 'preflight-' + '0' * 54
+            preview_at = c.clock()
+            preview = execution_record(snapshot=snapshot, manifest=manifest, targets=execution_targets,
+                job_id='0' * 32, run_id=preview_run, seconds=seconds, deadline=preview_at+seconds,
+                now=preview_at, spent=snapshot['spent']+seconds, jobs=len(snapshot['jobs'])+1, preview=True)
+            descriptor = prepare_handoff_context(scope, build_native_handoff(context, preview), run_id=preview_run)
             target_url, _ = _request_goal(Scope.model_validate(body), descriptor, targets=execution_targets)
             profile = 'target_network' if any(t.startswith('tcp://') for t in execution_targets) else 'target_http'
             job, token = c.prepare_job(case_id, 'existing-pentestgpt-compose', profile, seconds,
                                        expected_binding=binding)
             run_id = 'chat-' + job['id']
+            execution = c.native_execution_record(case_id, job['id'], token, 'existing-pentestgpt-compose',
+                                                   profile, run_id, execution_targets)
+            context = build_native_handoff(context, execution)
             descriptor = prepare_handoff_context(scope, context, run_id=run_id)
             plan = {**binding, 'tool': 'pentestgpt-agent', 'run_id': run_id,
                     'execution_mode': 'existing_compose_runtime', 'synthetic': False,
                     'phase_enforcement': 'prompt_only', 'native_full_access': True,
-                    'scope_enforcement': 'launcher_allowlist_and_existing_proxy',
+                    'scope_enforcement': 'launcher_allowlist_and_prompt_only_network_scope' if profile == 'target_network'
+                                         else 'launcher_allowlist_and_existing_proxy',
                     'reduced_scope_enforced': False, 'network_ack': False,
                     'handoff_context_hash': context['context_hash'], 'handoff': descriptor,
                     'target': target_url, 'execution_targets': execution_targets, 'profile': profile,
-                    'network_scope_enforcement': 'prompt_only'}
+                    'network_scope_enforcement': 'prompt_only', 'native_execution': execution}
             c.start_native_job(job['id'], token, 'existing-pentestgpt-compose', profile, plan)
             started = await self.runtime.start(run_id=run_id, scope=body, osint_context=context)
             c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', profile)

@@ -166,6 +166,32 @@ so this fix does not require rebuilding the tools image or an Ansible apply.
 
 ## Multi-target and TCP native agent
 
+### Native execution handoff
+
+The native runner receives a schema-2 packet with a separate `native_execution`
+record, not the non-executable `get_pentest_context` typed-facade packet. The
+Controller creates that record only for an actual prepared checks reservation
+and seals it against current job/scope/hash/generation, selection and accounting
+before provider launch. Capability tokens never enter model context. File size
+and goal limits are preflighted with an explicitly non-executable preview;
+the receiving runtime refuses previews, facade packets, mismatched bindings and
+expired reservations.
+
+The record provides the absolute job deadline and exact case counters after
+charging the reservation. `unallocated` case allowance is the budget for future
+Controller jobs, not a reason to deny the currently reserved run. Preparation
+consumes the same reservation; the container timeout is reduced to the remaining
+absolute window. Historical jobs/checkpoints remain context and are not used to
+guess current allowance. Native toolbox admission does not mark typed workers
+qualified or claim independent FULL_ACCESS network enforcement.
+
+The fixed native goal uses this admission contract for single-HTTP, TCP and mixed
+runs alike. It distinguishes the native shell from typed-dispatcher qualification
+and performs one compact preflight before progressing to the scoped hypothesis.
+The typed facade remains non-executable until its own qualification requirements
+are met. `native_execution_handoff_revision` in integration status identifies the
+updated host-side adapter; no image rebuild is needed for this context-only fix.
+
 `start_pentestgpt_run(..., targets=[...])` selects 1..16 exact HTTP/TCP services
 from the existing immutable scope. The upstream limit is per run, not per case.
 Larger cases select a focused slice without reauthorizing a different scope;
