@@ -17,7 +17,7 @@ for name, argv in {'curl':['/usr/bin/curl','--version'], 'nmap':['/usr/bin/nmap'
         value = subprocess.run(argv, capture_output=True, text=True, timeout=30 if name == 'zap' else 10)
         lines = [re.sub(r'\x1b\[[0-9;]*m','',line).strip() for line in value.stdout.splitlines() if line.strip()]
         if name == 'testssl':
-            lines = [line for line in lines if line.startswith('testssl.sh version ')]
+            lines = [line for line in lines if re.match(r'^testssl(?:\.sh)? version \d',line)]
         elif name == 'zap':
             lines = [line for line in lines if re.fullmatch(r'\d+\.\d+\.\d+',line)]
         tools[name] = {'available':value.returncode == 0 and bool(lines), 'version':lines[:1]}
