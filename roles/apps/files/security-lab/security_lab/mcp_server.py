@@ -271,6 +271,7 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         """Report actual integration gaps and whether live jobs are enabled."""
         return {**Controller.integration_status(), 'live_execution': pentest_runtime is not None,
                 'case_continuity_revision': 1, 'native_service_checks_revision': 2,
+                'case_budget_extension_revision': 1,
                 'native_targets_revision': 2, 'native_execution_handoff_revision': 2, 'native_preflight_revision':1,
                 'runtime_inventory_tool': 'get_runtime_inventory',
                 'poc_execution': pentest_runtime is not None,
@@ -390,6 +391,22 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         with c.lock:
             revision_guard(ctx, case_id, expected_revision)
             return c.propose(case_id, "scope", manifest, expected_revision=expected_revision)
+
+    @server.tool(annotations=write)
+    def propose_budget_extension(case_id: str, additional_seconds: int, authorization: dict[str, Any],
+                                  expires_at: int, expected_revision: int, ctx: Context) -> dict[str, Any]:
+        """Save an auditable time extension from an explicit current-chat task.
+
+        Copies the latest approved scope's exact targets and all other limits;
+        accepts fresh checks-only authorization and expiry even if it expired.
+        Preserves cumulative spent, jobs and evidence. Requires an idle case and
+        current revision. Returns a PENDING scope: activate that exact ID using
+        activate_scope_from_task before launching. Never resets/replays a job.
+        Read the old scope's authorization shape with get_manifest; retain its
+        owner/hosts and set reference/basis/window to the operator's new task.
+        """
+        return controller(ctx).propose_budget_extension(case_id, additional_seconds, authorization,
+            expires_at, expected_revision=expected_revision)
 
     @server.tool(annotations=write)
     def activate_scope_from_task(case_id: str, manifest_id: str, ctx: Context) -> dict[str, Any]:
