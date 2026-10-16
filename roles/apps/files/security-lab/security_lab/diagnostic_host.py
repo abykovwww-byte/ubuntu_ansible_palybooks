@@ -133,14 +133,6 @@ class DiagnosticHost:
                 raise RuntimeError('Diagnostic stop unconfirmed')
             if role == 'capture' and directory is not None and value is not None:
                 try:
-                    path = directory/'traffic.pcap'
-                    if path.is_symlink():
-                        raise RuntimeError('Diagnostic capture link refused')
-                    if not path.exists():
-                        # cp without -a assigns the host caller's ownership. No
-                        # worker gets a bind mount of this private directory.
-                        self.docker(['cp',value['Id']+':/capture/traffic.pcap',str(path)])
-                        path.chmod(0o600)
                     log = directory/'capture.log'
                     if not log.exists():
                         with log.open('x', encoding='utf-8') as stream:
@@ -152,6 +144,14 @@ class DiagnosticHost:
                 self.docker(['rm',value['Id']])
             if self.owned(role) is not None:
                 raise RuntimeError('Diagnostic removal unconfirmed')
+        if directory is not None:
+            path = directory/'traffic.pcap'
+            if path.is_symlink():
+                raise RuntimeError('Diagnostic capture link refused')
+            if path.exists():
+                path.chmod(0o600)
+                if path.stat().st_size < 24:
+                    capture_error = capture_error or 'capture_artifact_incomplete'
         return {'status':'stopped','access_closed':True,'artifacts':self.artifacts(),
                 'capture_error':capture_error,
                 'capture_vantage':'probe_network_namespace_on_worker_host',
@@ -215,14 +215,23 @@ class DiagnosticHost:
 
     def capture(self, address, port, deadline):
         seconds = max(1, math.floor(deadline-time.time()))
+        # Docker archive/cp cannot reliably read a container's tmpfs. Give only
+        # the trusted observer one fresh file, never the run directory. Its
+        # parent stays host-owned 0700; restore 0600 once the observer is closed.
+        path = self.directory()/'traffic.pcap'
+        with path.open('xb'):
+            pass
+        path.chmod(0o666)
         self.docker(['run','-d',*self.labels('capture'),'--network','container:'+self.name,
             '--workdir','/tmp',
             '--user','0:0','--cap-drop','ALL','--cap-add','NET_RAW','--cap-add','SETUID','--cap-add','SETGID',
+            '--cap-add','KILL',
             '--security-opt','no-new-privileges:true','--read-only','--pids-limit','16','--memory','64m',
-            '--tmpfs','/capture:rw,noexec,nosuid,nodev,size=2m,mode=1777',
+            '--mount','type=bind,src='+str(path)+',dst=/capture.pcap',
+            '--ulimit','fsize=1048576:1048576',
             '--entrypoint','/usr/bin/timeout',self.image,'--signal=TERM','--kill-after=1s',str(seconds),
             '/usr/bin/tcpdump','-Z','probe','-p','-i','eth0','-nn','-U','-s','2048','-c','256',
-            '-w','/capture/traffic.pcap','host',address,'and','tcp','port',str(port)])
+            '-w','/capture.pcap','host',address,'and','tcp','port',str(port)])
         ready_until = min(deadline-1,time.time()+5)
         while time.time() < ready_until:
             value = self.owned('capture')

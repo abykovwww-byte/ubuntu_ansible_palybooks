@@ -68,7 +68,9 @@ Stop closes only exact-owner probe/installer/capture containers. Unknown closure
 remains interrupted; no broad Docker cleanup or host-global firewall edit occurs.
 
 Stock tcpdump runs separately, shares only the probe namespace and drops to the
-probe user after opening its capture socket. Its readiness precedes any probe.
+probe user after opening its capture socket. The observer receives a write bind
+of one fresh PCAP file under a private host directory; the probe receives no
+host mount. File permissions return to 0600 after observer closure. Its readiness precedes any probe.
 PCAP is bounded to 256 packets with a 2048-byte snaplen. This is host-side capture
 in the worker namespace, **not capture on the remote target**, and it can be
 partial. The captured bytes do not prove where a missing remote response was

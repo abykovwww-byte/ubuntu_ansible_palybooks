@@ -95,14 +95,14 @@ class DiagnosticHostTests(unittest.TestCase):
             host.close()
         self.assertFalse(any(args[0] in {'stop','rm'} for args in calls))
 
-    def test_capture_copy_failure_still_removes_owned_containers(self):
+    def test_capture_log_failure_still_removes_owned_containers(self):
         host = host_class()(request(self.root))
         host.directory(create=True)
         containers = {'capture':{'Id':'capture-id','State':{'Running':False}}}
         host.owned = lambda role: containers.get(role)
         def docker(args,**kwargs):
-            if args[0] == 'cp':
-                raise RuntimeError('simulated copy failure')
+            if args[0] == 'logs':
+                raise RuntimeError('simulated log failure')
             if args[0] == 'rm':
                 containers.clear()
             return ''
@@ -111,6 +111,27 @@ class DiagnosticHostTests(unittest.TestCase):
         self.assertTrue(result['access_closed'])
         self.assertEqual(result['capture_error'],'capture_artifact_collection_failed')
         self.assertFalse(containers)
+
+    def test_observer_mounts_only_fresh_pcap_and_failed_start_restores_private_mode(self):
+        host = host_class()(request(self.root))
+        host.directory(create=True)
+        host.image = 'sha256:'+'a'*64
+        calls=[]
+        def docker(argv,**kwargs):
+            calls.append(argv)
+            raise RuntimeError('simulated observer launch failure')
+        host.docker=docker
+        with self.assertRaisesRegex(RuntimeError,'observer launch failure'):
+            host.capture('8.8.8.8',443,time.time()+30)
+        argv=calls[0]
+        self.assertEqual(argv[argv.index('--mount')+1],
+                         'type=bind,src='+str(host.directory()/'traffic.pcap')+',dst=/capture.pcap')
+        self.assertIn('KILL',argv)
+        self.assertIn('fsize=1048576:1048576',argv)
+        host.owned=lambda role:None
+        result=host.close()
+        self.assertEqual((host.directory()/'traffic.pcap').stat().st_mode & 0o777,0o600)
+        self.assertEqual(result['capture_error'],'capture_artifact_incomplete')
 
     def test_host_artifacts_cannot_be_replaced_with_links(self):
         host = host_class()(request(self.root))
