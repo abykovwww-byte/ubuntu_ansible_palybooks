@@ -110,6 +110,50 @@ extension. The running status advertises `case_budget_extension_revision`.
 
 ## Case continuity and native service checks
 
+### First-wave web toolbox
+
+The IaC image includes hash-locked Playwright Python dependencies and its
+Chromium revision, ffuf 2.3.0 and ZAP 2.17.0 from SHA256-pinned official releases.
+`pentest-web-tools` is a one-shot clean service without provider credentials,
+with Chromium/Java temporary space and process limits. Both operator clients
+use the existing `start_service_check` job/evidence lifecycle. Image installation
+does not qualify the typed production worker or change native FULL_ACCESS limits.
+
+Examples of `specification` (within a separately activated existing scope):
+
+```json
+{"tool":"playwright","url":"https://app.example.test/dashboard","seconds":60,"max_requests":30}
+{"tool":"ffuf","url":"https://app.example.test/","paths":["api","openapi.json","health"],"seconds":60}
+{"tool":"zap","url":"https://app.example.test/","seconds":120}
+```
+
+- Playwright loads a fresh credential-free page, executes JavaScript and records
+  scoped GET/HEAD subrequests and a viewport screenshot. Requests are paced at
+  scope RPS. Redirect responses, out-of-scope URLs, writes, service workers and
+  WebSockets are blocked and recorded as coverage gaps. No click/login script,
+  arbitrary JavaScript or stored browser profile is accepted.
+- ffuf gets only admitted relative paths plus a control URL. It uses one thread,
+  scope RPS, no recursion, calibration or redirects. Every candidate, including
+  the control, is checked before DNS/job admission. Similarity to the control is
+  reported; an equal SPA shell is not a discovered API.
+- ZAP passively imports one TLS-verified curl response as HAR with
+  `sendRequests=false`. Its pinned Automation Framework plan contains no spider
+  or active scan. Runtime add-on updates are disabled. Authentication and active
+  DAST are later profiles, not capabilities of this initial adapter.
+
+Host DNS pins are installed in the one-shot container's hosts file. The worker
+mounts only a newly created `<runs_directory>/<run_id>` at `/web-artifacts`.
+Receipts retain its path and artifact hashes; full browser/ffuf/ZAP JSON, the
+screenshot and HAR stay there. Summaries expose bounded previews. Treat these
+artifacts as engagement data; no auth cookie/header is included in the captured
+ZAP HAR. Timeout may leave partial artifacts. Do not reuse a run directory.
+
+Apply the IaC image/Compose changes **before** refreshing the idle shared MCP
+onto the matching release. `get_runtime_inventory` then reports the actual web
+tool versions and `web_service_applied`; it is zero-target version inventory,
+not target qualification. CI runs all three real tools on an owned loopback
+positive/negative SPA fixture with Internet networking disabled.
+
 Before continuing an engagement, read `get_case`, `get_case_history` (follow
 `next_after_sequence`), the relevant report receipts and exact `get_manifest`
 bodies. Legacy direct-run reports may also live in the workstation's `outputs/`

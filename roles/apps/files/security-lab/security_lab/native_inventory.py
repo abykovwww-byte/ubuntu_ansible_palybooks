@@ -4,9 +4,14 @@ INVENTORY_PROGRAM = r'''
 import json, subprocess
 tools = {}
 for name, argv in {'curl':['/usr/bin/curl','--version'], 'nmap':['/usr/bin/nmap','--version'],
-                   'openssl':['/usr/bin/openssl','version']}.items():
+                   'openssl':['/usr/bin/openssl','version'],
+                   'ffuf':['/usr/local/bin/ffuf','-V'],
+                   'playwright':['/opt/web-tools-venv/bin/python','-m','playwright','--version'],
+                   'chromium':['/opt/web-tools-venv/bin/python','-c',
+                       'from playwright.sync_api import sync_playwright; import subprocess; p=sync_playwright().start(); subprocess.run([p.chromium.executable_path,"--version"],check=True); p.stop()'],
+                   'zap':['/opt/zap/zap.sh','-Xmx256m','-cmd','-version']}.items():
     try:
-        value = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        value = subprocess.run(argv, capture_output=True, text=True, timeout=10)
         tools[name] = {'available':value.returncode == 0, 'version':value.stdout.splitlines()[:1]}
     except (OSError, subprocess.TimeoutExpired):
         tools[name] = {'available':False, 'version':[]}
