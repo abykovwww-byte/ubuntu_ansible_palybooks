@@ -164,6 +164,14 @@ jobs:
           docker run --rm --network none --entrypoint pentestgpt-run pentestgpt-abykovserv:ci --capabilities
           docker run --rm --entrypoint /opt/pentestgpt-agent/.venv/bin/python pentestgpt-abykovserv:ci -c "import pentestgpt_agent, unified_agent; assert unified_agent.__version__ == '0.3.0'"
           docker run --rm --entrypoint squid pentestgpt-egress-proxy:ci -k parse -f /etc/squid/squid.conf
+      - name: Qualify web tools against owned loopback fixture
+        run: >-
+          docker run --rm --network none --read-only --user 1000:1000
+          --cap-drop ALL --security-opt no-new-privileges --pids-limit 512 --shm-size 256m
+          --tmpfs /tmp:rw,nosuid,nodev,noexec,size=768m,uid=1000,gid=1000
+          --add-host fixture.example.test:127.0.0.1 --env HOME=/tmp
+          --entrypoint /opt/web-tools-venv/bin/python pentestgpt-abykovserv:ci
+          /usr/local/libexec/pentestgpt-test-web-tools.py
       - name: Verify Compose runtime, mounts, health, and network isolation
         working-directory: /tmp/PentestGPT
         shell: bash

@@ -305,7 +305,7 @@ try:
             close()
             raise
     elif p["operation"] in {"tool", "version"}:
-        if p.get("kind") not in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory"}:
+        if p.get("kind") not in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory", "playwright", "ffuf", "zap"}:
             raise RuntimeError("Unsupported fixed tool kind")
         if p["tool_service"] not in {"pentest-tools", "pentestgpt"}:
             raise RuntimeError("Unsupported tools service")
@@ -319,10 +319,28 @@ try:
             raise RuntimeError("Run identity already exists")
         argv = ["/usr/local/bin/subfinder", "-version", "-disable-update-check"] if p["operation"] == "version" else p["argv"]
         seconds = 10 if p["operation"] == "version" else p["seconds"]
+        web = p['kind'] in {'playwright', 'ffuf', 'zap'}
+        options, artifact_root = [], None
+        if web:
+            if p['tool_service'] != 'pentest-tools':
+                raise RuntimeError('Web checks require the tools-only service')
+            # Only a freshly owned run directory is mounted, never the runs
+            # root, provider auth, other jobs or arbitrary caller paths.
+            parent = pathlib.Path(p['runs_directory'])
+            if parent.is_symlink() or not parent.is_dir() or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}',p['run_id']):
+                raise RuntimeError('Unsafe web artifacts root')
+            artifact_root = parent / p['run_id']
+            artifact_root.mkdir(mode=0o700, exist_ok=False)
+            host, address = p['web_host'], p['web_address']
+            import ipaddress
+            if not re.fullmatch(r'[a-z0-9.-]+',host) or str(ipaddress.ip_address(address)) != address:
+                raise RuntimeError('Invalid web address pin')
+            pin = '['+address+']' if ':' in address else address
+            options = ['--add-host',host+':'+pin,'--volume',str(artifact_root)+':/web-artifacts:rw']
         command = ["docker", "compose", "--file", "compose.yml", "--profile", "tools", "--profile", "manual", "run", "--rm", "-T",
             "--name", p["container_name"], "--label", "security-lab.compose-owner="+p["owner"],
             "--label", "security-lab.run-id="+p["run_id"], "--entrypoint", "/usr/bin/timeout",
-            p["tool_service"], "--signal=TERM", "--kill-after=10s", str(seconds), *argv]
+            *options, 'pentest-web-tools' if web else p["tool_service"], "--signal=TERM", "--kill-after=10s", str(seconds), *argv]
         started = time.time()
         try:
             execution = subprocess.run(command, cwd=p["compose_directory"], capture_output=True,
@@ -343,6 +361,16 @@ try:
             "started_at":started, "finished_at":finished,
             "receipts_truncated":len(stdout)>maximum or len(stderr)>maximum,
             "receipt_kind":"real_compose_"+p["kind"], "verified_vulnerabilities":[]}
+        if artifact_root is not None:
+            result['artifact_directory'] = str(artifact_root)
+            result['artifacts'] = []
+            for name in ('summary.json','browser.json','page.png','ffuf.json','input.har','zap-report.json','zap.log'):
+                path = artifact_root / name
+                if path.is_symlink():
+                    raise RuntimeError('Unsafe web artifact link')
+                if path.is_file() and path.stat().st_size <= 16777216:
+                    result['artifacts'].append({'name':name,'bytes':path.stat().st_size,
+                        'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
         if p["operation"] == "version":
             reported = re.findall(r"(?<![A-Za-z0-9])v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]{1,50})?", stdout+"\n"+stderr)
             versions = {version.lstrip("v") for version in reported}
@@ -352,8 +380,9 @@ try:
         elif p["kind"] == "subfinder":
             result["actual_version"] = p["actual_version"]
         elif p['kind'] == 'inventory':
-            configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','config','--format','json']))
+            configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','--profile','tools','config','--format','json']))
             result['native_service_applied'] = 'pentestgpt-native' in configuration.get('services', {})
+            result['web_service_applied'] = 'pentest-web-tools' in configuration.get('services', {})
     elif p["operation"] == "poll":
         result = poll()
     elif p["operation"] == "stop":
@@ -580,7 +609,7 @@ class ComposePentestRuntime:
         limitations = dict(LIMITATIONS)
         if handle.get('agent_service') == 'pentestgpt-native':
             limitations['scope_enforcement'] = 'launcher_allowlist_and_prompt_only_network_scope'
-        if handle.get("kind") in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory"}:
+        if handle.get("kind") in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory", "playwright", "ffuf", "zap"}:
             limitations.update(native_full_access=False, phase_enforcement="fixed_"+handle["kind"]+"_entrypoint",
                                scope_enforcement="host_typed_plan_and_existing_compose_networks", provider_called=False)
         return {**result, "run_id":handle["run_id"], **limitations}
@@ -643,7 +672,7 @@ class ComposePentestRuntime:
         run_id = 'inventory-' + secrets.token_hex(12)
         handle = {'run_id':run_id, 'container_name':'security-lab-pentest-'+secrets.token_hex(12),
                   'owner':secrets.token_hex(24), 'kind':'inventory',
-                  'argv':['/usr/local/bin/python','-c',INVENTORY_PROGRAM], 'seconds':30}
+                  'argv':['/usr/local/bin/python','-c',INVENTORY_PROGRAM], 'seconds':60}
         try:
             result = await self._call('tool', handle)
             rows = result.get('receipts', [])
@@ -651,6 +680,7 @@ class ComposePentestRuntime:
                 raise Denied('Runtime inventory did not return a complete diagnostic receipt')
             data = json.loads(rows[0]['stdout'])
             return {**data, 'native_service_applied':result.get('native_service_applied', False),
+                    'web_service_applied':result.get('web_service_applied', False),
                     'access_closed': result.get('access_closed') is True,
                     'qualification': 'version_inventory_only_not_target_or_provider_qualification'}
         finally:
@@ -672,6 +702,9 @@ class ComposePentestRuntime:
                 raise Denied('Run ID is already owned by this runtime')
             handle = {'run_id': run_id, 'container_name': 'security-lab-pentest-' + secrets.token_hex(12),
                       'owner': secrets.token_hex(24), 'kind': plan.tool, 'argv': list(plan.argv), 'seconds': plan.seconds}
+            if plan.tool in {'playwright', 'ffuf', 'zap'}:
+                from urllib.parse import urlsplit
+                handle.update(web_host=urlsplit(plan.specification['url']).hostname, web_address=plan.addresses[0])
             self._handles[run_id] = handle
         try:
             result = await self._call('tool', handle)
