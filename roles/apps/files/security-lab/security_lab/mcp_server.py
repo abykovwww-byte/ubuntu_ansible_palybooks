@@ -166,7 +166,7 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
     @server.tool(annotations=external)
     async def start_service_check(case_id: str, specification: dict[str, Any], ctx: Context,
                                    ipv6: bool = False, expected_revision: int | None = None) -> dict[str, Any]:
-        """Run one scoped HTTP/API, curl, nmap version-light or TLS/PostgreSQL handshake.
+        """Run scoped HTTP/API, Nmap version-light, OpenSSL or selected testssl.sh checks.
 
         Read get_tool_catalog for strict specification schemas. Uses the clean
         PentestGPT tools service, host-selected DNS pins, fixed arguments and
@@ -175,6 +175,10 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
         HTTP requires exact URL/method scope; tool=http accepts query/public
         headers and GET/HEAD/OPTIONS. POST/body requires start_poc_action and the
         exact separately activated request. Service/TLS requires network scope.
+        TLS supports SNI/ALPN/versions/ciphers and bounded attempts; testssl uses
+        protocols or server-defaults only. Both require the applied diagnostic
+        service/image, use per-run nft TCP pins and retain host-side PCAP artifacts.
+        Capture is not remote receiving-side evidence or worker qualification.
         One selected address is checked. Version probes have a wall deadline,
         not independently enforced RPS. Poll job status and read real receipts.
         """
@@ -270,7 +274,7 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
     def integration_status(ctx: Context) -> dict[str, Any]:
         """Report actual integration gaps and whether live jobs are enabled."""
         return {**Controller.integration_status(), 'live_execution': pentest_runtime is not None,
-                'case_continuity_revision': 1, 'native_service_checks_revision': 2,
+                'case_continuity_revision': 1, 'native_service_checks_revision': 3,
                 'case_budget_extension_revision': 1,
                 'native_targets_revision': 2, 'native_execution_handoff_revision': 2, 'native_preflight_revision':1,
                 'runtime_inventory_tool': 'get_runtime_inventory',
@@ -286,7 +290,7 @@ def build_server(directory: Path, principal: str, *, pentest_runtime=None, pente
             'nmap_tool': 'start_nmap_scan', 'provider_tool': 'start_pentestgpt_run',
             'subfinder_tool': 'start_subfinder_discovery',
             'service_check_tool': 'start_service_check',
-            'service_check_profiles': ['curl', 'http', 'nmap_service', 'tls'],
+            'service_check_profiles': ['curl', 'http', 'nmap_service', 'tls', 'testssl'],
             'case_history_tools': ['get_case_history', 'record_case_checkpoint', 'get_manifest'],
             'nmap_service': getattr(getattr(pentest_runtime, 'config', None), 'tool_service', None),
             'tool_service_requires_applied_compose': True,

@@ -75,7 +75,7 @@ def test_service_job_records_command_observation_and_closure_without_provider(co
     case_id = activated(control, network_targets=[{'host': 'example.com', 'tcp_ports': [5432],
                                                   'addresses': ['172.20.1.3']}])
     class ServiceRuntime(Runtime):
-        async def run_check(self, *, run_id, plan):
+        async def run_check(self, *, run_id, plan, deadline=None):
             self.calls.append(('run_check', plan))
             return {'status': 'completed', 'receipts': [{'argv': plan.argv, 'exit_code': 0, 'stdout': 'fixture service observation'}]}
     runtime = ServiceRuntime()
@@ -114,7 +114,7 @@ def test_runtime_recompiles_plan_and_rejects_mutated_argv_before_launch(tmp_path
     assert runner.calls[0][1]['argv'] == list(plan.argv)
 
 
-@pytest.mark.parametrize('kind', ['curl', 'nmap_service', 'tls'])
+@pytest.mark.parametrize('kind', ['curl', 'nmap_service'])
 def test_actual_host_program_uses_tools_service_and_timeout(monkeypatch, tmp_path, kind):
     request = payload(tmp_path, 'tool')
     request.update(kind=kind, argv=['/usr/bin/fixed-test-tool'], seconds=10)

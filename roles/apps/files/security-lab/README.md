@@ -22,6 +22,86 @@ updated image and native TCP Compose service must be applied first. Use
 `get_runtime_inventory` to distinguish implemented adapters from deployed runtime
 capabilities. Response predicates do not independently verify vulnerability impact.
 
+## Stock TLS diagnostics
+
+`start_service_check` also accepts the expanded `tool=tls` OpenSSL profile and
+`tool=testssl` for selected upstream testssl.sh checks. There is no custom TCP or
+TLS client. The image installs system OpenSSL/nftables/tcpdump and testssl.sh
+v3.2.3 at commit `d2d9d2a04120033a7d1e01e52d9b409168544cc6`, retaining its
+source and license. Bundled upstream executables are removed; testssl uses the
+system OpenSSL. Rebuild/apply the IaC image and `pentest-diagnostics` service and
+reload the shared MCP service before use. `get_runtime_inventory` reports actual
+tool versions and `diagnostic_service_applied`; inventory is not qualification.
+
+Example specifications (the hostname/port must already be in network scope):
+
+```json
+{"tool":"tls","host":"app.example.test","port":443,"sni":"target","alpn":["h2","http/1.1"],"min_version":"TLSv1.2","max_version":"TLSv1.3","seconds":90,"attempt_seconds":30,"attempts":2}
+```
+
+Use `sni:null` to omit SNI. An alternate DNS SNI needs its own approved network
+host/port with an explicit grant for the same selected IP; no extra DNS lookup or
+connection is made to that alias. Certificate hostname verification continues
+to use `host`. The optional `ciphers` and `ciphersuites` fields accept explicit
+colon-separated names, separately for TLS <=1.2 and TLS 1.3; OpenSSL security
+policy directives and arbitrary options are refused. PostgreSQL SSLRequest
+remains available through `starttls:"postgres"`.
+
+```json
+{"tool":"testssl","host":"app.example.test","port":443,"checks":"protocols","seconds":120}
+```
+
+The other testssl selection is `server_defaults`. No default full scan,
+vulnerability suite, external revocation lookup or caller-selected script is
+exposed. TCP-only scope means QUIC/UDP is not covered, even if mentioned in
+upstream output. Version/protocol probe RPS is not independently enforced.
+
+Each diagnostic uses a fresh UID 1001 probe container, read-only root, no
+capabilities and no auth/workspace/host mounts. A separate short-lived installer
+applies nft only in its network namespace **before** Docker attaches egress.
+Only the Controller-selected IP/TCP port is allowed; replies need that same
+expiring endpoint membership, not just conntrack state. Related ICMP errors and
+IPv6 NDP are retained. Kernel expiry and an absolute-deadline PID1 bound access
+if the host launcher is lost. This is a hard job cutoff, not a claim that the
+native adapter has independently enforced the Controller's short heartbeat lease.
+Stop closes only exact-owner probe/installer/capture containers. Unknown closure
+remains interrupted; no broad Docker cleanup or host-global firewall edit occurs.
+
+Stock tcpdump runs separately, shares only the probe namespace and drops to the
+probe user after opening its capture socket. Its readiness precedes any probe.
+PCAP is bounded to 256 packets with a 2048-byte snaplen. This is host-side capture
+in the worker namespace, **not capture on the remote target**, and it can be
+partial. The captured bytes do not prove where a missing remote response was
+lost. Production isolation still needs receiving-side Docker qualification;
+the catalog remains `qualified:false`.
+
+The reserved job duration includes setup and cleanup margins. TLS attempts are
+sequential, bounded by the same original deadline, and retry only timeouts from
+the per-attempt timeout process. Success/definite TLS errors are not replayed.
+OpenSSL's completed-handshake diagnostic ends the probe without waiting for
+application data; the resulting termination exit code is retained separately
+from the handshake observation. A timeout remains inconclusive.
+
+Complete bounded stdout/stderr, PCAP, capture log, network readback and result
+JSON are retained privately under `<runs_directory>/<run_id>/`. MCP evidence
+contains bounded previews plus host paths, sizes and SHA256 references, including
+the independent stop path after interruption. Raw artifacts are not redacted
+or sent as an unrestricted MCP resource; use the host's existing run-artifact
+retention/cleanup process. They are never mounted into the probe container.
+
+Tests: the normal pytest suite covers schemas, admission, deadlines and artifact
+handoff. On Linux, `python3 -m unittest discover -s tests -p test_diagnostic_host.py`
+also exercises real system OpenSSL against owned loopback TLS/silent endpoints,
+with Docker replaced by local process transport. These tests do not claim kernel
+network-isolation or deployed-image qualification.
+
+The `pentestgpt` CI job additionally runs
+`scripts/test-pentestgpt-diagnostics.py <rendered-compose.yml>` against the actual
+built image. It uses disposable owned dual-stack Docker endpoints, verifies
+blocked traffic at the receivers, decodes real PCAP with tcpdump and checks
+concurrent stop/artifact recovery. This never uses production auth volumes or
+engagement targets; WAN/provider qualification remains separate.
+
 The operator uses the Codex or OpenCode chat throughout OSINT → surface
 review → checks → separately requested PoC. On 2026-10-06 the operator explicitly
 delegated authorization to tasks in that chat. No extra confirmation form,
