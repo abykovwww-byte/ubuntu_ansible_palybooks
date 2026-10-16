@@ -14,6 +14,24 @@ docker_apps_force_compose_up: false
 rp_stack_local_llm_force_model_download: false
 rp_stack_local_llm_force_runtime_check: false
 
+# Opt-in until an exact reviewed app revision and private repository access are ready.
+human_range_enabled: false
+human_range_repo_version: ""
+human_range_repo_token: ""
+human_range_project_dir: "{{ app_deploy_base_dir | default('/srv/apps') }}/human-range"
+human_range_backup_dir: "{{ app_backup_base_dir | default('/srv/backups') }}/human-range"
+human_range_bind_host: "192.168.1.88"
+human_range_port: 8012
+human_range_llm_mode: replay
+human_range_llm_network_enabled: false
+human_range_llm_config_path: ""
+human_range_openrouter_api_key: ""
+human_range_model_writer: ""
+human_range_model_responder: ""
+human_range_model_responder_short: ""
+human_range_model_decision: ""
+human_range_decision_threshold: ""
+
 # Security Lab operator control plane. Opt-in: when enabled, the shared
 # Controller, hypothesis ledger and research campaign loop run on the server as
 # a systemd service so research continues with the workstation off. Operator

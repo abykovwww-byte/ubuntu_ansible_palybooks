@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+cd {{ human_range_project_dir | quote }}
+archive=${1:?Usage: human-range-restore-check /srv/backups/human-range/FILE.dump}
+case "$archive" in {{ human_range_backup_dir | quote }}/*.dump) ;; *) echo 'Expected a Human Range backup path' >&2; exit 2;; esac
+test -f "$archive"
+probe="human_range_restore_probe_$(date -u +%Y%m%d%H%M%S)_$$"
+cleanup() { docker compose --file docker-compose.yml exec -T db dropdb -U human_range --if-exists "$probe"; }
+trap cleanup EXIT HUP INT TERM
+docker compose --file docker-compose.yml exec -T db createdb -U human_range "$probe"
+docker compose --file docker-compose.yml exec -T db pg_restore -U human_range --dbname="$probe" --exit-on-error --no-owner < "$archive"
+docker compose --file docker-compose.yml exec -T db psql -U human_range -d "$probe" -v ON_ERROR_STOP=1 -c 'SELECT version_num FROM alembic_version; SELECT count(*) AS runs FROM run; SELECT count(*) AS events FROM event; SELECT count(*) AS results FROM run_result; SELECT count(*) AS revisions FROM run_result_revision;'
+printf '%s\n' 'Restore into a separate empty database succeeded; source database was not modified.'
