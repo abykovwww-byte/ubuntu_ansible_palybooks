@@ -11,6 +11,8 @@ from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from .contracts import Contract, Denied, Scope, HTTPRequest, ActionPlan, hostname, is_private_network_address, network_address
 from .tool_catalog import CurlCheck, NmapCheck, _check_stage, build_check
+from .web_checks import BrowserCheck, FFUFCheck, ZAPCheck, WEB_CHECKS, web_policy
+from .contracts import canonical
 
 
 class ServiceCheck(Contract):
@@ -66,7 +68,7 @@ class TestSSLCheck(Contract):
     _host = field_validator('host')(hostname)
 
 
-NativeCheck = Annotated[Union[CurlCheck, HTTPRequest, ServiceCheck, TLSCheck, TestSSLCheck], Field(discriminator='tool')]
+NativeCheck = Annotated[Union[CurlCheck, HTTPRequest, ServiceCheck, TLSCheck, TestSSLCheck, BrowserCheck, FFUFCheck, ZAPCheck], Field(discriminator='tool')]
 _ADAPTER = TypeAdapter(NativeCheck)
 
 
@@ -76,6 +78,9 @@ def parse_native_check(value: dict):
 
 def check_subject(spec, scope: Scope) -> str:
     """Authorization is checked before DNS or any runtime operation."""
+    if isinstance(spec, WEB_CHECKS):
+        web_policy(spec, scope)
+        return urlsplit(spec.url).hostname
     if isinstance(spec, (CurlCheck, HTTPRequest)):
         if not any(target.permits(spec.url, spec.method) for target in scope.targets):
             raise Denied('HTTP check outside approved service, path or method')
@@ -134,7 +139,12 @@ def compile_native_check(specification: dict, scope: Scope, addresses: list[str]
         if address not in alias.addresses:
             raise Denied('Alternate SNI requires the same explicit address grant')
     bracketed = '[' + address + ']' if ipaddress.ip_address(address).version == 6 else address
-    if isinstance(spec, HTTPRequest):
+    if isinstance(spec, WEB_CHECKS):
+        policy = web_policy(spec, scope)
+        argv = ('/opt/web-tools-venv/bin/python', '/usr/local/libexec/pentestgpt-web-check.py',
+                '--policy', canonical(policy))
+        profile = 'target_http'
+    elif isinstance(spec, HTTPRequest):
         parsed = urlsplit(spec.url)
         url = spec.url + ('?' + urlencode(spec.query) if spec.query else '')
         argv = ('/usr/bin/curl', '--disable', '--globoff', '--silent', '--show-error', '--http1.1',
@@ -197,7 +207,10 @@ def native_check_catalog(configured: bool) -> list[dict]:
                 ('http', 'Pinned GET/HEAD/OPTIONS with query and public headers; POST/body only from an activated exact action plan'),
                 ('nmap_service', 'One scoped TCP port, version-light; no caller-selected NSE; built-in version scripts may run; version probes are not RPS-enforced'),
                 ('tls', 'OpenSSL SNI/ALPN/TLS1.2/1.3 and explicit ciphers; bounded attempts, pinned TCP egress and host-side PCAP. Timeout is inconclusive; no authentication or application data'),
-                ('testssl', 'Pinned upstream testssl.sh protocols or server-defaults only; no full/vulnerability scan. TCP-only egress; QUIC is not covered. Host-side PCAP; probe RPS is not independently enforced'))]
+                ('testssl', 'Pinned upstream testssl.sh protocols or server-defaults only; no full/vulnerability scan. TCP-only egress; QUIC is not covered. Host-side PCAP; probe RPS is not independently enforced'),
+                ('playwright', 'Fresh Chromium context; scoped GET/HEAD, request/rate/time bounds; no redirects, credentials, writes or WebSockets; host artifacts'),
+                ('ffuf', 'At most 32 admitted relative paths plus control; one thread, scope RPS; no redirects/recursion/calibration; host artifacts'),
+                ('zap', 'One TLS-verified curl GET; ZAP offline HAR import and passive scan with bundled add-ons; no spider, active scan, login or runtime updates; host artifacts'))]
     return checks + [{'name':'compose:saved_http_action', 'available':configured, 'qualified':False,
         'allowed_actions':['poc'], 'mcp_tool':'start_poc_action', 'manifest_schema':ActionPlan.model_json_schema(),
         'limitations':'Executes one exact saved action.request after separate action activation; POST/body allowed only within HTTP scope. '

@@ -447,6 +447,26 @@ docker_apps:
         path: "{{ pentestgpt_project_dir }}/tool-lock.json"
         mode: "0644"
         force: true
+      - src: pentestgpt/web-tool-lock.json
+        path: "{{ pentestgpt_project_dir }}/web-tool-lock.json"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/web-requirements.txt
+        path: "{{ pentestgpt_project_dir }}/web-requirements.txt"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/install_web_tools.py
+        path: "{{ pentestgpt_project_dir }}/install_web_tools.py"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/web_check.py
+        path: "{{ pentestgpt_project_dir }}/web_check.py"
+        mode: "0644"
+        force: true
+      - src: pentestgpt/test_web_tools_runtime.py
+        path: "{{ pentestgpt_project_dir }}/test_web_tools_runtime.py"
+        mode: "0644"
+        force: true
       - src: pentestgpt/Dockerfile.proxy
         path: "{{ pentestgpt_project_dir }}/Dockerfile.proxy"
         mode: "0644"
