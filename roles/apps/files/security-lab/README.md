@@ -61,7 +61,10 @@ capabilities and no auth/workspace/host mounts. A separate short-lived installer
 applies nft only in its network namespace **before** Docker attaches egress.
 Only the Controller-selected IP/TCP port is allowed; replies need that same
 expiring endpoint membership, not just conntrack state. Related ICMP errors and
-IPv6 NDP are retained. Kernel expiry and an absolute-deadline PID1 bound access
+IPv6 NDP are retained. Loopback stays denied with an immediate rejection so
+testssl's local OpenSSL capability probes cannot hang on a dropped SYN.
+Only local TCP reset packets are passed to deliver that rejection, not sessions.
+Kernel expiry and an absolute-deadline PID1 bound access
 if the host launcher is lost. This is a hard job cutoff, not a claim that the
 native adapter has independently enforced the Controller's short heartbeat lease.
 Stop closes only exact-owner probe/installer/capture containers. Unknown closure

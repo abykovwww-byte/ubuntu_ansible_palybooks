@@ -183,11 +183,15 @@ class DiagnosticHost:
             ' set endpoint { type '+addr_type+' . inet_service; flags timeout; '
             'elements = { '+address+' . '+str(port)+' timeout '+str(ttl)+'ms }; }\n'
             ' chain input { type filter hook input priority 0; policy drop;\n'
+            '  iifname "lo" tcp flags & rst == rst accept\n'
             '  ct state related meta l4proto { icmp, ipv6-icmp } accept\n'
             '  meta l4proto ipv6-icmp ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept\n'
             '  ct state established '+family+' saddr . tcp sport @endpoint accept\n }\n'
             ' chain output { type filter hook output priority 0; policy drop;\n'
             '  meta l4proto ipv6-icmp ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept\n'
+            '  oifname "lo" tcp flags & rst == rst accept\n'
+            '  oifname "lo" meta l4proto tcp reject with tcp reset\n'
+            '  oifname "lo" reject with icmpx type port-unreachable\n'
             '  ct state { new, established } '+family+' daddr . tcp dport @endpoint accept\n }\n'
             ' chain forward { type filter hook forward priority 0; policy drop; }\n}\n')
         self.firewall(rules)

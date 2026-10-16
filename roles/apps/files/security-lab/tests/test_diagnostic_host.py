@@ -246,7 +246,17 @@ class DiagnosticHostTests(unittest.TestCase):
         host.docker = lambda *a,**k: ''
         host.owned = lambda role: {'NetworkSettings':{'Networks':{'owned-egress':{}}}}
         try:
+            listener=socket.socket()
+            listener.bind(('127.0.0.1',0))
+            listener.listen(1)
+            self.addCleanup(listener.close)
+            with socket.create_connection(listener.getsockname(),timeout=1):
+                listener.accept()[0].close()
             host.install_network('8.8.8.8',443,'owned-egress',time.time()+7)
+            with socket.socket() as denied:
+                denied.settimeout(.3)
+                with self.assertRaises(ConnectionRefusedError):
+                    denied.connect(listener.getsockname())
             policy = json.loads((host.directory()/'network-policy.json').read_text())
             self.assertTrue(policy['installed_readback']['nftables'])
             time.sleep(2.1)
