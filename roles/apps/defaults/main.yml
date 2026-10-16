@@ -13,3 +13,32 @@ docker_apps_build_retry_delay: 15
 docker_apps_force_compose_up: false
 rp_stack_local_llm_force_model_download: false
 rp_stack_local_llm_force_runtime_check: false
+
+# Security Lab operator control plane. Opt-in: when enabled, the shared
+# Controller, hypothesis ledger and research campaign loop run on the server as
+# a systemd service so research continues with the workstation off. Operator
+# credentials are shared with the workstation clients and stay in local overrides.
+security_lab_enabled: false
+security_lab_project_dir: "{{ app_deploy_base_dir | default('/srv/apps') }}/security-lab"
+security_lab_config_dir: /etc/security-lab
+security_lab_data_dir: "{{ app_data_base_dir | default('/srv/app-data') }}/security-lab"
+security_lab_venv_dir: "{{ security_lab_project_dir }}/.venv"
+security_lab_service_name: security-lab
+security_lab_port: 39207
+# Must match the workstation client's service_id; set from local overrides when a
+# helper generates it. Empty means: reuse an existing server value, else create one.
+security_lab_service_id: ""
+security_lab_principal: "{{ security_lab_owner | default('abykov') }}"
+security_lab_service_user: "{{ security_lab_owner | default('abykov') }}"
+security_lab_service_group: "{{ security_lab_owner | default('abykov') }}"
+security_lab_python: python3
+security_lab_package_specs:
+  - "mcp==1.26.0"
+  - "uvicorn"
+  - "httpx"
+security_lab_pentestgpt_compose_dir: "{{ pentestgpt_project_dir | default('/srv/apps/pentestgpt') }}"
+security_lab_pentestgpt_runs_dir: "{{ pentestgpt_runs_dir | default('/srv/app-data/pentestgpt/runs') }}"
+security_lab_pentestgpt_workspace_dir: "{{ pentestgpt_workspace_dir | default('/srv/app-data/pentestgpt/workspace') }}"
+security_lab_tool_service: pentest-tools
+security_lab_codex_token: ""
+security_lab_opencode_token: ""
