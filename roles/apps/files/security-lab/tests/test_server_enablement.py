@@ -59,6 +59,57 @@ def test_ssh_prefix_uses_identity():
     assert "-T" in command and "BatchMode=yes" in command
 
 
+def test_prepare_writes_fragment_and_staged_without_touching_live_client(tmp_path, capsys):
+    database = make_store(tmp_path)
+    credentials = tmp_path / "credentials.json"
+    settings_path = tmp_path / "service.json"
+    original = json.dumps(settings(tmp_path, database.parent, credentials))
+    settings_path.write_text(original, encoding="utf-8")
+    assert se.command_prepare(SimpleNamespace(settings=settings_path, principal="abykov")) == 0
+    out = capsys.readouterr().out
+    assert "security_lab_enabled: true" in (tmp_path / "local-overrides.security-lab.yml").read_text()
+    staged = json.loads((tmp_path / "credentials.json.staged").read_text())
+    assert staged["codex"] != staged["opencode"] and len(staged["codex"]) >= 40
+    assert settings_path.read_text(encoding="utf-8") == original  # running client unchanged
+    assert not credentials.exists()
+    assert staged["codex"] not in out  # no secret leakage
+
+
+def test_deploy_uploads_private_files_and_prints_scoped_command(tmp_path, monkeypatch):
+    database = make_store(tmp_path)
+    settings_path = tmp_path / "service.json"
+    settings_path.write_text(json.dumps(settings(tmp_path, database.parent, tmp_path / "c.json")), encoding="utf-8")
+    se.command_prepare(SimpleNamespace(settings=settings_path, principal="abykov"))
+    uploads = []
+    monkeypatch.setattr(se, "_scp_upload", lambda src, ssh, ident, dest: uploads.append((str(src), dest)))
+    snapshot = tmp_path / "snap.db"
+    snapshot.write_bytes(b"db")
+    import io
+    from contextlib import redirect_stdout
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        assert se.command_deploy(SimpleNamespace(settings=settings_path, ssh="abykov@192.168.1.88",
+            identity="/k", snapshot=snapshot, server_overrides="/home/abykov/security-lab-overrides.yml",
+            server_seed="/home/abykov/security-lab-seed.db", repo_dir="/opt/ubuntu_ansible_palybooks")) == 0
+    report = json.loads(buffer.getvalue())
+    assert {dest for _, dest in uploads} == {"/home/abykov/security-lab-overrides.yml",
+                                             "/home/abykov/security-lab-seed.db"}
+    assert "playbooks/apps.yml" in report["apply_command"] and "--tags security-lab" in report["apply_command"]
+    assert "@" + report["uploaded"]["overrides"] in report["apply_command"]
+
+
+def test_switch_reuses_staged_tokens(tmp_path):
+    database = make_store(tmp_path)
+    credentials = tmp_path / "credentials.json"
+    settings_path = tmp_path / "service.json"
+    settings_path.write_text(json.dumps(settings(tmp_path, database.parent, credentials)), encoding="utf-8")
+    se.command_prepare(SimpleNamespace(settings=settings_path, principal="abykov"))
+    staged = json.loads((tmp_path / "credentials.json.staged").read_text())
+    assert se.command_switch(SimpleNamespace(settings=settings_path, ssh="abykov@host", identity="/k",
+        principal="abykov", apply=True)) == 0
+    assert json.loads(credentials.read_text()) == staged
+
+
 def test_switch_dry_run_writes_nothing_then_apply_preserves_namespace(tmp_path, capsys):
     database = make_store(tmp_path)
     credentials = tmp_path / "credentials.json"

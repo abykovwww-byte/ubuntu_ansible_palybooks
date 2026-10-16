@@ -28,6 +28,10 @@ security_lab_port: 39207
 # Must match the workstation client's service_id; set from local overrides when a
 # helper generates it. Empty means: reuse an existing server value, else create one.
 security_lab_service_id: ""
+# Optional server-local path to a pre-placed control.db (migration seed). Copied
+# into the data directory only when it has no control.db yet, before the service
+# starts. Leave empty for a fresh store.
+security_lab_seed_store: ""
 security_lab_principal: "{{ security_lab_owner | default('abykov') }}"
 security_lab_service_user: "{{ security_lab_owner | default('abykov') }}"
 security_lab_service_group: "{{ security_lab_owner | default('abykov') }}"
