@@ -124,6 +124,15 @@ restrictions are prompt-only. On `native_image_update_required` or
 `native_service_not_applied`, report the deployment blocker rather than retrying
 the provider or falling back to a duplicate broad scan.
 
+Native launch attaches a job-bound `native_execution` record with actual
+Controller admission, deadline and case allowance after reservation. The
+non-executable `get_pentest_context` packet belongs to the separate typed facade;
+its qualification gates are not native execution gates. Zero unallocated future
+case jobs/time does not cancel an already reserved native run. If a native run
+reports the old `execution_authorized=false`/empty-tools/missing-budget blocker,
+read its receipts and check `native_execution_handoff_revision`; treat it as
+an integration blocker, not completed testing, and do not automatically replay it.
+
 For HTTPx, Katana, Nuclei, JS analysis or another native tool: inspect the live
 catalog and prior receipts. If accessible through an authorized native agent,
 use the supported adapter and retain actual argv, version/template selection,

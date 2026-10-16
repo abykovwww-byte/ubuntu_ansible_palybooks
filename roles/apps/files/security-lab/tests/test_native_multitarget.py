@@ -9,7 +9,7 @@ from security_lab.contracts import Denied, Scope
 from security_lab.native_targets import select_native_targets
 from test_controller import control, scope_body
 from test_compose_service import activated, Runtime
-from test_compose_runtime import config, Runner, packet, scope, payload, Docker, execute_host
+from test_compose_runtime import config, Runner, native_packet, scope, payload, Docker, execute_host
 
 
 def test_native_mixed_selection_uses_full_original_scope_and_same_case(control):
@@ -57,10 +57,7 @@ def test_foreign_service_selection_is_refused_before_provider_or_budget(control)
 
 def test_runtime_payload_preserves_all_selected_targets_and_native_service(tmp_path):
     body = scope(targets=[{'host': 'fixture.example.test'}], network_targets=[{'host': 'fixture.example.test', 'tcp_ports': [5432]}])
-    context = packet(body)
-    context['execution_targets'] = ['https://fixture.example.test', 'tcp://fixture.example.test:5432']
-    from security_lab.contracts import digest
-    context['context_hash'] = digest({key: value for key, value in context.items() if key != 'context_hash'})
+    context = native_packet(body, run_id='mixed')
     runner = Runner()
     runtime = ComposePentestRuntime(config(tmp_path), runner=runner)
     asyncio.run(runtime.start(run_id='mixed', scope=body, osint_context=context))

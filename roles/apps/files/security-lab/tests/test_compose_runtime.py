@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+import math
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -31,13 +33,27 @@ def packet(manifest=None, data=None):
     manifest = Scope.model_validate(manifest or scope()).model_dump(mode="json")
     result = {"schema_version":1, "stage":"checks", "execution_authorized":False,
               "case_id":"fixture-case", "generation":1,
-              "binding":{"id":"scope-id", "hash":digest(manifest)},
+              "binding":{"id":"scope-id", "version":1, "hash":digest(manifest)},
               "scope_manifest":manifest, "effective_scope":manifest,
               "rules_of_engagement":manifest["authorization"], "snapshot_at":1800000000,
-              "policy":{"tool_rule":"typed facade only"}, "available_tools":[],
+              "policy":{"tool_rule":"typed facade only", "poc_allowed":False, "scope_expansion_allowed":False}, "available_tools":[],
               "untrusted_osint_data":data or {"surface_nodes":[], "surface_links":[], "coverage":[]}}
     result["context_hash"] = digest(result)
     return result
+
+
+def native_packet(manifest=None, data=None, *, run_id='owned'):
+    from security_lab.native_handoff import execution_record, build_native_handoff
+    from security_lab.native_targets import select_native_targets
+    context = packet(manifest, data)
+    scope_value = Scope.model_validate(context['scope_manifest'])
+    now = time.time()
+    seconds = min(1800, scope_value.budget.seconds, math.floor(scope_value.expires_at-now))
+    execution = execution_record(snapshot={'id':context['case_id'],'generation':context['generation']},
+        manifest={'id':'scope-id','hash':context['binding']['hash'],'version':1,'body':json.dumps(context['scope_manifest'])},
+        targets=select_native_targets(scope_value), job_id='fixture-job', run_id=run_id,
+        seconds=seconds, deadline=now+seconds, now=now, spent=seconds, jobs=1)
+    return build_native_handoff(context, execution)
 
 
 def nmap():
@@ -83,7 +99,7 @@ def test_start_is_explicit_and_payload_never_shell_interpolated(tmp_path):
         runs_directory="/srv/app-data/pentestgpt/runs", ssh_host="operator@owned-host", ssh_identity="C:/fixed/key"), runner=runner)
     assert not runner.calls
     result = asyncio.run(runtime.start(run_id="host-generated-001", scope=scope(),
-        osint_context=packet(data={"site":"' $(touch /tmp/bad); `id`", "api_key":"private-credential"})))
+        osint_context=native_packet(run_id='host-generated-001', data={"site":"' $(touch /tmp/bad); `id`", "api_key":"private-credential"})))
     command, payload, _ = runner.calls[0]
     assert command[:2] == ["ssh", "-T"]
     assert "$(touch" not in command[-1]
@@ -103,7 +119,7 @@ def test_goal_preserves_constraints_and_uses_only_full_file_descriptor():
     context = packet(data={"long":"x"*10000})
     descriptor = prepare_handoff_context(manifest, context)
     _, goal = _request_goal(manifest, descriptor)
-    assert '\"methods\":[\"GET\"]' in goal and '\"paths\":[\"/public\"]' in goal
+    assert 'native_execution' in goal and 'scope_manifest/effective_scope' in goal
     assert "UNTRUSTED DATA" in goal and descriptor['worker_path'] in goal
     assert descriptor['content_sha256'] in goal and 'x'*100 not in goal
     assert len(goal) <= MAX_GOAL_CHARS
@@ -146,7 +162,7 @@ def test_oversized_context_refused_before_runtime_handle_or_container(tmp_path):
     runtime = ComposePentestRuntime(config(tmp_path), runner=runner)
     with pytest.raises(Denied, match='1 MiB; no map was truncated'):
         asyncio.run(runtime.start(run_id='oversized', scope=scope(),
-                                  osint_context=packet(data={'value':'x'*MAX_CONTEXT_BYTES})))
+                                  osint_context=native_packet(run_id='oversized', data={'value':'x'*MAX_CONTEXT_BYTES})))
     assert runner.calls == [] and runtime._handles == {}
 
 
@@ -173,9 +189,9 @@ def test_unknown_run_and_repeated_id_never_launch(tmp_path):
     runtime = ComposePentestRuntime(config(tmp_path), runner=runner)
     with pytest.raises(Denied, match="not owned"):
         asyncio.run(runtime.stop("foreign"))
-    asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=packet()))
+    asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=native_packet()))
     with pytest.raises(Denied, match="already owned"):
-        asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=packet()))
+        asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=native_packet()))
     assert len(runner.calls) == 1
 
 
@@ -184,7 +200,7 @@ def test_timeout_attempts_only_own_cleanup_and_retains_retry_handle(tmp_path):
     runner.failed_start = True
     runtime = ComposePentestRuntime(config(tmp_path), runner=runner)
     with pytest.raises(TimeoutError):
-        asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=packet()))
+        asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=native_packet()))
     assert [request["operation"] for _,request,_ in runner.calls] == ["start", "stop"]
     assert runner.calls[0][1]["owner"] == runner.calls[1][1]["owner"]
     assert asyncio.run(runtime.stop("owned"))["access_closed"] is True
@@ -447,7 +463,7 @@ def test_stop_terminal_and_secret_receipts_redacted(tmp_path):
                 return 0, json.dumps({"ok":True, "result":result}).encode(), b"private host diagnostics"
             return await super().__call__(command, payload=payload, timeout=timeout)
     runtime = ComposePentestRuntime(config(tmp_path), runner=SensitiveRunner())
-    asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=packet()))
+    asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=native_packet()))
     result = asyncio.run(runtime.poll("owned"))
     assert "fixture-secret" not in str(result) and "sensitive=session" not in str(result)
     assert "hidden-key" not in str(result) and "PENTESTGPT_FIXTURE_OK" in str(result)
@@ -462,7 +478,7 @@ def test_bad_response_does_not_expose_stderr_or_promise_closure(tmp_path):
             return 1, b"not json", b"private credential should never appear"
     runtime = ComposePentestRuntime(config(tmp_path), runner=BadRunner())
     with pytest.raises(Denied, match="closure may need verification") as error:
-        asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=packet()))
+        asyncio.run(runtime.start(run_id="owned", scope=scope(), osint_context=native_packet()))
     assert "private credential" not in str(error.value)
 
 
@@ -470,12 +486,12 @@ def test_actual_launcher_timeout_uses_scope_budget_and_window(monkeypatch, tmp_p
     monkeypatch.setattr("security_lab.compose_runtime.time.time", lambda: 1_800_000_000.4)
     runner = Runner()
     runtime = ComposePentestRuntime(config(tmp_path), runner=runner)
-    asyncio.run(runtime.start(run_id="budget", scope=scope(budget={"seconds":90}), osint_context=packet(scope(budget={"seconds":90}))))
+    asyncio.run(runtime.start(run_id="budget", scope=scope(budget={"seconds":90}), osint_context=native_packet(scope(budget={"seconds":90}),run_id='budget')))
     assert runner.calls[0][1]["max_runtime_seconds"] == 90
-    asyncio.run(runtime.start(run_id="window", scope=scope(expires_at=1_800_000_072), osint_context=packet(scope(expires_at=1_800_000_072))))
+    asyncio.run(runtime.start(run_id="window", scope=scope(expires_at=1_800_000_072), osint_context=native_packet(scope(expires_at=1_800_000_072),run_id='window')))
     assert runner.calls[1][1]["max_runtime_seconds"] == 71
     with pytest.raises(Denied, match="sixty seconds"):
-        asyncio.run(runtime.start(run_id="short", scope=scope(budget={"seconds":59}), osint_context=packet()))
+        asyncio.run(runtime.start(run_id="short", scope=scope(budget={"seconds":59}), osint_context=native_packet(run_id='short')))
     assert len(runner.calls) == 2
 
 
@@ -584,7 +600,7 @@ def test_invalid_host_configuration_denied(tmp_path, values):
 
 def test_poll_and_stop_never_retransmit_full_context(tmp_path):
     runner=Runner(); runtime=ComposePentestRuntime(config(tmp_path),runner=runner)
-    asyncio.run(runtime.start(run_id='one', scope=scope(), osint_context=packet(data={'large':'x'*50000})))
+    asyncio.run(runtime.start(run_id='one', scope=scope(), osint_context=native_packet(run_id='one',data={'large':'x'*50000})))
     asyncio.run(runtime.poll('one')); asyncio.run(runtime.stop('one'))
     assert 'context_json' in runner.calls[0][1]
     assert all('context_json' not in request for _,request,_ in runner.calls[1:])
