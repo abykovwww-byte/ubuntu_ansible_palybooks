@@ -60,10 +60,12 @@ def remote_summary(ssh: str, identity: str | None, database: str) -> dict:
         "c=[r[0] for r in db.execute('SELECT id FROM cases ORDER BY created,id')];"
         "print(json.dumps({'cases_count':len(c),'cases':c,"
         "'history_sha256':hashlib.sha256(json.dumps(h,sort_keys=True).encode()).hexdigest()}))")
-    result = subprocess.run(ssh_prefix(ssh, identity) + ["python3", "-c", program, database],
-                            capture_output=True, text=True, timeout=30)
+    # Stream the program over stdin: a multi-line argv does not survive the
+    # ssh remote shell quoting. `python3 - <db>` reads the script from stdin.
+    result = subprocess.run(ssh_prefix(ssh, identity) + ["python3", "-", database],
+                            input=program, capture_output=True, text=True, timeout=30)
     if result.returncode:
-        raise RuntimeError("Remote store read failed")
+        raise RuntimeError("Remote store read failed: " + (result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown"))
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
