@@ -230,7 +230,7 @@ class DiagnosticHost:
             '--mount','type=bind,src='+str(path)+',dst=/capture.pcap',
             '--ulimit','fsize=1048576:1048576',
             '--entrypoint','/usr/bin/timeout',self.image,'--signal=TERM','--kill-after=1s',str(seconds),
-            '/usr/bin/tcpdump','-Z','probe','-p','-i','eth0','-nn','-U','-s','2048','-c','256',
+            '/usr/bin/tcpdump','-Z','probe','-p','-i','eth0','-nn','--immediate-mode','-U','-s','2048','-c','256',
             '-w','/capture.pcap','host',address,'and','tcp','port',str(port)])
         ready_until = min(deadline-1,time.time()+5)
         while time.time() < ready_until:
