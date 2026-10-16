@@ -108,6 +108,38 @@ No job, provider call or PoC starts automatically. Ordinary `propose_scope`
 cannot inflate time beyond the initial allowance or a previously activated
 extension. The running status advertises `case_budget_extension_revision`.
 
+## Server-resident deployment (workstation optional)
+
+The same shared service runs on the operator workstation or on the PentestGPT
+host (`abykovserv`). The `apps` role deploys an opt-in systemd service,
+`security-lab`, that owns the Controller, the hypothesis ledger and the research
+campaign loop on the server. The server service uses the local Compose runtime
+(`pentestgpt_mode: local`), so native launches need no SSH hop. An active
+campaign therefore continues while the Windows workstation is off or OpenCode is
+closed.
+
+- Enable with `security_lab_enabled: true` and distinct
+  `security_lab_codex_token` / `security_lab_opencode_token` (>=40 chars) in
+  server-private overrides only. The service binds loopback `security_lab_port`.
+- Files: source `security_lab_project_dir` (e.g. `/srv/apps/security-lab`), venv
+  next to it, private `security_lab_config_dir` (`/etc/security-lab`,
+  `service.json` + `credentials.json`, `0640`), data `security_lab_data_dir`
+  (`/srv/app-data/security-lab`). The unit runs as the operator user with
+  `SupplementaryGroups=docker` and `Restart=always`.
+- The workstation clients reach it through an SSH loopback forward instead of a
+  local daemon: add `remote_ssh` (e.g. `abykov@192.168.1.88`) and
+  `remote_ssh_identity` to the workstation `service.json`. `client_proxy.py`
+  then opens `-L 127.0.0.1:<port>:127.0.0.1:<port>` and never starts a local
+  service. The client tokens in the workstation `credentials.json` must equal
+  the server's two tokens.
+- One store is authoritative. Do not run the workstation service against the
+  server data directory, and do not point two hosts at one data directory. To
+  move an existing engagement, copy `control.db` (and its WAL) into the server
+  data directory while both services are stopped; case IDs, evidence and
+  checkpoints are preserved.
+- Closing a client only closes its tunnel; the server continues. Server restart
+  still conservatively pauses active campaigns and never auto-resumes them.
+
 ## Research campaign and operator verification lanes
 
 `start_research_campaign(case_id, config, expected_revision)` runs a wide
