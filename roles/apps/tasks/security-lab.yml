@@ -47,6 +47,18 @@
     mode: "0750"
   tags: [apps, security-lab, directories]
 
+- name: Seed the Security Lab store from a pre-placed migration snapshot
+  ansible.builtin.copy:
+    src: "{{ security_lab_seed_store }}"
+    dest: "{{ security_lab_data_dir }}/control.db"
+    remote_src: true
+    owner: "{{ security_lab_service_user }}"
+    group: "{{ security_lab_service_group }}"
+    mode: "0640"
+    force: false
+  when: security_lab_seed_store | default('') | length > 0
+  tags: [apps, security-lab, state]
+
 - name: Copy Security Lab source to the server
   ansible.builtin.copy:
     src: "security-lab/"
