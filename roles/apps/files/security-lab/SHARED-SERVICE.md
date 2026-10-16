@@ -1,4 +1,4 @@
-# Shared Security Lab MCP: Codex and OpenCode
+﻿# Shared Security Lab MCP: Codex and OpenCode
 
 ## Ownership and transport
 
@@ -140,52 +140,67 @@ closed.
 - Closing a client only closes its tunnel; the server continues. Server restart
   still conservatively pauses active campaigns and never auto-resumes them.
 
-### Enablement runbook (workstation and one sudo apply)
+### Enablement runbook (workstation prepares; one scoped sudo apply)
 
-All workstation steps are non-sudo and print no secrets. The server service must
-be stopped while its store is replaced, and the workstation service must be
-stopped while a snapshot is taken.
+Everything except the final apply is done from the workstation with no sudo and
+prints no secrets. The general `site.yml` apply stops at the NGFW extreme guard,
+so enablement uses the existing **apps-only** playbook, scoped to the
+`security-lab` tag and a separate override fragment. The store has exactly one
+owner: cut over only when the workstation Controller is idle and stopped.
 
-1. Workstation snapshot of the existing engagement store:
+1. Generate the shared ids/tokens and private override fragment (does **not**
+   touch the running client):
+
+   ```text
+   .venv/Scripts/python.exe lab/server_enablement.py prepare \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json
+   ```
+
+   Writes `local-overrides.security-lab.yml` and `credentials.json.staged` beside
+   the settings; the live `service.json`/`credentials.json` are untouched.
+2. Snapshot the current store, then upload the private fragment and seed:
 
    ```text
    .venv/Scripts/python.exe lab/server_enablement.py snapshot \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json --out %USERPROFILE%/sl-seed.db
+   .venv/Scripts/python.exe lab/server_enablement.py deploy \
      --settings %USERPROFILE%/.local/share/security-lab/service.json \
-     --out %USERPROFILE%/.local/share/security-lab/server-migration/control.db
+     --ssh abykov@192.168.1.88 --identity %USERPROFILE%/.ssh/id_ed25519 --snapshot %USERPROFILE%/sl-seed.db
    ```
 
-   This writes a consistent `control.db` and a `control.db.json` case/history
-   digest. Nothing else is printed.
-2. Prepare the workstation client and the private server override fragment:
+   `deploy` copies the fragment to `/home/abykov/security-lab-overrides.yml` and
+   the store to `/home/abykov/security-lab-seed.db`, then prints the exact
+   command to run. It seeds the store only when the data directory has none.
+3. The operator runs the one printed sudo command (scoped, no NGFW role):
 
    ```text
+   sudo /opt/ubuntu_ansible_palybooks/.venv/bin/ansible-playbook \
+     -i /opt/ubuntu_ansible_palybooks/inventories/local/hosts.yml \
+     /opt/ubuntu_ansible_palybooks/playbooks/apps.yml \
+     --extra-vars @/etc/ansible/local-overrides.yml \
+     --extra-vars @/home/abykov/security-lab-overrides.yml \
+     -e security_lab_seed_store=/home/abykov/security-lab-seed.db --tags security-lab
+   ```
+
+   `scripts/apply-local.sh playbooks/apps.yml --tags security-lab` with
+   `EXTRA_VARS_FILE=/etc/ansible/local-overrides.yml:/home/abykov/security-lab-overrides.yml`
+   is equivalent when run as root.
+4. Prove the copied cases survived, then switch the client:
+
+   ```text
+   .venv/Scripts/python.exe lab/server_enablement.py verify \
+     --settings %USERPROFILE%/.local/share/security-lab/service.json \
+     --ssh abykov@192.168.1.88 --identity %USERPROFILE%/.ssh/id_ed25519 --snapshot %USERPROFILE%/sl-seed.db
    .venv/Scripts/python.exe lab/server_enablement.py switch \
      --settings %USERPROFILE%/.local/share/security-lab/service.json \
      --ssh abykov@192.168.1.88 --identity %USERPROFILE%/.ssh/id_ed25519 --apply
    ```
 
-   Writes the remote `service.json`, a shared `credentials.json`, a
-   `service.json.pre-remote` backup, and `local-overrides.security-lab.yml`.
-3. Place the store and overrides on the server (operator, secure channel), then
-   apply with sudo:
-
-   ```text
-   scp control.db abykov@192.168.1.88:/srv/app-data/security-lab/control.db
-   # append local-overrides.security-lab.yml into /etc/ansible/local-overrides.yml
-   sudo systemctl start ansible-local-apply.service
-   ```
-
-4. Prove the copied cases survived before switching clients:
-
-   ```text
-   .venv/Scripts/python.exe lab/server_enablement.py verify \
-     --settings %USERPROFILE%/.local/share/security-lab/service.json \
-     --ssh abykov@192.168.1.88 --identity %USERPROFILE%/.ssh/id_ed25519 \
-     --snapshot %USERPROFILE%/.local/share/security-lab/server-migration/control.db
-   ```
-
    Exit 0 with `preserved: true` means the server history digest and every case
-   ID match the snapshot. Restart OpenCode/Codex to load the remote bridge.
+   ID match. `switch` reuses the staged tokens, writes the remote `service.json`
+   and `credentials.json`, and backs both up. Restart OpenCode/Codex to load the
+   remote bridge. Coordinate the cutover with any other client (the store has one
+   writer); new cases created after the snapshot are not carried over.
 
 ## Research campaign and operator verification lanes
 

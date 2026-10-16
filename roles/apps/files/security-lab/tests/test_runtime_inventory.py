@@ -56,6 +56,7 @@ def test_zap_inventory_has_writable_home_and_reports_scanner_not_java_version(mo
             output = '{"native_targets_revision":2}'
         elif argv[0] == '/opt/zap/zap.sh':
             assert argv[argv.index('-dir')+1].startswith('/tmp/')
+            assert kwargs['timeout'] == 30  # measured cold startup on the deployed server exceeds ten seconds
             output = 'Found Java version 17.0.20.1\nUsing JVM args: -Xmx256m\n2.17.0\n'
         else:
             output = 'fixture version'

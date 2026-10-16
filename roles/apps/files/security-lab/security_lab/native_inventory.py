@@ -14,7 +14,7 @@ for name, argv in {'curl':['/usr/bin/curl','--version'], 'nmap':['/usr/bin/nmap'
                        'from playwright.sync_api import sync_playwright; import subprocess; p=sync_playwright().start(); subprocess.run([p.chromium.executable_path,"--version"],check=True); p.stop()'],
                    'zap':['/opt/zap/zap.sh','-Xmx256m','-cmd','-dir','/tmp/security-lab-zap-inventory','-version']}.items():
     try:
-        value = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        value = subprocess.run(argv, capture_output=True, text=True, timeout=30 if name == 'zap' else 10)
         lines = [re.sub(r'\x1b\[[0-9;]*m','',line).strip() for line in value.stdout.splitlines() if line.strip()]
         if name == 'testssl':
             lines = [line for line in lines if line.startswith('testssl.sh version ')]
