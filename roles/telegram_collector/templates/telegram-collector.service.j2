@@ -1,0 +1,17 @@
+[Unit]
+Description=Collect the approved Telegram archive through VPN egress
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists={{ telegram_collector_data_dir }}/secrets/telegram-session
+
+[Service]
+Type=oneshot
+WorkingDirectory={{ telegram_collector_project_dir }}
+ExecStart=/usr/bin/docker compose run --name telegram-collector-run --rm --no-deps -T collector
+ExecStopPost=-/usr/bin/docker rm -f telegram-collector-run
+TimeoutStartSec=4h
+TimeoutStopSec=60
+UMask=0077
+StandardOutput=null
+StandardError=null

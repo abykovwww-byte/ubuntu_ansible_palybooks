@@ -1,0 +1,202 @@
+---
+- name: Require existing archive storage and the selective VPN gateway
+  ansible.builtin.assert:
+    that:
+      - telegram_archive_enabled | default(false) | bool
+      - vpn_egress_enabled | default(false) | bool
+      - telegram_collector_project_dir == '/srv/apps/telegram-collector'
+      - telegram_collector_data_dir == '/srv/app-data/telegram-collector'
+      - telegram_collector_private_dir == '/etc/ansible/telegram-collector-private'
+
+- name: Verify that the consumer network has no direct external route
+  ansible.builtin.command:
+    argv: [docker, network, inspect, vpn_clients]
+  register: telegram_collector_network
+  changed_when: false
+
+- name: Reject a publicly routed consumer network
+  ansible.builtin.assert:
+    that:
+      - (telegram_collector_network.stdout | from_json)[0].Internal | bool
+
+- name: Read the existing media owner identity
+  ansible.builtin.getent:
+    database: passwd
+    key: tgmedia-rw
+  register: telegram_collector_user
+
+- name: Create the collector project and read-only configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ telegram_collector_project_dir }}"
+    - /usr/local/libexec
+
+- name: Create private collector data directories
+  ansible.builtin.file:
+    path: "{{ telegram_collector_data_dir }}/{{ item }}"
+    state: directory
+    owner: tgmedia-rw
+    group: tgmedia
+    mode: '0700'
+  loop: ['', scope, scope/state, reports, secrets]
+
+- name: Read owner-approved migration settings and API credentials
+  ansible.builtin.slurp:
+    src: "{{ telegram_collector_private_dir }}/{{ item }}.json"
+  loop: [settings, api]
+  register: telegram_collector_inputs
+  no_log: true
+
+- name: Decode only the collector's staged inputs
+  ansible.builtin.set_fact:
+    telegram_collector_settings: "{{ telegram_collector_inputs.results[0].content | b64decode | from_json }}"
+    telegram_collector_api: "{{ telegram_collector_inputs.results[1].content | b64decode | from_json }}"
+  no_log: true
+
+- name: Install the source from the reviewed IaC revision
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ telegram_collector_project_dir }}/"
+    owner: root
+    group: root
+    mode: preserve
+  loop: [src, pyproject.toml, uv.lock, README.md, Dockerfile, .dockerignore]
+
+- name: Install the selected chats without exposing their identities
+  ansible.builtin.copy:
+    src: "{{ telegram_collector_private_dir }}/chats.yaml"
+    remote_src: true
+    dest: "{{ telegram_collector_data_dir }}/scope/chats.yaml"
+    owner: tgmedia-rw
+    group: tgmedia
+    mode: '0400'
+    force: false
+  no_log: true
+
+- name: Install private approval and session receipts
+  ansible.builtin.copy:
+    src: "{{ telegram_collector_private_dir }}/{{ item.src }}"
+    remote_src: true
+    dest: "{{ telegram_collector_data_dir }}/{{ item.dest }}"
+    owner: tgmedia-rw
+    group: tgmedia
+    mode: '0400'
+  loop:
+    - {src: approved-private-peers.json, dest: scope/state/approved-private-peers.json}
+    - {src: telegram-session, dest: secrets/telegram-session}
+  no_log: true
+
+- name: Render the collector config and its writer-only credentials
+  ansible.builtin.template:
+    src: "{{ item.src }}.j2"
+    dest: "{{ item.dest }}"
+    owner: tgmedia-rw
+    group: tgmedia
+    mode: '0400'
+  loop:
+    - {src: tg-archive.toml, dest: "{{ telegram_collector_data_dir }}/scope/tg-archive.toml"}
+    - {src: sync.env, dest: "{{ telegram_collector_data_dir }}/secrets/sync.env"}
+  no_log: true
+
+- name: Create an initial empty dialog snapshot only before first collection
+  ansible.builtin.copy:
+    content: '[]'
+    dest: "{{ telegram_collector_data_dir }}/scope/state/dialogs.json"
+    owner: tgmedia-rw
+    group: tgmedia
+    mode: '0600'
+    force: false
+
+- name: Create the dedicated forced-command MCP scope account
+  ansible.builtin.user:
+    name: tgarchive-scope
+    shell: /bin/sh
+    create_home: false
+    password_lock: true
+    system: true
+
+- name: Install the exact-client scope public key
+  ansible.builtin.copy:
+    content: 'from="{{ telegram_archive_client_ip }}",restrict {{ telegram_archive_ro_public_key }}{{ "\n" }}'
+    dest: /etc/ssh/tg-archive-keys/tgarchive-scope
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install the fixed scope launcher without caller arguments
+  ansible.builtin.template:
+    src: scope-command.sh.j2
+    dest: /usr/local/libexec/tg-archive-scope
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Grant only the fixed forced-command launcher
+  ansible.builtin.copy:
+    content: 'tgarchive-scope ALL=(root) NOPASSWD: /usr/local/libexec/tg-archive-scope ""{{ "\n" }}'
+    dest: /etc/sudoers.d/tg-archive-scope
+    owner: root
+    group: root
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Restrict scope SSH to the dedicated command and exact client
+  ansible.builtin.template:
+    src: scope-sshd.conf.j2
+    dest: /etc/ssh/sshd_config.d/98-tg-archive-scope.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload scope SSH
+
+- name: Validate complete SSH configuration before scope reload
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+
+- name: Render the isolated collector Compose project
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ telegram_collector_project_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Validate the collector Compose configuration
+  ansible.builtin.command:
+    cmd: docker compose config --quiet
+    chdir: "{{ telegram_collector_project_dir }}"
+  changed_when: false
+
+- name: Build the pinned collector runtime without starting collection
+  ansible.builtin.command:
+    cmd: docker compose build collector
+    chdir: "{{ telegram_collector_project_dir }}"
+  changed_when: true
+
+- name: Validate private configuration without contacting Telegram
+  ansible.builtin.command:
+    cmd: docker compose run --rm --no-deps -T collector python -m tg_archive.cli --config /data/tg-archive.toml --check
+    chdir: "{{ telegram_collector_project_dir }}"
+  changed_when: false
+  no_log: true
+
+- name: Install the single collector service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [telegram-collector.service, telegram-collector.timer]
+
+- name: Enable the persistent collector schedule
+  ansible.builtin.systemd:
+    name: telegram-collector.timer
+    daemon_reload: true
+    enabled: true
+    state: started

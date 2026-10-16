@@ -22,6 +22,10 @@ Private browser-based Obsidian, ordinary login/password, persistent Markdown and
 Optional PostgreSQL 17, separate archive database roles and chroot SFTP accounts:
 [deployment, boundaries and acceptance](docs/telegram-archive.md).
 
+The optional [server collector](docs/telegram-collector.md) refreshes the existing
+approved archive every 30 minutes through the selective VPN gateway, independently
+of Windows uptime and its VPN connection.
+
 ## Application portal
 
 `http://192.168.1.88/` is the application catalogue, with local illustrations,

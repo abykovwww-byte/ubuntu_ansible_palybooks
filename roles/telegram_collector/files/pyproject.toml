@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "telegram-archive"
+version = "0.1.0"
+description = "Project Telegram archive collector and isolated read-only MCP"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+  "telethon>=1.40,<2",
+  "python-socks[asyncio]>=2.7,<3",
+  "keyring>=25,<26",
+  "ruamel.yaml>=0.18,<0.19",
+  "mcp==2.0.0",
+  "psycopg[binary]>=3.2,<4",
+  "asyncssh>=2.20,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9", "ruff>=0.12,<1"]
+
+[project.scripts]
+tg-sync = "tg_archive.cli:main"
+tg-archive-mcp = "tg_archive.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tg_archive"]
+
+[tool.pytest.ini_options]
+addopts = "-q -p no:cacheprovider"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

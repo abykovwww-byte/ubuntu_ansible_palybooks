@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+import yaml
+from jinja2 import Environment
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,18 +21,30 @@ def main():
                            .replace('{{ telegram_archive_base }}', '/srv/data/tg-archive')
                            .replace('{{ telegram_archive_client_ip }}', '100.64.0.42'), encoding='utf-8')
         config = base / 'sshd_config'
-        config.write_text(f'Include {snippet}\nUsePAM yes\nPasswordAuthentication yes\n', encoding='utf-8')
+        scope_snippet = base / '98-tg-archive-scope.conf'
+        scope_snippet.write_text((ROOT / 'roles/telegram_collector/templates/scope-sshd.conf.j2').read_text(encoding='utf-8')
+                                 .replace('{{ telegram_archive_client_ip }}', '100.64.0.42'), encoding='utf-8')
+        config.write_text(f'Include {scope_snippet}\nInclude {snippet}\nUsePAM yes\nPasswordAuthentication yes\n', encoding='utf-8')
         subprocess.run([daemon, '-t', '-f', str(config), '-h', str(key)], check=True,
                        capture_output=True, text=True)
+        tasks = yaml.safe_load((ROOT / 'roles/telegram_collector/tasks/main.yml').read_text(encoding='utf-8'))
+        sudo_task = next(task for task in tasks if task['name'] == 'Grant only the fixed forced-command launcher')
+        sudo_config = base / 'scope-sudoers'
+        sudo_config.write_text(Environment().from_string(sudo_task['ansible.builtin.copy']['content']).render(), encoding='utf-8')
+        subprocess.run(['/usr/sbin/visudo', '-cf', str(sudo_config)], check=True,
+                       capture_output=True, text=True)
         for user, command in [('tgmedia-rw', 'internal-sftp -d /media -u 0027'),
-                              ('tgmedia-ro', 'internal-sftp -R -d /media'), ('abykov', 'none')]:
+                              ('tgmedia-ro', 'internal-sftp -R -d /media'),
+                              ('tgarchive-scope', 'sudo -n /usr/local/libexec/tg-archive-scope'),
+                              ('abykov', 'none')]:
             result = subprocess.run([daemon, '-T', '-f', str(config), '-h', str(key),
                                      '-C', f'user={user},host=fixture,addr=100.64.0.42'],
                                     capture_output=True, text=True, check=True)
             values = dict(line.split(' ', 1) for line in result.stdout.splitlines())
             assert values['forcecommand'] == command, user
-            if user.startswith('tgmedia-'):
-                assert values['chrootdirectory'] == '/srv/data/tg-archive'
+            if user.startswith('tgmedia-') or user == 'tgarchive-scope':
+                expected_chroot = '/srv/data/tg-archive' if user.startswith('tgmedia-') else 'none'
+                assert values['chrootdirectory'] == expected_chroot
                 assert values['passwordauthentication'] == 'no'
                 assert values['disableforwarding'] == 'yes'
                 assert values['permittty'] == 'no'
@@ -42,14 +56,15 @@ def main():
                                       '-C', f'user={user},host=fixture,addr=100.64.0.43'],
                                      capture_output=True, text=True, check=True)
             outside_values = dict(line.split(' ', 1) for line in outside.stdout.splitlines())
-            if user.startswith('tgmedia-'):
+            if user.startswith('tgmedia-') or user == 'tgarchive-scope':
                 denied = {name for line in outside.stdout.splitlines()
                           if line.startswith('denyusers ') for name in line.split()[1:]}
-                assert denied == {'tgmedia-rw', 'tgmedia-ro'}, denied
+                expected = {'tgmedia-rw', 'tgmedia-ro'} if user.startswith('tgmedia-') else {'tgarchive-scope'}
+                assert denied == expected, denied
                 assert 'denyusers' not in values
             else:
                 assert 'denyusers' not in outside_values
-        print(json.dumps({'fixture': 'sshd-effective-configuration', 'users_checked': 3,
+        print(json.dumps({'fixture': 'sshd-effective-configuration', 'users_checked': 4,
                           'source_addresses_checked': 2, 'status': 'ok', 'daemon_started': False}))
 
 

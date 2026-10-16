@@ -1,0 +1,47 @@
+name: telegram-collector
+services:
+  collector:
+    build: .
+    image: abykovserv-telegram-collector:1
+    user: "{{ telegram_collector_user.ansible_facts.getent_passwd['tgmedia-rw'][1] }}:{{ telegram_collector_user.ansible_facts.getent_passwd['tgmedia-rw'][2] }}"
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: 1.0
+    restart: "no"
+    stop_grace_period: 30s
+    volumes:
+      - "{{ telegram_collector_data_dir }}/scope:/data:ro"
+      - "{{ telegram_collector_data_dir }}/scope/state:/data/state"
+      - "{{ telegram_collector_data_dir }}/reports:/data/reports"
+      - "{{ telegram_collector_data_dir }}/secrets/sync.env:/data/sync.env:ro"
+      - "{{ telegram_collector_data_dir }}/secrets/telegram-session:/run/secrets/telegram-session:ro"
+      - "{{ context_postgres_data_dir }}/socket:/run/postgresql:ro"
+      - "{{ telegram_archive_base }}/media:/media"
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    networks: [vpn_clients]
+    logging:
+      driver: none
+  scope:
+    profiles: [scope]
+    image: abykovserv-telegram-collector:1
+    command: [python, -m, tg_archive.scope_server]
+    user: "{{ telegram_collector_user.ansible_facts.getent_passwd['tgmedia-rw'][1] }}:{{ telegram_collector_user.ansible_facts.getent_passwd['tgmedia-rw'][2] }}"
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    volumes:
+      - "{{ telegram_collector_data_dir }}/scope:/data"
+    logging:
+      driver: none
+networks:
+  vpn_clients:
+    external: true
+    name: vpn_clients

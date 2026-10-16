@@ -5,7 +5,9 @@ instance. `telegram_archive` adds the `tgarchive` database, its three roles,
 and two SFTP accounts. Both are disabled by default; enabling the archive
 also enables its shared instance. A later context-registry database can add
 its exact client rule and bootstrap to this instance without another container.
-No Telegram client, session, API credential or message collector runs on the server.
+By default no Telegram client or session runs on the server. The separately
+opt-in [server collector](telegram-collector.md) migrates the existing approved
+scope to a VPN-only container while keeping Windows as an MCP reader.
 
 ## Boundaries
 
@@ -63,7 +65,8 @@ consumer needs one; this archive role does not decide it for other consumers.
 2. Include the public keys in the reviewed IaC branch, commit/push it, open a
    non-draft PR, wait for green CI, then merge. Production application code stays
    in the local `telegram-archive` project; only IaC, tests and public keys go
-   into this repository.
+   into this repository in the original Windows-only mode. The opt-in server
+   collector has its reviewed source under `roles/telegram_collector/files`.
 3. After merge, the owner runs the generated `sudo sh .../apply.sh` command
    interactively on abykovserv. It appends the new role variables to
    `/etc/ansible/local-overrides.yml` without printing them, removes staging,

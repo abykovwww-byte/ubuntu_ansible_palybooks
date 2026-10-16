@@ -1,0 +1,6 @@
+---
+telegram_collector_enabled: false
+telegram_collector_project_dir: /srv/apps/telegram-collector
+telegram_collector_data_dir: /srv/app-data/telegram-collector
+telegram_collector_private_dir: /etc/ansible/telegram-collector-private
+telegram_collector_calendar: "*-*-* *:00,30:00"

@@ -56,6 +56,15 @@
     mode: "0400"
   no_log: true
 
+- name: Create a server-local socket directory for the archive collector
+  ansible.builtin.file:
+    path: "{{ context_postgres_data_dir }}/socket"
+    state: directory
+    owner: "{{ context_postgres_uid }}"
+    group: "{{ context_postgres_gid }}"
+    mode: '0755'
+  when: telegram_collector_enabled | default(false) | bool
+
 - name: Render shared PostgreSQL configuration
   ansible.builtin.template:
     src: "{{ item }}.j2"

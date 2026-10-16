@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the approved Telegram archive every thirty minutes
+
+[Timer]
+OnCalendar={{ telegram_collector_calendar }}
+Persistent=true
+AccuracySec=30s
+Unit=telegram-collector.service
+
+[Install]
+WantedBy=timers.target

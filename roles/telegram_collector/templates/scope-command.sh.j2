@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+test "$#" -eq 0
+exec /usr/bin/docker compose --project-directory {{ telegram_collector_project_dir }} \
+  --file {{ telegram_collector_project_dir }}/compose.yml --profile scope \
+  run --rm --no-deps -T scope

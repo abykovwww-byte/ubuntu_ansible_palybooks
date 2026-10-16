@@ -1,0 +1,8 @@
+tests
+migrations
+__pycache__
+.venv
+*.env
+state
+reports
+chats.yaml
