@@ -413,3 +413,31 @@ def test_photo_source_matches_largest_metadata_variant():
     )
     source, dc_id = media.download_source(msg)
     assert source.thumb_size == "x" and dc_id == 4 and msg.file.size == 500
+
+
+@pytest.mark.parametrize("web_preview", [False, True])
+def test_document_source_is_accepted_by_pinned_telethon(web_preview):
+    from telethon import types, utils
+
+    attachment = document().document
+    wrapper = (
+        types.MessageMediaWebPage(
+            webpage=types.WebPage(
+                id=10,
+                url="https://synthetic.invalid/document",
+                display_url="synthetic.invalid",
+                hash=0,
+                document=attachment,
+            )
+        )
+        if web_preview
+        else types.MessageMediaDocument(document=attachment)
+    )
+    msg = message(media=wrapper)
+    source, explicit_dc = media.download_source(msg)
+    dc_id, location = utils.get_input_location(source)
+    assert dc_id == attachment.dc_id
+    assert isinstance(location, types.InputDocumentFileLocation)
+    assert location.id == attachment.id and location.thumb_size == ""
+    assert explicit_dc in (None, attachment.dc_id)
+    assert msg.file.size == attachment.size

@@ -47,7 +47,7 @@ def media_error(error):
 
 
 def download_source(message):
-    """Match Telethon File.size's heaviest photo variant, not utils' last variant."""
+    """Match projected photo size and unwrap documents, including web previews."""
     if message.photo:
         photo = message.photo
         variant = max(photo.sizes, key=lambda s: utils._photo_size_byte_count(s) or 0)
@@ -57,6 +57,8 @@ def download_source(message):
             file_reference=photo.file_reference,
             thumb_size=variant.type,
         ), photo.dc_id
+    if message.document:
+        return message.document, message.document.dc_id
     return message.media, None
 
 
