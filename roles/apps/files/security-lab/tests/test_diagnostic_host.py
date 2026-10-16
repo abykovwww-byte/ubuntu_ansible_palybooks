@@ -127,6 +127,8 @@ class DiagnosticHostTests(unittest.TestCase):
         self.assertEqual(argv[argv.index('--mount')+1],
                          'type=bind,src='+str(host.directory()/'traffic.pcap')+',dst=/capture.pcap')
         self.assertIn('KILL',argv)
+        self.assertNotIn('CHOWN',argv)
+        self.assertEqual(argv[argv.index('-w')+1],'-')
         self.assertIn('fsize=1048576:1048576',argv)
         host.owned=lambda role:None
         result=host.close()

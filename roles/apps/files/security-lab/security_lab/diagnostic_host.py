@@ -229,9 +229,15 @@ class DiagnosticHost:
             '--security-opt','no-new-privileges:true','--read-only','--pids-limit','16','--memory','64m',
             '--mount','type=bind,src='+str(path)+',dst=/capture.pcap',
             '--ulimit','fsize=1048576:1048576',
-            '--entrypoint','/usr/bin/timeout',self.image,'--signal=TERM','--kill-after=1s',str(seconds),
+            # Open the host-owned file before dropping UID. tcpdump stdout does
+            # not chown a named savefile; no CHOWN/DAC_OVERRIDE grant or host
+            # ownership repair is needed, including when the host UID != 1001.
+            '--entrypoint','/usr/local/bin/python',self.image,'-c',
+            'import os,sys; fd=os.open("/capture.pcap",os.O_WRONLY|os.O_TRUNC|os.O_NOFOLLOW); '
+            'os.dup2(fd,1); os.close(fd); os.execv("/usr/bin/timeout",["timeout",*sys.argv[1:]])',
+            '--signal=TERM','--kill-after=1s',str(seconds),
             '/usr/bin/tcpdump','-Z','probe','-p','-i','eth0','-nn','--immediate-mode','-U','-s','2048','-c','256',
-            '-w','/capture.pcap','host',address,'and','tcp','port',str(port)])
+            '-w','-','host',address,'and','tcp','port',str(port)])
         ready_until = min(deadline-1,time.time()+5)
         while time.time() < ready_until:
             value = self.owned('capture')
