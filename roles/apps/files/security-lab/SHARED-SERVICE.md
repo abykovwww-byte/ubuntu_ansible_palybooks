@@ -170,7 +170,11 @@ owner: cut over only when the workstation Controller is idle and stopped.
 
    `deploy` copies the fragment to `/home/abykov/security-lab-overrides.yml` and
    the store to `/home/abykov/security-lab-seed.db`, then prints the exact
-   command to run. It seeds the store only when the data directory has none.
+   command to run. The role copies the seed into `control.db` with `force: false`,
+   so it applies **only on the first apply**: once a server `control.db` exists,
+   re-uploading `security-lab-seed.db` alone changes nothing. Refreshing the seed
+   is therefore a **pre-apply** step — take it after the live store is idle and,
+   if its digest moved, re-snapshot and re-upload before running the apply.
 3. The operator runs the one printed sudo command (scoped, no NGFW role):
 
    ```text
@@ -185,7 +189,14 @@ owner: cut over only when the workstation Controller is idle and stopped.
    `scripts/apply-local.sh playbooks/apps.yml --tags security-lab` with
    `EXTRA_VARS_FILE=/etc/ansible/local-overrides.yml:/home/abykov/security-lab-overrides.yml`
    is equivalent when run as root.
-4. Prove the copied cases survived, then switch the client:
+4. After the apply, verify the **running server store** against the **current live
+   state** — not merely the staged file. Take a fresh snapshot of the live store
+   at cutover and point `verify` at it; it reads the server `control.db` over SSH
+   and compares case IDs and the history digest. On any mismatch, keep the Windows
+   writer and clients as they are and perform a targeted transfer of the fresh
+   state (stop the Windows writer, re-snapshot, place the new `control.db`, restart
+   the service) before switching — never assume re-uploading the seed file and
+   switching is sufficient. Then switch the client:
 
    ```text
    .venv/Scripts/python.exe lab/server_enablement.py verify \
