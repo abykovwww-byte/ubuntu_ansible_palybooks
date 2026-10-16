@@ -8,8 +8,8 @@ ConditionPathExists={{ telegram_collector_data_dir }}/secrets/telegram-session
 [Service]
 Type=oneshot
 WorkingDirectory={{ telegram_collector_project_dir }}
-ExecStart=/usr/bin/docker compose run --rm --no-deps -T collector
-ExecStopPost=-/usr/bin/docker compose down --remove-orphans --timeout 30
+ExecStart=/usr/bin/docker compose run --name telegram-collector-run --rm --no-deps -T collector
+ExecStopPost=-/usr/bin/docker rm -f telegram-collector-run
 TimeoutStartSec=4h
 TimeoutStopSec=60
 UMask=0077

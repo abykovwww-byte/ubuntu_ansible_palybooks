@@ -1,0 +1,17 @@
+Match User tgarchive-scope
+    AuthorizedKeysFile /etc/ssh/tg-archive-keys/%u
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PubkeyAuthentication yes
+    DisableForwarding yes
+    PermitTTY no
+    PermitUserRC no
+    X11Forwarding no
+    MaxSessions 1
+    ForceCommand sudo -n /usr/local/libexec/tg-archive-scope
+
+Match User tgarchive-scope Address *,!{{ telegram_archive_client_ip }}
+    DenyUsers tgarchive-scope
+
+Match all

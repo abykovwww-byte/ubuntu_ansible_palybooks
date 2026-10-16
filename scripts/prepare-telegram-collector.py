@@ -34,6 +34,22 @@ def main():
     parser.add_argument("--host", default="abykov@192.168.1.88")
     parser.add_argument("--identity", type=Path, default=Path.home() / ".ssh/id_ed25519")
     args = parser.parse_args()
+    if sys.platform != "win32":
+        raise ValueError("Prepare the existing authorization on its original Windows host")
+    guard = r'''
+$ErrorActionPreference = 'Stop'
+$tasks = @('Telegram Archive daily', 'Telegram Archive work hours')
+foreach ($task in $tasks) {
+    if ((Get-ScheduledTask -TaskName $task).State -ne 'Disabled') { exit 1 }
+}
+if (@(Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object {
+    $_.CommandLine -match 'tg_archive\.cli' -and $_.CommandLine -match '\brun\b'
+}).Count -gt 0) { exit 1 }
+'''
+    check = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", guard],
+                           capture_output=True, timeout=15)
+    if check.returncode:
+        raise ValueError("Pause Windows collection and wait for active collectors before staging")
     root = args.source.resolve()
     sys.path.insert(0, str(root / "src"))
     from tg_archive.config import load_env, load_settings

@@ -34,7 +34,7 @@
     mode: '0755'
   loop:
     - "{{ telegram_collector_project_dir }}"
-    - "{{ telegram_collector_project_dir }}/config"
+    - /usr/local/libexec
 
 - name: Create private collector data directories
   ansible.builtin.file:
@@ -43,7 +43,7 @@
     owner: tgmedia-rw
     group: tgmedia
     mode: '0700'
-  loop: ['', state, reports, secrets]
+  loop: ['', scope, scope/state, reports, secrets]
 
 - name: Read owner-approved migration settings and API credentials
   ansible.builtin.slurp:
@@ -71,10 +71,11 @@
   ansible.builtin.copy:
     src: "{{ telegram_collector_private_dir }}/chats.yaml"
     remote_src: true
-    dest: "{{ telegram_collector_project_dir }}/config/chats.yaml"
+    dest: "{{ telegram_collector_data_dir }}/scope/chats.yaml"
     owner: tgmedia-rw
     group: tgmedia
     mode: '0400'
+    force: false
   no_log: true
 
 - name: Install private approval and session receipts
@@ -86,7 +87,7 @@
     group: tgmedia
     mode: '0400'
   loop:
-    - {src: approved-private-peers.json, dest: state/approved-private-peers.json}
+    - {src: approved-private-peers.json, dest: scope/state/approved-private-peers.json}
     - {src: telegram-session, dest: secrets/telegram-session}
   no_log: true
 
@@ -98,9 +99,64 @@
     group: tgmedia
     mode: '0400'
   loop:
-    - {src: tg-archive.toml, dest: "{{ telegram_collector_project_dir }}/config/tg-archive.toml"}
+    - {src: tg-archive.toml, dest: "{{ telegram_collector_data_dir }}/scope/tg-archive.toml"}
     - {src: sync.env, dest: "{{ telegram_collector_data_dir }}/secrets/sync.env"}
   no_log: true
+
+- name: Create an initial empty dialog snapshot only before first collection
+  ansible.builtin.copy:
+    content: '[]'
+    dest: "{{ telegram_collector_data_dir }}/scope/state/dialogs.json"
+    owner: tgmedia-rw
+    group: tgmedia
+    mode: '0600'
+    force: false
+
+- name: Create the dedicated forced-command MCP scope account
+  ansible.builtin.user:
+    name: tgarchive-scope
+    shell: /bin/sh
+    create_home: false
+    password_lock: true
+    system: true
+
+- name: Install the exact-client scope public key
+  ansible.builtin.copy:
+    content: 'from="{{ telegram_archive_client_ip }}",restrict {{ telegram_archive_ro_public_key }}{{ "\n" }}'
+    dest: /etc/ssh/tg-archive-keys/tgarchive-scope
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install the fixed scope launcher without caller arguments
+  ansible.builtin.template:
+    src: scope-command.sh.j2
+    dest: /usr/local/libexec/tg-archive-scope
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Grant only the fixed forced-command launcher
+  ansible.builtin.copy:
+    content: 'tgarchive-scope ALL=(root) NOPASSWD: /usr/local/libexec/tg-archive-scope ""{{ "\n" }}'
+    dest: /etc/sudoers.d/tg-archive-scope
+    owner: root
+    group: root
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Restrict scope SSH to the dedicated command and exact client
+  ansible.builtin.template:
+    src: scope-sshd.conf.j2
+    dest: /etc/ssh/sshd_config.d/98-tg-archive-scope.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload scope SSH
+
+- name: Validate complete SSH configuration before scope reload
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
 
 - name: Render the isolated collector Compose project
   ansible.builtin.template:

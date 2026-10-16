@@ -10,4 +10,11 @@ if ($runningTasks.Count -gt 0) {
     Write-Error 'Windows collection is still running. Wait for completion before starting the server collector.'
     exit 1
 }
+$activeCollectors = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object {
+    $_.CommandLine -match 'tg_archive\.cli' -and $_.CommandLine -match '\brun\b'
+})
+if ($activeCollectors.Count -gt 0) {
+    Write-Error 'A Windows collector process is still active. Wait for it to finish before migrating the session.'
+    exit 1
+}
 Write-Output 'Windows archive schedules disabled; no scheduled collector is running.'

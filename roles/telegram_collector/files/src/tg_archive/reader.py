@@ -235,10 +235,17 @@ class Reader:
     async def chats(self, include_available=False, query=None):
         if query is not None and len(query) > 200:
             raise ValueError("Title filter too long")
-        try:
-            configured = {e["id"] for e in selection(self.settings.root)["chats"]}
-        except FileNotFoundError:
-            configured = set()
+        remote = None
+        if self.settings.scope_backend == "server":
+            from .remote_scope import request_scope
+
+            remote = await request_scope(self.settings, {"op": "snapshot"})
+            configured = {e["id"] for e in remote["selection"]["chats"]}
+        else:
+            try:
+                configured = {e["id"] for e in selection(self.settings.root)["chats"]}
+            except FileNotFoundError:
+                configured = set()
         async with self.connection() as conn:
             where, params = ("where c.title ilike %s", (pattern(query),)) if query else ("", ())
             rows = await self.rows(
@@ -290,14 +297,25 @@ class Reader:
                 result.append(exposed)
             response = {"notice": NOTICE, "chats": result}
         if include_available:
-            rows, status = snapshot(self.settings.root)
+            if remote is not None:
+                rows, status = remote["dialogs"], remote["snapshot_status"]
+            else:
+                rows, status = snapshot(self.settings.root)
             response["snapshot_status"] = status
             response["available"] = [
                 dict(r, in_sync=False)
                 for r in rows
                 if r.get("kind") in KINDS
                 and type(r.get("chat_id")) is int
-                and (r["chat_id"] < 0 or r["chat_id"] in self.settings.approved_private_ids)
+                and (
+                    r["chat_id"] < 0
+                    or r["chat_id"]
+                    in (
+                        remote["approved_private_ids"]
+                        if remote
+                        else self.settings.approved_private_ids
+                    )
+                )
                 and r["chat_id"] not in configured
                 and (not query or query.casefold() in r.get("title", "").casefold())
             ]

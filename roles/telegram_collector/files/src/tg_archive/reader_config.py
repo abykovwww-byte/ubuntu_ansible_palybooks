@@ -30,6 +30,7 @@ class ReaderSettings:
     dsn: str = field(repr=False)
     key: str = field(repr=False)
     approved_private_ids: tuple[int, ...] = ()
+    scope_backend: str = "local"
 
 
 def load_reader(config: Path, env_file: Path) -> ReaderSettings:
@@ -59,6 +60,9 @@ def load_reader(config: Path, env_file: Path) -> ReaderSettings:
     if type(data["refresh_days"]) is not int or data["refresh_days"] < 0:
         raise ValueError("Invalid refresh_days")
     media = data["media"]
+    scope_backend = data.get("scope", {}).get("backend", "local")
+    if scope_backend not in {"local", "server"}:
+        raise ValueError("Invalid scope.backend")
     within_root(media["remote_root"], "path-check")
     if type(media["sftp_port"]) is not int or not 1 <= media["sftp_port"] <= 65535:
         raise ValueError("Invalid sftp_port")
@@ -73,6 +77,7 @@ def load_reader(config: Path, env_file: Path) -> ReaderSettings:
         dsn,
         key,
         private_ids(data, config.parent),
+        scope_backend,
     )
 
 

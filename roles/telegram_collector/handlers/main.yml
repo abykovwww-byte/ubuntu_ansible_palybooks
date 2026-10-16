@@ -1,0 +1,5 @@
+---
+- name: Reload scope SSH
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded

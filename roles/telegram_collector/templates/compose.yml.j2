@@ -14,8 +14,8 @@ services:
     restart: "no"
     stop_grace_period: 30s
     volumes:
-      - "{{ telegram_collector_project_dir }}/config:/data:ro"
-      - "{{ telegram_collector_data_dir }}/state:/data/state"
+      - "{{ telegram_collector_data_dir }}/scope:/data:ro"
+      - "{{ telegram_collector_data_dir }}/scope/state:/data/state"
       - "{{ telegram_collector_data_dir }}/reports:/data/reports"
       - "{{ telegram_collector_data_dir }}/secrets/sync.env:/data/sync.env:ro"
       - "{{ telegram_collector_data_dir }}/secrets/telegram-session:/run/secrets/telegram-session:ro"
@@ -24,6 +24,21 @@ services:
     tmpfs:
       - /tmp:mode=1777,size=64m
     networks: [vpn_clients]
+    logging:
+      driver: none
+  scope:
+    profiles: [scope]
+    image: abykovserv-telegram-collector:1
+    command: [python, -m, tg_archive.scope_server]
+    user: "{{ telegram_collector_user.ansible_facts.getent_passwd['tgmedia-rw'][1] }}:{{ telegram_collector_user.ansible_facts.getent_passwd['tgmedia-rw'][2] }}"
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    volumes:
+      - "{{ telegram_collector_data_dir }}/scope:/data"
     logging:
       driver: none
 networks:

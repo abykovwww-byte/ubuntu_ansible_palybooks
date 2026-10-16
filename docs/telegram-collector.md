@@ -55,9 +55,9 @@ the private reports directory; container output is not retained.
 3. Use the original Windows project's interpreter to run the IaC helper:
 
    ```powershell
-   & 'C:\Users\albykov\Documents\Jira\telegram-archive\.venv\Scripts\python.exe' `
-     scripts\prepare-telegram-collector.py `
-     --source 'C:\Users\albykov\Documents\Jira\telegram-archive'
+   $archiveProject = Join-Path $env:USERPROFILE 'Documents\Jira\telegram-archive'
+   & (Join-Path $archiveProject '.venv\Scripts\python.exe') `
+     scripts\prepare-telegram-collector.py --source $archiveProject
    ```
 
    It validates the current allowlist and transfers the existing Windows Vault
@@ -99,11 +99,49 @@ transport network. Exercise a bounded synthetic connection from the actual
 collector network with the proxy absent and require refusal; restore the
 normal configuration afterwards without changing other gateway consumers.
 
-Observe the next timer-triggered run without Windows collection running and,
+Observe at least two consecutive timer-triggered runs without Windows collection running and,
 for independence acceptance, with Windows powered off. An active timer, image
 build, reachable Bot API or merged PR alone does not prove MTProto collection.
 Do not create test messages in work chats. Natural cursor/media changes or
 synthetic isolated fixtures supply the data-path evidence.
+
+Require repeat collection without duplicate rows, correct last attempt/success
+timestamps and counters, and continuation from existing cursors after restarting
+the collector. A transient failed run must remain visible in its run/report.
+
+Install the reviewed reader adapter using `scripts/install-telegram-mcp-reader.py
+--source <original-Windows-project>`, then run `scripts/switch-telegram-mcp-scope.py
+--source <original-Windows-project>` with the existing project interpreter. The
+switch requires a successful server scope/snapshot receipt before updating
+`[scope] backend = "server"`; restart the stdio MCP process after switching.
+
+The canonical selection and dialog snapshot are under
+`/srv/app-data/telegram-collector/scope` on the server. Ansible seeds `chats.yaml`
+only if absent, so later MCP additions survive reapply. `tg_chats` reads server
+scope, and `tg_sync_add` invokes a dedicated forced-command SSH account using
+the existing reader SSH key and exact client restriction. The protocol permits
+only bounded snapshot reads and the existing append-only add operation, with
+server read-back. Its container has no network, DB socket, session or API secret.
+The SSH account has no general command/forwarding/TTY capability; its sole sudo
+rule runs the fixed scope launcher without arguments. Server scope errors never
+fall back to a local Windows write. Owner confirmation remains required for
+every `tg_sync_add` call, and private peers still require the existing receipt.
+
+Verify MCP separately after cutover: chat status/freshness, bounded search/read,
+and fetching an existing attachment with its size/SHA and Mark-of-the-Web check.
+The Windows stdio reader may retain its interpreter, `mcp.env`, the reader SFTP
+key and disposable fetch cache: these serve the active Codex client and are not
+server collection dependencies. Its reader configuration does not load the
+Windows Vault, `sync.env` or Telethon. After server and MCP acceptance, retire
+the disabled collector tasks and only collector-specific session/API/writer
+credentials and scripts; retain shared Python, VPN, SSH, Jira/Wiki and notification
+resources. The rollback window ends after the full manual server sync, two
+successful consecutive timer runs, restart/continuation checks and MCP read/file
+acceptance. At that boundary remove the local collector-only Vault entry and
+credentials without Telegram logout/revoke; the migrated server authorization
+must remain valid. Keep a server-side configuration/data rollback point and the
+reviewed previous revision. No further consent is needed for this already
+requested, bounded cleanup; perform it only after the acceptance evidence exists.
 
 Windows MCP still needs connectivity to the archive when a user queries it.
 Windows uptime or its VPN state no longer controls server-side collection.
