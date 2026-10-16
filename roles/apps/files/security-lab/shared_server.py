@@ -5,9 +5,26 @@ the server it uses the local Compose runtime, so the campaign loop, hypothesis
 ledger and native jobs all keep running with the Windows workstation off.
 """
 import argparse
+import json
 import logging
 from pathlib import Path
 import sys
+
+
+def open_service_log(settings_path: Path, settings: dict):
+    """Open a private log if writable, else fall back to the systemd journal.
+
+    The settings directory may be root-owned and read-only for the service user,
+    so the log must not be a hard requirement next to it.
+    """
+    candidates = [Path(settings["log_file"])] if settings.get("log_file") else []
+    candidates.append(settings_path.with_suffix(".service.log"))
+    for candidate in candidates:
+        try:
+            return candidate.open("a", encoding="utf-8", buffering=1)
+        except OSError:
+            continue
+    return None
 
 
 def runtime_for_settings(settings: dict):
@@ -41,8 +58,11 @@ def main():
     args = parser.parse_args()
     # pythonw has no console streams. Own a private log independent of a bridge
     # process or its STDIO handles before importing/initializing the MCP SDK.
-    log = args.settings.with_suffix(".service.log").open("a", encoding="utf-8", buffering=1)
-    sys.stdout = sys.stderr = log
+    # If no writable log is available (e.g. a read-only settings dir), keep the
+    # processes' streams so systemd/journald still captures output.
+    log = open_service_log(args.settings, json.loads(args.settings.read_text(encoding="utf-8")))
+    if log is not None:
+        sys.stdout = sys.stderr = log
     import uvicorn
     from security_lab.shared_service import build_shared_app, load_credentials, load_settings
     settings = load_settings(args.settings)
