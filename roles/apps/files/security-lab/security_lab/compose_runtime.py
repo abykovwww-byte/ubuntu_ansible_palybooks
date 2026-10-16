@@ -30,6 +30,7 @@ from .native_checks import compile_native_check
 from .native_targets import select_native_targets
 from .native_inventory import INVENTORY_PROGRAM
 from .native_handoff import validate_native_handoff
+from .diagnostic_host import DIAGNOSTIC_HOST_PROGRAM
 from .native_preflight import (NATIVE_PREFLIGHT_PROGRAM, NATIVE_PREFLIGHT_SHA256, PREFLIGHT_FILENAME,
                                MAX_PREFLIGHT_RECEIPT_CHARS, PREFLIGHT_GOAL_PREFIX, preflight_command)
 
@@ -140,6 +141,8 @@ def owned():
         raise RuntimeError("Container ownership mismatch")
     return value
 def close():
+    if p.get('kind') in {'tls', 'testssl'}:
+        return DiagnosticHost(p).close()
     value = owned()
     if value is not None:
         docker(["stop", "--time", "20", value["Id"]], timeout=30)
@@ -306,6 +309,8 @@ try:
         except BaseException:
             close()
             raise
+    elif p['operation'] == 'tool' and p.get('kind') in {'tls', 'testssl'}:
+        result = DiagnosticHost(p).run()
     elif p["operation"] in {"tool", "version"}:
         if p.get("kind") not in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory", "playwright", "ffuf", "zap"}:
             raise RuntimeError("Unsupported fixed tool kind")
@@ -348,7 +353,7 @@ try:
                        '--volume',str(hosts_file)+':/etc/hosts:ro']
         service = 'pentest-web-tools' if web else p['tool_service']
         if p['kind'] == 'inventory':
-            configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','--profile','tools','config','--format','json']))
+            configuration = json.loads(docker(['compose','--file','compose.yml','--profile','manual','--profile','native','--profile','tools','--profile','diagnostics','config','--format','json']))
             if 'pentest-web-tools' in configuration.get('services', {}):
                 service = 'pentest-web-tools'
         command = ["docker", "compose", "--file", "compose.yml", "--profile", "tools", "--profile", "manual", "run", "--rm", "-T",
@@ -395,6 +400,7 @@ try:
             result["actual_version"] = p["actual_version"]
         elif p['kind'] == 'inventory':
             result['native_service_applied'] = 'pentestgpt-native' in configuration.get('services', {})
+            result['diagnostic_service_applied'] = 'pentest-diagnostics' in configuration.get('services', {})
             result['web_service_applied'] = 'pentest-web-tools' in configuration.get('services', {})
     elif p["operation"] == "poll":
         result = poll()
@@ -404,18 +410,18 @@ try:
         raise RuntimeError("Unknown operation")
     print(json.dumps({"ok":True, "result":result}, ensure_ascii=False))
 except BaseException as exc:
-    code = str(exc) if str(exc) in {'native_image_update_required','native_service_not_applied','native_preflight_failed'} else 'native_operation_failed'
+    code = str(exc) if str(exc) in {'native_image_update_required','native_service_not_applied','native_preflight_failed','diagnostic_runtime_update_required'} else 'native_operation_failed'
     print(json.dumps({"ok":False, "error":"Existing PentestGPT runner operation failed", 'error_code':code}))
     sys.exit(1)
 finally:
     if store is not None: store.release()
 '''
-_HOST_SCRIPT = HANDOFF_FILE_PROGRAM + "\n" + _HOST_SCRIPT
-# Keep the exact trusted program out of Windows' 32767-character argv ceiling.
-# Only this fixed source is compressed, never request data, scope or credentials.
-_SSH_HOST_PROGRAM = ("import base64,zlib;exec(compile(zlib.decompress(base64.b64decode("
-                     + repr(base64.b64encode(zlib.compress(_HOST_SCRIPT.encode('utf-8'))).decode('ascii'))
-                     + ")), 'security-lab-host', 'exec'))")
+_HOST_SCRIPT = HANDOFF_FILE_PROGRAM + "\n" + DIAGNOSTIC_HOST_PROGRAM + "\n" + _HOST_SCRIPT
+# Windows process command lines are limited to 32767 characters. The trusted
+# program travels compressed; the separate stdin JSON remains data, not code.
+_SSH_HOST_PROGRAM = ('import base64,zlib;exec(compile(zlib.decompress(base64.b64decode('
+                  + repr(base64.b64encode(zlib.compress(_HOST_SCRIPT.encode('utf-8'))).decode('ascii'))
+                  + ')),"security-lab-host","exec"))')
 
 
 def _process_environment():
@@ -587,7 +593,7 @@ class ComposePentestRuntime:
 
     def _command(self) -> list[str]:
         if self.config.mode == "local":
-            return ["python3", "-c", _HOST_SCRIPT]
+            return ["python3", "-c", _SSH_HOST_PROGRAM]
         return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
                 "-o", "StrictHostKeyChecking=yes", "-i", self.config.ssh_identity,
                 self.config.ssh_host, "python3 -c " + shlex.quote(_SSH_HOST_PROGRAM)]
@@ -613,7 +619,7 @@ class ComposePentestRuntime:
             raise Denied("Existing PentestGPT runner operation failed; closure may need verification") from exc
         if code != 0 or not isinstance(reply, dict) or reply.get('ok') is not True:
             reason = reply.get('error_code') if isinstance(reply, dict) else None
-            if reason in {'native_image_update_required', 'native_service_not_applied'}:
+            if reason in {'native_image_update_required', 'native_service_not_applied', 'diagnostic_runtime_update_required'}:
                 raise Denied('Native runtime needs IaC image/Compose apply before this launch: ' + reason)
             if reason == 'native_preflight_failed':
                 raise Denied('Host native preflight failed before provider launch; inspect the bound handoff')
@@ -629,7 +635,12 @@ class ComposePentestRuntime:
             limitations['scope_enforcement'] = 'launcher_allowlist_and_prompt_only_network_scope'
         if handle.get("kind") in {"nmap", "subfinder", "curl", "http", "nmap_service", "tls", "inventory", "playwright", "ffuf", "zap"}:
             limitations.update(native_full_access=False, phase_enforcement="fixed_"+handle["kind"]+"_entrypoint",
-                               scope_enforcement="host_typed_plan_and_existing_compose_networks", provider_called=False)
+                                scope_enforcement="host_typed_plan_and_existing_compose_networks", provider_called=False)
+        if handle.get('kind') in {'tls', 'testssl'}:
+            limitations.update(native_full_access=False, provider_called=False,
+                phase_enforcement='fixed_'+handle['kind']+'_entrypoint',
+                scope_enforcement='per_run_nft_pinned_tcp_endpoint',
+                network_enforcement_qualification='candidate_requires_receiving_side_tests')
         return {**result, "run_id":handle["run_id"], **limitations}
 
     async def run_tool(self, *, run_id: str, argv: tuple, seconds: int) -> dict:
@@ -698,13 +709,14 @@ class ComposePentestRuntime:
                 raise Denied('Runtime inventory did not return a complete diagnostic receipt')
             data = json.loads(rows[0]['stdout'])
             return {**data, 'native_service_applied':result.get('native_service_applied', False),
+                    'diagnostic_service_applied':result.get('diagnostic_service_applied',False),
                     'web_service_applied':result.get('web_service_applied', False),
                     'access_closed': result.get('access_closed') is True,
                     'qualification': 'version_inventory_only_not_target_or_provider_qualification'}
         finally:
             await asyncio.shield(self._call('stop', handle))
 
-    async def run_check(self, *, run_id: str, plan) -> dict:
+    async def run_check(self, *, run_id: str, plan, deadline: float | None = None) -> dict:
         """Recompile the host plan; arbitrary argv never crosses this boundary."""
         if self.config.tool_service != 'pentest-tools':
             raise Denied('Service checks require the managed tools-only service')
@@ -720,6 +732,18 @@ class ComposePentestRuntime:
                 raise Denied('Run ID is already owned by this runtime')
             handle = {'run_id': run_id, 'container_name': 'security-lab-pentest-' + secrets.token_hex(12),
                       'owner': secrets.token_hex(24), 'kind': plan.tool, 'argv': list(plan.argv), 'seconds': plan.seconds}
+            if plan.tool in {'tls', 'testssl'}:
+                now = time.time()
+                limit = min(now+plan.seconds, plan.scope['expires_at'], plan.scope['authorization']['valid_until'])
+                if deadline is not None:
+                    if not math.isfinite(deadline) or deadline > limit:
+                        raise Denied('Diagnostic deadline exceeds the reserved scope window')
+                    limit = deadline
+                if limit <= now:
+                    raise Denied('Diagnostic reservation has expired')
+                handle.update(address=plan.addresses[0], port=plan.specification['port'], deadline=limit,
+                    attempts=plan.specification.get('attempts',1),
+                    attempt_seconds=plan.specification.get('attempt_seconds',plan.seconds))
             if plan.tool in {'playwright', 'ffuf', 'zap'}:
                 from urllib.parse import urlsplit
                 handle.update(web_host=urlsplit(plan.specification['url']).hostname, web_address=plan.addresses[0])

@@ -5,6 +5,9 @@ import json, re, subprocess
 tools = {}
 for name, argv in {'curl':['/usr/bin/curl','--version'], 'nmap':['/usr/bin/nmap','--version'],
                    'openssl':['/usr/bin/openssl','version'],
+                   'testssl':['/usr/local/bin/testssl','--version'],
+                   'tcpdump':['/usr/bin/tcpdump','--version'],
+                   'nft':['/usr/sbin/nft','--version'],
                    'ffuf':['/usr/local/bin/ffuf','-V'],
                    'playwright':['/opt/web-tools-venv/bin/python','-m','playwright','--version'],
                    'chromium':['/opt/web-tools-venv/bin/python','-c',
@@ -12,8 +15,12 @@ for name, argv in {'curl':['/usr/bin/curl','--version'], 'nmap':['/usr/bin/nmap'
                    'zap':['/opt/zap/zap.sh','-Xmx256m','-cmd','-dir','/tmp/security-lab-zap-inventory','-version']}.items():
     try:
         value = subprocess.run(argv, capture_output=True, text=True, timeout=30 if name == 'zap' else 10)
-        versions = re.findall(r'(?m)^\d+\.\d+\.\d+\s*$', value.stdout) if name == 'zap' else value.stdout.splitlines()[:1]
-        tools[name] = {'available':value.returncode == 0 and bool(versions), 'version':[v.strip() for v in versions]}
+        lines = [re.sub(r'\x1b\[[0-9;]*m','',line).strip() for line in value.stdout.splitlines() if line.strip()]
+        if name == 'testssl':
+            lines = [line for line in lines if line.startswith('testssl.sh version ')]
+        elif name == 'zap':
+            lines = [line for line in lines if re.fullmatch(r'\d+\.\d+\.\d+',line)]
+        tools[name] = {'available':value.returncode == 0 and bool(lines), 'version':lines[:1]}
     except (OSError, subprocess.TimeoutExpired):
         tools[name] = {'available':False, 'version':[]}
 try:

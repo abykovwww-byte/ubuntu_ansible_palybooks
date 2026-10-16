@@ -264,6 +264,9 @@ jobs:
       - name: Qualify IPv6 connections and isolation on owned endpoints
         run: python scripts/test-pentestgpt-ipv6.py /tmp/PentestGPT/compose.yml
 
+      - name: Exercise stock TLS diagnostics, PCAP and receiving-side scope denials
+        run: python scripts/test-pentestgpt-diagnostics.py /tmp/PentestGPT/compose.yml
+
   gateway:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest

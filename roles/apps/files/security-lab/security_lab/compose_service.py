@@ -148,6 +148,11 @@ class ComposeRunService:
                 'specification': specification,
                 'coverage_limits': 'Single selected DNS address; no independent version-probe RPS enforcement' if specification else '',
                 'synthetic': False}
+            if plan.tool in {'tls', 'testssl'}:
+                receipt_plan.update(scope_enforcement='per_run_nft_pinned_tcp_endpoint',
+                    network_enforcement_qualification='candidate_requires_receiving_side_tests',
+                    capture_vantage='probe_network_namespace_on_worker_host',
+                    target_receiving_side_capture=False)
             if action_binding:
                 receipt_plan.update(action_binding)
                 receipt_plan['verification'] = action.verification.model_dump(mode='json') if action.verification else None
@@ -209,12 +214,13 @@ class ComposeRunService:
 
     async def _monitor_tool(self, case_id, job, token, plan, run_id, receipt_plan):
         c = self.controller
-        if receipt_plan.get('specification') is not None:
-            run = asyncio.create_task(self.runtime.run_check(run_id=run_id, plan=plan))
-        else:
-            run = asyncio.create_task(self.runtime.run_tool(run_id=run_id, argv=plan.argv, seconds=plan.seconds))
-        outcome, latest = 'failed', {}
+        outcome, latest, run = 'failed', {}, None
         try:
+            if receipt_plan.get('specification') is not None:
+                options = {'deadline':job['deadline']} if plan.tool in {'tls', 'testssl'} else {}
+                run = asyncio.create_task(self.runtime.run_check(run_id=run_id, plan=plan, **options))
+            else:
+                run = asyncio.create_task(self.runtime.run_tool(run_id=run_id, argv=plan.argv, seconds=plan.seconds))
             while not run.done():
                 c.validate_capability(job['id'], token, 'existing-pentestgpt-compose', plan.profile)
                 remaining = job['deadline'] - c.clock()
@@ -232,13 +238,15 @@ class ComposeRunService:
             outcome, latest = 'interrupted', {'error_type': type(exc).__name__,
                                               'error': redact_worker_output(str(exc))[:1000]}
         finally:
-            if not run.done():
-                run.cancel()
-            await asyncio.shield(asyncio.gather(run, return_exceptions=True))
+            if run is not None:
+                if not run.done():
+                    run.cancel()
+                await asyncio.shield(asyncio.gather(run, return_exceptions=True))
             try:
                 closure = await asyncio.shield(self.runtime.stop(run_id))
                 closed = closure.get('access_closed') is True
             except Exception:
+                closure = {}
                 closed = False
             if not closed:
                 outcome = 'interrupted'
@@ -247,6 +255,15 @@ class ComposeRunService:
             if receipt_plan.get('task_stage') == 'poc':
                 from .native_checks import evaluate_action_response
                 evaluation = evaluate_action_response(latest, receipt_plan.get('verification'))
+            if plan.tool in {'tls', 'testssl'}:
+                # Cancelled SSH may not return stdout. Independent stop recovers
+                # host artifacts instead of discarding interrupted evidence.
+                latest = {**latest, 'closure':closure}
+                evaluation['artifacts'] = closure.get('artifacts',latest.get('artifacts',[]))
+                if len(json.dumps(latest,ensure_ascii=False)) > 18000:
+                    latest = {'status':latest.get('status'), 'receipts_truncated':True,
+                              'artifacts':evaluation['artifacts'], 'closure':closure,
+                              'note':'Complete bounded command outputs are in host artifacts'}
             c.finish_job(case_id, job['id'], outcome=outcome, synthetic=False,
                 result={**receipt_plan, **evaluation, 'access_closed': closed,
                         'receipt': redact_worker_output(json.dumps(latest, ensure_ascii=False))[:18000],

@@ -96,7 +96,8 @@ Configuration status alone does not show that a rebuilt image was applied.
 | Identify one known service | `start_service_check`, `tool=nmap_service` | One scoped TCP port, version-light; no caller-selected NSE, built-in version scripts may run; version-probe RPS is not independently enforced |
 | Exact HTTP response, headers, public route or JS | `start_service_check`, `tool=curl` | Exact scoped URL and GET/HEAD; TLS verification, pinned DNS, no redirects/query/credentials |
 | Public API, query parameters, CORS/OPTIONS | `start_service_check`, `tool=http` | Scoped GET/HEAD/OPTIONS, separate query and allowlisted public headers; POST/body requires an activated action request |
-| TLS or PostgreSQL SSLRequest | `start_service_check`, `tool=tls` | Explicit network host/port; optional `starttls=postgres`; no login/data retrieval |
+| TLS or PostgreSQL SSLRequest | `start_service_check`, `tool=tls` | Explicit network host/port; SNI/ALPN/versions/ciphers, bounded attempts; optional `starttls=postgres`; no login/data retrieval |
+| Selected upstream TLS audit | `start_service_check`, `tool=testssl` | Applied diagnostic image/service; protocols or server_defaults only, pinned TCP service; no full/vulnerability scan |
 | Delegate reasoning to actual PentestGPT | `start_pentestgpt_run` | Supported scope shape, real provider and command trace; continuation packet includes prior jobs/checkpoint |
 | Demonstrate one saved HTTP action | `start_poc_action` | Exact activated manifest/finding; request comes from the saved plan, not launch arguments |
 | Checks-only typed facade | `execute_tool_job` | Production qualification in live status; a planner alone is insufficient |
@@ -111,6 +112,19 @@ encoded by the host; custom Host/auth/cookie headers and redirects are unsupport
 These are single-service checks using the clean native tools container. They do
 not invoke a separate PentestGPT LLM. They select one current DNS address; do
 not present one-family/one-address results as full coverage.
+
+TLS/testssl now use the separate `pentest-diagnostics` namespace with host-applied
+nft endpoint restrictions and stock tcpdump capture; require the rebuilt image,
+applied service and refreshed shared MCP. Check `diagnostic_service_applied` and
+actual OpenSSL/testssl/tcpdump/nft versions in runtime inventory. The execution
+path remains a qualification candidate; neither inventory nor readback is an
+independent receiving-side test. Do not fall back to FULL_ACCESS on a missing
+diagnostic service. The original reserved deadline includes setup; use a realistic
+job allowance when requesting multiple bounded TLS attempts. Capture and raw
+command files stay in private host run artifacts with SHA256 references, including
+after interruption. Host-side PCAP is not remote receiving-side evidence. For an
+absent SNI pass `sni:null`; another SNI needs an approved same-IP network-service
+grant. A TLS timeout is inconclusive, even when a ClientHello is visible locally.
 
 `start_pentestgpt_run` accepts up to 16 exact HTTP/TCP service strings in
 `targets`, for example `["https://app.example.test","tcp://db.example.test:5432"]`.

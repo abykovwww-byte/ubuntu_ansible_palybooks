@@ -316,8 +316,22 @@ single-service profiles selected by `specification.tool`:
 - `nmap_service`: one explicit network-scoped TCP port, version-light, no
   caller-selected NSE; Nmap's built-in version-category scripts may run;
   a wall deadline bounds the operation, not a separate version-probe RPS limit;
-- `tls`: one explicit network-scoped TLS handshake with hostname/chain
-  verification, optionally `starttls=postgres` for PostgreSQL SSLRequest.
+- `tls`: stock OpenSSL with hostname/chain verification, SNI/no-SNI, ALPN,
+  TLS 1.2/1.3 and explicit cipher settings, plus bounded timeout retries;
+  optionally `starttls=postgres` for PostgreSQL SSLRequest;
+- `testssl`: pinned upstream testssl.sh, selected `protocols` or `server_defaults`
+  checks only, without the default full/vulnerability suite.
+
+TLS/testssl use the separate UID 1001 `pentest-diagnostics` service. The trusted
+host installs per-run nft endpoint restrictions before attaching egress, starts
+stock tcpdump, then executes the fixed typed command. This requires rebuilding
+the IaC image and applying Compose; `get_runtime_inventory` reports actual tool
+versions and `diagnostic_service_applied`. Bounded PCAP and partial command files
+are retained as private host artifacts with SHA256 references, including after
+interruption. Capture is on the worker host, not the remote target. See
+[stock TLS diagnostics](README.md#stock-tls-diagnostics) for use and evidence
+limits. Configuration or a fixture pass does not mark the worker production
+qualified.
 
 Each launch requires the current case revision and consumes existing case
 budgets. DNS is consulted only after target authorization, one selected address

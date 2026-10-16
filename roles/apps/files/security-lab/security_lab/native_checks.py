@@ -7,7 +7,7 @@ import re
 from typing import Annotated, Literal, Union
 from urllib.parse import urlsplit, urlencode
 
-from pydantic import Field, TypeAdapter, field_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from .contracts import Contract, Denied, Scope, HTTPRequest, ActionPlan, hostname, is_private_network_address, network_address
 from .tool_catalog import CurlCheck, NmapCheck, _check_stage, build_check
@@ -28,11 +28,47 @@ class TLSCheck(Contract):
     host: str
     port: int = Field(default=443, ge=1, le=65535)
     starttls: Literal['none', 'postgres'] = 'none'
-    seconds: int = Field(default=15, ge=1, le=60)
+    seconds: int = Field(default=30, ge=1, le=180)
+    sni: str | None = 'target'
+    alpn: list[Literal['h2', 'http/1.1']] = Field(default_factory=list, max_length=2)
+    min_version: Literal['TLSv1.2', 'TLSv1.3'] = 'TLSv1.2'
+    max_version: Literal['TLSv1.2', 'TLSv1.3'] = 'TLSv1.3'
+    ciphers: str | None = Field(default=None, max_length=500)
+    ciphersuites: str | None = Field(default=None, max_length=500)
+    attempts: int = Field(default=1, ge=1, le=3)
+    attempt_seconds: int = Field(default=15, ge=1, le=60)
+    _host = field_validator('host')(hostname)
+
+    @field_validator('sni')
+    @classmethod
+    def server_name(cls, value):
+        return value if value in {None, 'target'} else hostname(value)
+
+    @field_validator('ciphers', 'ciphersuites')
+    @classmethod
+    def cipher_names(cls, value):
+        if value is not None and not re.fullmatch(r'[A-Za-z0-9_+-]+(?::[A-Za-z0-9_+-]+)*', value):
+            raise ValueError('Use explicit colon-separated cipher names, without OpenSSL policy directives')
+        return value
+
+    @model_validator(mode='after')
+    def versions(self):
+        if self.min_version > self.max_version or len(set(self.alpn)) != len(self.alpn):
+            raise ValueError('Invalid TLS version range or duplicate ALPN')
+        return self
+
+
+class TestSSLCheck(Contract):
+    """Selected upstream checks only; no default full/vulnerability scan."""
+    tool: Literal['testssl'] = 'testssl'
+    host: str
+    port: int = Field(default=443, ge=1, le=65535)
+    checks: Literal['protocols', 'server_defaults'] = 'protocols'
+    seconds: int = Field(default=90, ge=1, le=180)
     _host = field_validator('host')(hostname)
 
 
-NativeCheck = Annotated[Union[CurlCheck, HTTPRequest, ServiceCheck, TLSCheck, BrowserCheck, FFUFCheck, ZAPCheck], Field(discriminator='tool')]
+NativeCheck = Annotated[Union[CurlCheck, HTTPRequest, ServiceCheck, TLSCheck, TestSSLCheck, BrowserCheck, FFUFCheck, ZAPCheck], Field(discriminator='tool')]
 _ADAPTER = TypeAdapter(NativeCheck)
 
 
@@ -51,6 +87,11 @@ def check_subject(spec, scope: Scope) -> str:
         return urlsplit(spec.url).hostname
     if not any(target.host == spec.host and spec.port in target.tcp_ports for target in scope.network_targets):
         raise Denied('Service/TLS check requires explicit approved network host and port')
+    if isinstance(spec, TLSCheck) and spec.sni not in {None, 'target', spec.host}:
+        # A shared IP is not permission for arbitrary virtual hosts. An alias
+        # needs the same explicit service/address grant; it is never resolved.
+        if not any(t.host == spec.sni and spec.port in t.tcp_ports for t in scope.network_targets):
+            raise Denied('Alternate SNI requires an explicit approved network host and port')
     return spec.host
 
 
@@ -93,6 +134,10 @@ def compile_native_check(specification: dict, scope: Scope, addresses: list[str]
         raise Denied('DNS address exceeds explicit address grants')
     if is_private_network_address(address) and (grant is None or address not in grant.addresses):
         raise Denied('Private service checks require an explicit address grant')
+    if isinstance(spec, TLSCheck) and spec.sni not in {None, 'target', host}:
+        alias = next(t for t in scope.network_targets if t.host == spec.sni)
+        if address not in alias.addresses:
+            raise Denied('Alternate SNI requires the same explicit address grant')
     bracketed = '[' + address + ']' if ipaddress.ip_address(address).version == 6 else address
     if isinstance(spec, WEB_CHECKS):
         policy = web_policy(spec, scope)
@@ -127,9 +172,24 @@ def compile_native_check(specification: dict, scope: Scope, addresses: list[str]
         # not independently bound version-probe traffic; the wall deadline does.
         argv = (*base.argv[:6], '-sV', '--version-light', *base.argv[6:])
         profile = 'target_network'
+    elif isinstance(spec, TestSSLCheck):
+        argv = ('/usr/local/bin/testssl', '--quiet', '--color', '0', '--warnings', 'batch',
+                '--openssl', '/usr/bin/openssl', '-6' if ':' in address else '-4',
+                '--nodns', 'none', '--ip', address, '--connect-timeout', '5', '--openssl-timeout', '10',
+                '--protocols' if spec.checks == 'protocols' else '--server-defaults',
+                f'{host}:{spec.port}')
+        profile = 'target_network'
     else:
         argv = ('/usr/bin/openssl', 's_client', '-connect', f'{bracketed}:{spec.port}',
-                '-servername', host, '-verify_hostname', host, '-verify_return_error', '-brief', '-no_ign_eof')
+                '-verify_hostname', host, '-verify_return_error', '-brief', '-state', '-msg', '-debug', '-ign_eof',
+                '-min_protocol', spec.min_version, '-max_protocol', spec.max_version)
+        argv += ('-noservername',) if spec.sni is None else ('-servername', host if spec.sni == 'target' else spec.sni)
+        if spec.alpn:
+            argv += ('-alpn', ','.join(spec.alpn))
+        if spec.ciphers is not None:
+            argv += ('-cipher', spec.ciphers)
+        if spec.ciphersuites is not None:
+            argv += ('-ciphersuites', spec.ciphersuites)
         if spec.starttls != 'none':
             argv += ('-starttls', spec.starttls)
         profile = 'target_network'
@@ -146,7 +206,8 @@ def native_check_catalog(configured: bool) -> list[dict]:
                 ('curl', 'One pinned GET/HEAD; TLS verification; no query, redirects, auth or custom payloads'),
                 ('http', 'Pinned GET/HEAD/OPTIONS with query and public headers; POST/body only from an activated exact action plan'),
                 ('nmap_service', 'One scoped TCP port, version-light; no caller-selected NSE; built-in version scripts may run; version probes are not RPS-enforced'),
-                ('tls', 'One TLS handshake, optionally PostgreSQL SSLRequest; no authentication or application data'),
+                ('tls', 'OpenSSL SNI/ALPN/TLS1.2/1.3 and explicit ciphers; bounded attempts, pinned TCP egress and host-side PCAP. Timeout is inconclusive; no authentication or application data'),
+                ('testssl', 'Pinned upstream testssl.sh protocols or server-defaults only; no full/vulnerability scan. TCP-only egress; QUIC is not covered. Host-side PCAP; probe RPS is not independently enforced'),
                 ('playwright', 'Fresh Chromium context; scoped GET/HEAD, request/rate/time bounds; no redirects, credentials, writes or WebSockets; host artifacts'),
                 ('ffuf', 'At most 32 admitted relative paths plus control; one thread, scope RPS; no redirects/recursion/calibration; host artifacts'),
                 ('zap', 'One TLS-verified curl GET; ZAP offline HAR import and passive scan with bundled add-ons; no spider, active scan, login or runtime updates; host artifacts'))]
