@@ -253,7 +253,7 @@ def payload(tmp_path, operation):
             "target":"https://fixture.example.test:8443/public", "goal":"fixed checks only",
             "kind":"nmap", "tool_service":"pentest-tools", "workspace_directory":str(workspace)}
     if operation == 'start':
-        text, descriptor = _serialize_handoff(Scope.model_validate(scope()), packet(), run_id='owned')
+        text, descriptor = _serialize_handoff(Scope.model_validate(scope()), native_packet(), run_id='owned')
         result.update(context_json=text, handoff=descriptor, scope_hash=descriptor['scope_hash'])
     return result
 
