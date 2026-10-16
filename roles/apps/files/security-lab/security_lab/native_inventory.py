@@ -11,7 +11,7 @@ for name, argv in {'curl':['/usr/bin/curl','--version'], 'nmap':['/usr/bin/nmap'
                        'from playwright.sync_api import sync_playwright; import subprocess; p=sync_playwright().start(); subprocess.run([p.chromium.executable_path,"--version"],check=True); p.stop()'],
                    'zap':['/opt/zap/zap.sh','-Xmx256m','-cmd','-dir','/tmp/security-lab-zap-inventory','-version']}.items():
     try:
-        value = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        value = subprocess.run(argv, capture_output=True, text=True, timeout=30 if name == 'zap' else 10)
         versions = re.findall(r'(?m)^\d+\.\d+\.\d+\s*$', value.stdout) if name == 'zap' else value.stdout.splitlines()[:1]
         tools[name] = {'available':value.returncode == 0 and bool(versions), 'version':[v.strip() for v in versions]}
     except (OSError, subprocess.TimeoutExpired):
