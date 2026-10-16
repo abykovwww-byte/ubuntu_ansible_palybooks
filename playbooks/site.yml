@@ -32,6 +32,9 @@
     - role: telegram_archive
       tags: [telegram-archive]
       when: telegram_archive_enabled | default(false) | bool
+    - role: telegram_collector
+      tags: [telegram-collector]
+      when: telegram_collector_enabled | default(false) | bool
     - role: ngfw_logs
       tags: [ngfw-logs]
       when: ngfw_logs_enabled | default(false) | bool

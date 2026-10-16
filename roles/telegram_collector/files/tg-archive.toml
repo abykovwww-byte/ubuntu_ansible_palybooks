@@ -1,0 +1,22 @@
+# Quotas confirmed by the owner on 2026-10-12 after discovery.
+default_since = 2025-01-01
+refresh_days = 3
+max_per_chat_run = 20000
+private_approval_file = "state/approved-private-peers.json"
+
+[media]
+sftp_host = "100.117.52.16"
+sftp_port = 22
+remote_root = "/media"
+transfer_path = "lan"
+lan_cidr = "192.168.1.0/24"
+kinds = ["document", "photo", "video", "audio", "voice"]
+max_file_mb = 1024
+max_per_run_gb = 20
+max_total_gb = 300
+min_free_gb = 50
+
+[fetch]
+local_dir = '%TEMP%\tg-archive-fetch'
+max_mb = 200
+ttl_hours = 24

@@ -1,0 +1,22 @@
+default_since = {{ telegram_collector_settings.default_since }}
+refresh_days = {{ telegram_collector_settings.refresh_days }}
+max_per_chat_run = {{ telegram_collector_settings.max_per_chat_run }}
+private_approval_file = "state/approved-private-peers.json"
+
+[media]
+storage = "local"
+sftp_host = "127.0.0.1"
+sftp_port = 22
+remote_root = "/media"
+transfer_path = "any"
+lan_cidr = "127.0.0.0/8"
+kinds = {{ telegram_collector_settings.media.kinds | to_json }}
+max_file_mb = {{ telegram_collector_settings.media.max_file_mb }}
+max_per_run_gb = {{ telegram_collector_settings.media.max_per_run_gb }}
+max_total_gb = {{ telegram_collector_settings.media.max_total_gb }}
+min_free_gb = {{ telegram_collector_settings.media.min_free_gb }}
+
+[fetch]
+local_dir = "/tmp/tg-archive-fetch"
+max_mb = 200
+ttl_hours = 24

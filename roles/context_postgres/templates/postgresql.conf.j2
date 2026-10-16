@@ -1,10 +1,10 @@
-listen_addresses = '{{ context_postgres_bind_host }}'
+listen_addresses = '{{ context_postgres_bind_host }}{{ ",127.0.0.1" if telegram_collector_enabled | default(false) and context_postgres_bind_host != "127.0.0.1" else "" }}'
 port = {{ context_postgres_port }}
 hba_file = '/etc/postgresql/pg_hba.conf'
 password_encryption = 'scram-sha-256'
 max_connections = 40
 shared_buffers = '128MB'
-unix_socket_directories = '/var/run/postgresql'
+unix_socket_directories = '/var/run/postgresql{{ ",/archive-socket" if telegram_collector_enabled | default(false) else "" }}'
 # No query text, parameters or SQL errors containing archive text/passwords.
 log_statement = 'none'
 log_min_messages = 'panic'

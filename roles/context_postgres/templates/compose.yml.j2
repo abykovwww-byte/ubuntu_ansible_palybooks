@@ -15,6 +15,9 @@ services:
       - "{{ context_postgres_data_dir }}/data:/var/lib/postgresql/data"
       - "{{ context_postgres_project_dir }}/config:/etc/postgresql:ro"
       - "{{ context_postgres_data_dir }}/secrets:/run/secrets:ro"
+{% if telegram_collector_enabled | default(false) %}
+      - "{{ context_postgres_data_dir }}/socket:/archive-socket"
+{% endif %}
     restart: unless-stopped
     mem_limit: "{{ context_postgres_memory_limit }}"
     cpus: "{{ context_postgres_cpu_limit }}"

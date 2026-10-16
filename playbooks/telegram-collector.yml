@@ -1,0 +1,13 @@
+---
+- name: Converge server-side Telegram collection through the existing VPN gateway
+  hosts: server
+  become: true
+  roles:
+    - role: vpn_egress
+      when: vpn_egress_enabled | default(false) | bool
+    - role: context_postgres
+      when: telegram_collector_enabled | default(false) | bool
+    - role: telegram_archive
+      when: telegram_collector_enabled | default(false) | bool
+    - role: telegram_collector
+      when: telegram_collector_enabled | default(false) | bool

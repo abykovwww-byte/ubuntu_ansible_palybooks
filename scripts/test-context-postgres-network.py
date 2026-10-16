@@ -42,13 +42,17 @@ def main():
         base.chmod(0o755)
         for folder in ('config', 'secrets'):
             (base / folder).mkdir(mode=0o755)
+        (base / 'socket').mkdir()
+        # Isolated synthetic fixture only; production uses postgres-owned 0755.
+        (base / 'socket').chmod(0o777)
         with socket.socket() as candidate:
             candidate.bind(('127.0.0.1', 0))
             port = candidate.getsockname()[1]
         values = yaml.safe_load((ROOT / 'roles/context_postgres/defaults/main.yml').read_text())
         values.update(context_postgres_bind_host='127.0.0.1', context_postgres_port=port,
                       context_postgres_project_dir=str(base), context_postgres_data_dir=str(base),
-                      telegram_archive_enabled=True, telegram_archive_client_ip='127.0.0.1')
+                      telegram_archive_enabled=True, telegram_archive_client_ip='127.0.0.1',
+                      telegram_collector_enabled=True)
         env = Environment(undefined=StrictUndefined)
         def render(filename):
             return env.from_string((ROOT / 'roles/context_postgres/templates' / filename).read_text()).render(values)
@@ -75,6 +79,19 @@ def main():
                                  autocommit=True, connect_timeout=10) as db:
                 assert db.execute('SELECT host(inet_client_addr())').fetchone()[0] == '127.0.0.1'
                 assert db.execute('SHOW listen_addresses').fetchone()[0] == '127.0.0.1'
+            with psycopg.connect(host=str(base / 'socket'), port=port, user='tg_writer',
+                                 password=password('tg_writer'), dbname='tgarchive',
+                                 connect_timeout=5) as db:
+                assert db.execute('SELECT inet_client_addr()').fetchone()[0] is None
+                assert db.execute('SELECT current_user').fetchone()[0] == 'tg_writer'
+            for denied_role in ('tg_owner', 'tg_reader'):
+                try:
+                    with psycopg.connect(host=str(base / 'socket'), port=port, user=denied_role,
+                                         password=password(denied_role), dbname='tgarchive',
+                                         connect_timeout=5):
+                        raise AssertionError('Unexpected local role access')
+                except psycopg.OperationalError:
+                    pass
             with socket.socket() as denied:
                 denied.settimeout(5)
                 denied.bind(('127.0.0.2', 0))
@@ -91,6 +108,7 @@ def main():
                 pass
             print(json.dumps({'fixture': 'rendered-postgres-host-network', 'status': 'ok',
                               'source_preserved': True, 'other_source_denied': True,
+                              'local_writer_socket': True, 'local_owner_reader_denied': True,
                               'other_listener_address_unavailable': True, 'persistent_data': False}))
         finally:
             run(compose + ['down', '--remove-orphans'])
