@@ -2,6 +2,7 @@ import asyncio
 import json
 import subprocess
 from types import SimpleNamespace
+import pytest
 
 from security_lab.compose_runtime import ComposePentestRuntime
 from security_lab.native_inventory import INVENTORY_PROGRAM
@@ -31,10 +32,11 @@ def test_inventory_uses_only_clean_tools_and_reports_deployed_capability_without
     assert runner.calls[0][1]['kind'] == 'inventory' and runner.calls[0][1]['tool_service'] == 'pentest-tools'
 
 
-def test_stock_testssl_inventory_extracts_version_instead_of_empty_banner(monkeypatch,capsys):
+@pytest.mark.parametrize('name',['testssl','testssl.sh'])
+def test_stock_testssl_inventory_extracts_version_instead_of_empty_banner(monkeypatch,capsys,name):
     def run(argv,**kwargs):
         if argv[0] == '/usr/local/bin/testssl':
-            text = '\n\x1b[1m\n########\x1b[m\n  testssl.sh version 3.2.3 from https://testssl.sh/\n'
+            text = f'\n\x1b[1m\n########\x1b[m\n  {name} version 3.2.3 from https://testssl.sh/\n'
         elif argv[0] == '/usr/local/bin/pentestgpt-run':
             text = '{"native_targets_revision":2}'
         else:
@@ -43,7 +45,7 @@ def test_stock_testssl_inventory_extracts_version_instead_of_empty_banner(monkey
     monkeypatch.setattr(subprocess,'run',run)
     exec(compile(INVENTORY_PROGRAM,'trusted-inventory','exec'),{})
     result = json.loads(capsys.readouterr().out)
-    assert result['tools']['testssl'] == {'available':True,'version':['testssl.sh version 3.2.3 from https://testssl.sh/']}
+    assert result['tools']['testssl'] == {'available':True,'version':[f'{name} version 3.2.3 from https://testssl.sh/']}
     assert {'testssl','openssl','tcpdump','nft'} <= result['tools'].keys()
     assert result['target_requests'] == result['provider_calls'] == 0
 
