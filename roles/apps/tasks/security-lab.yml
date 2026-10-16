@@ -1,0 +1,137 @@
+---
+# Server-resident Security Lab control plane. The shared Controller, hypothesis
+# ledger and research campaign loop run here so an active campaign continues
+# while the operator workstation is off. Client tokens must match the
+# workstation clients and are supplied only through local overrides.
+
+- name: Require distinct Security Lab operator credentials
+  ansible.builtin.assert:
+    that:
+      - security_lab_codex_token | length >= 40
+      - security_lab_opencode_token | length >= 40
+      - security_lab_codex_token != security_lab_opencode_token
+    fail_msg: >-
+      security_lab_enabled requires security_lab_codex_token and
+      security_lab_opencode_token (>=40 chars, distinct) in the server-private
+      overrides.
+  no_log: true
+  tags: [apps, security-lab, preflight]
+
+- name: Validate Security Lab port and identity
+  ansible.builtin.assert:
+    that:
+      - security_lab_port is number
+      - 1024 <= (security_lab_port | int) <= 65535
+      - security_lab_principal | length > 0
+    fail_msg: "Security Lab requires a valid loopback port and principal."
+  tags: [apps, security-lab, preflight]
+
+- name: Ensure Security Lab directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ security_lab_service_user }}"
+    group: "{{ security_lab_service_group }}"
+    mode: "0750"
+  loop:
+    - "{{ security_lab_project_dir }}"
+    - "{{ security_lab_data_dir }}"
+  tags: [apps, security-lab, directories]
+
+- name: Ensure Security Lab private config directory exists
+  ansible.builtin.file:
+    path: "{{ security_lab_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ security_lab_service_group }}"
+    mode: "0750"
+  tags: [apps, security-lab, directories]
+
+- name: Copy Security Lab source to the server
+  ansible.builtin.copy:
+    src: "security-lab/"
+    dest: "{{ security_lab_project_dir }}/"
+    owner: "{{ security_lab_service_user }}"
+    group: "{{ security_lab_service_group }}"
+    mode: "0644"
+    directory_mode: "0750"
+  register: security_lab_source_copy
+  tags: [apps, security-lab, source]
+
+- name: Create Security Lab virtual environment
+  ansible.builtin.command:
+    argv:
+      - "{{ security_lab_python }}"
+      - -m
+      - venv
+      - "{{ security_lab_venv_dir }}"
+    creates: "{{ security_lab_venv_dir }}/bin/python"
+  tags: [apps, security-lab, venv]
+
+- name: Install Security Lab runtime dependencies
+  ansible.builtin.command:
+    argv: "{{ [security_lab_venv_dir ~ '/bin/pip', 'install', '--disable-pip-version-check', '--upgrade'] + security_lab_package_specs }}"
+  register: security_lab_pip
+  changed_when: "'Successfully installed' in (security_lab_pip.stdout | default(''))"
+  tags: [apps, security-lab, venv]
+
+- name: Read an existing Security Lab service id
+  ansible.builtin.slurp:
+    src: "{{ security_lab_config_dir }}/service.json"
+  register: security_lab_service
+  failed_when: false
+  tags: [apps, security-lab, config]
+
+- name: Resolve the Security Lab service id
+  ansible.builtin.set_fact:
+    security_lab_service_id: >-
+      {{
+        (security_lab_service.content | b64decode | from_json).service_id
+        if (security_lab_service.content is defined and security_lab_service.content | length > 0)
+        else lookup('password', '/dev/null length=32 chars=hexdigits')
+      }}
+  tags: [apps, security-lab, config]
+
+- name: Render Security Lab service settings
+  ansible.builtin.template:
+    src: security-lab.settings.json.j2
+    dest: "{{ security_lab_config_dir }}/service.json"
+    owner: root
+    group: "{{ security_lab_service_group }}"
+    mode: "0640"
+  register: security_lab_settings
+  tags: [apps, security-lab, config]
+
+- name: Render Security Lab operator credentials
+  ansible.builtin.template:
+    src: security-lab.credentials.json.j2
+    dest: "{{ security_lab_config_dir }}/credentials.json"
+    owner: root
+    group: "{{ security_lab_service_group }}"
+    mode: "0640"
+  register: security_lab_credentials
+  no_log: true
+  tags: [apps, security-lab, config]
+
+- name: Render the Security Lab systemd unit
+  ansible.builtin.template:
+    src: security-lab.service.j2
+    dest: "/etc/systemd/system/{{ security_lab_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  register: security_lab_unit
+  tags: [apps, security-lab, service]
+
+- name: Reload systemd for the Security Lab unit
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: security_lab_unit.changed
+  tags: [apps, security-lab, service]
+
+- name: Start and enable the Security Lab service
+  ansible.builtin.systemd_service:
+    name: "{{ security_lab_service_name }}"
+    enabled: true
+    state: "{{ 'restarted' if (security_lab_unit.changed or security_lab_settings.changed or security_lab_credentials.changed) else 'started' }}"
+  tags: [apps, security-lab, service]

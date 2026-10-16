@@ -1,0 +1,12 @@
+{
+  "data_dir": {{ security_lab_data_dir | to_json }},
+  "principal": {{ security_lab_principal | to_json }},
+  "port": {{ security_lab_port | int }},
+  "service_id": {{ security_lab_service_id | to_json }},
+  "credentials_file": {{ (security_lab_config_dir ~ '/credentials.json') | to_json }},
+  "pentestgpt_mode": "local",
+  "pentestgpt_directory": {{ security_lab_pentestgpt_compose_dir | to_json }},
+  "pentestgpt_runs_directory": {{ security_lab_pentestgpt_runs_dir | to_json }},
+  "pentestgpt_workspace_directory": {{ security_lab_pentestgpt_workspace_dir | to_json }},
+  "pentestgpt_tool_service": {{ security_lab_tool_service | to_json }}
+}

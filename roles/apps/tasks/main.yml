@@ -799,3 +799,8 @@
   ansible.builtin.import_tasks: beszel.yml
   when: beszel_enabled | default(false) | bool
   tags: [apps, beszel]
+
+- name: Deploy the server-resident Security Lab control plane
+  ansible.builtin.import_tasks: security-lab.yml
+  when: security_lab_enabled | default(false) | bool
+  tags: [apps, security-lab]
