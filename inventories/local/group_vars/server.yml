@@ -344,6 +344,8 @@ docker_apps:
     owner: abykov
     group: abykov
     directory_mode: "0750"
+    managed_directories:
+      - "{{ human_range_project_dir }}"
     # A dedicated task runs the one-shot migration before starting this API.
     compose_filename: docker-compose.yml
     compose_up: false
