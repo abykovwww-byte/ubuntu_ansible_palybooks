@@ -8,6 +8,7 @@ not enforce HTTP methods, paths or effects of arbitrary native commands.
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 import hashlib
 import ipaddress
@@ -19,6 +20,7 @@ import re
 import secrets
 import shlex
 import time
+import zlib
 
 from .contracts import Denied, Scope, canonical, digest
 from .dispatcher import redact_worker_output
@@ -409,6 +411,11 @@ finally:
     if store is not None: store.release()
 '''
 _HOST_SCRIPT = HANDOFF_FILE_PROGRAM + "\n" + _HOST_SCRIPT
+# Keep the exact trusted program out of Windows' 32767-character argv ceiling.
+# Only this fixed source is compressed, never request data, scope or credentials.
+_SSH_HOST_PROGRAM = ("import base64,zlib;exec(compile(zlib.decompress(base64.b64decode("
+                     + repr(base64.b64encode(zlib.compress(_HOST_SCRIPT.encode('utf-8'))).decode('ascii'))
+                     + ")), 'security-lab-host', 'exec'))")
 
 
 def _process_environment():
@@ -583,7 +590,7 @@ class ComposePentestRuntime:
             return ["python3", "-c", _HOST_SCRIPT]
         return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
                 "-o", "StrictHostKeyChecking=yes", "-i", self.config.ssh_identity,
-                self.config.ssh_host, "python3 -c " + shlex.quote(_HOST_SCRIPT)]
+                self.config.ssh_host, "python3 -c " + shlex.quote(_SSH_HOST_PROGRAM)]
 
     async def _call(self, operation: str, handle: dict) -> dict:
         config = self.config

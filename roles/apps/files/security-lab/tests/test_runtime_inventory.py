@@ -6,6 +6,7 @@ from security_lab.compose_runtime import ComposePentestRuntime
 from test_compose_runtime import config, Runner
 from test_compose_runtime import Docker, execute_host, payload
 from security_lab.native_inventory import INVENTORY_PROGRAM
+from security_lab.compose_runtime import _SSH_HOST_PROGRAM, _HOST_SCRIPT
 
 
 def test_inventory_uses_only_clean_tools_and_reports_deployed_capability_without_provider(tmp_path):
@@ -64,3 +65,11 @@ def test_inventory_uses_web_tmpfs_when_applied_and_falls_back_on_old_compose(mon
     result = execute_host(monkeypatch, request, legacy)
     assert result['ok'] and not result['result']['web_service_applied']
     assert 'pentest-tools' in next(c for c,_ in legacy.calls if '--entrypoint' in c)
+
+
+def test_ssh_compact_transport_executes_the_exact_fixed_host_program():
+    executed = []
+    # Capture compile's source rather than executing Docker/network operations.
+    namespace = {'compile': lambda source, filename, mode: executed.append(source) or compile('pass', filename, mode)}
+    exec(_SSH_HOST_PROGRAM, namespace)
+    assert executed[0] == _HOST_SCRIPT.encode('utf-8')
