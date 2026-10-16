@@ -93,7 +93,8 @@
 
 - name: Install source-restricted SFTP public keys
   ansible.builtin.copy:
-    content: 'from="{{ telegram_archive_client_ip }}",restrict {{ item.key }}{{ "\n" }}'
+    content: |
+      from="{{ telegram_archive_client_ip }}",restrict {{ item.key }}
     dest: "/etc/ssh/tg-archive-keys/{{ item.user }}"
     owner: root
     group: root

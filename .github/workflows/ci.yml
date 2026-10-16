@@ -57,6 +57,10 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_telegram_*.py' -v
       - name: Execute archive preflight with valid and invalid inputs
         run: python scripts/test-telegram-archive-ansible.py
+      - name: Validate actual Ansible access files and sudoers syntax without root changes
+        run: python scripts/test-telegram-collector-access.py
+      - name: Validate actual Ansible configuration and Compose mount layout with dummy inputs
+        run: python scripts/test-telegram-collector-config.py
       - name: Exercise PostgreSQL roles with synthetic data
         run: python scripts/test-telegram-archive-runtime.py
       - name: Check exact source IP and listener with the rendered network templates
