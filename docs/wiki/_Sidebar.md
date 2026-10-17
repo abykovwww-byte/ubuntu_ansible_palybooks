@@ -8,3 +8,4 @@
 - [Обучение, автотесты и датасеты](07-training-autotests-datasets.md)
 - [Данные и безопасность](08-data-and-security.md)
 - [Эксплуатация и репозиторий](09-operations-and-repository.md)
+- [Human Range: развёртывание и резервные копии](../human-range-deployment.md)

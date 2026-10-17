@@ -3,10 +3,14 @@ set -eu
 umask 077
 cd {{ human_range_project_dir | quote }}
 backup_dir={{ human_range_backup_dir | quote }}
-archive="$backup_dir/$(date -u +%Y%m%dT%H%M%SZ).dump"
-trap 'rm -f -- "$archive.part"' EXIT HUP INT TERM
-docker compose --file docker-compose.yml exec -T db pg_dump -U human_range -d human_range --format=custom > "$archive.part"
-test -s "$archive.part"
-mv -- "$archive.part" "$archive"
+exec 9>"$backup_dir/.backup.lock"
+flock 9
+part=$(mktemp "$backup_dir/$(date -u +%Y%m%dT%H%M%SZ).XXXXXX.part")
+archive="${part%.part}.dump"
+trap 'rm -f -- "$part"' EXIT
+trap 'exit 1' HUP INT TERM
+docker compose --file docker-compose.yml exec -T db pg_dump -U human_range -d human_range --format=custom > "$part"
+test -s "$part"
+mv -- "$part" "$archive"
 find "$backup_dir" -maxdepth 1 -type f -name '*.dump' -mtime +13 -delete
 printf '%s\n' "$archive"

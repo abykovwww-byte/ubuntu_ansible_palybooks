@@ -32,12 +32,46 @@
   no_log: true
   diff: false
 
+- name: Read Human Range environment checksum for the build stamp
+  ansible.builtin.stat:
+    path: "{{ human_range_project_dir }}/.env"
+    checksum_algorithm: sha256
+  register: human_range_env_state
+  no_log: true
+
+- name: Check the last successful Human Range build stamp
+  ansible.builtin.stat:
+    path: /etc/ansible/human-range-build-stamp
+  register: human_range_build_stamp_state
+
+- name: Read the last successful Human Range build stamp
+  ansible.builtin.slurp:
+    src: /etc/ansible/human-range-build-stamp
+  register: human_range_previous_build
+  when: human_range_build_stamp_state.stat.exists
+  no_log: true
+
+- name: Determine whether Human Range images need rebuilding
+  ansible.builtin.set_fact:
+    human_range_build_stamp: "{{ human_range_repo_version }}:{{ human_range_env_state.stat.checksum }}"
+  no_log: true
+
 - name: Build Human Range images
   ansible.builtin.command:
     argv: [docker, compose, --file, docker-compose.yml, --profile, migration, build]
     chdir: "{{ human_range_project_dir }}"
   changed_when: true
-  when: human_range_env.changed or 'human-range' in (docker_app_changed_names | default([])) or docker_apps_force_compose_up | bool
+  when: (human_range_previous_build.content | default('') | b64decode | trim) != human_range_build_stamp or docker_apps_force_compose_up | bool
+
+- name: Record the successful Human Range build
+  ansible.builtin.copy:
+    content: "{{ human_range_build_stamp }}\n"
+    dest: /etc/ansible/human-range-build-stamp
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
 
 - name: Start Human Range database and wait for health
   ansible.builtin.command:
